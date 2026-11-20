@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "local.salah",
+  "name": "Salah",
+  "version": "0.2.0",
+  "author": "Saidburxon",
+  "description": "Next prayer countdown with a daily prayer-time popup",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Salah",
+    "description": "Shows the next prayer and time remaining",
+    "category": "Time",
+    "allowMultiple": false
+  }
+}

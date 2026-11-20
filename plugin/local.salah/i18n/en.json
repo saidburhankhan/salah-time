@@ -1,0 +1,19 @@
+{
+  "bar.loading": "Prayer times…",
+  "bar.unavailable": "Prayer times unavailable",
+  "panel.nextPrayer": "NEXT PRAYER",
+  "panel.beginsIn": "Begins in %1",
+  "panel.calculatedBy": "Calculated by %1",
+  "panel.refresh": "Refresh",
+  "panel.close": "Close",
+  "panel.noData": "Prayer-time data is not available.",
+  "panel.retryHint": "Make sure the salah command is installed, then refresh.",
+  "panel.commandFailed": "The salah command failed.",
+  "panel.locationSyncFailed": "Automatic location could not be updated.",
+  "panel.officialSyncFailed": "Official timetable could not be updated.",
+  "panel.usingCalculatedTimes": "Using calculated fallback times. %1",
+  "panel.refreshNow": "Refresh location and official times",
+  "panel.usingSavedLocation": "Using the saved location. %1",
+  "panel.autoLocation": "Auto · %1",
+  "panel.networkLocationNotice": "Approximate network location. geo.omarchy.org, then ipapi.co as fallback, receives your public IP; a VPN can affect the result."
+}

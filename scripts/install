@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+binary_source="$project_dir/target/release/salah"
+binary_target="$HOME/.local/bin/salah"
+plugin_source="$project_dir/plugin/local.salah"
+plugin_target="$HOME/.config/omarchy/plugins/local.salah"
+state_dir="$HOME/.local/state/salah"
+install_marker="$state_dir/installed-from"
+binary_digest="$state_dir/binary.sha256"
+plugin_digest_file="$state_dir/plugin.sha256"
+
+plugin_digest() {
+  tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
+    -cf - -C "$1" . | sha256sum | awk '{ print $1 }'
+}
+
+if [[ ! -f "$project_dir/Cargo.toml" ]]; then
+  printf 'Missing Cargo.toml in %s\n' "$project_dir" >&2
+  exit 1
+fi
+
+if [[ ! -f "$plugin_source/manifest.json" ]]; then
+  printf 'Missing Omarchy plugin in %s\n' "$plugin_source" >&2
+  exit 1
+fi
+
+if [[ -e "$plugin_target" || -L "$plugin_target" ]]; then
+  if [[ -L "$plugin_target" && "$(readlink -f -- "$plugin_target")" == "$plugin_source" ]]; then
+    : # Migrate the symlink used by early development installs.
+  elif [[ -d "$plugin_target" && -f "$install_marker" && "$(<"$install_marker")" == "$project_dir" \
+      && -f "$plugin_digest_file" && "$(plugin_digest "$plugin_target")" == "$(<"$plugin_digest_file")" ]]; then
+    : # This checkout owns an unchanged previous copy.
+  else
+    printf 'Refusing to replace an existing plugin: %s\n' "$plugin_target" >&2
+    printf 'Move it elsewhere first if it is no longer needed.\n' >&2
+    exit 1
+  fi
+fi
+
+printf 'Building Salah in release mode…\n'
+cargo build --locked --release --manifest-path "$project_dir/Cargo.toml"
+
+mkdir -p -- "$(dirname -- "$binary_target")" "$(dirname -- "$plugin_target")" "$state_dir"
+install -m 0755 -- "$binary_source" "$binary_target"
+sha256sum -- "$binary_target" | awk '{ print $1 }' > "$binary_digest"
+
+plugin_parent=$(dirname -- "$plugin_target")
+staging_dir=$(mktemp -d --tmpdir="$plugin_parent" .local.salah.install.XXXXXX)
+backup_dir=""
+cleanup() {
+  [[ ! -d "$staging_dir" ]] || rm -rf -- "$staging_dir"
+  [[ -z "$backup_dir" || ! -e "$backup_dir" ]] || rm -rf -- "$backup_dir"
+}
+trap cleanup EXIT
+cp -a -- "$plugin_source/." "$staging_dir/"
+
+if [[ -e "$plugin_target" || -L "$plugin_target" ]]; then
+  backup_dir=$(mktemp -d --tmpdir="$plugin_parent" .local.salah.backup.XXXXXX)
+  rmdir -- "$backup_dir"
+  mv -- "$plugin_target" "$backup_dir"
+fi
+
+if ! mv -- "$staging_dir" "$plugin_target"; then
+  if [[ -n "$backup_dir" && -e "$backup_dir" ]]; then
+    mv -- "$backup_dir" "$plugin_target"
+    backup_dir=""
+  fi
+  exit 1
+fi
+staging_dir=""
+[[ -z "$backup_dir" ]] || rm -rf -- "$backup_dir"
+backup_dir=""
+
+printf '%s\n' "$project_dir" > "$install_marker"
+plugin_digest "$plugin_target" > "$plugin_digest_file"
+
+printf 'Installed %s\n' "$binary_target"
+printf 'Installed plugin in %s\n' "$plugin_target"
+printf '\nEnable the bar widget with:\n'
+printf '  omarchy plugin enable local.salah --after omarchy.clock\n'
+

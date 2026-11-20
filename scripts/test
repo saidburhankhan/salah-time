@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+plugin_source="$project_dir/plugin/local.salah"
+
+cargo fmt --check --manifest-path "$project_dir/Cargo.toml"
+cargo test --locked --offline --manifest-path "$project_dir/Cargo.toml"
+bash -n "$project_dir/scripts/install" "$project_dir/scripts/uninstall"
+jq empty "$plugin_source/manifest.json" "$plugin_source/i18n/en.json"
+omarchy plugin validate "$plugin_source"
+
+test_home=$(mktemp -d)
+cleanup() { rm -rf -- "$test_home"; }
+trap cleanup EXIT
+
+HOME="$test_home" "$project_dir/scripts/install"
+test -x "$test_home/.local/bin/salah"
+test -f "$test_home/.config/omarchy/plugins/local.salah/manifest.json"
+HOME="$test_home" "$test_home/.local/bin/salah" status --json \
+  | jq -e '.next.name and (.next.remaining_seconds | numbers) and (.prayers | length == 6)' >/dev/null
+
+# Reinstallation must accept an unchanged installation owned by this checkout.
+HOME="$test_home" "$project_dir/scripts/install"
+HOME="$test_home" "$project_dir/scripts/uninstall"
+test ! -e "$test_home/.local/bin/salah"
+test ! -e "$test_home/.config/omarchy/plugins/local.salah"
+
+# Uninstall must preserve a plugin the user changed after installation.
+HOME="$test_home" "$project_dir/scripts/install"
+printf '\n// local test modification\n' >> "$test_home/.config/omarchy/plugins/local.salah/BarWidget.qml"
+HOME="$test_home" "$project_dir/scripts/uninstall"
+test -f "$test_home/.config/omarchy/plugins/local.salah/BarWidget.qml"
+
+printf 'All Salah tests passed.\n'

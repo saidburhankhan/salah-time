@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+binary_target="$HOME/.local/bin/salah"
+plugin_target="$HOME/.config/omarchy/plugins/local.salah"
+state_dir="$HOME/.local/state/salah"
+install_marker="$state_dir/installed-from"
+binary_digest="$state_dir/binary.sha256"
+plugin_digest_file="$state_dir/plugin.sha256"
+
+plugin_digest() {
+  tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
+    -cf - -C "$1" . | sha256sum | awk '{ print $1 }'
+}
+
+if [[ ! -f "$install_marker" || "$(<"$install_marker")" != "$project_dir" ]]; then
+  printf 'Refusing to uninstall: this checkout does not own the active installation.\n' >&2
+  exit 1
+fi
+
+if [[ -d "$plugin_target" && ! -L "$plugin_target" && -f "$plugin_digest_file" \
+    && "$(plugin_digest "$plugin_target")" == "$(<"$plugin_digest_file")" ]]; then
+  omarchy plugin disable local.salah >/dev/null 2>&1 || true
+  rm -rf -- "$plugin_target"
+elif [[ -e "$plugin_target" || -L "$plugin_target" ]]; then
+  printf 'Leaving modified or unrelated plugin path untouched: %s\n' "$plugin_target" >&2
+fi
+
+if [[ -f "$binary_target" && -f "$binary_digest" ]]; then
+  expected_digest=$(<"$binary_digest")
+  actual_digest=$(sha256sum -- "$binary_target" | awk '{ print $1 }')
+  if [[ "$actual_digest" == "$expected_digest" ]]; then
+    rm -- "$binary_target"
+  else
+    printf 'Leaving modified binary untouched: %s\n' "$binary_target" >&2
+  fi
+fi
+rm -f -- "$install_marker" "$binary_digest" "$plugin_digest_file"
+rmdir --ignore-fail-on-non-empty -- "$state_dir" 2>/dev/null || true
+
+printf 'Uninstalled Salah. User settings were kept.\n'
+
