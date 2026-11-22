@@ -5,6 +5,7 @@ pub mod export;
 pub mod item;
 pub mod location;
 pub mod official;
+pub mod planner;
 pub mod schedule;
 pub mod status;
 pub mod store;

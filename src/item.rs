@@ -185,7 +185,7 @@ pub fn day_items(
     items: &[Item],
     entries: &[Entry],
     view: DayView,
-    block_end: impl Fn(BlockKey) -> Option<DateTime<Utc>>,
+    mut block_end: impl FnMut(BlockKey) -> Option<DateTime<Utc>>,
 ) -> Vec<DayItem> {
     let mut rows: Vec<DayItem> = items
         .iter()
