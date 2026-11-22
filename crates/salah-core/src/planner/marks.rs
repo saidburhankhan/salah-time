@@ -36,6 +36,7 @@ fn mark_prayer(
         None => schedule::resolve(config, now)?.day(),
     };
     let id = PrayerMark::id_for(day, prayer);
+    let expected_version = mutation.expected_version;
     write_mutation(store, config, now, mutation, |tx| {
         let mut mark = tx.mark(&id)?.unwrap_or(PrayerMark {
             id: id.clone(),
@@ -47,12 +48,7 @@ fn mark_prayer(
             deleted_at: Some(now),
             version: 1,
         });
-        ensure_version(
-            "prayer mark",
-            &mark.id,
-            mark.version,
-            mutation.expected_version,
-        )?;
+        ensure_version("prayer mark", &mark.id, mark.version, expected_version)?;
         // Repeating the current state changes nothing, so marking twice is safe.
         if mark.is_live() == prayed {
             return Ok(mark);

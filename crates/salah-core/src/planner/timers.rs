@@ -1,6 +1,6 @@
 use super::entries::new_entry;
 use super::items::find_item;
-use super::{BlockEnds, Mutation, stamp, write_mutation};
+use super::{BlockEnds, Mutation, StoredResult, VersionedEntry, stamp, write_mutation};
 use crate::config::Config;
 use chrono::{DateTime, Utc};
 use salah_domain::error::Error;
@@ -8,6 +8,7 @@ use salah_domain::item::{Entry, EntryKind};
 use salah_domain::runtime::IdGenerator;
 use salah_prayer::schedule;
 use salah_store::{Store, WriteTx};
+use serde::{Deserialize, Serialize};
 
 /// Persists the automatic stop of timers whose block has ended. Callers reach
 /// this only from inside a write transaction; reads derive expiry instead.
@@ -34,6 +35,65 @@ pub fn close_expired_timers(
     Ok(expired.len())
 }
 
+/// A started timer plus every timer it displaced, so callers can report all
+/// affected rows.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StartedTimer {
+    pub timer: Entry,
+    pub stopped: Vec<Entry>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredStartedTimer {
+    timer: VersionedEntry,
+    stopped: Vec<VersionedEntry>,
+}
+
+impl StoredResult for StartedTimer {
+    fn to_stored_json(&self) -> Result<String, Error> {
+        let stored = StoredStartedTimer {
+            timer: VersionedEntry {
+                row: self.timer.clone(),
+                version: self.timer.version,
+            },
+            stopped: self
+                .stopped
+                .iter()
+                .map(|row| VersionedEntry {
+                    row: row.clone(),
+                    version: row.version,
+                })
+                .collect(),
+        };
+        serde_json::to_string(&stored).map_err(|error| Error::Internal(format!("store: {error}")))
+    }
+
+    fn from_stored_json(text: &str) -> Result<Self, Error> {
+        let Ok(stored) = serde_json::from_str::<StoredStartedTimer>(text) else {
+            // Rows written before the stopped-timer list was added contain a
+            // single entry; replay them as a start that displaced nothing.
+            return Ok(Self {
+                timer: Entry::from_stored_json(text)?,
+                stopped: Vec::new(),
+            });
+        };
+        let mut timer = stored.timer.row;
+        timer.version = stored.timer.version;
+        Ok(Self {
+            timer,
+            stopped: stored
+                .stopped
+                .into_iter()
+                .map(|stored| {
+                    let mut row = stored.row;
+                    row.version = stored.version;
+                    row
+                })
+                .collect(),
+        })
+    }
+}
+
 /// Starts a timer for a minutes item, stopping any other running timer.
 pub fn start_timer(
     store: &mut Store,
@@ -53,15 +113,27 @@ pub fn start_timer_with(
     id: &str,
     mutation: Mutation<'_>,
 ) -> Result<Entry, Error> {
+    start_timer_with_stopped(store, config, now, ids, id, mutation).map(|started| started.timer)
+}
+
+/// Starts a timer and returns the stopped timers as well.
+pub fn start_timer_with_stopped(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
+    id: &str,
+    mutation: Mutation<'_>,
+) -> Result<StartedTimer, Error> {
     let now = stamp(now);
     let schedule = schedule::resolve(config, now)?;
     write_mutation(store, config, now, mutation, |tx| {
         let item = find_item(tx, id)?;
         let mut timer = new_entry(&item, schedule.current_block(), EntryKind::Timer, now, ids);
         timer.started_at = Some(now);
-        stop_running(tx, now)?;
+        let stopped = stop_running(tx, now)?;
         timer.version = tx.put_entry(&timer)?;
-        Ok(timer)
+        Ok(StartedTimer { timer, stopped })
     })
 }
 

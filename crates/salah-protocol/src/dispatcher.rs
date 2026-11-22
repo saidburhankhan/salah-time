@@ -8,7 +8,7 @@ use crate::methods::*;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use salah_core::config::Config;
 use salah_core::export::{self, ImportSummary};
-use salah_core::{Store, planner, quick, status};
+use salah_core::{Store, WriteTx, planner, quick, status};
 use salah_domain::error::Error;
 use salah_domain::item::{Entry, Item, PrayerMark};
 use salah_domain::runtime::{Clock, IdGenerator};
@@ -242,6 +242,9 @@ impl Dispatcher {
 
     fn item_add(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
         let params: ItemAddParams = parse_params(params)?;
+        if let Some(stored) = applied_rpc(ctx.store, &params.op_id)? {
+            return Ok(stored);
+        }
         let mut request = match (&params.quick_text, &params.title) {
             (Some(text), _) => {
                 let mut request = quick::parse(text)?.into_new_item();
@@ -276,67 +279,83 @@ impl Dispatcher {
         request.date = params.date;
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
-        let item = planner::add_with(
+        let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
+            let item: Item = decode_result(stored)?;
+            let rows = find_item_rows(
+                tx,
+                &config,
+                now,
+                std::slice::from_ref(&item.id),
+                Some(item.day),
+            )?;
+            result_value(MutationResult {
+                revision: tx.revision()?,
+                op_id: params.op_id.clone(),
+                changed: Changed {
+                    items: rows,
+                    ..Changed::default()
+                },
+                undone: None,
+            })
+        };
+        planner::add_with(
             ctx.store,
             &config,
             now,
             ctx.ids,
             request,
-            planner::Mutation::new(Some(&params.op_id), None),
+            planner::Mutation::with_result(Some(&params.op_id), None, &mut recorder),
         )?;
-        let revision = revision_for(ctx.store, &params.op_id)?;
-        let rows = find_item_rows(
-            ctx.store,
-            &config,
-            now,
-            std::slice::from_ref(&item.id),
-            Some(item.day),
-        )?;
-        to_value(MutationResult {
-            revision,
-            op_id: params.op_id,
-            changed: Changed {
-                items: rows,
-                ..Changed::default()
-            },
-            undone: None,
-        })
+        stored_rpc_result(ctx.store, &params.op_id).map_err(Into::into)
     }
 
     fn item_edit(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
         let params: ItemEditParams = parse_params(params)?;
+        if let Some(stored) = applied_rpc(ctx.store, &params.op_id)? {
+            return Ok(stored);
+        }
         ensure_full_item(ctx.store, &params.id)?;
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
-        let item = planner::edit_with(
+        let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
+            let item: Item = decode_result(stored)?;
+            let rows = find_item_rows(
+                tx,
+                &config,
+                now,
+                std::slice::from_ref(&item.id),
+                Some(item.day),
+            )?;
+            result_value(MutationResult {
+                revision: tx.revision()?,
+                op_id: params.op_id.clone(),
+                changed: Changed {
+                    items: rows,
+                    ..Changed::default()
+                },
+                undone: None,
+            })
+        };
+        planner::edit_with(
             ctx.store,
             &config,
             now,
             &params.id,
             params.changes(),
-            planner::Mutation::new(Some(&params.op_id), params.expected_version),
+            planner::Mutation::with_result(
+                Some(&params.op_id),
+                params.expected_version,
+                &mut recorder,
+            ),
         )?;
-        let revision = revision_for(ctx.store, &params.op_id)?;
-        let rows = find_item_rows(
-            ctx.store,
-            &config,
-            now,
-            std::slice::from_ref(&item.id),
-            Some(item.day),
-        )?;
-        to_value(MutationResult {
-            revision,
-            op_id: params.op_id,
-            changed: Changed {
-                items: rows,
-                ..Changed::default()
-            },
-            undone: None,
-        })
+        stored_rpc_result(ctx.store, &params.op_id).map_err(Into::into)
     }
 
     fn item_move(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
         let params: ItemMoveParams = parse_params(params)?;
+        if let Some(stored) = applied_rpc(ctx.store, &params.op_id)? {
+            return Ok(stored);
+        }
         let selectors = [
             params.index.is_some(),
             params.after_id.is_some(),
@@ -353,148 +372,213 @@ impl Dispatcher {
             .into());
         }
         ensure_full_item(ctx.store, &params.id)?;
-        let index = move_index(ctx.store, &params)?;
+        let position = match (&params.after_id, &params.before_id, params.index) {
+            (Some(anchor), _, _) => planner::MovePosition::After(anchor.clone()),
+            (_, Some(anchor), _) => planner::MovePosition::Before(anchor.clone()),
+            (_, _, Some(index)) => planner::MovePosition::Index(index),
+            (None, None, None) => planner::MovePosition::Index(0),
+        };
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
-        let item = planner::move_item_with(
+        let block = params.block;
+        let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
+            let item: Item = decode_result(stored)?;
+            let changed_ids: Vec<String> = tx
+                .items()?
+                .into_iter()
+                .filter(|item| item.is_live() && item.block == block)
+                .map(|item| item.id)
+                .collect();
+            let rows = find_item_rows(tx, &config, now, &changed_ids, Some(item.day))?;
+            result_value(MutationResult {
+                revision: tx.revision()?,
+                op_id: params.op_id.clone(),
+                changed: Changed {
+                    items: rows,
+                    ..Changed::default()
+                },
+                undone: None,
+            })
+        };
+        planner::move_item_with(
             ctx.store,
             &config,
             now,
             &params.id,
-            params.block,
-            index,
-            planner::Mutation::new(Some(&params.op_id), params.expected_version),
+            block,
+            position,
+            planner::Mutation::with_result(
+                Some(&params.op_id),
+                params.expected_version,
+                &mut recorder,
+            ),
         )?;
-        let revision = revision_for(ctx.store, &params.op_id)?;
-        let changed_ids: Vec<String> = ctx
-            .store
-            .items()?
-            .into_iter()
-            .filter(|item| item.is_live() && item.block == params.block)
-            .map(|item| item.id)
-            .collect();
-        let preferred = Some(item.day);
-        let rows = find_item_rows(ctx.store, &config, now, &changed_ids, preferred)?;
-        to_value(MutationResult {
-            revision,
-            op_id: params.op_id,
-            changed: Changed {
-                items: rows,
-                ..Changed::default()
-            },
-            undone: None,
-        })
+        stored_rpc_result(ctx.store, &params.op_id).map_err(Into::into)
     }
 
     fn item_remove(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
         let params: ItemRemoveParams = parse_params(params)?;
+        if let Some(stored) = applied_rpc(ctx.store, &params.op_id)? {
+            return Ok(stored);
+        }
         ensure_full_item(ctx.store, &params.id)?;
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
-        let item = planner::remove_with(
+        let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
+            let item: Item = decode_result(stored)?;
+            result_value(MutationResult {
+                revision: tx.revision()?,
+                op_id: params.op_id.clone(),
+                changed: Changed {
+                    deleted: vec![item.id.clone()],
+                    ..Changed::default()
+                },
+                undone: None,
+            })
+        };
+        planner::remove_with(
             ctx.store,
             &config,
             now,
             &params.id,
-            planner::Mutation::new(Some(&params.op_id), params.expected_version),
+            planner::Mutation::with_result(
+                Some(&params.op_id),
+                params.expected_version,
+                &mut recorder,
+            ),
         )?;
-        let revision = revision_for(ctx.store, &params.op_id)?;
-        to_value(MutationResult {
-            revision,
-            op_id: params.op_id,
-            changed: Changed {
-                deleted: vec![item.id],
-                ..Changed::default()
-            },
-            undone: None,
-        })
+        stored_rpc_result(ctx.store, &params.op_id).map_err(Into::into)
     }
 
     // -- entry mutations ---------------------------------------------------
 
     fn entry_done(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
         let params: EntryDoneParams = parse_params(params)?;
+        if let Some(stored) = applied_rpc(ctx.store, &params.op_id)? {
+            return Ok(stored);
+        }
         ensure_full_item(ctx.store, &params.item_id)?;
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
-        let entry = planner::done_with(
+        let date = params.date;
+        let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
+            let entry: Entry = decode_result(stored)?;
+            let day = date.unwrap_or(entry.block.day);
+            let rows = find_item_rows(
+                tx,
+                &config,
+                now,
+                std::slice::from_ref(&params.item_id),
+                Some(day),
+            )?;
+            result_value(MutationResult {
+                revision: tx.revision()?,
+                op_id: params.op_id.clone(),
+                changed: Changed {
+                    items: rows,
+                    entries: vec![entry_record(&entry)],
+                    ..Changed::default()
+                },
+                undone: None,
+            })
+        };
+        planner::done_with(
             ctx.store,
             &config,
             now,
             ctx.ids,
             &params.item_id,
-            params.date,
-            planner::Mutation::new(Some(&params.op_id), None),
+            date,
+            planner::Mutation::with_result(Some(&params.op_id), None, &mut recorder),
         )?;
-        let revision = revision_for(ctx.store, &params.op_id)?;
-        let day = params.date.unwrap_or(entry.block.day);
-        let rows = find_item_rows(
-            ctx.store,
-            &config,
-            now,
-            std::slice::from_ref(&params.item_id),
-            Some(day),
-        )?;
-        to_value(MutationResult {
-            revision,
-            op_id: params.op_id,
-            changed: Changed {
-                items: rows,
-                entries: vec![entry_record(&entry)],
-                ..Changed::default()
-            },
-            undone: None,
-        })
+        stored_rpc_result(ctx.store, &params.op_id).map_err(Into::into)
     }
 
     fn entry_undo(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
         let params: EntryUndoParams = parse_params(params)?;
+        if let Some(stored) = applied_rpc(ctx.store, &params.op_id)? {
+            return Ok(stored);
+        }
         ensure_full_item(ctx.store, &params.item_id)?;
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
-        let undone = planner::undo_with(
+        let date = params.date;
+        let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
+            let undone: usize = decode_result(stored)?;
+            let day = match date {
+                Some(day) => day,
+                None => current_day(&config, now)?,
+            };
+            let rows = find_item_rows(
+                tx,
+                &config,
+                now,
+                std::slice::from_ref(&params.item_id),
+                Some(day),
+            )?;
+            result_value(MutationResult {
+                revision: tx.revision()?,
+                op_id: params.op_id.clone(),
+                changed: Changed {
+                    items: rows,
+                    ..Changed::default()
+                },
+                undone: Some(undone),
+            })
+        };
+        planner::undo_with(
             ctx.store,
             &config,
             now,
             &params.item_id,
-            params.date,
-            planner::Mutation::new(Some(&params.op_id), None),
+            date,
+            planner::Mutation::with_result(Some(&params.op_id), None, &mut recorder),
         )?;
-        let revision = revision_for(ctx.store, &params.op_id)?;
-        let day = params.date.map_or_else(|| current_day(&config, now), Ok)?;
-        let rows = find_item_rows(
-            ctx.store,
-            &config,
-            now,
-            std::slice::from_ref(&params.item_id),
-            Some(day),
-        )?;
-        to_value(MutationResult {
-            revision,
-            op_id: params.op_id,
-            changed: Changed {
-                items: rows,
-                ..Changed::default()
-            },
-            undone: Some(undone),
-        })
+        stored_rpc_result(ctx.store, &params.op_id).map_err(Into::into)
     }
 
     fn entry_log(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
         let params: EntryLogParams = parse_params(params)?;
+        if let Some(stored) = applied_rpc(ctx.store, &params.op_id)? {
+            return Ok(stored);
+        }
         ensure_full_item(ctx.store, &params.item_id)?;
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
-        let mutation = planner::Mutation::new(Some(&params.op_id), None);
-        let entry = match params.kind {
+        let date = params.date;
+        let value = params.value;
+        let kind = params.kind;
+        let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
+            let entry: Entry = decode_result(stored)?;
+            let day = date.unwrap_or(entry.block.day);
+            let rows = find_item_rows(
+                tx,
+                &config,
+                now,
+                std::slice::from_ref(&params.item_id),
+                Some(day),
+            )?;
+            result_value(MutationResult {
+                revision: tx.revision()?,
+                op_id: params.op_id.clone(),
+                changed: Changed {
+                    items: rows,
+                    entries: vec![entry_record(&entry)],
+                    ..Changed::default()
+                },
+                undone: None,
+            })
+        };
+        let mutation = planner::Mutation::with_result(Some(&params.op_id), None, &mut recorder);
+        match kind {
             Some(LogKind::Minutes) => planner::adjust_time_with(
                 ctx.store,
                 &config,
                 now,
                 ctx.ids,
                 &params.item_id,
-                params.value,
-                params.date,
+                value,
+                date,
                 mutation,
             )?,
             Some(LogKind::Count) => planner::log_count_with(
@@ -503,8 +587,8 @@ impl Dispatcher {
                 now,
                 ctx.ids,
                 &params.item_id,
-                params.value,
-                params.date,
+                value,
+                date,
                 mutation,
             )?,
             None => planner::log_with(
@@ -513,102 +597,100 @@ impl Dispatcher {
                 now,
                 ctx.ids,
                 &params.item_id,
-                params.value,
-                params.date,
+                value,
+                date,
                 mutation,
             )?,
         };
-        let revision = revision_for(ctx.store, &params.op_id)?;
-        let day = params.date.unwrap_or(entry.block.day);
-        let rows = find_item_rows(
-            ctx.store,
-            &config,
-            now,
-            std::slice::from_ref(&params.item_id),
-            Some(day),
-        )?;
-        to_value(MutationResult {
-            revision,
-            op_id: params.op_id,
-            changed: Changed {
-                items: rows,
-                entries: vec![entry_record(&entry)],
-                ..Changed::default()
-            },
-            undone: None,
-        })
+        stored_rpc_result(ctx.store, &params.op_id).map_err(Into::into)
     }
 
     // -- timer mutations ---------------------------------------------------
 
     fn timer_start(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
         let params: TimerStartParams = parse_params(params)?;
+        if let Some(stored) = applied_rpc(ctx.store, &params.op_id)? {
+            return Ok(stored);
+        }
         ensure_full_item(ctx.store, &params.item_id)?;
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
-        let entry = planner::start_timer_with(
+        let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
+            let started: planner::StartedTimer = decode_result(stored)?;
+            let day = current_day(&config, now)?;
+            let mut ids = Vec::new();
+            let mut seen = HashSet::new();
+            if seen.insert(started.timer.item_id.clone()) {
+                ids.push(started.timer.item_id.clone());
+            }
+            for entry in &started.stopped {
+                if seen.insert(entry.item_id.clone()) {
+                    ids.push(entry.item_id.clone());
+                }
+            }
+            let rows = find_item_rows(tx, &config, now, &ids, Some(day))?;
+            result_value(MutationResult {
+                revision: tx.revision()?,
+                op_id: params.op_id.clone(),
+                changed: Changed {
+                    items: rows,
+                    entries: vec![entry_record(&started.timer)],
+                    ..Changed::default()
+                },
+                undone: None,
+            })
+        };
+        planner::start_timer_with_stopped(
             ctx.store,
             &config,
             now,
             ctx.ids,
             &params.item_id,
-            planner::Mutation::new(Some(&params.op_id), None),
+            planner::Mutation::with_result(Some(&params.op_id), None, &mut recorder),
         )?;
-        let revision = revision_for(ctx.store, &params.op_id)?;
-        let day = current_day(&config, now)?;
-        let rows = find_item_rows(
-            ctx.store,
-            &config,
-            now,
-            std::slice::from_ref(&params.item_id),
-            Some(day),
-        )?;
-        to_value(MutationResult {
-            revision,
-            op_id: params.op_id,
-            changed: Changed {
-                items: rows,
-                entries: vec![entry_record(&entry)],
-                ..Changed::default()
-            },
-            undone: None,
-        })
+        stored_rpc_result(ctx.store, &params.op_id).map_err(Into::into)
     }
 
     fn timer_stop(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
         let params: TimerStopParams = parse_params(params)?;
+        if let Some(stored) = applied_rpc(ctx.store, &params.op_id)? {
+            return Ok(stored);
+        }
         if let Some(item_id) = &params.item_id {
             ensure_full_item(ctx.store, item_id)?;
         }
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
-        let mutation = planner::Mutation::new(Some(&params.op_id), None);
-        let entries = match &params.item_id {
+        let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
+            let entries: Vec<Entry> = decode_result(stored)?;
+            let day = current_day(&config, now)?;
+            let mut ids = Vec::new();
+            let mut seen = HashSet::new();
+            for entry in &entries {
+                if seen.insert(entry.item_id.clone()) {
+                    ids.push(entry.item_id.clone());
+                }
+            }
+            let rows = find_item_rows(tx, &config, now, &ids, Some(day))?;
+            result_value(MutationResult {
+                revision: tx.revision()?,
+                op_id: params.op_id.clone(),
+                changed: Changed {
+                    items: rows,
+                    entries: entries.iter().map(entry_record).collect(),
+                    ..Changed::default()
+                },
+                undone: None,
+            })
+        };
+        let mutation = planner::Mutation::with_result(Some(&params.op_id), None, &mut recorder);
+        match &params.item_id {
             Some(item_id) => {
                 planner::stop_item_timer_with(ctx.store, &config, now, item_id, mutation)?
             }
             None => planner::stop_timer_with(ctx.store, &config, now, mutation)?,
         };
-        let revision = revision_for(ctx.store, &params.op_id)?;
-        let day = current_day(&config, now)?;
-        let mut ids = Vec::new();
-        let mut seen = HashSet::new();
-        for entry in &entries {
-            if seen.insert(entry.item_id.clone()) {
-                ids.push(entry.item_id.clone());
-            }
-        }
-        let rows = find_item_rows(ctx.store, &config, now, &ids, Some(day))?;
-        to_value(MutationResult {
-            revision,
-            op_id: params.op_id,
-            changed: Changed {
-                items: rows,
-                entries: entries.iter().map(entry_record).collect(),
-                ..Changed::default()
-            },
-            undone: None,
-        })
+        stored_rpc_result(ctx.store, &params.op_id).map_err(Into::into)
     }
 
     // -- prayer mutations --------------------------------------------------
@@ -620,10 +702,29 @@ impl Dispatcher {
         prayed: bool,
     ) -> Result<Value, RpcError> {
         let params: PrayerParams = parse_params(params)?;
+        if let Some(stored) = applied_rpc(ctx.store, &params.op_id)? {
+            return Ok(stored);
+        }
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
-        let mutation = planner::Mutation::new(Some(&params.op_id), params.expected_version);
-        let mark = if prayed {
+        let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
+            let mark: PrayerMark = decode_result(stored)?;
+            result_value(MutationResult {
+                revision: tx.revision()?,
+                op_id: params.op_id.clone(),
+                changed: Changed {
+                    marks: vec![mark_record(&mark)],
+                    ..Changed::default()
+                },
+                undone: None,
+            })
+        };
+        let mutation = planner::Mutation::with_result(
+            Some(&params.op_id),
+            params.expected_version,
+            &mut recorder,
+        );
+        if prayed {
             planner::mark_with(
                 ctx.store,
                 &config,
@@ -631,7 +732,7 @@ impl Dispatcher {
                 params.prayer,
                 params.date,
                 mutation,
-            )?
+            )?;
         } else {
             planner::unmark_with(
                 ctx.store,
@@ -640,18 +741,9 @@ impl Dispatcher {
                 params.prayer,
                 params.date,
                 mutation,
-            )?
-        };
-        let revision = revision_for(ctx.store, &params.op_id)?;
-        to_value(MutationResult {
-            revision,
-            op_id: params.op_id,
-            changed: Changed {
-                marks: vec![mark_record(&mark)],
-                ..Changed::default()
-            },
-            undone: None,
-        })
+            )?;
+        }
+        stored_rpc_result(ctx.store, &params.op_id).map_err(Into::into)
     }
 
     // -- config ------------------------------------------------------------
@@ -670,26 +762,31 @@ impl Dispatcher {
             )
             .into());
         }
-        if let Some(op_id) = &params.op_id
-            && let Some(applied) = ctx.store.applied_op(op_id)?
-        {
-            let config: Config = serde_json::from_str(&applied.result_json)
-                .map_err(|error| Error::Storage(format!("invalid applied op result: {error}")))?;
-            return to_value(config);
-        }
         let config = params.apply(ctx.config.load()?);
         config.validate()?;
-        ctx.config.save(&config)?;
-        if let Some(op_id) = &params.op_id {
-            let stored = serde_json::to_string(&config)
-                .map_err(|error| Error::Internal(format!("store: {error}")))?;
-            ctx.store.write(|tx| {
-                tx.set_op_id(Some(op_id));
-                tx.record_applied_op(op_id, &stored)?;
-                Ok(())
-            })?;
-        }
-        to_value(config)
+        let stored = serde_json::to_string(&config)
+            .map_err(|error| Error::Internal(format!("store: {error}")))?;
+        let Some(op_id) = &params.op_id else {
+            ctx.config.save(&config)?;
+            return to_value(config);
+        };
+        // The config file cannot join the SQLite transaction. Write it first
+        // through the repository's atomic rename, then record the op in the
+        // same write transaction; a replay therefore never applies a second
+        // body. A crash between the rename and the commit leaves the new file
+        // without an op row, so a retry applies its body once more.
+        let result = ctx.store.write(|tx| {
+            tx.set_op_id(Some(op_id));
+            if let Some(applied) = tx.applied_op(op_id)? {
+                return serde_json::from_str::<Config>(&applied.result_json).map_err(|error| {
+                    Error::Storage(format!("invalid applied op result: {error}"))
+                });
+            }
+            ctx.config.save(&config)?;
+            tx.record_applied_op(op_id, &stored)?;
+            Ok(config.clone())
+        })?;
+        to_value(result)
     }
 
     fn export(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
@@ -791,6 +888,38 @@ fn revision_for(store: &Store, op_id: &str) -> Result<i64, Error> {
     }
 }
 
+/// Serializes a full mutation result while its transaction is open.
+fn result_value<T: Serialize>(value: T) -> Result<Value, Error> {
+    serde_json::to_value(value)
+        .map_err(|error| Error::Internal(format!("serialize result: {error}")))
+}
+
+/// Decodes the planner result stored next to the full protocol result.
+fn decode_result<T: DeserializeOwned>(stored: &str) -> Result<T, Error> {
+    serde_json::from_str(stored)
+        .map_err(|error| Error::Storage(format!("invalid applied op result: {error}")))
+}
+
+/// Returns the exact protocol result recorded with a first application of
+/// `op_id`, if one exists. Older planner-only rows have no full result.
+fn applied_rpc(store: &Store, op_id: &str) -> Result<Option<Value>, Error> {
+    let Some(applied) = store.applied_op(op_id)? else {
+        return Ok(None);
+    };
+    let stored: Value = serde_json::from_str(&applied.result_json)
+        .map_err(|error| Error::Storage(format!("invalid applied op result: {error}")))?;
+    Ok(stored.get("rpc").cloned())
+}
+
+/// Reads the full result stored in the same transaction as the mutation.
+fn stored_rpc_result(store: &Store, op_id: &str) -> Result<Value, Error> {
+    applied_rpc(store, op_id)?.ok_or_else(|| {
+        Error::Storage(format!(
+            "applied op {op_id:?} has no stored protocol result"
+        ))
+    })
+}
+
 fn entry_record(entry: &Entry) -> EntryRecord {
     EntryRecord {
         version: entry.version,
@@ -853,42 +982,4 @@ fn find_item_rows(
         }
     }
     Ok(rows)
-}
-
-fn move_index(store: &Store, params: &ItemMoveParams) -> Result<usize, Error> {
-    if let Some(index) = params.index {
-        return Ok(index);
-    }
-    if let (Some(_), Some(_)) = (&params.after_id, &params.before_id) {
-        return Err(Error::validation(
-            "position",
-            "use either after_id or before_id, not both",
-        ));
-    }
-    let anchor = params.after_id.as_deref().or(params.before_id.as_deref());
-    let Some(anchor) = anchor else {
-        return Ok(0);
-    };
-    let mut siblings: Vec<Item> = store
-        .items()?
-        .into_iter()
-        .filter(|item| item.is_live() && item.block == params.block && item.id != params.id)
-        .collect();
-    siblings.sort_by(|a, b| {
-        a.position
-            .cmp(&b.position)
-            .then(a.created_at.cmp(&b.created_at))
-    });
-    let position = siblings
-        .iter()
-        .position(|item| item.id == anchor)
-        .ok_or_else(|| Error::NotFound {
-            what: "item",
-            id: anchor.to_string(),
-        })?;
-    if params.after_id.is_some() {
-        Ok(position + 1)
-    } else {
-        Ok(position)
-    }
 }

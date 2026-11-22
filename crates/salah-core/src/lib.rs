@@ -8,4 +8,4 @@ pub mod planner;
 pub mod quick;
 pub mod status;
 
-pub use salah_store::Store;
+pub use salah_store::{Store, WriteTx};

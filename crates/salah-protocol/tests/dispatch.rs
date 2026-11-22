@@ -464,3 +464,283 @@ fn config_export_and_import_round_trip() {
     let error = fixture.err("import", json!({"op_id":"op-bad-import","data":invalid}));
     assert_eq!(error.data.unwrap().kind, "validation");
 }
+
+#[test]
+fn replay_after_later_edits_returns_byte_identical_original_results() {
+    let mut fixture = Fixture::new();
+    fixture.handshake();
+
+    let added = fixture.ok(
+        "item.add",
+        json!({"op_id":"op-replay-add","title":"Original","block":"fajr"}),
+    );
+    let id = item_id(&added).to_string();
+    let added_bytes = serde_json::to_string(&added).unwrap();
+
+    // The complete response is stored in the same transaction as the write.
+    let applied = fixture.store.applied_op("op-replay-add").unwrap().unwrap();
+    let stored: Value = serde_json::from_str(&applied.result_json).unwrap();
+    assert_eq!(stored["rpc"]["changed"]["items"][0]["title"], "Original");
+
+    let first_edit = fixture.ok(
+        "item.edit",
+        json!({
+            "op_id":"op-replay-edit-1",
+            "id":id,
+            "expected_version":1,
+            "title":"First edit"
+        }),
+    );
+    let first_edit_bytes = serde_json::to_string(&first_edit).unwrap();
+
+    // A later edit changes the current projection and version. Replaying the
+    // earlier ops must not recompute rows from that newer state.
+    let second_edit = fixture.ok(
+        "item.edit",
+        json!({
+            "op_id":"op-replay-edit-2",
+            "id":id,
+            "expected_version":2,
+            "title":"Second edit"
+        }),
+    );
+    assert_eq!(item_version(&second_edit), 3);
+
+    let replay_add = fixture.ok(
+        "item.add",
+        json!({"op_id":"op-replay-add","title":"Different retry body","block":"asr"}),
+    );
+    assert_eq!(serde_json::to_string(&replay_add).unwrap(), added_bytes);
+
+    let replay_edit = fixture.ok(
+        "item.edit",
+        json!({
+            "op_id":"op-replay-edit-1",
+            "id":id,
+            "title":"Different retry body"
+        }),
+    );
+    assert_eq!(
+        serde_json::to_string(&replay_edit).unwrap(),
+        first_edit_bytes
+    );
+    assert_eq!(replay_edit["changed"]["items"][0]["title"], "First edit");
+    assert_eq!(replay_edit["changed"]["items"][0]["version"], 2);
+}
+
+#[test]
+fn timer_start_reports_the_previously_running_item_too() {
+    let mut fixture = Fixture::new();
+    fixture.handshake();
+
+    let first = fixture.ok(
+        "item.add",
+        json!({"op_id":"op-timer-a","title":"First timer","measure":"minutes"}),
+    );
+    let first_id = item_id(&first).to_string();
+    let second = fixture.ok(
+        "item.add",
+        json!({"op_id":"op-timer-b","title":"Second timer","measure":"minutes"}),
+    );
+    let second_id = item_id(&second).to_string();
+
+    let started_first = fixture.ok(
+        "timer.start",
+        json!({"op_id":"op-start-a","item_id":first_id}),
+    );
+    assert_eq!(
+        started_first["changed"]["items"].as_array().unwrap().len(),
+        1
+    );
+
+    let started_second = fixture.ok(
+        "timer.start",
+        json!({"op_id":"op-start-b","item_id":second_id}),
+    );
+    let rows = started_second["changed"]["items"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "both the started and stopped items change");
+    let stopped = rows.iter().find(|row| row["id"] == first_id).unwrap();
+    let running = rows.iter().find(|row| row["id"] == second_id).unwrap();
+    assert!(stopped["timer_started_at"].is_null());
+    assert!(running["timer_started_at"].is_string());
+}
+
+#[test]
+fn item_move_by_after_id_resolves_the_anchor_in_the_move_transaction() {
+    let mut fixture = Fixture::new();
+    fixture.handshake();
+
+    let a = fixture.ok(
+        "item.add",
+        json!({"op_id":"op-move-a","title":"A","block":"fajr"}),
+    );
+    let a_id = item_id(&a).to_string();
+    let b = fixture.ok(
+        "item.add",
+        json!({"op_id":"op-move-b","title":"B","block":"fajr"}),
+    );
+    let b_id = item_id(&b).to_string();
+    let c = fixture.ok(
+        "item.add",
+        json!({"op_id":"op-move-c","title":"C","block":"fajr"}),
+    );
+    let c_id = item_id(&c).to_string();
+
+    let moved = fixture.ok(
+        "item.move",
+        json!({
+            "op_id":"op-move-after",
+            "id":a_id,
+            "block":"fajr",
+            "after_id":c_id
+        }),
+    );
+    let order: Vec<&str> = moved["changed"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(order, [b_id.as_str(), c_id.as_str(), a_id.as_str()]);
+}
+
+#[test]
+fn every_protocol_method_has_a_happy_path_and_an_error() {
+    let mut fixture = Fixture::new();
+    fixture.handshake();
+
+    let check = |fixture: &mut Fixture, method: &str, good: Value, bad: Value| {
+        let result = fixture.ok(method, good);
+        assert!(!result.is_null(), "{method} returned null");
+        let error = fixture.err(method, bad);
+        assert!(
+            error.code == INVALID_PARAMS || error.code <= -32000,
+            "{method} returned an unexpected error: {error:?}"
+        );
+    };
+
+    check(
+        &mut fixture,
+        "hello",
+        json!({"protocol":[1],"client":"again"}),
+        json!({"protocol":[2],"client":"old"}),
+    );
+    check(&mut fixture, "status.get", json!({}), json!([]));
+    check(
+        &mut fixture,
+        "day.get",
+        json!({"date":"2031-05-14"}),
+        json!({"date":"not-a-date"}),
+    );
+    check(&mut fixture, "items.list", json!({}), json!([]));
+    check(
+        &mut fixture,
+        "stats.get",
+        json!({"days":7}),
+        json!({"from":"2031-05-01"}),
+    );
+    check(
+        &mut fixture,
+        "history.get",
+        json!({}),
+        json!({"to":"not-a-date"}),
+    );
+    check(
+        &mut fixture,
+        "item.parse",
+        json!({"text":"read 20m after isha daily"}),
+        json!({}),
+    );
+
+    let added = fixture.ok(
+        "item.add",
+        json!({"op_id":"op-all-add","title":"All methods","block":"fajr","measure":"minutes"}),
+    );
+    let id = item_id(&added).to_string();
+    check(
+        &mut fixture,
+        "item.add",
+        json!({"op_id":"op-all-add-2","title":"Second"}),
+        json!({"op_id":"op-all-add-bad"}),
+    );
+    check(
+        &mut fixture,
+        "item.edit",
+        json!({"op_id":"op-all-edit","id":id,"title":"Renamed"}),
+        json!({"op_id":"op-all-edit-bad","id":id,"expected_version":999,"title":"Stale"}),
+    );
+    let extra = fixture.ok(
+        "item.add",
+        json!({"op_id":"op-all-extra","title":"Extra","block":"fajr"}),
+    );
+    let extra_id = item_id(&extra).to_string();
+    check(
+        &mut fixture,
+        "item.move",
+        json!({"op_id":"op-all-move","id":extra_id,"block":"fajr","after_id":id}),
+        json!({"op_id":"op-all-move-bad","id":extra_id,"block":"fajr","after_id":id,"before_id":id}),
+    );
+    check(
+        &mut fixture,
+        "item.remove",
+        json!({"op_id":"op-all-remove","id":extra_id}),
+        json!({"op_id":"op-all-remove-bad","id":"missing"}),
+    );
+    check(
+        &mut fixture,
+        "entry.done",
+        json!({"op_id":"op-all-done","item_id":id,"date":"2031-05-14"}),
+        json!({"op_id":"op-all-done-bad","item_id":"missing"}),
+    );
+    check(
+        &mut fixture,
+        "entry.undo",
+        json!({"op_id":"op-all-undo","item_id":id,"date":"2031-05-14"}),
+        json!({"op_id":"op-all-undo-bad","item_id":"missing"}),
+    );
+    check(
+        &mut fixture,
+        "entry.log",
+        json!({"op_id":"op-all-log","item_id":id,"kind":"minutes","value":5}),
+        json!({"op_id":"op-all-log-bad","item_id":id,"value":0}),
+    );
+    check(
+        &mut fixture,
+        "timer.start",
+        json!({"op_id":"op-all-start","item_id":id}),
+        json!({"op_id":"op-all-start-bad","item_id":"missing"}),
+    );
+    check(
+        &mut fixture,
+        "timer.stop",
+        json!({"op_id":"op-all-stop","item_id":id}),
+        json!({"op_id":"op-all-stop-bad","item_id":"missing"}),
+    );
+    check(
+        &mut fixture,
+        "prayer.mark",
+        json!({"op_id":"op-all-mark","prayer":"dhuhr","date":"2031-05-14"}),
+        json!({"op_id":"op-all-mark-bad","prayer":"sleep"}),
+    );
+    check(
+        &mut fixture,
+        "prayer.unmark",
+        json!({"op_id":"op-all-unmark","prayer":"dhuhr","date":"2031-05-14"}),
+        json!({"op_id":"op-all-unmark-bad","prayer":"sleep"}),
+    );
+    check(&mut fixture, "config.get", json!({}), json!([]));
+    check(
+        &mut fixture,
+        "config.set",
+        json!({"op_id":"op-all-config","sleep_time":"22:15"}),
+        json!({"op_id":"op-all-config-bad"}),
+    );
+    let exported = fixture.ok("export", json!({}));
+    check(&mut fixture, "export", json!({}), json!([]));
+    check(
+        &mut fixture,
+        "import",
+        json!({"op_id":"op-all-import","data":exported}),
+        json!({"op_id":"op-all-import-bad","data":{"format":"not-salah"}}),
+    );
+}

@@ -14,14 +14,14 @@ pub use entries::{
     undo_with,
 };
 pub use items::{
-    ItemChanges, NewItem, add, add_with, edit, edit_with, find_item, move_item, move_item_with,
-    remove, remove_with,
+    ItemChanges, MovePosition, NewItem, add, add_with, edit, edit_with, find_item, move_item,
+    move_item_with, remove, remove_with,
 };
 pub use marks::{mark, mark_with, unmark, unmark_with};
 pub use stats::{DayStat, DayTotals, ItemStats, PrayerStats, Stats, Totals, stats};
 pub use timers::{
-    close_expired_timers, start_timer, start_timer_with, stop_item_timer, stop_item_timer_with,
-    stop_timer, stop_timer_with,
+    StartedTimer, close_expired_timers, start_timer, start_timer_with, start_timer_with_stopped,
+    stop_item_timer, stop_item_timer_with, stop_timer, stop_timer_with,
 };
 pub use views::{
     BlockPlan, DayPlan, DayReport, NextBoundary, Now, PrayerRow, RunningTimer, SleepRow, Today,
@@ -111,8 +111,14 @@ fn report_day(
     item::day_items(items, entries, view, |key| ends.end(key))
 }
 
+/// Callback that builds the full protocol result while the mutation
+/// transaction is still open. It receives the planner result serialized for
+/// `applied_ops`, so replay can return the exact response bytes.
+pub type ResultRecorder<'a> =
+    &'a mut dyn FnMut(&WriteTx<'_>, &str) -> Result<serde_json::Value, Error>;
+
 /// Optional metadata for one mutating use case.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Default)]
 pub struct Mutation<'a> {
     /// Client idempotency key. Replaying it returns the stored result and
     /// performs no writes.
@@ -120,6 +126,8 @@ pub struct Mutation<'a> {
     /// Rejects the mutation with `Error::Conflict` when the target entity's
     /// stored version differs.
     pub expected_version: Option<i64>,
+    /// Records the full protocol result in the same transaction as the write.
+    pub recorder: Option<ResultRecorder<'a>>,
 }
 
 impl<'a> Mutation<'a> {
@@ -127,6 +135,21 @@ impl<'a> Mutation<'a> {
         Self {
             op_id,
             expected_version,
+            recorder: None,
+        }
+    }
+
+    /// Like [`Mutation::new`], but also stores the full protocol result in
+    /// `applied_ops` inside the same write transaction.
+    pub fn with_result(
+        op_id: Option<&'a str>,
+        expected_version: Option<i64>,
+        recorder: ResultRecorder<'a>,
+    ) -> Self {
+        Self {
+            op_id,
+            expected_version,
+            recorder: Some(recorder),
         }
     }
 }
@@ -277,20 +300,57 @@ fn write_mutation<T: StoredResult>(
     mut work: impl FnMut(&WriteTx<'_>) -> Result<T, Error>,
 ) -> Result<T, Error> {
     let now = stamp(now);
+    let Mutation {
+        op_id,
+        expected_version: _,
+        mut recorder,
+    } = mutation;
     store.write(|tx| {
-        tx.set_op_id(mutation.op_id);
-        if let Some(op_id) = mutation.op_id
+        tx.set_op_id(op_id);
+        if let Some(op_id) = op_id
             && let Some(applied) = tx.applied_op(op_id)?
         {
-            return T::from_stored_json(&applied.result_json);
+            return decode_stored(&applied.result_json);
         }
         timers::close_expired_timers(tx, config, now)?;
         let value = work(tx)?;
-        if let Some(op_id) = mutation.op_id {
-            tx.record_applied_op(op_id, &value.to_stored_json()?)?;
+        if let Some(op_id) = op_id {
+            let result_json = value.to_stored_json()?;
+            let stored = match recorder.as_mut() {
+                Some(recorder) => {
+                    let rpc = recorder(tx, &result_json)?;
+                    let result: serde_json::Value =
+                        serde_json::from_str(&result_json).map_err(|error| {
+                            Error::Internal(format!("serialize applied op result: {error}"))
+                        })?;
+                    serde_json::to_string(&serde_json::json!({
+                        "result": result,
+                        "rpc": rpc,
+                    }))
+                    .map_err(|error| Error::Internal(format!("store: {error}")))?
+                }
+                None => result_json,
+            };
+            tx.record_applied_op(op_id, &stored)?;
         }
         Ok(value)
     })
+}
+
+/// Reads a planner result from an `applied_ops` row. Newer rows wrap it next
+/// to the full protocol result; older rows contain the planner result alone.
+fn decode_stored<T: StoredResult>(text: &str) -> Result<T, Error> {
+    let value: serde_json::Value = serde_json::from_str(text)
+        .map_err(|error| Error::Storage(format!("store: invalid applied op result: {error}")))?;
+    match value.get("rpc") {
+        Some(_) => match value.get("result") {
+            Some(result) => T::from_stored_json(&result.to_string()),
+            None => Err(Error::Storage(
+                "store: invalid applied op result: missing planner result".into(),
+            )),
+        },
+        None => T::from_stored_json(text),
+    }
 }
 
 #[cfg(test)]

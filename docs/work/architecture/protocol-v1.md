@@ -97,8 +97,21 @@ Example stale edit:
 ## Idempotency and versions
 
 - A repeated `op_id` returns the stored result and revision and performs no
-  write, even if the retry body differs. The planner records `(op_id → result,
-  revision)` in `applied_ops` in the same transaction as the mutation.
+  write, even if the retry body differs. On first application the planner
+  records the complete serialized protocol result in `applied_ops` inside the
+  same `BEGIN IMMEDIATE` transaction as the mutation. A replay returns those
+  exact bytes, including the `changed` rows as they were then, even if later
+  edits have changed the current state.
+- `item.move` resolves `after_id`/`before_id` against the siblings read inside
+  the same write transaction that reorders the block, so the anchor cannot go
+  stale between the read and the move.
+- `config.set` cannot share SQLite's transaction with the JSON config file. It
+  writes the config file first through the repository's atomic rename and then
+  records `op_id` in the same SQLite write transaction as `applied_ops`, so a
+  replay returns the recorded `Config` without touching the file. If the
+  process dies between the rename and the commit, the new file remains without
+  an op row and a retry applies its body once more; the file is never left
+  half-written.
 - Reuse the same `op_id` when retrying after a timeout; use a new one for a new
   intent.
 - `expected_version` applies per entity on `item.edit`, `item.move`,

@@ -155,9 +155,10 @@ pub fn edit_with(
     mutation: Mutation<'_>,
 ) -> Result<Item, Error> {
     let now = stamp(now);
+    let expected_version = mutation.expected_version;
     write_mutation(store, config, now, mutation, |tx| {
         let mut item = find_item(tx, id)?;
-        ensure_version("item", &item.id, item.version, mutation.expected_version)?;
+        ensure_version("item", &item.id, item.version, expected_version)?;
         if let Some(title) = &changes.title {
             item.title = validate_title(title)?;
         }
@@ -195,6 +196,17 @@ pub fn edit_with(
     })
 }
 
+/// Where a moved item lands within its target block.
+#[derive(Clone, Debug)]
+pub enum MovePosition {
+    /// Legacy zero-based index from the human CLI.
+    Index(usize),
+    /// Immediately after this sibling id.
+    After(String),
+    /// Immediately before this sibling id.
+    Before(String),
+}
+
 /// Moves an item to `block` at `index` (0-based) and renumbers that block.
 pub fn move_item(
     store: &mut Store,
@@ -204,7 +216,15 @@ pub fn move_item(
     block: BoundaryId,
     index: usize,
 ) -> Result<Item, Error> {
-    move_item_with(store, config, now, id, block, index, Mutation::default())
+    move_item_with(
+        store,
+        config,
+        now,
+        id,
+        block,
+        MovePosition::Index(index),
+        Mutation::default(),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -214,14 +234,15 @@ pub fn move_item_with(
     now: DateTime<Utc>,
     id: &str,
     block: BoundaryId,
-    index: usize,
+    position: MovePosition,
     mutation: Mutation<'_>,
 ) -> Result<Item, Error> {
     let now = stamp(now);
     let block = validate_block(block)?;
+    let expected_version = mutation.expected_version;
     write_mutation(store, config, now, mutation, |tx| {
         let mut moved = find_item(tx, id)?;
-        ensure_version("item", &moved.id, moved.version, mutation.expected_version)?;
+        ensure_version("item", &moved.id, moved.version, expected_version)?;
         let mut siblings: Vec<Item> = tx
             .items()?
             .into_iter()
@@ -232,6 +253,7 @@ pub fn move_item_with(
                 .cmp(&b.position)
                 .then(a.created_at.cmp(&b.created_at))
         });
+        let index = resolve_move_index(&siblings, &position)?;
         let moved_id = moved.id.clone();
         moved.block = block;
         siblings.insert(index.min(siblings.len()), moved);
@@ -248,6 +270,28 @@ pub fn move_item_with(
             .find(|i| i.id == moved_id)
             .ok_or_else(|| "moved item vanished".into())
     })
+}
+
+/// Resolves an anchor id against the siblings read inside the move
+/// transaction, so no read-then-write gap remains.
+fn resolve_move_index(siblings: &[Item], position: &MovePosition) -> Result<usize, Error> {
+    match position {
+        MovePosition::Index(index) => Ok(*index),
+        MovePosition::After(anchor) | MovePosition::Before(anchor) => {
+            let index = siblings
+                .iter()
+                .position(|item| item.id == *anchor)
+                .ok_or_else(|| Error::NotFound {
+                    what: "item",
+                    id: anchor.clone(),
+                })?;
+            Ok(match position {
+                MovePosition::After(_) => index + 1,
+                MovePosition::Before(_) => index,
+                MovePosition::Index(_) => unreachable!(),
+            })
+        }
+    }
 }
 
 pub fn remove(
@@ -267,9 +311,10 @@ pub fn remove_with(
     mutation: Mutation<'_>,
 ) -> Result<Item, Error> {
     let now = stamp(now);
+    let expected_version = mutation.expected_version;
     write_mutation(store, config, now, mutation, |tx| {
         let mut item = find_item(tx, id)?;
-        ensure_version("item", &item.id, item.version, mutation.expected_version)?;
+        ensure_version("item", &item.id, item.version, expected_version)?;
         item.deleted_at = Some(now);
         item.updated_at = now;
         item.version = tx.put_item(&item)?;
