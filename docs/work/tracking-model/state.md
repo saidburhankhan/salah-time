@@ -6,21 +6,27 @@
 
 ## Now
 
-Planning is committed (27f7020). `salah-lead` has ended, so W1 (backend) goes to Codex.
-Limits at 19:10: Claude 5h 75% (resets 22:10), 7d 22%; Codex 5h 100% (resets 19:37), 7d 16%.
-The orchestrator `salah-orch` stays lean so it outlives the workers; `salah-revive.service`
-resumes it after a limit cutoff.
+Committed: S1 7d1299e, S2 bf4de55, S3 core 241326d + c1753ec (sessions, metric validation,
+snapshots, fulfilment, day/metric/project/tag/block stats). All workspace suites including
+daemon sockets + strict Clippy green at each commit.
+
+Uncommitted, not green-checked: W1's partial S4 protocol wiring (`crates/salah-protocol`,
+RPC fixtures, Cargo.lock) and W2's frontend work (`app/**`, `plugin/**`). W2's first attempt
+was rejected: it deleted 43 of 48 app tests; it was told to restore and adapt them.
+
+Both Codex workers stopped at 20:15 on the Codex usage limit (resets 00:39).
+Codex workers run sandboxed (no .git writes, no sockets): they declare CHECKPOINT in
+their progress file and the orchestrator verifies and commits.
 
 ## Next
 
-- W1 (`salah-codex-w1`) and W2 (`salah-codex-w2`) both run on Codex since 19:39/19:5x
-  (Codex 5h window resets 00:39). Logs in `~/.cache/salah-agents/`. The orchestrator
-  watches commits, unit exits and Codex errors live (Monitor), re-dispatches dead
-  workers, and reviews each commit against `interface.md`.
-- 22:13 (cron): Claude has reset; add Claude subagents next to Codex where ownership allows.
-- When both slices are integrated and verified: archive this work item, then run
-  `handoff-telegram.sh` (the user asked for this) to resume the telegram-vim-rust lead on its
-  task list 1–4 (order 4, 1, 2, 3).
+- 22:13 (cron): Claude resets at 22:10. Start a Claude worker on W1's remaining S4
+  (protocol wiring, legacy removal, fixtures) from w1-progress.md, so the critical path
+  doesn't wait for Codex.
+- 00:41 (systemd timer `salah-resume-w2`): Codex resumes W2 (test restoration).
+  W1 Codex is resumed by the orchestrator only if the Claude worker hasn't finished S4.
+- Then: S6 integration (full checks, install, live daemon/logs), archive, and
+  `handoff-telegram.sh`.
 
 ## Interfaces
 
