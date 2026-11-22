@@ -100,22 +100,22 @@ Owners: **W1 backend** (Claude session `06b42b65`) owns S1–S4: `crates/**`,
 the RPC fixtures, and `docs/work/architecture/protocol-v1.md`. **W2 frontends** (Codex,
 from 19:37) owns S5: `app/**`, `plugin/**`. The orchestrator owns `docs/work/tracking-model/`,
 `docs/START.md`, and integration.
-- [ ] S1 — Domain types: Project, Tag, Metric, Item, Session, values, DayPlan.
-- [ ] S2 — Store: single v1 schema, constraints, indexes, repository API.
-- [ ] S3 — Core: planning, session logging with metric validation, day
+- [x] S1 — Domain types: Project, Tag, Metric, Item, Session, values, DayPlan.
+- [x] S2 — Store: single v1 schema, constraints, indexes, repository API.
+- [x] S3 — Core: planning, session logging with metric validation, day
       fulfilment, snapshots, stats queries.
-- [ ] S4 — Protocol/daemon methods and fixtures.
-- [ ] S5 — Widget quick-log flow; app planning and settings (metrics, projects,
+- [x] S4 — Protocol/daemon methods and fixtures.
+- [x] S5 — Widget quick-log flow; app planning and settings (metrics, projects,
       tags); statistics views.
-- [ ] S6 — Integration and live verification.
+- [x] S6 — Integration and live verification.
 
 ## Acceptance checks
 
-- [ ] A session with minutes, focus, quality and a custom metric is recorded in
+- [x] A session with minutes, focus, quality and a custom metric is recorded in
       one operation and read back intact.
-- [ ] Required project metrics are enforced when a session is logged.
-- [ ] Adding a metric from settings needs no schema change.
-- [ ] Past days' block times and plans are unchanged after editing an item or
+- [x] Required project metrics are enforced when a session is logged.
+- [x] Adding a metric from settings needs no schema change.
+- [x] Past days' block times and plans are unchanged after editing an item or
       changing location.
-- [ ] Stats can be grouped by tag, project, block and day from SQL aggregates.
-- [ ] `./scripts/test` and strict Clippy pass.
+- [x] Stats can be grouped by tag, project, block and day from SQL aggregates.
+- [x] `./scripts/test` and strict Clippy pass.
