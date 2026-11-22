@@ -1,22 +1,69 @@
 # Salah
 
-Salah is a small, offline prayer-time widget for Omarchy. The bar always
-shows the next prayer and the time remaining. Selecting it opens a compact
-daily schedule with the location, calculation method, prayer times, and a
-larger countdown.
+Salah is a small, offline prayer-time widget and planner for Omarchy. The day
+is divided by the five prayers (Fajr, Dhuhr, Asr, Maghrib, and Isha), and
+items, either one-time tasks or routines, are planned in the blocks between
+them. The bar widget shows now: the current block and the next boundary. The
+desktop app (`salah open`, or "Salah" in the launcher) shows the day, routines,
+and statistics. The configured sleep time ends the day.
 
-After Isha, the next boundary is the configured sleep time instead of
-tomorrow's Fajr. This makes the remaining productive part of the day visible.
-After sleep time, the widget marks the current block as sleeping and counts
-down to Fajr. Set the local 24-hour boundary with:
+## Planning
+
+Quick add understands the prayer, repeat, and measure in one line:
+
+```sh
+salah item add --quick -- "read 20m after isha daily"
+salah item add --quick -- "pushups x30 at asr weekdays"
+salah item add --quick -- "call mum 15 min on sundays"
+```
+
+Use `salah item parse --json -- "read 20m after isha daily"` to preview the
+result without saving it.
+
+The core item commands are:
+
+```sh
+salah item add --block fajr -- "Read Quran"
+salah item list
+salah item done <id>
+salah item undo <id>
+salah item log <id> 20
+salah item start <id>
+salah item stop
+salah item move <id> --block asr --index 0
+salah item edit <id> --title "Read Quran" --target 30
+salah item remove <id>
+```
+
+An item is measured by check, minutes, or count, and repeats once, daily, or on
+chosen weekdays. Item ids may be shortened to a unique prefix. `salah day`
+shows one day's prayers and items by block, `salah prayer mark fajr` records a
+prayer, and `salah stats --days 30` shows per-item and per-prayer totals.
+
+Unfinished one-time items carry forward through the rest of their day and
+appear in the current block. When the day ends they are history as missed. A
+running timer stops automatically at the end of the block where it started.
+
+Sleep ends the day. Set the local 24-hour boundary with:
 
 ```sh
 salah config set --sleep-time 23:00
 ```
 
-The Rust binary owns calculation and settings. The Omarchy/Quickshell plugin
-only renders the bar label and popup, so the same calculation can be tested
-and queried from a terminal.
+## Your data
+
+Planner data lives in one SQLite database at
+`${XDG_DATA_HOME:-~/.local/share}/salah/salah.db`. Set `SALAH_DATA` to use a
+different path.
+
+Export writes versioned JSON, including deletions, and import is idempotent:
+importing the same file again changes nothing, and a newer `updated_at` wins.
+Export refuses to replace an existing file unless `--force` is given.
+
+```sh
+salah export --output file.json
+salah import file.json
+```
 
 ## Build and test
 
@@ -82,9 +129,13 @@ UTC offsets, and calculation-method names before saving them.
 ## Install in Omarchy
 
 The installer builds a release binary, copies it to `~/.local/bin/salah`, and
-copies the plugin into `~/.config/omarchy/plugins/local.salah`. It refuses to
-replace a plugin with the same name if that path belongs to something else or
-if the previously installed copy has local modifications.
+copies the plugin into `~/.config/omarchy/plugins/local.salah`. When `qmake6`
+is present it also builds the desktop app, installs `~/.local/bin/salah-app`,
+and adds a "Salah" launcher entry and icon; without `qmake6` it skips the app.
+The plugin and desktop-app installation is ownership-checked: the installer
+never overwrites files it did not install, and it refuses to replace a plugin
+with the same name if that path belongs to something else or if the previously
+installed copy has local modifications.
 
 ```sh
 ./scripts/install
@@ -106,8 +157,8 @@ To remove the binary and plugin link while keeping personal settings:
 
 ## CLI contract
 
-The popup reads `salah status --json`. Human-readable output is also useful
-for checking the result independently:
+The bar widget and desktop app read JSON from the CLI. Human-readable output is
+also useful for checking the result independently:
 
 ```sh
 salah status
@@ -116,10 +167,11 @@ salah config show
 salah config set --help
 ```
 
-The JSON output includes the location and method, every prayer, the ordered
-prayer/sleep boundaries, the current block, and the next boundary with its
-wall-clock time and remaining seconds. This keeps UI code free of scheduling
-mathematics.
+`salah status --json` includes the location and method, every prayer, the
+ordered prayer/sleep boundaries, the current block, and the next boundary with
+its wall-clock time and remaining seconds. It also embeds today's planner
+items as `planner`; `salah day --json` returns the full timeline for one day.
+This keeps UI code free of scheduling mathematics.
 
 ## Calculation notice
 
@@ -136,10 +188,18 @@ Do not present an unverified preset as an exact official timetable.
 ## Development layout
 
 ```text
-src/                 Rust calculation, configuration, and CLI
-tests/               calculation and CLI tests
+src/day.rs           day keys, prayer boundaries, and block ordering
+src/schedule.rs      resolves the schedule and each block's start and end
+src/item.rs          items, entries, repeats, and measurement rules
+src/store.rs         SQLite persistence and numbered migrations
+src/planner.rs       planner use cases shared by the CLI, widget, and app
+src/quick.rs         quick-add text parser
+src/export.rs        versioned JSON export and idempotent import
+src/status.rs        status and countdown JSON for the widget
+src/main.rs          CLI commands
+app/                 Qt Quick desktop app
 plugin/local.salah/  Omarchy bar widget and popup
+tests/               calculation, planner, export, and CLI tests
 scripts/install      reversible local install
 scripts/uninstall    ownership- and content-checked uninstall
 ```
-

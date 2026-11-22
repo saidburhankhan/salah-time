@@ -9,7 +9,9 @@ Enumerations:
 
 - prayer / block: `fajr`, `dhuhr`, `asr`, `maghrib`, `isha`
 - boundary id (adds): `sleep`
-- repeat: `none`, `daily`, `weekly` (`weekly` always carries `weekdays`)
+- repeat (stored and in JSON): `none`, `daily`, `weekly` (`weekly` always carries
+  `weekdays`). The `--repeat` flag also accepts `once` (= `none`) and `weekdays`
+  (= `weekly` Mon–Fri).
 - weekday: `mon` `tue` `wed` `thu` `fri` `sat` `sun`
 - measure: `check`, `minutes`, `count`
 - state: `open`, `done`, `missed`
