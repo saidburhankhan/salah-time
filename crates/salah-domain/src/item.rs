@@ -136,6 +136,11 @@ pub struct Item {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    /// Store-side concurrency version, incremented on every stored update.
+    /// The CLI contract predates versions, so this is not serialized there;
+    /// exports carry it explicitly.
+    #[serde(default = "default_version", skip_serializing)]
+    pub version: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -153,6 +158,12 @@ pub struct Entry {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    #[serde(default = "default_version", skip_serializing)]
+    pub version: i64,
+}
+
+pub fn default_version() -> i64 {
+    1
 }
 
 pub fn validate_title(title: &str) -> Result<String, Error> {
@@ -190,6 +201,8 @@ pub struct PrayerMark {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    #[serde(default = "default_version", skip_serializing)]
+    pub version: i64,
 }
 
 impl PrayerMark {
@@ -400,6 +413,7 @@ mod tests {
             created_at: t(0, 0),
             updated_at: t(0, 0),
             deleted_at: None,
+            version: 1,
         }
     }
     fn entry(item_id: &str, block: BoundaryId, kind: EntryKind) -> Entry {
@@ -417,6 +431,7 @@ mod tests {
             created_at: t(0, 0),
             updated_at: t(0, 0),
             deleted_at: None,
+            version: 1,
         }
     }
     fn view(current: Option<BoundaryId>, ended: bool, now: DateTime<Utc>) -> DayView {

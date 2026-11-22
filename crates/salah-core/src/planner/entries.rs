@@ -1,5 +1,5 @@
 use super::items::find_item;
-use super::{recorded_block, stamp, write};
+use super::{Mutation, recorded_block, stamp, write_mutation};
 use crate::config::Config;
 use chrono::{DateTime, NaiveDate, Utc};
 use salah_domain::day::BlockKey;
@@ -27,6 +27,7 @@ pub(super) fn new_entry(
         created_at: now,
         updated_at: now,
         deleted_at: None,
+        version: 1,
     }
 }
 
@@ -39,13 +40,25 @@ pub fn done(
     id: &str,
     date: Option<NaiveDate>,
 ) -> Result<Entry, Error> {
+    done_with(store, config, now, ids, id, date, Mutation::default())
+}
+
+pub fn done_with(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
+    id: &str,
+    date: Option<NaiveDate>,
+    mutation: Mutation<'_>,
+) -> Result<Entry, Error> {
     let now = stamp(now);
     let schedule = schedule::resolve(config, now)?;
-    write(store, config, now, |tx| {
+    write_mutation(store, config, now, mutation, |tx| {
         let item = find_item(tx, id)?;
         let block = recorded_block(&schedule, &item, date);
-        let entry = new_entry(&item, block, EntryKind::Done, now, ids);
-        tx.put_entry(&entry)?;
+        let mut entry = new_entry(&item, block, EntryKind::Done, now, ids);
+        entry.version = tx.put_entry(&entry)?;
         Ok(entry)
     })
 }
@@ -58,9 +71,20 @@ pub fn undo(
     id: &str,
     date: Option<NaiveDate>,
 ) -> Result<usize, Error> {
+    undo_with(store, config, now, id, date, Mutation::default())
+}
+
+pub fn undo_with(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    id: &str,
+    date: Option<NaiveDate>,
+    mutation: Mutation<'_>,
+) -> Result<usize, Error> {
     let now = stamp(now);
     let schedule = schedule::resolve(config, now)?;
-    write(store, config, now, |tx| {
+    write_mutation(store, config, now, mutation, |tx| {
         let item = find_item(tx, id)?;
         let day = recorded_block(&schedule, &item, date).day;
         let ticks: Vec<Entry> = tx
@@ -87,8 +111,31 @@ pub fn log(
     value: i64,
     date: Option<NaiveDate>,
 ) -> Result<Entry, Error> {
+    log_with(
+        store,
+        config,
+        now,
+        ids,
+        id,
+        value,
+        date,
+        Mutation::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn log_with(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
+    id: &str,
+    value: i64,
+    date: Option<NaiveDate>,
+    mutation: Mutation<'_>,
+) -> Result<Entry, Error> {
     // Count items adjust their count; every other item records time spent.
-    record(store, config, now, ids, id, (None, value), date)
+    record(store, config, now, ids, id, (None, value), date, mutation)
 }
 
 /// Adds (or, when negative, subtracts) minutes of time spent on any item,
@@ -102,6 +149,29 @@ pub fn adjust_time(
     value: i64,
     date: Option<NaiveDate>,
 ) -> Result<Entry, Error> {
+    adjust_time_with(
+        store,
+        config,
+        now,
+        ids,
+        id,
+        value,
+        date,
+        Mutation::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn adjust_time_with(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
+    id: &str,
+    value: i64,
+    date: Option<NaiveDate>,
+    mutation: Mutation<'_>,
+) -> Result<Entry, Error> {
     record(
         store,
         config,
@@ -110,9 +180,11 @@ pub fn adjust_time(
         id,
         (Some(EntryKind::Minutes), value),
         date,
+        mutation,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn record(
     store: &mut Store,
     config: &Config,
@@ -121,6 +193,7 @@ fn record(
     id: &str,
     (kind, value): (Option<EntryKind>, i64),
     date: Option<NaiveDate>,
+    mutation: Mutation<'_>,
 ) -> Result<Entry, Error> {
     let now = stamp(now);
     // A negative value subtracts; daily totals are clamped at zero.
@@ -128,7 +201,7 @@ fn record(
         return Err("value must be between -1440 and 1440, and not 0".into());
     }
     let schedule = schedule::resolve(config, now)?;
-    write(store, config, now, |tx| {
+    write_mutation(store, config, now, mutation, |tx| {
         let item = find_item(tx, id)?;
         let kind = kind.unwrap_or(match item.measure {
             Measure::Count => EntryKind::Count,
@@ -142,7 +215,7 @@ fn record(
             ids,
         );
         entry.value = Some(value);
-        tx.put_entry(&entry)?;
+        entry.version = tx.put_entry(&entry)?;
         Ok(entry)
     })
 }
@@ -152,7 +225,7 @@ mod tests {
     use super::*;
     use crate::planner::NewItem;
     use crate::planner::test_support::{at, config, date, ids, titled};
-    use crate::planner::{add, history, today};
+    use crate::planner::{Mutation, add, done_with, history, today, undo_with};
     use salah_domain::day::BoundaryId;
     use salah_domain::item::{Repeat, State};
 
@@ -178,6 +251,59 @@ mod tests {
         );
         let view = today(&store, &config(), at(20, 9, 41)).unwrap();
         assert_eq!(view.items[0].state, State::Open);
+    }
+
+    #[test]
+    fn replayed_entry_ops_return_the_same_row_without_writing() {
+        let mut store = Store::open_in_memory().unwrap();
+        let item = add(&mut store, &config(), at(20, 9, 0), ids(), titled("Email")).unwrap();
+        let first = done_with(
+            &mut store,
+            &config(),
+            at(20, 9, 30),
+            ids(),
+            &item.id,
+            None,
+            Mutation::new(Some("op-done"), None),
+        )
+        .unwrap();
+        let revision = store.revision().unwrap();
+        let replay = done_with(
+            &mut store,
+            &config(),
+            at(20, 9, 31),
+            ids(),
+            &item.id,
+            None,
+            Mutation::new(Some("op-done"), None),
+        )
+        .unwrap();
+        assert_eq!(replay, first);
+        assert_eq!(store.revision().unwrap(), revision);
+        assert_eq!(store.entries().unwrap().len(), 1);
+
+        let undone = undo_with(
+            &mut store,
+            &config(),
+            at(20, 9, 40),
+            &item.id,
+            None,
+            Mutation::new(Some("op-undo"), None),
+        )
+        .unwrap();
+        assert_eq!(undone, 1);
+        let revision = store.revision().unwrap();
+        let replay = undo_with(
+            &mut store,
+            &config(),
+            at(20, 9, 41),
+            &item.id,
+            None,
+            Mutation::new(Some("op-undo"), None),
+        )
+        .unwrap();
+        assert_eq!(replay, 1);
+        assert_eq!(store.revision().unwrap(), revision);
     }
 
     #[test]

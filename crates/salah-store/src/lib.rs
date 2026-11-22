@@ -10,6 +10,7 @@ use salah_domain::day::BlockKey;
 use salah_domain::error::Error;
 use salah_domain::item::{Entry, EntryKind, Item, Measure, PrayerMark, Repeat, Weekdays};
 use serde::{Serialize, de::DeserializeOwned};
+use std::cell::{Cell, RefCell};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -64,6 +65,37 @@ const MIGRATIONS: &[&str] = &[
         deleted_at  TEXT
     );
     CREATE INDEX prayer_marks_by_day ON prayer_marks(day);
+",
+    "
+    ALTER TABLE items ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE entries ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE prayer_marks ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+
+    CREATE TABLE meta (
+        id          INTEGER PRIMARY KEY CHECK (id = 1),
+        revision    INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO meta (id, revision) VALUES (1, 0);
+
+    CREATE TABLE changes (
+        seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+        revision    INTEGER NOT NULL,
+        entity      TEXT NOT NULL,
+        entity_id   TEXT NOT NULL,
+        op          TEXT NOT NULL CHECK (op IN ('insert', 'update', 'delete')),
+        version     INTEGER NOT NULL,
+        at          TEXT NOT NULL,
+        op_id       TEXT
+    );
+    CREATE INDEX changes_by_revision ON changes(revision);
+    CREATE INDEX changes_by_entity ON changes(entity, entity_id);
+
+    CREATE TABLE applied_ops (
+        op_id       TEXT PRIMARY KEY,
+        revision    INTEGER NOT NULL,
+        result_json TEXT NOT NULL,
+        at          TEXT NOT NULL
+    );
 ",
 ];
 
@@ -178,6 +210,7 @@ fn item_from(row: &Row) -> rusqlite::Result<Item> {
         created_at: parse_time(&row.get::<_, String>("created_at")?)?,
         updated_at: parse_time(&row.get::<_, String>("updated_at")?)?,
         deleted_at: parse_opt_time(row.get("deleted_at")?)?,
+        version: row.get("version")?,
     })
 }
 
@@ -190,6 +223,7 @@ fn mark_from(row: &Row) -> rusqlite::Result<PrayerMark> {
         created_at: parse_time(&row.get::<_, String>("created_at")?)?,
         updated_at: parse_time(&row.get::<_, String>("updated_at")?)?,
         deleted_at: parse_opt_time(row.get("deleted_at")?)?,
+        version: row.get("version")?,
     })
 }
 
@@ -208,7 +242,30 @@ fn entry_from(row: &Row) -> rusqlite::Result<Entry> {
         created_at: parse_time(&row.get::<_, String>("created_at")?)?,
         updated_at: parse_time(&row.get::<_, String>("updated_at")?)?,
         deleted_at: parse_opt_time(row.get("deleted_at")?)?,
+        version: row.get("version")?,
     })
+}
+
+/// One row of the append-only change log.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Change {
+    pub seq: i64,
+    pub revision: i64,
+    pub entity: String,
+    pub entity_id: String,
+    pub op: String,
+    /// Version of the entity after the change.
+    pub version: i64,
+    pub at: DateTime<Utc>,
+    pub op_id: Option<String>,
+}
+
+/// A stored idempotent mutation result.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppliedOp {
+    pub revision: i64,
+    pub result_json: String,
+    pub at: DateTime<Utc>,
 }
 
 impl Store {
@@ -242,6 +299,62 @@ impl Store {
     pub fn version(&self) -> Result<i64, Error> {
         self.conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(sqlite_error)
+    }
+
+    /// The store-wide revision. It advances by exactly one for each committed
+    /// transaction that appends a change.
+    pub fn revision(&self) -> Result<i64, Error> {
+        self.conn
+            .query_row("SELECT revision FROM meta WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .map_err(sqlite_error)
+    }
+
+    /// Changes with `seq` greater than `after_seq`, oldest first.
+    pub fn changes_since(&self, after_seq: i64, limit: usize) -> Result<Vec<Change>, Error> {
+        let limit = limit.min(10_000) as i64;
+        let mut statement = self
+            .conn
+            .prepare(
+                "SELECT seq, revision, entity, entity_id, op, version, at, op_id
+                 FROM changes WHERE seq > ?1 ORDER BY seq LIMIT ?2",
+            )
+            .map_err(sqlite_error)?;
+        statement
+            .query_map(params![after_seq, limit], |row| {
+                Ok(Change {
+                    seq: row.get("seq")?,
+                    revision: row.get("revision")?,
+                    entity: row.get("entity")?,
+                    entity_id: row.get("entity_id")?,
+                    op: row.get("op")?,
+                    version: row.get("version")?,
+                    at: parse_time(&row.get::<_, String>("at")?)?,
+                    op_id: row.get("op_id")?,
+                })
+            })
+            .map_err(sqlite_error)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(sqlite_error)
+    }
+
+    /// The stored result of `op_id`, if that mutation was already applied.
+    pub fn applied_op(&self, op_id: &str) -> Result<Option<AppliedOp>, Error> {
+        self.conn
+            .query_row(
+                "SELECT revision, result_json, at FROM applied_ops WHERE op_id = ?1",
+                [op_id],
+                |row| {
+                    Ok(AppliedOp {
+                        revision: row.get("revision")?,
+                        result_json: row.get("result_json")?,
+                        at: parse_time(&row.get::<_, String>("at")?)?,
+                    })
+                },
+            )
+            .optional()
             .map_err(sqlite_error)
     }
 
@@ -308,7 +421,12 @@ impl Store {
         self.conn
             .execute_batch("BEGIN IMMEDIATE")
             .map_err(sqlite_error)?;
-        let value = match work(&WriteTx { store: self }) {
+        let tx = WriteTx {
+            store: self,
+            revision: Cell::new(None),
+            op_id: RefCell::new(None),
+        };
+        let value = match work(&tx) {
             Ok(value) => value,
             Err(error) => {
                 let _ = self.conn.execute_batch("ROLLBACK");
@@ -422,8 +540,13 @@ impl Store {
 
 /// A transaction handle. It exposes the store's reads (through `Deref`) and
 /// the only write helpers, so a mutation cannot escape its transaction.
+///
+/// Every successful entity write appends a `changes` row and, on the first
+/// change of the transaction, advances the global revision exactly once.
 pub struct WriteTx<'a> {
     store: &'a Store,
+    revision: Cell<Option<i64>>,
+    op_id: RefCell<Option<String>>,
 }
 
 impl Deref for WriteTx<'_> {
@@ -435,20 +558,140 @@ impl Deref for WriteTx<'_> {
 }
 
 impl WriteTx<'_> {
-    pub fn put_item(&self, item: &Item) -> Result<(), Error> {
+    /// The idempotency key that all changes in this transaction belong to.
+    pub fn set_op_id(&self, op_id: Option<&str>) {
+        *self.op_id.borrow_mut() = op_id.map(str::to_owned);
+    }
+
+    fn current_revision(&self) -> Result<i64, Error> {
+        match self.revision.get() {
+            Some(revision) => Ok(revision),
+            None => self.store.revision(),
+        }
+    }
+
+    fn next_revision(&self) -> Result<i64, Error> {
+        if let Some(revision) = self.revision.get() {
+            return Ok(revision);
+        }
+        let revision = self
+            .store
+            .conn
+            .query_row(
+                "UPDATE meta SET revision = revision + 1 WHERE id = 1 RETURNING revision",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(sqlite_error)?;
+        self.revision.set(Some(revision));
+        Ok(revision)
+    }
+
+    /// Stores an idempotent mutation result. This is metadata, so it does not
+    /// advance the revision on its own.
+    pub fn record_applied_op(&self, op_id: &str, result_json: &str) -> Result<(), Error> {
+        let revision = self.current_revision()?;
+        self.store
+            .conn
+            .execute(
+                "INSERT INTO applied_ops (op_id, revision, result_json, at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(op_id) DO NOTHING",
+                params![op_id, revision, result_json, time_text(Utc::now())],
+            )
+            .map(|_| ())
+            .map_err(sqlite_error)
+    }
+
+    fn append_change(
+        &self,
+        entity: &str,
+        entity_id: &str,
+        op: &str,
+        version: i64,
+    ) -> Result<(), Error> {
+        let revision = self.next_revision()?;
+        let at = time_text(Utc::now());
+        let op_id = self.op_id.borrow();
+        self.store
+            .conn
+            .execute(
+                "INSERT INTO changes (revision, entity, entity_id, op, version, at, op_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    revision,
+                    entity,
+                    entity_id,
+                    op,
+                    version,
+                    at,
+                    op_id.as_deref()
+                ],
+            )
+            .map(|_| ())
+            .map_err(sqlite_error)
+    }
+
+    fn existing_version(
+        &self,
+        table: &str,
+        id: &str,
+    ) -> Result<Option<(i64, Option<String>)>, Error> {
+        // `table` is one of the three literals below, never user input.
+        self.store
+            .conn
+            .query_row(
+                &format!("SELECT version, deleted_at FROM {table} WHERE id = ?1"),
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(sqlite_error)
+    }
+
+    /// Chooses the next version and the change operation. A tombstone
+    /// transition is a `delete`; every other existing-row write is an
+    /// `update`.
+    fn version_for(
+        &self,
+        table: &str,
+        id: &str,
+        deleted_at: Option<DateTime<Utc>>,
+        explicit: Option<i64>,
+    ) -> Result<(i64, &'static str), Error> {
+        match self.existing_version(table, id)? {
+            None => Ok((explicit.unwrap_or(1).max(1), "insert")),
+            Some((current, was_deleted)) => {
+                let op = if deleted_at.is_some() && was_deleted.is_none() {
+                    "delete"
+                } else {
+                    "update"
+                };
+                let version = match explicit {
+                    Some(version) => version.max(current + 1),
+                    None => current + 1,
+                };
+                Ok((version, op))
+            }
+        }
+    }
+
+    fn write_item(&self, item: &Item, explicit: Option<i64>) -> Result<i64, Error> {
+        let (version, op) = self.version_for("items", &item.id, item.deleted_at, explicit)?;
         self.store
             .conn
             .execute(
                 "INSERT INTO items (id, title, block, repeat, measure, target, day,
-                                    created_at, updated_at, deleted_at, position, weekdays)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                                    created_at, updated_at, deleted_at, position, weekdays,
+                                    version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                  ON CONFLICT(id) DO UPDATE SET
                     title = excluded.title, block = excluded.block,
                     repeat = excluded.repeat, measure = excluded.measure,
                     target = excluded.target, day = excluded.day,
                     position = excluded.position, weekdays = excluded.weekdays,
                     created_at = excluded.created_at, updated_at = excluded.updated_at,
-                    deleted_at = excluded.deleted_at",
+                    deleted_at = excluded.deleted_at, version = excluded.version",
                 params![
                     item.id,
                     item.title,
@@ -462,25 +705,39 @@ impl WriteTx<'_> {
                     item.deleted_at.map(time_text),
                     item.position,
                     item.weekdays.map(|w| w.0),
+                    version,
                 ],
             )
-            .map(|_| ())
-            .map_err(sqlite_error)
+            .map_err(sqlite_error)?;
+        self.append_change("item", &item.id, op, version)?;
+        Ok(version)
     }
 
-    pub fn put_entry(&self, entry: &Entry) -> Result<(), Error> {
+    pub fn put_item(&self, item: &Item) -> Result<i64, Error> {
+        self.write_item(item, None)
+    }
+
+    /// Stores a row with an imported version instead of bumping the local one.
+    /// The version still never moves backwards for an existing row.
+    pub fn put_item_versioned(&self, item: &Item, version: i64) -> Result<i64, Error> {
+        self.write_item(item, Some(version))
+    }
+
+    fn write_entry(&self, entry: &Entry, explicit: Option<i64>) -> Result<i64, Error> {
+        let (version, op) = self.version_for("entries", &entry.id, entry.deleted_at, explicit)?;
         self.store
             .conn
             .execute(
                 "INSERT INTO entries (id, item_id, day, block, kind, value, started_at,
-                                      ended_at, created_at, updated_at, deleted_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                                      ended_at, created_at, updated_at, deleted_at, version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                  ON CONFLICT(id) DO UPDATE SET
                     item_id = excluded.item_id, day = excluded.day,
                     block = excluded.block, kind = excluded.kind,
                     value = excluded.value, started_at = excluded.started_at,
                     ended_at = excluded.ended_at, created_at = excluded.created_at,
-                    updated_at = excluded.updated_at, deleted_at = excluded.deleted_at",
+                    updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
+                    version = excluded.version",
                 params![
                     entry.id,
                     entry.item_id,
@@ -493,23 +750,36 @@ impl WriteTx<'_> {
                     time_text(entry.created_at),
                     time_text(entry.updated_at),
                     entry.deleted_at.map(time_text),
+                    version,
                 ],
             )
-            .map(|_| ())
-            .map_err(sqlite_error)
+            .map_err(sqlite_error)?;
+        self.append_change("entry", &entry.id, op, version)?;
+        Ok(version)
     }
 
-    pub fn put_mark(&self, mark: &PrayerMark) -> Result<(), Error> {
+    pub fn put_entry(&self, entry: &Entry) -> Result<i64, Error> {
+        self.write_entry(entry, None)
+    }
+
+    pub fn put_entry_versioned(&self, entry: &Entry, version: i64) -> Result<i64, Error> {
+        self.write_entry(entry, Some(version))
+    }
+
+    fn write_mark(&self, mark: &PrayerMark, explicit: Option<i64>) -> Result<i64, Error> {
+        let (version, op) =
+            self.version_for("prayer_marks", &mark.id, mark.deleted_at, explicit)?;
         self.store
             .conn
             .execute(
                 "INSERT INTO prayer_marks (id, day, prayer, marked_at, created_at,
-                                           updated_at, deleted_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                                           updated_at, deleted_at, version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(id) DO UPDATE SET
                     day = excluded.day, prayer = excluded.prayer,
                     marked_at = excluded.marked_at, created_at = excluded.created_at,
-                    updated_at = excluded.updated_at, deleted_at = excluded.deleted_at",
+                    updated_at = excluded.updated_at, deleted_at = excluded.deleted_at,
+                    version = excluded.version",
                 params![
                     mark.id,
                     mark.day.format("%Y-%m-%d").to_string(),
@@ -518,10 +788,20 @@ impl WriteTx<'_> {
                     time_text(mark.created_at),
                     time_text(mark.updated_at),
                     mark.deleted_at.map(time_text),
+                    version,
                 ],
             )
-            .map(|_| ())
-            .map_err(sqlite_error)
+            .map_err(sqlite_error)?;
+        self.append_change("prayer_mark", &mark.id, op, version)?;
+        Ok(version)
+    }
+
+    pub fn put_mark(&self, mark: &PrayerMark) -> Result<i64, Error> {
+        self.write_mark(mark, None)
+    }
+
+    pub fn put_mark_versioned(&self, mark: &PrayerMark, version: i64) -> Result<i64, Error> {
+        self.write_mark(mark, Some(version))
     }
 }
 
@@ -551,6 +831,7 @@ mod tests {
             created_at: t(1),
             updated_at: t(1),
             deleted_at: None,
+            version: 1,
         }
     }
     fn sample_entry() -> Entry {
@@ -568,6 +849,7 @@ mod tests {
             created_at: t(2),
             updated_at: t(2),
             deleted_at: None,
+            version: 1,
         }
     }
 
@@ -590,10 +872,10 @@ mod tests {
     fn put_updates_in_place_and_keeps_tombstones() {
         let mut store = Store::open_in_memory().unwrap();
         let mut item = sample_item();
-        store.write(|tx| tx.put_item(&item)).unwrap();
+        item.version = store.write(|tx| tx.put_item(&item)).unwrap();
         item.deleted_at = Some(t(3));
         item.updated_at = t(3);
-        store.write(|tx| tx.put_item(&item)).unwrap();
+        item.version = store.write(|tx| tx.put_item(&item)).unwrap();
         assert_eq!(store.items().unwrap(), [item]);
     }
 
@@ -608,6 +890,7 @@ mod tests {
             created_at: t(10),
             updated_at: t(10),
             deleted_at: None,
+            version: 1,
         };
         store.write(|tx| tx.put_mark(&mark)).unwrap();
         assert_eq!(store.mark("2026-11-20:asr").unwrap(), Some(mark.clone()));
@@ -640,6 +923,173 @@ mod tests {
         });
         assert!(result.is_err());
         assert!(store.items().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_version_two_database_with_data_upgrades_in_place() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.execute_batch(MIGRATIONS[1]).unwrap();
+        conn.pragma_update(None, "user_version", 2).unwrap();
+        conn.execute(
+            "INSERT INTO items
+             (id, title, block, repeat, measure, target, day, created_at, updated_at,
+              deleted_at, position, weekdays)
+             VALUES ('old', 'Old', 'fajr', 'weekly', 'minutes', 20, '2026-11-20',
+                     '2026-11-20T01:00:00.000Z', '2026-11-20T02:00:00.000Z', NULL, 3, 31)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO entries
+             (id, item_id, day, block, kind, value, started_at, ended_at, created_at,
+              updated_at, deleted_at)
+             VALUES ('entry-old', 'old', '2026-11-20', 'fajr', 'minutes', 20, NULL, NULL,
+                     '2026-11-20T01:00:00.000Z', '2026-11-20T01:00:00.000Z', NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO prayer_marks
+             (id, day, prayer, marked_at, created_at, updated_at, deleted_at)
+             VALUES ('2026-11-20:asr', '2026-11-20', 'asr',
+                     '2026-11-20T10:00:00.000Z', '2026-11-20T10:00:00.000Z',
+                     '2026-11-20T10:00:00.000Z', NULL)",
+            [],
+        )
+        .unwrap();
+
+        let mut store = Store::init(conn).unwrap();
+        assert_eq!(store.version().unwrap(), schema_version());
+        let old = store.item("old").unwrap().unwrap();
+        assert_eq!(
+            (old.position, old.weekdays, old.version),
+            (3, Some(Weekdays(31)), 1)
+        );
+        assert_eq!(store.entry("entry-old").unwrap().unwrap().version, 1);
+        assert_eq!(store.mark("2026-11-20:asr").unwrap().unwrap().version, 1);
+        assert_eq!(store.revision().unwrap(), 0);
+        assert!(store.changes_since(0, 10).unwrap().is_empty());
+
+        let mut old = old;
+        old.title = "Updated".into();
+        old.updated_at = t(3);
+        assert_eq!(store.write(|tx| tx.put_item(&old)).unwrap(), 2);
+        assert_eq!(store.revision().unwrap(), 1);
+        let changes = store.changes_since(0, 10).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!((changes[0].op.as_str(), changes[0].version), ("update", 2));
+    }
+
+    #[test]
+    fn one_transaction_bumps_revision_once_and_appends_each_change() {
+        let mut store = Store::open_in_memory().unwrap();
+        assert_eq!(store.revision().unwrap(), 0);
+        let mut first = sample_item();
+        first.id = "a".into();
+        let mut second = sample_item();
+        second.id = "b".into();
+        store
+            .write(|tx| {
+                tx.put_item(&first)?;
+                tx.put_item(&second)
+            })
+            .unwrap();
+        assert_eq!(store.revision().unwrap(), 1);
+        let changes = store.changes_since(0, 10).unwrap();
+        assert_eq!(
+            changes
+                .iter()
+                .map(|change| (
+                    change.seq,
+                    change.revision,
+                    change.op.as_str(),
+                    change.version
+                ))
+                .collect::<Vec<_>>(),
+            [(1, 1, "insert", 1), (2, 1, "insert", 1)]
+        );
+        assert!(changes.iter().all(|change| change.entity == "item"));
+
+        store.write(|_| Ok::<(), Error>(())).unwrap();
+        assert_eq!(
+            store.revision().unwrap(),
+            1,
+            "an empty write is not a change"
+        );
+
+        first.title = "Changed".into();
+        first.updated_at = t(4);
+        assert_eq!(store.write(|tx| tx.put_item(&first)).unwrap(), 2);
+        second.deleted_at = Some(t(5));
+        second.updated_at = t(5);
+        assert_eq!(store.write(|tx| tx.put_item(&second)).unwrap(), 2);
+        assert_eq!(store.revision().unwrap(), 3);
+
+        let changes = store.changes_since(2, 10).unwrap();
+        assert_eq!(
+            changes
+                .iter()
+                .map(|change| (
+                    change.revision,
+                    change.entity_id.as_str(),
+                    change.op.as_str(),
+                    change.version
+                ))
+                .collect::<Vec<_>>(),
+            [(2, "a", "update", 2), (3, "b", "delete", 2)]
+        );
+        assert_eq!(store.changes_since(3, 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn applied_ops_store_results_without_forcing_a_revision() {
+        let mut store = Store::open_in_memory().unwrap();
+        let item = sample_item();
+        store
+            .write(|tx| {
+                tx.set_op_id(Some("op-1"));
+                let version = tx.put_item(&item)?;
+                tx.record_applied_op("op-1", r#"{"id":"item-1"}"#)?;
+                Ok(version)
+            })
+            .unwrap();
+        let applied = store.applied_op("op-1").unwrap().unwrap();
+        assert_eq!(applied.revision, 1);
+        assert_eq!(applied.result_json, r#"{"id":"item-1"}"#);
+        assert_eq!(
+            store.changes_since(0, 10).unwrap()[0].op_id.as_deref(),
+            Some("op-1")
+        );
+
+        store
+            .write(|tx| tx.record_applied_op("op-2", "null"))
+            .unwrap();
+        assert_eq!(store.revision().unwrap(), 1);
+        assert_eq!(store.applied_op("op-2").unwrap().unwrap().revision, 1);
+    }
+
+    #[test]
+    fn imported_versions_never_move_existing_rows_backwards() {
+        let mut store = Store::open_in_memory().unwrap();
+        let item = sample_item();
+        assert_eq!(store.write(|tx| tx.put_item(&item)).unwrap(), 1);
+        let mut imported = item.clone();
+        imported.updated_at = t(2);
+        assert_eq!(
+            store
+                .write(|tx| tx.put_item_versioned(&imported, 7))
+                .unwrap(),
+            7
+        );
+        assert_eq!(store.item("item-1").unwrap().unwrap().version, 7);
+        imported.updated_at = t(3);
+        assert_eq!(
+            store
+                .write(|tx| tx.put_item_versioned(&imported, 2))
+                .unwrap(),
+            8
+        );
     }
 
     #[test]

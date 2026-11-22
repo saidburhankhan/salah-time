@@ -872,7 +872,10 @@ fn history_command(args: HistoryArgs, now: DateTime<Utc>) -> Result<(), String> 
 
 fn export_command(args: ExportArgs, now: DateTime<Utc>) -> Result<(), String> {
     let (store, _) = open_planner()?;
-    let bytes = serde_json::to_vec(&export::export(&store, now)?).map_err(|e| e.to_string())?;
+    // S2 keeps the frozen v2 CLI shape; the core export format is v3 and
+    // carries per-entity versions. S3 switches the CLI to the new envelope.
+    let bytes =
+        serde_json::to_vec(&export::export_legacy(&store, now)?).map_err(|e| e.to_string())?;
     if let Some(path) = args.output {
         atomic_write(&path, &bytes, args.force)?;
         println!("Exported to {}", path.display());

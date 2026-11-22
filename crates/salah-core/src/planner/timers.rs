@@ -1,6 +1,6 @@
 use super::entries::new_entry;
 use super::items::find_item;
-use super::{BlockEnds, stamp, write};
+use super::{BlockEnds, Mutation, stamp, write_mutation};
 use crate::config::Config;
 use chrono::{DateTime, Utc};
 use salah_domain::error::Error;
@@ -42,14 +42,25 @@ pub fn start_timer(
     ids: &dyn IdGenerator,
     id: &str,
 ) -> Result<Entry, Error> {
+    start_timer_with(store, config, now, ids, id, Mutation::default())
+}
+
+pub fn start_timer_with(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
+    id: &str,
+    mutation: Mutation<'_>,
+) -> Result<Entry, Error> {
     let now = stamp(now);
     let schedule = schedule::resolve(config, now)?;
-    write(store, config, now, |tx| {
+    write_mutation(store, config, now, mutation, |tx| {
         let item = find_item(tx, id)?;
         let mut timer = new_entry(&item, schedule.current_block(), EntryKind::Timer, now, ids);
         timer.started_at = Some(now);
         stop_running(tx, now)?;
-        tx.put_entry(&timer)?;
+        timer.version = tx.put_entry(&timer)?;
         Ok(timer)
     })
 }
@@ -59,7 +70,7 @@ fn stop_running(tx: &WriteTx<'_>, now: DateTime<Utc>) -> Result<Vec<Entry>, Erro
     for mut timer in tx.running_timers()? {
         timer.ended_at = Some(now);
         timer.updated_at = now;
-        tx.put_entry(&timer)?;
+        timer.version = tx.put_entry(&timer)?;
         stopped.push(timer);
     }
     Ok(stopped)
@@ -72,15 +83,25 @@ pub fn stop_item_timer(
     now: DateTime<Utc>,
     id: &str,
 ) -> Result<Vec<Entry>, Error> {
+    stop_item_timer_with(store, config, now, id, Mutation::default())
+}
+
+pub fn stop_item_timer_with(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    id: &str,
+    mutation: Mutation<'_>,
+) -> Result<Vec<Entry>, Error> {
     let now = stamp(now);
-    write(store, config, now, |tx| {
+    write_mutation(store, config, now, mutation, |tx| {
         let item = find_item(tx, id)?;
         let mut stopped = Vec::new();
         for mut timer in tx.running_timers()? {
             if timer.item_id == item.id {
                 timer.ended_at = Some(now);
                 timer.updated_at = now;
-                tx.put_entry(&timer)?;
+                timer.version = tx.put_entry(&timer)?;
                 stopped.push(timer);
             }
         }
@@ -94,8 +115,17 @@ pub fn stop_timer(
     config: &Config,
     now: DateTime<Utc>,
 ) -> Result<Vec<Entry>, Error> {
+    stop_timer_with(store, config, now, Mutation::default())
+}
+
+pub fn stop_timer_with(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    mutation: Mutation<'_>,
+) -> Result<Vec<Entry>, Error> {
     let now = stamp(now);
-    write(store, config, now, |tx| stop_running(tx, now))
+    write_mutation(store, config, now, mutation, |tx| stop_running(tx, now))
 }
 
 #[cfg(test)]
@@ -103,7 +133,7 @@ mod tests {
     use super::*;
     use crate::planner::NewItem;
     use crate::planner::test_support::{at, config, date, ids, titled};
-    use crate::planner::{add, day_plan, history, log, stats, today};
+    use crate::planner::{Mutation, add, day_plan, history, log, stats, stop_timer_with, today};
     use salah_domain::day::BoundaryId;
     use salah_domain::item::{Measure, Repeat, State};
 
@@ -196,6 +226,41 @@ mod tests {
         let view = today(&store, &config(), at(20, 13, 30)).unwrap();
         let minutes_of = |id: &str| view.items.iter().find(|r| r.id == id).unwrap().minutes;
         assert_eq!((minutes_of(&a.id), minutes_of(&b.id)), (20, 10));
+    }
+
+    #[test]
+    fn replayed_stop_returns_the_stored_entries_without_writing() {
+        let mut store = Store::open_in_memory().unwrap();
+        let email = add(
+            &mut store,
+            &config(),
+            at(20, 13, 0),
+            ids(),
+            NewItem {
+                measure: Some(Measure::Minutes),
+                ..titled("Email")
+            },
+        )
+        .unwrap();
+        start_timer(&mut store, &config(), at(20, 13, 0), ids(), &email.id).unwrap();
+        let first = stop_timer_with(
+            &mut store,
+            &config(),
+            at(20, 13, 12),
+            Mutation::new(Some("op-stop"), None),
+        )
+        .unwrap();
+        let revision = store.revision().unwrap();
+        let replay = stop_timer_with(
+            &mut store,
+            &config(),
+            at(20, 13, 30),
+            Mutation::new(Some("op-stop"), None),
+        )
+        .unwrap();
+        assert_eq!(replay, first);
+        assert_eq!(store.revision().unwrap(), revision);
+        assert_eq!(store.entries().unwrap().len(), 1);
     }
 
     #[test]

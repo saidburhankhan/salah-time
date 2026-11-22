@@ -1,4 +1,4 @@
-use super::{stamp, write};
+use super::{Mutation, ensure_version, stamp, write_mutation};
 use crate::config::Config;
 use chrono::{DateTime, NaiveDate, Utc};
 use salah_domain::day::BoundaryId;
@@ -71,6 +71,17 @@ pub fn add(
     ids: &dyn IdGenerator,
     request: NewItem,
 ) -> Result<Item, Error> {
+    add_with(store, config, now, ids, request, Mutation::default())
+}
+
+pub fn add_with(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
+    request: NewItem,
+    mutation: Mutation<'_>,
+) -> Result<Item, Error> {
     let now = stamp(now);
     let schedule = schedule::resolve(config, now)?;
     let planning = schedule.planning_block();
@@ -94,8 +105,8 @@ pub fn add(
     };
     let block = validate_block(request.block.unwrap_or(default_block))?;
     let title = validate_title(&request.title)?;
-    write(store, config, now, |tx| {
-        let item = Item {
+    write_mutation(store, config, now, mutation, |tx| {
+        let mut item = Item {
             id: ids.new_id(),
             title: title.clone(),
             block,
@@ -108,8 +119,9 @@ pub fn add(
             created_at: now,
             updated_at: now,
             deleted_at: None,
+            version: 1,
         };
-        tx.put_item(&item)?;
+        item.version = tx.put_item(&item)?;
         Ok(item)
     })
 }
@@ -131,9 +143,21 @@ pub fn edit(
     id: &str,
     changes: ItemChanges,
 ) -> Result<Item, Error> {
+    edit_with(store, config, now, id, changes, Mutation::default())
+}
+
+pub fn edit_with(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    id: &str,
+    changes: ItemChanges,
+    mutation: Mutation<'_>,
+) -> Result<Item, Error> {
     let now = stamp(now);
-    write(store, config, now, |tx| {
+    write_mutation(store, config, now, mutation, |tx| {
         let mut item = find_item(tx, id)?;
+        ensure_version("item", &item.id, item.version, mutation.expected_version)?;
         if let Some(title) = &changes.title {
             item.title = validate_title(title)?;
         }
@@ -166,7 +190,7 @@ pub fn edit(
             item.target = target;
         }
         item.updated_at = now;
-        tx.put_item(&item)?;
+        item.version = tx.put_item(&item)?;
         Ok(item)
     })
 }
@@ -180,10 +204,24 @@ pub fn move_item(
     block: BoundaryId,
     index: usize,
 ) -> Result<Item, Error> {
+    move_item_with(store, config, now, id, block, index, Mutation::default())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn move_item_with(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    id: &str,
+    block: BoundaryId,
+    index: usize,
+    mutation: Mutation<'_>,
+) -> Result<Item, Error> {
     let now = stamp(now);
     let block = validate_block(block)?;
-    write(store, config, now, |tx| {
+    write_mutation(store, config, now, mutation, |tx| {
         let mut moved = find_item(tx, id)?;
+        ensure_version("item", &moved.id, moved.version, mutation.expected_version)?;
         let mut siblings: Vec<Item> = tx
             .items()?
             .into_iter()
@@ -202,7 +240,7 @@ pub fn move_item(
             if item.position != position || item.id == moved_id {
                 item.position = position;
                 item.updated_at = now;
-                tx.put_item(item)?;
+                item.version = tx.put_item(item)?;
             }
         }
         siblings
@@ -218,12 +256,23 @@ pub fn remove(
     now: DateTime<Utc>,
     id: &str,
 ) -> Result<Item, Error> {
+    remove_with(store, config, now, id, Mutation::default())
+}
+
+pub fn remove_with(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    id: &str,
+    mutation: Mutation<'_>,
+) -> Result<Item, Error> {
     let now = stamp(now);
-    write(store, config, now, |tx| {
+    write_mutation(store, config, now, mutation, |tx| {
         let mut item = find_item(tx, id)?;
+        ensure_version("item", &item.id, item.version, mutation.expected_version)?;
         item.deleted_at = Some(now);
         item.updated_at = now;
-        tx.put_item(&item)?;
+        item.version = tx.put_item(&item)?;
         Ok(item)
     })
 }
@@ -232,7 +281,9 @@ pub fn remove(
 mod tests {
     use super::*;
     use crate::planner::test_support::{at, config, date, ids, titled};
-    use crate::planner::{day_plan, log, mark, start_timer, today};
+    use crate::planner::{
+        Mutation, add_with, day_plan, edit_with, log, mark, remove_with, start_timer, today,
+    };
 
     #[test]
     fn add_defaults_to_the_current_block() {
@@ -415,6 +466,170 @@ mod tests {
             .collect();
         assert_eq!(asr, ["B", "C", "A"]);
         assert!(plan.blocks[5].items.is_empty());
+    }
+
+    #[test]
+    fn every_planner_write_bumps_revision_once_and_logs_its_change() {
+        let mut store = Store::open_in_memory().unwrap();
+        assert_eq!(store.revision().unwrap(), 0);
+        let item = add(&mut store, &config(), at(20, 13, 0), ids(), titled("Track")).unwrap();
+        assert_eq!(store.revision().unwrap(), 1);
+        assert_eq!(item.version, 1);
+
+        // Reads never write.
+        today(&store, &config(), at(20, 13, 1)).unwrap();
+        day_plan(&store, &config(), at(20, 13, 1), None).unwrap();
+        assert_eq!(store.revision().unwrap(), 1);
+
+        edit(
+            &mut store,
+            &config(),
+            at(20, 13, 2),
+            &item.id,
+            ItemChanges {
+                title: Some("Tracked".into()),
+                ..ItemChanges::default()
+            },
+        )
+        .unwrap();
+        remove(&mut store, &config(), at(20, 13, 3), &item.id).unwrap();
+        assert_eq!(store.revision().unwrap(), 3);
+
+        let changes = store.changes_since(0, 10).unwrap();
+        assert_eq!(
+            changes
+                .iter()
+                .map(|change| (
+                    change.revision,
+                    change.entity.as_str(),
+                    change.op.as_str(),
+                    change.version
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (1, "item", "insert", 1),
+                (2, "item", "update", 2),
+                (3, "item", "delete", 3),
+            ]
+        );
+        assert!(changes.iter().all(|change| change.entity_id == item.id));
+    }
+
+    #[test]
+    fn expected_version_mismatch_is_a_conflict_and_writes_nothing() {
+        let mut store = Store::open_in_memory().unwrap();
+        let item = add(
+            &mut store,
+            &config(),
+            at(20, 13, 0),
+            ids(),
+            titled("Versioned"),
+        )
+        .unwrap();
+        let before = store.revision().unwrap();
+        let result = edit_with(
+            &mut store,
+            &config(),
+            at(20, 13, 1),
+            &item.id,
+            ItemChanges {
+                title: Some("Nope".into()),
+                ..ItemChanges::default()
+            },
+            Mutation::new(None, Some(item.version + 1)),
+        );
+        assert!(matches!(result, Err(Error::Conflict(_))), "{result:?}");
+        assert_eq!(store.revision().unwrap(), before);
+        assert_eq!(store.item(&item.id).unwrap().unwrap().title, item.title);
+
+        let edited = edit_with(
+            &mut store,
+            &config(),
+            at(20, 13, 2),
+            &item.id,
+            ItemChanges {
+                title: Some("Yes".into()),
+                ..ItemChanges::default()
+            },
+            Mutation::new(None, Some(item.version)),
+        )
+        .unwrap();
+        assert_eq!((edited.title.as_str(), edited.version), ("Yes", 2));
+
+        let stale_remove = remove_with(
+            &mut store,
+            &config(),
+            at(20, 13, 3),
+            &item.id,
+            Mutation::new(None, Some(1)),
+        );
+        assert!(matches!(stale_remove, Err(Error::Conflict(_))));
+    }
+
+    #[test]
+    fn replayed_op_id_returns_the_stored_result_without_writing() {
+        let mut store = Store::open_in_memory().unwrap();
+        let request = titled("Idempotent");
+        let first = add_with(
+            &mut store,
+            &config(),
+            at(20, 13, 0),
+            ids(),
+            request.clone(),
+            Mutation::new(Some("op-add"), None),
+        )
+        .unwrap();
+        assert_eq!((first.version, store.revision().unwrap()), (1, 1));
+        let changes = store.changes_since(0, 10).unwrap();
+        assert_eq!(changes[0].op_id.as_deref(), Some("op-add"));
+        assert_eq!(store.applied_op("op-add").unwrap().unwrap().revision, 1);
+
+        // Replaying the same op id (even with a different body) returns the
+        // canonical stored result and creates no row, change, or revision.
+        let replay = add_with(
+            &mut store,
+            &config(),
+            at(20, 13, 5),
+            ids(),
+            titled("Different body"),
+            Mutation::new(Some("op-add"), None),
+        )
+        .unwrap();
+        assert_eq!(replay, first);
+        assert_eq!(store.items().unwrap().len(), 1);
+        assert_eq!(store.revision().unwrap(), 1);
+        assert_eq!(store.changes_since(0, 10).unwrap().len(), 1);
+
+        // The same applies to an update, including its expected version.
+        let edited = edit_with(
+            &mut store,
+            &config(),
+            at(20, 13, 6),
+            &first.id,
+            ItemChanges {
+                title: Some("Edited".into()),
+                ..ItemChanges::default()
+            },
+            Mutation::new(Some("op-edit"), Some(1)),
+        )
+        .unwrap();
+        assert_eq!(edited.version, 2);
+        assert_eq!(store.revision().unwrap(), 2);
+        let replay = edit_with(
+            &mut store,
+            &config(),
+            at(20, 13, 7),
+            &first.id,
+            ItemChanges {
+                title: Some("Stale retry".into()),
+                ..ItemChanges::default()
+            },
+            Mutation::new(Some("op-edit"), Some(999)),
+        )
+        .unwrap();
+        assert_eq!(replay, edited);
+        assert_eq!(store.revision().unwrap(), 2);
+        assert_eq!(store.changes_since(0, 10).unwrap().len(), 2);
     }
 
     #[test]

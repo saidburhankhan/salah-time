@@ -9,11 +9,17 @@ mod stats;
 mod timers;
 mod views;
 
-pub use entries::{adjust_time, done, log, undo};
-pub use items::{ItemChanges, NewItem, add, edit, find_item, move_item, remove};
-pub use marks::{mark, unmark};
+pub use entries::{adjust_time, adjust_time_with, done, done_with, log, log_with, undo, undo_with};
+pub use items::{
+    ItemChanges, NewItem, add, add_with, edit, edit_with, find_item, move_item, move_item_with,
+    remove, remove_with,
+};
+pub use marks::{mark, mark_with, unmark, unmark_with};
 pub use stats::{DayStat, DayTotals, ItemStats, PrayerStats, Stats, Totals, stats};
-pub use timers::{close_expired_timers, start_timer, stop_item_timer, stop_timer};
+pub use timers::{
+    close_expired_timers, start_timer, start_timer_with, stop_item_timer, stop_item_timer_with,
+    stop_timer, stop_timer_with,
+};
 pub use views::{
     BlockPlan, DayPlan, DayReport, NextBoundary, Now, PrayerRow, RunningTimer, SleepRow, Today,
     day_plan, history, today,
@@ -26,6 +32,8 @@ use salah_domain::error::Error;
 use salah_domain::item::{self, DayItem, DayView, Entry, Item, Repeat};
 use salah_prayer::schedule::{self, Schedule};
 use salah_store::{Store, WriteTx};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry as Slot;
 
@@ -100,19 +108,185 @@ fn report_day(
     item::day_items(items, entries, view, |key| ends.end(key))
 }
 
-/// Runs one planner mutation in a single immediate transaction. Reads and
-/// writes share the `WriteTx`, and any timer that a read projection already
-/// treats as expired is closed in the same transaction.
-fn write<T>(
+/// Optional metadata for one mutating use case.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Mutation<'a> {
+    /// Client idempotency key. Replaying it returns the stored result and
+    /// performs no writes.
+    pub op_id: Option<&'a str>,
+    /// Rejects the mutation with `Error::Conflict` when the target entity's
+    /// stored version differs.
+    pub expected_version: Option<i64>,
+}
+
+impl<'a> Mutation<'a> {
+    pub fn new(op_id: Option<&'a str>, expected_version: Option<i64>) -> Self {
+        Self {
+            op_id,
+            expected_version,
+        }
+    }
+}
+
+fn ensure_version(kind: &str, id: &str, actual: i64, expected: Option<i64>) -> Result<(), Error> {
+    if let Some(expected) = expected
+        && expected != actual
+    {
+        return Err(Error::Conflict(format!(
+            "{kind} {id:?} is at version {actual}, not {expected}"
+        )));
+    }
+    Ok(())
+}
+
+/// Results stored for idempotent replay. Entity versions are not part of the
+/// CLI JSON, so they are added explicitly here.
+trait StoredResult: Serialize + DeserializeOwned {
+    fn to_stored_json(&self) -> Result<String, Error>;
+    fn from_stored_json(text: &str) -> Result<Self, Error>;
+}
+
+#[derive(Serialize, Deserialize)]
+struct VersionedItem {
+    #[serde(flatten)]
+    row: Item,
+    version: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct VersionedEntry {
+    #[serde(flatten)]
+    row: Entry,
+    version: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct VersionedMark {
+    #[serde(flatten)]
+    row: salah_domain::item::PrayerMark,
+    version: i64,
+}
+
+impl StoredResult for Item {
+    fn to_stored_json(&self) -> Result<String, Error> {
+        serde_json::to_string(&VersionedItem {
+            row: self.clone(),
+            version: self.version,
+        })
+        .map_err(|error| Error::Internal(format!("store: {error}")))
+    }
+
+    fn from_stored_json(text: &str) -> Result<Self, Error> {
+        let stored: VersionedItem = serde_json::from_str(text).map_err(|error| {
+            Error::Storage(format!("store: invalid applied op result: {error}"))
+        })?;
+        let mut row = stored.row;
+        row.version = stored.version;
+        Ok(row)
+    }
+}
+
+impl StoredResult for Entry {
+    fn to_stored_json(&self) -> Result<String, Error> {
+        serde_json::to_string(&VersionedEntry {
+            row: self.clone(),
+            version: self.version,
+        })
+        .map_err(|error| Error::Internal(format!("store: {error}")))
+    }
+
+    fn from_stored_json(text: &str) -> Result<Self, Error> {
+        let stored: VersionedEntry = serde_json::from_str(text).map_err(|error| {
+            Error::Storage(format!("store: invalid applied op result: {error}"))
+        })?;
+        let mut row = stored.row;
+        row.version = stored.version;
+        Ok(row)
+    }
+}
+
+impl StoredResult for salah_domain::item::PrayerMark {
+    fn to_stored_json(&self) -> Result<String, Error> {
+        serde_json::to_string(&VersionedMark {
+            row: self.clone(),
+            version: self.version,
+        })
+        .map_err(|error| Error::Internal(format!("store: {error}")))
+    }
+
+    fn from_stored_json(text: &str) -> Result<Self, Error> {
+        let stored: VersionedMark = serde_json::from_str(text).map_err(|error| {
+            Error::Storage(format!("store: invalid applied op result: {error}"))
+        })?;
+        let mut row = stored.row;
+        row.version = stored.version;
+        Ok(row)
+    }
+}
+
+impl StoredResult for Vec<Entry> {
+    fn to_stored_json(&self) -> Result<String, Error> {
+        let rows: Vec<VersionedEntry> = self
+            .iter()
+            .map(|row| VersionedEntry {
+                row: row.clone(),
+                version: row.version,
+            })
+            .collect();
+        serde_json::to_string(&rows).map_err(|error| Error::Internal(format!("store: {error}")))
+    }
+
+    fn from_stored_json(text: &str) -> Result<Self, Error> {
+        let rows: Vec<VersionedEntry> = serde_json::from_str(text).map_err(|error| {
+            Error::Storage(format!("store: invalid applied op result: {error}"))
+        })?;
+        Ok(rows
+            .into_iter()
+            .map(|stored| {
+                let mut row = stored.row;
+                row.version = stored.version;
+                row
+            })
+            .collect())
+    }
+}
+
+impl StoredResult for usize {
+    fn to_stored_json(&self) -> Result<String, Error> {
+        serde_json::to_string(self).map_err(|error| Error::Internal(format!("store: {error}")))
+    }
+
+    fn from_stored_json(text: &str) -> Result<Self, Error> {
+        serde_json::from_str(text)
+            .map_err(|error| Error::Storage(format!("store: invalid applied op result: {error}")))
+    }
+}
+
+/// Runs one planner mutation in a single immediate transaction with
+/// idempotency and version preconditions. A replayed
+/// `op_id` returns the stored result before any timer repair or validation
+/// work, so a retry after a timeout is a true no-op.
+fn write_mutation<T: StoredResult>(
     store: &mut Store,
     config: &Config,
     now: DateTime<Utc>,
+    mutation: Mutation<'_>,
     mut work: impl FnMut(&WriteTx<'_>) -> Result<T, Error>,
 ) -> Result<T, Error> {
     let now = stamp(now);
     store.write(|tx| {
+        tx.set_op_id(mutation.op_id);
+        if let Some(op_id) = mutation.op_id
+            && let Some(applied) = tx.applied_op(op_id)?
+        {
+            return T::from_stored_json(&applied.result_json);
+        }
         timers::close_expired_timers(tx, config, now)?;
-        work(tx)
+        let value = work(tx)?;
+        if let Some(op_id) = mutation.op_id {
+            tx.record_applied_op(op_id, &value.to_stored_json()?)?;
+        }
+        Ok(value)
     })
 }
 

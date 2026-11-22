@@ -5,16 +5,20 @@ use salah_domain::item::{
     Entry, EntryKind, Item, PrayerMark, validate_block, validate_repeat, validate_title,
 };
 use salah_store::{Store, WriteTx};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::collections::HashSet;
 
 pub const FORMAT: &str = "salah-export";
-/// Version 2 added prayer marks and item position/weekdays; version 1 files
-/// still import because those fields default.
-pub const VERSION: u32 = 2;
+/// Version 3 adds per-entity versions to the backup. Version 2 added prayer
+/// marks and item position/weekdays; version 1 files still import because
+/// missing fields default.
+pub const VERSION: u32 = 3;
+/// The version written by the CLI until the S3 contract switch. The CLI's
+/// golden fixtures are frozen at this shape.
+pub const LEGACY_VERSION: u32 = 2;
 pub const MAX_BYTES: usize = 32 * 1024 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Export {
     pub format: String,
     pub version: u32,
@@ -23,6 +27,72 @@ pub struct Export {
     pub entries: Vec<Entry>,
     #[serde(default)]
     pub prayer_marks: Vec<PrayerMark>,
+}
+
+#[derive(Serialize)]
+struct VersionedItemRef<'a> {
+    #[serde(flatten)]
+    item: &'a Item,
+    version: i64,
+}
+
+#[derive(Serialize)]
+struct VersionedEntryRef<'a> {
+    #[serde(flatten)]
+    entry: &'a Entry,
+    version: i64,
+}
+
+#[derive(Serialize)]
+struct VersionedMarkRef<'a> {
+    #[serde(flatten)]
+    mark: &'a PrayerMark,
+    version: i64,
+}
+
+#[derive(Serialize)]
+struct ExportWire<'a> {
+    format: &'a str,
+    version: u32,
+    exported_at: &'a DateTime<Utc>,
+    items: Vec<VersionedItemRef<'a>>,
+    entries: Vec<VersionedEntryRef<'a>>,
+    prayer_marks: Vec<VersionedMarkRef<'a>>,
+}
+
+impl Serialize for Export {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        ExportWire {
+            format: &self.format,
+            version: self.version,
+            exported_at: &self.exported_at,
+            items: self
+                .items
+                .iter()
+                .map(|item| VersionedItemRef {
+                    item,
+                    version: item.version,
+                })
+                .collect(),
+            entries: self
+                .entries
+                .iter()
+                .map(|entry| VersionedEntryRef {
+                    entry,
+                    version: entry.version,
+                })
+                .collect(),
+            prayer_marks: self
+                .prayer_marks
+                .iter()
+                .map(|mark| VersionedMarkRef {
+                    mark,
+                    version: mark.version,
+                })
+                .collect(),
+        }
+        .serialize(serializer)
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize)]
@@ -41,6 +111,19 @@ pub fn export(store: &Store, now: DateTime<Utc>) -> Result<Export, Error> {
         entries: store.entries()?,
         prayer_marks: store.marks()?,
     })
+}
+
+/// The frozen v2 CLI shape, without per-entity versions. The CLI contract
+/// fixtures must stay byte-identical until the S3 wire-contract switch.
+pub fn export_legacy(store: &Store, now: DateTime<Utc>) -> Result<serde_json::Value, Error> {
+    Ok(serde_json::json!({
+        "format": FORMAT,
+        "version": LEGACY_VERSION,
+        "exported_at": now,
+        "items": store.items()?,
+        "entries": store.entries()?,
+        "prayer_marks": store.marks()?,
+    }))
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Export, Error> {
@@ -83,6 +166,7 @@ pub fn validate(data: &Export) -> Result<(), Error> {
             return Err(format!("item {}: target must not be negative", item.id).into());
         }
         validate_times("item", &item.id, item.created_at, item.updated_at)?;
+        validate_version("item", &item.id, item.version)?;
     }
 
     let mut entry_ids = HashSet::new();
@@ -105,6 +189,7 @@ pub fn validate(data: &Export) -> Result<(), Error> {
         {
             return Err(format!("entry {}: ended_at precedes started_at", entry.id).into());
         }
+        validate_version("entry", &entry.id, entry.version)?;
     }
     let mut mark_ids = HashSet::new();
     for mark in &data.prayer_marks {
@@ -116,6 +201,7 @@ pub fn validate(data: &Export) -> Result<(), Error> {
             return Err(format!("prayer mark {:?} is invalid", mark.id).into());
         }
         validate_times("prayer mark", &mark.id, mark.created_at, mark.updated_at)?;
+        validate_version("prayer mark", &mark.id, mark.version)?;
     }
     Ok(())
 }
@@ -142,11 +228,11 @@ pub fn import_tx(tx: &WriteTx<'_>, data: &Export) -> Result<ImportSummary, Error
     for item in &data.items {
         match tx.item(&item.id)? {
             None => {
-                tx.put_item(item)?;
+                tx.put_item_versioned(item, item.version)?;
                 summary.added += 1;
             }
             Some(current) if item.updated_at > current.updated_at => {
-                tx.put_item(item)?;
+                tx.put_item_versioned(item, item.version)?;
                 summary.updated += 1;
             }
             Some(_) => summary.unchanged += 1,
@@ -155,11 +241,11 @@ pub fn import_tx(tx: &WriteTx<'_>, data: &Export) -> Result<ImportSummary, Error
     for entry in &data.entries {
         match tx.entry(&entry.id)? {
             None => {
-                tx.put_entry(entry)?;
+                tx.put_entry_versioned(entry, entry.version)?;
                 summary.added += 1;
             }
             Some(current) if entry.updated_at > current.updated_at => {
-                tx.put_entry(entry)?;
+                tx.put_entry_versioned(entry, entry.version)?;
                 summary.updated += 1;
             }
             Some(_) => summary.unchanged += 1,
@@ -168,11 +254,11 @@ pub fn import_tx(tx: &WriteTx<'_>, data: &Export) -> Result<ImportSummary, Error
     for mark in &data.prayer_marks {
         match tx.mark(&mark.id)? {
             None => {
-                tx.put_mark(mark)?;
+                tx.put_mark_versioned(mark, mark.version)?;
                 summary.added += 1;
             }
             Some(current) if mark.updated_at > current.updated_at => {
-                tx.put_mark(mark)?;
+                tx.put_mark_versioned(mark, mark.version)?;
                 summary.updated += 1;
             }
             Some(_) => summary.unchanged += 1,
@@ -191,6 +277,13 @@ fn validate_id(kind: &str, id: &str) -> Result<(), Error> {
     }
     if id.chars().any(char::is_control) {
         return Err(format!("{kind} id must not contain control characters").into());
+    }
+    Ok(())
+}
+
+fn validate_version(kind: &str, id: &str, version: i64) -> Result<(), Error> {
+    if version < 1 {
+        return Err(format!("{kind} {id}: version must be at least 1").into());
     }
     Ok(())
 }

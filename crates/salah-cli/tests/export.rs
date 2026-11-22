@@ -27,6 +27,7 @@ fn item(id: &str, updated_at: DateTime<Utc>) -> Item {
         created_at: time(1),
         updated_at,
         deleted_at: None,
+        version: 1,
     }
 }
 
@@ -45,6 +46,7 @@ fn entry(id: &str, item_id: &str, updated_at: DateTime<Utc>) -> Entry {
         created_at: time(1),
         updated_at,
         deleted_at: None,
+        version: 1,
     }
 }
 
@@ -181,6 +183,72 @@ fn version_one_exports_still_import() {
 }
 
 #[test]
+fn version_three_exports_entity_versions_and_import_preserves_them() {
+    use salah_domain::item::PrayerMark;
+
+    let mut source = Store::open_in_memory().unwrap();
+    let mut row = item("versioned", time(2));
+    source.write(|tx| tx.put_item(&row)).unwrap();
+    row.title = "Updated".into();
+    row.updated_at = time(3);
+    source.write(|tx| tx.put_item(&row)).unwrap();
+    let mark = PrayerMark {
+        id: PrayerMark::id_for(day(), BoundaryId::Asr),
+        day: day(),
+        prayer: BoundaryId::Asr,
+        marked_at: time(5),
+        created_at: time(5),
+        updated_at: time(5),
+        deleted_at: None,
+        version: 1,
+    };
+    source
+        .write(|tx| {
+            tx.put_entry(&entry("versioned-entry", "versioned", time(3)))?;
+            tx.put_mark(&mark)
+        })
+        .unwrap();
+    assert_eq!(source.item("versioned").unwrap().unwrap().version, 2);
+
+    let exported = export::export(&source, time(10)).unwrap();
+    assert_eq!(exported.version, VERSION);
+    assert_eq!(exported.items[0].version, 2);
+    let value = serde_json::to_value(&exported).unwrap();
+    assert_eq!(value["version"], VERSION);
+    assert_eq!(value["items"][0]["version"], 2);
+    assert_eq!(value["entries"][0]["version"], 1);
+    assert_eq!(value["prayer_marks"][0]["version"], 1);
+    assert!(value.get("changes").is_none());
+    assert!(value.get("applied_ops").is_none());
+
+    let mut destination = Store::open_in_memory().unwrap();
+    export::import(&mut destination, &exported).unwrap();
+    assert_eq!(destination.item("versioned").unwrap().unwrap().version, 2);
+    assert_eq!(destination.mark(&mark.id).unwrap().unwrap().version, 1);
+}
+
+#[test]
+fn version_two_exports_still_import_with_version_one_rows() {
+    let v2 = r#"{"format":"salah-export","version":2,
+        "exported_at":"2026-11-20T10:00:00Z",
+        "items":[{"id":"old-v2","title":"Old v2","block":"fajr","repeat":"daily",
+                  "measure":"check","target":null,"position":0,"weekdays":null,
+                  "day":"2026-11-20","created_at":"2026-11-20T01:00:00Z",
+                  "updated_at":"2026-11-20T01:00:00Z","deleted_at":null}],
+        "entries":[],
+        "prayer_marks":[{"id":"2026-11-20:asr","day":"2026-11-20","prayer":"asr",
+                         "marked_at":"2026-11-20T02:00:00Z",
+                         "created_at":"2026-11-20T02:00:00Z",
+                         "updated_at":"2026-11-20T02:00:00Z","deleted_at":null}]}"#;
+    let data = export::parse(v2.as_bytes()).unwrap();
+    assert_eq!(data.items[0].version, 1);
+    let mut store = Store::open_in_memory().unwrap();
+    assert_eq!(export::import(&mut store, &data).unwrap().added, 2);
+    assert_eq!(store.item("old-v2").unwrap().unwrap().version, 1);
+    assert_eq!(store.mark("2026-11-20:asr").unwrap().unwrap().version, 1);
+}
+
+#[test]
 fn prayer_marks_round_trip_and_reject_bad_ids() {
     use salah_domain::item::PrayerMark;
     let mark = PrayerMark {
@@ -191,6 +259,7 @@ fn prayer_marks_round_trip_and_reject_bad_ids() {
         created_at: time(5),
         updated_at: time(5),
         deleted_at: None,
+        version: 1,
     };
     let mut good = data(Vec::new(), Vec::new());
     good.prayer_marks = vec![mark.clone()];
