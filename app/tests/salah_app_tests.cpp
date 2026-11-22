@@ -5,6 +5,8 @@
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQuickItem>
+#include <QQuickWindow>
 #include <QtTest>
 #include "backend.h"
 #include "theme.h"
@@ -31,6 +33,30 @@ else printf '%s\n' '{}'; fi
     }
     static QStringList logLines(QTemporaryDir &dir) { QFile f(dir.filePath("args")); if (!f.open(QIODevice::ReadOnly)) return {}; return QString::fromUtf8(f.readAll()).split('\n',Qt::SkipEmptyParts); }
 private slots:
+    void realCliScreenshots() {
+        const QString outputDir=qEnvironmentVariable("A9_SCREENSHOT_DIR");
+        if(outputDir.isEmpty()) return;
+        QDir().mkpath(outputDir);
+        Backend backend(nullptr,qEnvironmentVariable("SALAH_BIN")); Theme theme;
+        QSignalSpy spy(&backend,&Backend::requestFinished); backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(),3,5000);
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend",&backend); engine.rootContext()->setContextProperty("theme",&theme);
+        QQmlComponent component(&engine,QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/Main.qml")));
+        QScopedPointer<QObject> root(component.create()); QVERIFY2(root,qPrintable(component.errorString()));
+        auto *window=qobject_cast<QQuickWindow *>(root.data()); QVERIFY(window); window->setWidth(1440);window->setHeight(900);window->show();QTest::qWait(250);
+        auto shot=[&](const QString &name){QTest::qWait(200);QImage image=window->grabWindow();QVERIFY2(!image.isNull(),qPrintable(name));QVERIFY(image.save(outputDir+"/"+name));};
+        shot("a9-today.png");
+        root->setProperty("page",2);root->setProperty("statsMode","week");root->setProperty("statsAnchor",QDateTime(QDate(2026,11,22),QTime()));
+        QVERIFY(QMetaObject::invokeMethod(root.data(),"loadStatistics"));QTRY_VERIFY_WITH_TIMEOUT(!backend.busy(),5000);shot("a9-week.png");
+        root->setProperty("statsMode","month");root->setProperty("statsAnchor",QDateTime(QDate(2026,11,22),QTime()));
+        QVERIFY(QMetaObject::invokeMethod(root.data(),"loadStatistics"));QTRY_VERIFY_WITH_TIMEOUT(!backend.busy(),5000);
+        auto *scroll=root->findChild<QObject *>("statsScroll");QVERIFY(scroll);for(QObject *child:scroll->findChildren<QObject *>())if(child->property("contentY").isValid()){child->setProperty("contentY",240);break;}shot("a9-month.png");
+        for(QObject *child:scroll->findChildren<QObject *>())if(child->property("contentY").isValid()){child->setProperty("contentY",0);break;}
+        root->setProperty("statsTableVisible",true);shot("a9-table.png");
+        root->setProperty("statsTableVisible",false);QTest::qWait(150);
+        // Month chart plot spans x=298..1396. Day 17 is column index 16.
+        QTest::mouseMove(window,QPoint(902,450));auto *tooltip=root->findChild<QObject *>("statsTooltip");QVERIFY(tooltip);QTRY_VERIFY_WITH_TIMEOUT(tooltip->property("visible").toBool(),1000);QCOMPARE(tooltip->property("text").toString(),QString("Tue 17 Nov · 2 / 2 done · 105 min · 9 counts · 3 prayers"));shot("a9-tooltip.png");
+        window->hide();
+    }
     void asyncQueueAndModels() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
         b.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(),3,3000);
@@ -138,6 +164,7 @@ private slots:
     }
     void statsRangeMathAndTooltip() {
         QTemporaryDir dir; Backend backend(nullptr,fake(dir)); Theme theme(dir.path());
+        backend.loadStatsRange("2026-11-01","2026-11-30"); QSignalSpy statsSpy(&backend,&Backend::requestFinished); QTRY_VERIFY_WITH_TIMEOUT(statsSpy.size()>=1,3000);
         QQmlEngine engine; engine.rootContext()->setContextProperty("backend",&backend); engine.rootContext()->setContextProperty("theme",&theme);
         QQmlComponent component(&engine,QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/Main.qml")));
         QScopedPointer<QObject> root(component.create()); QVERIFY2(root,qPrintable(component.errorString())); root->setProperty("visible",false);
@@ -156,6 +183,17 @@ private slots:
         QVariant tip; QVariantMap day{{"day","2026-11-18"},{"done",3},{"planned",4},{"minutes",95},{"count",30},{"prayers",4}};
         QVERIFY(QMetaObject::invokeMethod(root.data(),"tooltipText",Q_RETURN_ARG(QVariant,tip),Q_ARG(QVariant,day)));
         QCOMPARE(tip.toString(),QString("Wed 18 Nov · 3 / 4 done · 95 min · 30 counts · 4 prayers"));
+        QVERIFY(QMetaObject::invokeMethod(root.data(),"tooltipTextAt",Q_RETURN_ARG(QVariant,tip),Q_ARG(QVariant,0)));
+        QCOMPARE(tip.toString(),QString("Sun 22 Nov · 1 / 1 done · 25 min · 0 counts · 4 prayers"));
+        QVariant stepped;
+        QVERIFY(QMetaObject::invokeMethod(root.data(),"monthStep",Q_RETURN_ARG(QVariant,stepped),Q_ARG(QVariant,QDateTime(QDate(2024,1,31),QTime())),Q_ARG(QVariant,1)));
+        QCOMPARE(stepped.toDateTime().date(),QDate(2024,2,29));
+        QVERIFY(QMetaObject::invokeMethod(root.data(),"monthStep",Q_RETURN_ARG(QVariant,stepped),Q_ARG(QVariant,QDateTime(QDate(2026,3,31),QTime())),Q_ARG(QVariant,-1)));
+        QCOMPARE(stepped.toDateTime().date(),QDate(2026,2,28));
+        QVERIFY(QMetaObject::invokeMethod(root.data(),"monthStep",Q_RETURN_ARG(QVariant,stepped),Q_ARG(QVariant,QDateTime(QDate(2026,12,15),QTime())),Q_ARG(QVariant,1)));
+        QCOMPARE(stepped.toDateTime().date(),QDate(2027,1,15));
+        QVERIFY(QMetaObject::invokeMethod(root.data(),"monthStep",Q_RETURN_ARG(QVariant,stepped),Q_ARG(QVariant,QDateTime(QDate(2026,1,15),QTime())),Q_ARG(QVariant,-1)));
+        QCOMPARE(stepped.toDateTime().date(),QDate(2025,12,15));
     }
     void themeFallbackAndAccent() {
         QTemporaryDir dir; Theme fallback(dir.path()); QCOMPARE(fallback.accent(),QString("#FFD60A")); QCOMPARE(fallback.accentForeground(),QString("black"));

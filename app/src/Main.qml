@@ -101,6 +101,12 @@ ApplicationWindow {
         var first=new Date(base.getFullYear(),base.getMonth(),1); var monday=(first.getDay()+6)%7
         return new Date(first.getFullYear(),first.getMonth(),1-monday+offset)
     }
+    function monthStep(day, amount) {
+        var d=day instanceof Date?day:Date.fromLocaleString(Qt.locale(),String(day),"yyyy-MM-dd")
+        var targetFirst=new Date(d.getFullYear(),d.getMonth()+amount,1)
+        var lastDay=new Date(targetFirst.getFullYear(),targetFirst.getMonth()+1,0).getDate()
+        return new Date(targetFirst.getFullYear(),targetFirst.getMonth(),Math.min(d.getDate(),lastDay))
+    }
     function iso(d) { return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0") }
     function statsBounds(mode, anchor, from, to) {
         var a=new Date(anchor.getFullYear(),anchor.getMonth(),anchor.getDate()), first, last
@@ -113,10 +119,20 @@ ApplicationWindow {
     function loadStatistics() { var b=statsBounds(statsMode,statsAnchor,customFrom,customTo);backend.loadStatsRange(b.from,b.to) }
     function statsRangeLabel() { var b=statsBounds(statsMode,statsAnchor,customFrom,customTo),l=Qt.locale("en_US");if(statsMode==="month")return l.toString(b.first,"MMMM yyyy");if(b.first.getMonth()===b.last.getMonth())return l.toString(b.first,"d")+"–"+l.toString(b.last,"d MMM yyyy");return l.toString(b.first,"d MMM")+" – "+l.toString(b.last,"d MMM yyyy") }
     function tooltipText(day) { var d=Date.fromLocaleString(Qt.locale(),day.day,"yyyy-MM-dd");return Qt.locale("en_US").toString(d,"ddd d MMM")+" · "+(day.done||0)+" / "+(day.planned||0)+" done · "+(day.minutes||0)+" min · "+(day.count||0)+" counts · "+(day.prayers||0)+" prayers" }
+    function tooltipTextAt(index) { var rows=selectedDaily();return index>=0&&index<rows.length?tooltipText(rows[index]):"" }
     function formatMinutes(n) { n=Number(n||0);return n>=60?Math.floor(n/60)+" h "+(n%60)+" m":n+" m" }
     function selectedDaily() { if(!selectedStatsItem)return backend.stats.daily||[];var items=backend.stats.items||[];for(var i=0;i<items.length;i++)if(items[i].id===selectedStatsItem){var out=[],s=items[i].series||[];for(var j=0;j<s.length;j++)out.push({day:s[j].day,planned:s[j].planned?1:0,done:s[j].done?1:0,minutes:s[j].minutes||0,count:s[j].count||0,prayers:0});return out}return [] }
-    function newestDaily() { var source=selectedDaily(),out=[];for(var i=source.length-1;i>=0;i--)out.push(source[i]);return out }
+    function shownDaily() { var source=selectedDaily(),out=[];for(var i=0;i<source.length;i++)if(source[i].day<=backend.todayDay)out.push(source[i]);return out }
+    function newestDaily() { var source=shownDaily(),out=[];for(var i=source.length-1;i>=0;i--)out.push(source[i]);return out }
+    function shownTotals() { var rows=shownDaily(),t={done:0,planned:0,minutes:0,count:0,prayers:0};for(var i=0;i<rows.length;i++){t.done+=Number(rows[i].done||0);t.planned+=Number(rows[i].planned||0);t.minutes+=Number(rows[i].minutes||0);t.count+=Number(rows[i].count||0);t.prayers+=Number(rows[i].prayers||0)}return t }
     function maxDaily(field) { var a=selectedDaily(),m=0;for(var i=0;i<a.length;i++)m=Math.max(m,Number(a[i][field]||0));return Math.max(1,m) }
+    function niceAxis(field) {
+        var maximum=field==="done"?Math.max(maxDaily("planned"),maxDaily("done")):maxDaily("minutes"), steps=field==="done"?[1,2,5,10,20,50,100]:[5,10,15,30,60,120,180,240]
+        var step=steps[steps.length-1]
+        for(var i=0;i<steps.length;i++){var lines=Math.ceil(maximum/steps[i]);if(lines>=3&&lines<=4){step=steps[i];break}if(lines<3){step=steps[i];break}}
+        return {step:step,maximum:Math.max(step*3,Math.ceil(maximum/step)*step),lines:Math.max(3,Math.ceil(maximum/step))}
+    }
+    function axisLabel(field,value) { if(field!=="minutes")return String(value);if(value===0)return "0";var h=Math.floor(value/60),m=value%60;return h?(h+"h"+(m?String(m).padStart(2,"0"):"")):(value+"m") }
     function isTyping() { var f=win.activeFocusItem; return f && f.inputMethodHints !== undefined }
     ListModel { id: timelineModel }
     property bool timelineSyncing: false
@@ -307,47 +323,48 @@ ApplicationWindow {
                         delegate: Item { id:rowDelegate; required property int index; required property string kind; required property string block; required property var payload; required property string key
                             width:todayList.width; height:kind==="header"?60:kind==="item"?82:kind==="add"?32:26
                             property string correctionError: ""
+                            property var safePayload: payload||({})
                             Rectangle { visible:kind==="header"; anchors.fill:parent; radius:theme.radius; color:win.card; border.color:win.border
                                         RowLayout { anchors.fill:parent; anchors.leftMargin:18; anchors.rightMargin:16; spacing:14
-                                            Rectangle { visible:block!=="night"; width:28;height:28;radius:14;color:payload.marked?theme.accent:"transparent";border.width:2;border.color:payload.marked?theme.accent:win.text
-                                                Label { anchors.centerIn:parent; visible:!!payload.marked; text:"✓"; color:theme.accentForeground; font.weight:Font.Bold }
-                                                MouseArea { anchors.fill:parent; onClicked:backend.togglePrayer(block,payload.marked||false) }
+                                            Rectangle { visible:block!=="night"; width:28;height:28;radius:14;color:safePayload.marked?theme.accent:"transparent";border.width:2;border.color:safePayload.marked?theme.accent:win.text
+                                                Label { anchors.centerIn:parent; visible:!!safePayload.marked; text:"✓"; color:theme.accentForeground; font.weight:Font.Bold }
+                                                MouseArea { anchors.fill:parent; onClicked:backend.togglePrayer(block,safePayload.marked||false) }
                                             }
-                                            Label { text:payload.name||""; color:win.text; font.pixelSize:17; font.weight:Font.Medium; Layout.fillWidth:true }
-                                            Label { text:payload.time||"--:--"; color:"#d8d4cc"; font.family:win.mono; font.pixelSize:17 }
-                                            Rectangle { visible:payload.current||false; width:62;height:28;radius:14;color:"#4a2d26"
+                                            Label { text:safePayload.name||""; color:win.text; font.pixelSize:17; font.weight:Font.Medium; Layout.fillWidth:true }
+                                            Label { text:safePayload.time||"--:--"; color:"#d8d4cc"; font.family:win.mono; font.pixelSize:17 }
+                                            Rectangle { visible:safePayload.current||false; width:62;height:28;radius:14;color:"#4a2d26"
                                                 Label { anchors.centerIn:parent;text:qsTr("● NOW");color:"#ef8068";font.family:win.mono;font.pixelSize:11 }
                                             }
                                         }
                             }
-                            Rectangle { id:itemCard; visible:kind==="item"; anchors.fill:parent; radius:theme.radius; color:win.dragging&&win.dragId===payload.id?"transparent":"#1c1b18"; border.color:win.dragging&&win.dragId===payload.id?"#4a463e":win.border; opacity:payload.pending?0.55:1
-                                            RowLayout { anchors.fill:parent; anchors.leftMargin:12; anchors.rightMargin:14; spacing:12; opacity:win.dragging&&win.dragId===payload.id?0:1
+                            Rectangle { id:itemCard; visible:kind==="item"; anchors.fill:parent; radius:theme.radius; color:win.dragging&&win.dragId===safePayload.id?"transparent":"#1c1b18"; border.color:win.dragging&&win.dragId===safePayload.id?"#4a463e":win.border; opacity:safePayload.pending?0.55:1
+                                            RowLayout { anchors.fill:parent; anchors.leftMargin:12; anchors.rightMargin:14; spacing:12; opacity:win.dragging&&win.dragId===safePayload.id?0:1
                                                 Label { id:handle; text:"⠿"; color:win.muted; font.pixelSize:19
                                                     MouseArea { anchors.fill:parent; anchors.margins:-8; preventStealing:true
-                                                        onPressed:function(mouse){var p=mapToItem(win.contentItem,mouse.x,mouse.y);win.beginDrag(rowDelegate.index,payload.id,p.y)}
+                                                        onPressed:function(mouse){var p=mapToItem(win.contentItem,mouse.x,mouse.y);win.beginDrag(rowDelegate.index,safePayload.id,p.y)}
                                                         onPositionChanged:function(mouse){if(pressed){var p=mapToItem(win.contentItem,mouse.x,mouse.y);win.updateDrag(p.y)}}
                                                         onReleased:function(mouse){var p=mapToItem(todayList,mouse.x,mouse.y);win.finishDrag(p.y<0||p.y>todayList.height)}
                                                         onCanceled:win.finishDrag(true)
                                                     }
                                                 }
-                                                Rectangle { width:24;height:24;radius:Math.min(5,theme.radius);color:payload.state==="done"?theme.accent:"transparent";border.color:payload.state==="done"?theme.accent:"#625e55"
-                                                    Label { anchors.centerIn:parent;text:"✓";visible:payload.state==="done";color:theme.accentForeground }
-                                                    MouseArea { anchors.fill:parent;onClicked:backend.toggleDone(payload.id,payload.state) }
+                                                Rectangle { width:24;height:24;radius:Math.min(5,theme.radius);color:safePayload.state==="done"?theme.accent:"transparent";border.color:safePayload.state==="done"?theme.accent:"#625e55"
+                                                    Label { anchors.centerIn:parent;text:"✓";visible:safePayload.state==="done";color:theme.accentForeground }
+                                                    MouseArea { anchors.fill:parent;onClicked:backend.toggleDone(safePayload.id,safePayload.state) }
                                                 }
                                                 ColumnLayout { Layout.fillWidth:true;spacing:4
-                                                    Label { text:payload.title||"";color:payload.state==="done"?win.muted:win.text;font.pixelSize:15;font.weight:Font.Medium;Layout.fillWidth:true;elide:Text.ElideRight;textFormat:Text.PlainText }
-                                                    Label { text:detail(payload);color:win.muted;font.family:win.mono;font.pixelSize:12 }
+                                                    Label { text:safePayload.title||"";color:safePayload.state==="done"?win.muted:win.text;font.pixelSize:15;font.weight:Font.Medium;Layout.fillWidth:true;elide:Text.ElideRight;textFormat:Text.PlainText }
+                                                    Label { text:detail(safePayload);color:win.muted;font.family:win.mono;font.pixelSize:12 }
                                                 }
-                                                RowLayout { visible:payload.measure==="count";spacing:3
-                                                    RoundButton { text:"−";flat:true;Layout.preferredWidth:30;Layout.preferredHeight:30;enabled:(payload.count||0)>0;onClicked:backend.adjustCount(payload.id,-1) }
-                                                    Label { text:payload.target?qsTr("%1 / %2").arg(payload.count||0).arg(payload.target):String(payload.count||0);color:win.text;font.family:win.mono;font.pixelSize:14;horizontalAlignment:Text.AlignHCenter;Layout.minimumWidth:payload.target?58:28 }
-                                                    RoundButton { text:"+";flat:true;Layout.preferredWidth:30;Layout.preferredHeight:30;onClicked:backend.adjustCount(payload.id,1) }
+                                                RowLayout { visible:safePayload.measure==="count";spacing:3
+                                                    RoundButton { text:"−";flat:true;Layout.preferredWidth:30;Layout.preferredHeight:30;enabled:(safePayload.count||0)>0;onClicked:backend.adjustCount(safePayload.id,-1) }
+                                                    Label { text:safePayload.target?qsTr("%1 / %2").arg(safePayload.count||0).arg(safePayload.target):String(safePayload.count||0);color:win.text;font.family:win.mono;font.pixelSize:14;horizontalAlignment:Text.AlignHCenter;Layout.minimumWidth:safePayload.target?58:28 }
+                                                    RoundButton { text:"+";flat:true;Layout.preferredWidth:30;Layout.preferredHeight:30;onClicked:backend.adjustCount(safePayload.id,1) }
                                                 }
-                                                Button { flat:true;text:payload.timer_started_at?qsTr("❚❚ %1m").arg(runningMinutes(payload)):qsTr("▶︎ %1m").arg(runningMinutes(payload));font.family:win.mono;onClicked:backend.toggleTimer(payload.id,!!payload.timer_started_at) }
+                                                Button { flat:true;text:safePayload.timer_started_at?qsTr("❚❚ %1m").arg(runningMinutes(safePayload)):qsTr("▶︎ %1m").arg(runningMinutes(safePayload));font.family:win.mono;onClicked:backend.toggleTimer(safePayload.id,!!safePayload.timer_started_at) }
                                                 ColumnLayout { spacing:1
-                                                    Rectangle { Layout.preferredWidth:42;Layout.preferredHeight:36;radius:7;color:"transparent";border.color:correctionError?"#ef8068":win.border
-                                                        TextField { id:correctionInput;anchors.fill:parent;anchors.margins:1;color:win.text;font.family:win.mono;font.pixelSize:14;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter;placeholderText:"±";inputMethodHints:Qt.ImhFormattedNumbersOnly;background:null;padding:2
-                                                            onAccepted:{var raw=text.trim(),n=Number(raw);if(!/^[+-]?\d+$/.test(raw)||n===0||n < -1440||n > 1440){correctionError=qsTr("Use ±1–1440");correctionErrorTimer.restart()}else{backend.adjustMinutes(payload.id,n);text=""}}
+                                                    Rectangle { Layout.preferredWidth:Math.max(88,Math.min(96,correctionInput.contentWidth+28));Layout.preferredHeight:36;radius:7;color:"transparent";border.color:correctionError?"#ef8068":win.border
+                                                        TextField { id:correctionInput;anchors.fill:parent;anchors.margins:1;color:win.text;font.family:win.mono;font.pixelSize:14;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter;placeholderText:qsTr("± min");inputMethodHints:Qt.ImhFormattedNumbersOnly;background:null;padding:2
+                                                            onAccepted:{var raw=text.trim(),n=Number(raw);if(!/^[+-]?\d+$/.test(raw)||n===0||n < -1440||n > 1440){correctionError=qsTr("Use ±1–1440");correctionErrorTimer.restart()}else{backend.adjustMinutes(safePayload.id,n);text=""}}
                                                             Keys.onEscapePressed:function(event){text="";correctionError="";focus=false;event.accepted=true}
                                                         }
                                                     }
@@ -355,7 +372,7 @@ ApplicationWindow {
                                                 }
                                                 Timer { id:correctionErrorTimer;interval:2200;onTriggered:correctionError="" }
                                             }
-                                            MouseArea { anchors.fill:parent; acceptedButtons:Qt.LeftButton; onDoubleClicked:openEntry(payload); z:-1 }
+                                            MouseArea { anchors.fill:parent; acceptedButtons:Qt.LeftButton; onDoubleClicked:openEntry(safePayload); z:-1 }
                             }
                             Rectangle { visible:kind==="add"; anchors.fill:parent;color:"transparent"
                                         Label { anchors.left:parent.left;anchors.leftMargin:56;anchors.verticalCenter:parent.verticalCenter;text:qsTr("+  add");color:"#777269";font.pixelSize:13 }
@@ -363,7 +380,7 @@ ApplicationWindow {
                             }
                             Row { visible:kind==="marker"; height:26; spacing:12; leftPadding:18
                                         Rectangle { width:8;height:8;radius:4;color:"#555148";anchors.verticalCenter:parent.verticalCenter }
-                                        Label { text:(payload.name||"")+"  "+(payload.time||"--:--");color:win.muted;font.family:win.mono;font.pixelSize:12;anchors.verticalCenter:parent.verticalCenter }
+                                        Label { text:(safePayload.name||"")+"  "+(safePayload.time||"--:--");color:win.muted;font.family:win.mono;font.pixelSize:12;anchors.verticalCenter:parent.verticalCenter }
                             }
                         }
                     }
@@ -383,9 +400,10 @@ ApplicationWindow {
                         Rectangle { Layout.fillWidth:true; height:360; radius:theme.radius; color:win.panel; border.color:win.border
                             ColumnLayout { anchors.fill:parent;anchors.margins:18;spacing:6
                                 RowLayout { Layout.fillWidth:true
-                                    ToolButton { text:"‹";onClicked:{var d=calendarDate(0);backend.selectDay(iso(new Date(d.getFullYear(),d.getMonth()-1,d.getDate())))} }
+                                    ToolButton { text:"‹";onClicked:backend.selectDay(iso(monthStep(backend.selectedDay,-1))) }
                                     Label { Layout.fillWidth:true;text:Qt.locale().toString(Date.fromLocaleString(Qt.locale(),backend.selectedDay,"yyyy-MM-dd"),"MMMM yyyy");horizontalAlignment:Text.AlignHCenter;color:win.text;font.pixelSize:16;font.weight:Font.Medium }
-                                    ToolButton { text:"›";onClicked:{var d=calendarDate(0);backend.selectDay(iso(new Date(d.getFullYear(),d.getMonth()+1,d.getDate())))} }
+                                    ToolButton { text:qsTr("Today");font.pixelSize:11;onClicked:backend.jumpToday() }
+                                    ToolButton { text:"›";onClicked:backend.selectDay(iso(monthStep(backend.selectedDay,1))) }
                                 }
                                 GridLayout { columns:7;Layout.fillWidth:true;rowSpacing:5;columnSpacing:4
                                     Repeater { model:["M","T","W","T","F","S","S"]
@@ -436,7 +454,7 @@ ApplicationWindow {
                 }
 
                 // Statistics
-                ScrollView { id:statsScroll; visible:page===2;Layout.fillWidth:true;Layout.fillHeight:true;clip:true;Layout.margins:26
+                ScrollView { id:statsScroll;objectName:"statsScroll";visible:page===2;Layout.fillWidth:true;Layout.fillHeight:true;clip:true;Layout.margins:26
                     Column { width:statsScroll.availableWidth;spacing:16
                         RowLayout { width:parent.width;spacing:10
                             Rectangle { height:38;width:250;radius:8;color:win.panel;border.color:win.border
@@ -487,39 +505,43 @@ ApplicationWindow {
                         Column { visible:!statsTableVisible;width:parent.width;spacing:12
                             Repeater { model:[[qsTr("Tasks done per day"),"done"],[qsTr("Time spent per day"),"minutes"]]
                                 Rectangle { required property var modelData;width:parent.width;height:218;radius:theme.radius;color:win.panel;border.color:win.border
-                                    property var rows:selectedDaily();property real maximum:modelData[1]==="done"?Math.max(maxDaily("planned"),maxDaily("done")):maxDaily("minutes")
+                                    property var rows:selectedDaily();property var axis:niceAxis(modelData[1]);property real maximum:axis.maximum
                                     Label { x:18;y:15;text:modelData[0];color:win.text;font.pixelSize:15;font.weight:Font.Medium }
                                     Item { id:plot;anchors{left:parent.left;right:parent.right;top:parent.top;bottom:parent.bottom;leftMargin:52;rightMargin:18;topMargin:48;bottomMargin:34}
-                                        Repeater { model:4
-                                            Item { required property int index;width:plot.width;height:1;y:index*(plot.height-1)/3
+                                        Repeater { model:plot.parent.axis.lines+1
+                                            Item { required property int index;width:plot.width;height:1;y:index*(plot.height-1)/plot.parent.axis.lines
                                                 Rectangle { width:parent.width;height:1;color:"#302e29" }
-                                                Label { x:-45;y:-7;width:38;horizontalAlignment:Text.AlignRight;color:win.muted;font.family:win.mono;font.pixelSize:10;text:{var v=Math.round(parent.parent.parent.maximum*(3-index)/3);return parent.parent.parent.modelData[1]==="minutes"&&parent.parent.parent.maximum>=120?(v/60).toFixed(v%60?1:0)+"h":v} }
+                                                Label { x:-45;y:-7;width:38;horizontalAlignment:Text.AlignRight;color:win.muted;font.family:win.mono;font.pixelSize:10;text:axisLabel(parent.parent.parent.modelData[1],(parent.parent.parent.axis.lines-index)*parent.parent.parent.axis.step) }
                                             }
                                         }
                                         Row { anchors.fill:parent;spacing:2
                                             Repeater { model:plot.parent.rows
-                                                Item { required property var modelData;required property int index;width:(plot.width-Math.max(0,plot.parent.rows.length-1)*2)/Math.max(1,plot.parent.rows.length);height:plot.height
-                                                    property bool future:modelData.day>backend.todayDay
-                                                    Rectangle { visible:parent.parent.parent.parent.modelData[1]==="done";anchors.bottom:parent.bottom;anchors.horizontalCenter:parent.horizontalCenter;width:Math.max(3,Math.min(42,parent.width-3));height:plot.height*(modelData.planned||0)/parent.parent.parent.parent.maximum;radius:4;color:"#45423b";opacity:future?.3:1 }
-                                                    Rectangle { anchors.bottom:parent.bottom;anchors.horizontalCenter:parent.horizontalCenter;width:Math.max(3,Math.min(42,parent.width-3));height:plot.height*Number(modelData[parent.parent.parent.parent.modelData[1]]||0)/parent.parent.parent.parent.maximum;radius:4;color:theme.accent;opacity:future?.22:.9 }
-                                                    Rectangle { visible:modelData.day===backend.todayDay;anchors.bottom:parent.bottom;anchors.horizontalCenter:parent.horizontalCenter;width:Math.max(5,Math.min(46,parent.width-1));height:parent.height;color:"transparent";border.color:win.text;border.width:1;opacity:.55 }
+                                                Item { id:taskChartDay;required property var modelData;required property int index;objectName:"taskChartDay"+index;width:(plot.width-Math.max(0,plot.parent.rows.length-1)*2)/Math.max(1,plot.parent.rows.length);height:plot.height
+                                                    property var dayRow:modelData;property bool future:dayRow.day>backend.todayDay
+                                                    Rectangle { visible:parent.parent.parent.parent.modelData[1]==="done";anchors.bottom:parent.bottom;anchors.horizontalCenter:parent.horizontalCenter;width:Math.max(3,Math.min(42,parent.width-3));height:plot.height*(parent.dayRow.planned||0)/parent.parent.parent.parent.maximum;radius:4;color:"#45423b";opacity:future?.3:1 }
+                                                    Rectangle { anchors.bottom:parent.bottom;anchors.horizontalCenter:parent.horizontalCenter;width:Math.max(3,Math.min(42,parent.width-3));height:plot.height*Number(parent.dayRow[parent.parent.parent.parent.modelData[1]]||0)/parent.parent.parent.parent.maximum;radius:4;color:theme.accent;opacity:future?.22:.9 }
+                                                    Rectangle { visible:parent.dayRow.day===backend.todayDay;anchors.bottom:parent.bottom;anchors.horizontalCenter:parent.horizontalCenter;width:Math.max(5,Math.min(46,parent.width-1));height:parent.height;color:"transparent";border.color:win.text;border.width:1;opacity:.55 }
                                                     Label { anchors.top:parent.bottom;anchors.topMargin:7;anchors.horizontalCenter:parent.horizontalCenter;color:future?"#5f5b54":win.muted;font.family:win.mono;font.pixelSize:10;text:{var d=Date.fromLocaleString(Qt.locale(),modelData.day,"yyyy-MM-dd");if(statsMode==="week")return Qt.locale("en_US").toString(d,"ddd").charAt(0);return (index%Math.max(1,Math.ceil(plot.parent.rows.length/12))===0||index===plot.parent.rows.length-1)?d.getDate():""} }
-                                                    MouseArea { anchors.fill:parent;anchors.leftMargin:-2;anchors.rightMargin:-2;hoverEnabled:true;onEntered:{tip.text=tooltipText(modelData);tip.visible=true;var p=mapToItem(win.contentItem,width/2,0);tip.x=Math.max(230,Math.min(win.width-tip.width-10,p.x-tip.width/2));tip.y=Math.max(10,p.y-tip.height-8)} onExited:tip.visible=false }
+                                                    MouseArea { objectName:"taskChartHit";anchors.fill:parent;anchors.leftMargin:-2;anchors.rightMargin:-2;hoverEnabled:true;onEntered:{tip.text=tooltipTextAt(taskChartDay.index);tip.visible=true;var p=mapToItem(win.contentItem,width/2,0);tip.x=Math.max(230,Math.min(win.width-tip.width-10,p.x-tip.width/2));tip.y=Math.max(10,p.y-tip.height-8)} onExited:tip.visible=false }
                                                 }
                                             }
                                         }
                                     }
                                 }
                             }
-                            Rectangle { width:parent.width;height:106;radius:theme.radius;color:win.panel;border.color:win.border
+                            Rectangle { width:parent.width;height:218;radius:theme.radius;color:win.panel;border.color:win.border
                                 Label { x:18;y:15;text:qsTr("Prayers per day");color:win.text;font.pixelSize:15;font.weight:Font.Medium }
-                                Row { x:18;y:53;width:parent.width-36;spacing:2
+                                Item { id:prayerPlot;anchors{left:parent.left;right:parent.right;top:parent.top;bottom:parent.bottom;leftMargin:52;rightMargin:18;topMargin:48;bottomMargin:34}
+                                Repeater { model:6;Item { required property int index;width:prayerPlot.width;height:1;y:index*(prayerPlot.height-1)/5;Rectangle{width:parent.width;height:1;color:"#302e29"}Label{x:-45;y:-7;width:38;text:String(5-index);horizontalAlignment:Text.AlignRight;color:win.muted;font.family:win.mono;font.pixelSize:10} } }
+                                Row { anchors.fill:parent;spacing:2
                                     Repeater { model:selectedDaily()
-                                        Item { required property var modelData;width:(parent.parent.width-Math.max(0,selectedDaily().length-1)*2)/Math.max(1,selectedDaily().length);height:35
-                                            Row { anchors.centerIn:parent;spacing:2;Repeater { model:5;Rectangle { required property int index;width:Math.max(2,Math.min(6,(parent.parent.width-8)/5));height:width;radius:width/2;color:index<(parent.parent.modelData.prayers||0)?theme.accent:"#45423b" } } }
-                                            MouseArea { anchors.fill:parent;hoverEnabled:true;onEntered:{tip.text=tooltipText(modelData);tip.visible=true;var p=mapToItem(win.contentItem,width/2,0);tip.x=Math.max(230,Math.min(win.width-tip.width-10,p.x-tip.width/2));tip.y=p.y-tip.height-8} onExited:tip.visible=false }
+                                        Item { id:prayerDay;required property var modelData;required property int index;property var dayRow:modelData;width:(parent.parent.width-Math.max(0,selectedDaily().length-1)*2)/Math.max(1,selectedDaily().length);height:parent.parent.height
+                                            Column { anchors.horizontalCenter:parent.horizontalCenter;anchors.bottom:parent.bottom;spacing:Math.max(2,(parent.parent.height-35)/4);Repeater { model:5;Rectangle { required property int index;width:7;height:7;radius:4;color:index<(prayerDay.dayRow.prayers||0)?theme.accent:"#45423b" } } }
+                                            Label { anchors.top:parent.bottom;anchors.topMargin:7;anchors.horizontalCenter:parent.horizontalCenter;color:parent.dayRow.day>backend.todayDay?"#5f5b54":win.muted;font.family:win.mono;font.pixelSize:10;text:{var d=Date.fromLocaleString(Qt.locale(),parent.dayRow.day,"yyyy-MM-dd");if(statsMode==="week")return Qt.locale("en_US").toString(d,"ddd").charAt(0);return (parent.index%Math.max(1,Math.ceil(selectedDaily().length/12))===0||parent.index===selectedDaily().length-1)?d.getDate():""} }
+                                            MouseArea { anchors.fill:parent;hoverEnabled:true;onEntered:{tip.text=tooltipTextAt(parent.index);tip.visible=true;var p=mapToItem(win.contentItem,width/2,0);tip.x=Math.max(230,Math.min(win.width-tip.width-10,p.x-tip.width/2));tip.y=Math.max(10,p.y-tip.height-8)} onExited:tip.visible=false }
                                         }
                                     }
+                                }
                                 }
                             }
                         }
@@ -537,16 +559,16 @@ ApplicationWindow {
                                         Label { width:parent.width*.15;text:(parent.modelData.prayers||0)+" / 5";color:win.text;font.family:win.mono;font.pixelSize:12;horizontalAlignment:Text.AlignRight }
                                     }
                                 }
-                                Row { width:parent.width;height:38;property var t:backend.stats.totals||{};Rectangle{anchors.top:parent.top;width:parent.width;height:1;color:win.border}Label{width:parent.width*.34;text:qsTr("Total");color:win.text;font.weight:Font.DemiBold}Label{width:parent.width*.2;text:(parent.t.done||0)+" / "+(parent.t.planned||0);color:win.text;font.family:win.mono;horizontalAlignment:Text.AlignRight}Label{width:parent.width*.16;text:formatMinutes(parent.t.minutes);color:win.text;font.family:win.mono;horizontalAlignment:Text.AlignRight}Label{width:parent.width*.15;text:parent.t.count||0;color:win.text;font.family:win.mono;horizontalAlignment:Text.AlignRight}Label{width:parent.width*.15;text:(parent.t.prayers||0)+" / "+(backend.stats.prayer_slots||0);color:win.text;font.family:win.mono;horizontalAlignment:Text.AlignRight} }
+                                Row { width:parent.width;height:38;property var t:shownTotals();Rectangle{anchors.top:parent.top;width:parent.width;height:1;color:win.border}Label{width:parent.width*.34;text:qsTr("Total");color:win.text;font.weight:Font.DemiBold}Label{width:parent.width*.2;text:(parent.t.done||0)+" / "+(parent.t.planned||0);color:win.text;font.family:win.mono;horizontalAlignment:Text.AlignRight}Label{width:parent.width*.16;text:formatMinutes(parent.t.minutes);color:win.text;font.family:win.mono;horizontalAlignment:Text.AlignRight}Label{width:parent.width*.15;text:parent.t.count||0;color:win.text;font.family:win.mono;horizontalAlignment:Text.AlignRight}Label{width:parent.width*.15;text:(parent.t.prayers||0)+" / "+(shownDaily().length*5);color:win.text;font.family:win.mono;horizontalAlignment:Text.AlignRight} }
                             }
                         }
                         Label { text:qsTr("By task");color:win.text;font.pixelSize:18;font.weight:Font.DemiBold;topPadding:4 }
                         Repeater { model:(backend.stats.items||[]).slice().sort(function(a,b){return (b.minutes||0)-(a.minutes||0)})
-                            Rectangle { required property var modelData;width:parent.width;height:88;radius:theme.radius;color:selectedStatsItem===modelData.id?"#292722":win.panel;border.color:selectedStatsItem===modelData.id?theme.accent:win.border
+                            Rectangle { id:taskStatsRow;required property var modelData;property var rowData:modelData;width:parent.width;height:88;radius:theme.radius;color:selectedStatsItem===modelData.id?"#292722":win.panel;border.color:selectedStatsItem===modelData.id?theme.accent:win.border
                                 RowLayout { anchors.fill:parent;anchors.margins:15;spacing:16
                                     ColumnLayout { Layout.preferredWidth:260;spacing:4;Label{text:modelData.title;color:win.text;font.pixelSize:14;font.weight:Font.Medium;Layout.fillWidth:true;elide:Text.ElideRight}Label{text:joinedDetail(modelData.block,modelData.repeat);color:win.muted;font.family:win.mono;font.pixelSize:11} }
                                     ColumnLayout { Layout.preferredWidth:190;spacing:6;Label{text:(modelData.done_days||0)+" / "+(modelData.planned_days||0)+qsTr(" days");color:win.muted;font.family:win.mono;font.pixelSize:11}Rectangle{Layout.fillWidth:true;height:4;radius:2;color:"#403d37";Rectangle{height:parent.height;width:parent.width*(modelData.planned_days?modelData.done_days/modelData.planned_days:0);radius:2;color:theme.accent}} }
-                                    Item { Layout.fillWidth:true;Layout.preferredHeight:42;Row{anchors.fill:parent;spacing:2;Repeater{model:modelData.series||[];Rectangle{required property var modelData;width:(parent.parent.width-Math.max(0,(parent.parent.parent.modelData.series||[]).length-1)*2)/Math.max(1,(parent.parent.parent.modelData.series||[]).length);height:Math.max(2,parent.parent.height*Math.min(1,(modelData.minutes||0)/60));anchors.bottom:parent.bottom;radius:2;color:"#777168"}}} }
+                                    Item { Layout.fillWidth:true;Layout.preferredHeight:42;Row{anchors.fill:parent;spacing:2;Repeater{model:taskStatsRow.rowData.series||[];Rectangle{required property var modelData;width:(parent.parent.width-Math.max(0,(taskStatsRow.rowData.series||[]).length-1)*2)/Math.max(1,(taskStatsRow.rowData.series||[]).length);height:Math.max(2,parent.parent.height*Math.min(1,(modelData.minutes||0)/60));anchors.bottom:parent.bottom;radius:2;color:"#777168"}}} }
                                     Label { Layout.preferredWidth:90;text:formatMinutes(modelData.minutes);color:win.text;font.family:win.mono;font.pixelSize:14;horizontalAlignment:Text.AlignRight }
                                     Label { Layout.preferredWidth:76;text:modelData.measure==="count"?(modelData.count||0)+" ×":"—";color:win.muted;font.family:win.mono;font.pixelSize:12;horizontalAlignment:Text.AlignRight }
                                 }
