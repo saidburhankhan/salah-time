@@ -13,10 +13,14 @@ resumes it after a limit cutoff.
 
 ## Next
 
-- W1 is running as `salah-codex-w1` (Codex, started 19:39; Codex 5h window resets 00:39). Log: `~/.cache/salah-agents/w1.log`.
-- At :17/:57 each hour (recurring cron): check limits and progress; dispatch W2 once W1
-  has committed S2 and Codex 5h usage is below 60%; re-dispatch a dead worker; integrate
-  and verify when both are done.
+- W1 (`salah-codex-w1`) and W2 (`salah-codex-w2`) both run on Codex since 19:39/19:5x
+  (Codex 5h window resets 00:39). Logs in `~/.cache/salah-agents/`. The orchestrator
+  watches commits, unit exits and Codex errors live (Monitor), re-dispatches dead
+  workers, and reviews each commit against `interface.md`.
+- 22:13 (cron): Claude has reset; add Claude subagents next to Codex where ownership allows.
+- When both slices are integrated and verified: archive this work item, then run
+  `handoff-telegram.sh` (the user asked for this) to resume the telegram-vim-rust lead on its
+  task list 1–4 (order 4, 1, 2, 3).
 
 ## Interfaces
 
