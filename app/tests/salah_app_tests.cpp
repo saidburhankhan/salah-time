@@ -195,6 +195,106 @@ esac
                 return row;
         return -1;
     }
+    // A day with items in several blocks and one deliberately empty block, so
+    // the drag tests exercise both in-block and cross-block drops.
+    static QJsonObject dragDay() {
+        QJsonObject day = fixture("day");
+        QJsonArray blocks = day.value("blocks").toArray();
+        for (int b = 0; b < blocks.size(); ++b) {
+            QJsonObject block = blocks[b].toObject();
+            if (block.value("start").toString() != "fajr") continue;
+            QJsonArray items = block.value("items").toArray();
+            if (items.isEmpty()) return day;
+            QJsonObject second = items.first().toObject();
+            second["id"] = "fajr-2";
+            second["title"] = "Fajr second";
+            second["position"] = 1;
+            items.append(second);
+            block["items"] = items;
+            blocks[b] = block;
+            break;
+        }
+        day["blocks"] = blocks;
+        return day;
+    }
+    static QQuickItem *timelineView(QObject *root) {
+        for (QObject *object : root->findChildren<QObject *>()) {
+            auto *item = qobject_cast<QQuickItem *>(object);
+            if (item && QByteArray(item->metaObject()->className()).contains("QQuickListView"))
+                return item;
+        }
+        return nullptr;
+    }
+    static void appendQuickItems(QQuickItem *parent, QList<QQuickItem *> &items) {
+        for (QQuickItem *child : parent->childItems()) {
+            items.append(child);
+            appendQuickItems(child, items);
+        }
+    }
+    static QList<QQuickItem *> quickDescendants(QQuickItem *root) {
+        QList<QQuickItem *> items;
+        appendQuickItems(root, items);
+        return items;
+    }
+    static QQuickItem *rowDelegate(QQuickItem *list, int row) {
+        auto *content = list->property("contentItem").value<QQuickItem *>();
+        if (!content) return nullptr;
+        for (QQuickItem *item : content->childItems())
+            if (item->property("index").toInt() == row && item->property("rowKind").isValid())
+                return item;
+        return nullptr;
+    }
+    static QQuickItem *itemDelegate(QQuickItem *list, const QString &id) {
+        auto *content = list->property("contentItem").value<QQuickItem *>();
+        if (!content) return nullptr;
+        for (QQuickItem *item : quickDescendants(content))
+            if (item->property("itemId").toString() == id && item->property("rowIndex").isValid())
+                return item;
+        return nullptr;
+    }
+    static QQuickItem *dragHandle(QQuickItem *card) {
+        for (QQuickItem *item : quickDescendants(card)) {
+            if (item->property("text").toString() != QString::fromUtf8("⠿")) continue;
+            for (QQuickItem *child : quickDescendants(item))
+                if (child->property("pressed").isValid()) return child;
+        }
+        return nullptr;
+    }
+    static QPoint sceneCenter(QQuickItem *item, qreal yFraction = 0.5) {
+        return item->mapToScene(QPointF(item->width() / 2, item->height() * yFraction)).toPoint();
+    }
+    static QStringList timelineKeys(DayTimelineModel *model) {
+        QStringList keys;
+        for (int row = 0; row < model->rowCount(); ++row) keys.append(model->keyAt(row));
+        return keys;
+    }
+    static int rowForKey(DayTimelineModel *model, const QString &key) {
+        for (int row = 0; row < model->rowCount(); ++row)
+            if (model->keyAt(row) == key) return row;
+        return -1;
+    }
+    static QJsonObject lastRequest(const FakeDaemon &daemon, const QString &method) {
+        for (int i = daemon.requests.size() - 1; i >= 0; --i) {
+            const QJsonObject &request = daemon.requests.at(i);
+            if (request.value("method").toString() == method) return request;
+        }
+        return {};
+    }
+    static int requestCount(const FakeDaemon &daemon, const QString &method) {
+        int count = 0;
+        for (const QJsonObject &request : daemon.requests)
+            if (request.value("method").toString() == method) ++count;
+        return count;
+    }
+    // Showing/activating the window makes Main.qml reload the day. Let those
+    // requests land before a drag starts, so a late rebuild cannot reorder the
+    // list under the pointer.
+    static void waitForBackendIdle(Backend &backend) {
+        QTest::qWait(200);
+        QTRY_VERIFY_WITH_TIMEOUT(!backend.busy(), 3000);
+        QTest::qWait(100);
+        QTRY_VERIFY_WITH_TIMEOUT(!backend.busy(), 3000);
+    }
     static int prayerRow(PrayerModel *model, const QString &id) {
         for (int row = 0; row < model->rowCount(); ++row)
             if (model->data(model->index(row, 0), PrayerModel::PrayerIdRole).toString() == id) return row;
@@ -952,6 +1052,307 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(hasLabelText(root.data(), "CORE PREVIEW"), 3000);
         QVERIFY(hasLabelText(root.data(), "May 19, 2031"));
         root->setProperty("visible", false);
+    }
+
+    void timelineDragIntoEmptyBlockShowsGapAndSendsAnchors() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        const QJsonObject day = dragDay();
+        auto reads = readHandler(day);
+        daemon.setHandler([reads](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            if (request.value("method").toString() == "item.move") {
+                const QJsonObject params = request.value("params").toObject();
+                server->respond(socket, request, QJsonObject{
+                    {"revision", 101}, {"op_id", params.value("op_id")},
+                    {"changed", QJsonObject{{"items", QJsonArray{}}, {"entries", QJsonArray{}},
+                                            {"marks", QJsonArray{}}, {"deleted", QJsonArray{}}}}});
+                return;
+            }
+            reads(request, socket, server);
+        });
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
+
+        Theme theme(dir.path());
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data()); QVERIFY(window);
+        window->show(); window->setWidth(1440); window->setHeight(1600);
+        waitForBackendIdle(backend);
+        auto *list = timelineView(root.data()); QVERIFY(list);
+        QTRY_VERIFY_WITH_TIMEOUT(itemDelegate(list, "<id:1>") != nullptr, 3000);
+        auto *model = backend.dayTimeline();
+        const QStringList before = timelineKeys(model);
+        const int original = model->indexOfItem("<id:1>");
+        const int secondOriginal = model->indexOfItem("fajr-2");
+        const int dhuhrBefore = rowForKey(model, "header:dhuhr");
+        QVERIFY(original >= 0); QVERIFY(secondOriginal > original); QVERIFY(dhuhrBefore > secondOriginal);
+        auto *card = itemDelegate(list, "<id:1>"); QVERIFY(card);
+        auto *handle = dragHandle(card); QVERIFY(handle);
+        auto *target = rowDelegate(list, dhuhrBefore); QVERIFY(target);
+        const QPoint targetPoint = sceneCenter(target);
+
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, sceneCenter(handle));
+        QTRY_VERIFY_WITH_TIMEOUT(root->property("dragging").toBool(), 1000);
+        QTest::mouseMove(window, targetPoint);
+        QTRY_VERIFY_WITH_TIMEOUT(model->indexOfItem("<id:1>") != original, 1000);
+        QTest::qWait(200);
+
+        const int moved = model->indexOfItem("<id:1>");
+        QCOMPARE(moved, rowForKey(model, "header:dhuhr") + 1);
+        QCOMPARE(model->kindAt(moved), QString("item"));
+        QCOMPARE(model->keyAt(moved + 1), QString("add:dhuhr"));
+        QCOMPARE(model->rowCount(), before.size());
+        int occurrences = 0;
+        for (int row = 0; row < model->rowCount(); ++row)
+            if (model->itemIdAt(row) == "<id:1>") ++occurrences;
+        QCOMPARE(occurrences, 1);
+        QCOMPARE(model->indexOfItem("fajr-2"), secondOriginal - 1);
+
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier,
+                            sceneCenter(rowDelegate(list, rowForKey(model, "header:dhuhr"))));
+        QTRY_COMPARE_WITH_TIMEOUT(requestCount(daemon, "item.move"), 1, 3000);
+        const QJsonObject params = lastRequest(daemon, "item.move").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("<id:1>"));
+        QCOMPARE(params.value("block").toString(), QString("dhuhr"));
+        QCOMPARE(params.value("index").toInt(), 0);
+        QVERIFY(!params.contains("after_id"));
+        QVERIFY(!params.contains("before_id"));
+        QTRY_COMPARE_WITH_TIMEOUT(model->blockAt(model->indexOfItem("<id:1>")), QString("dhuhr"), 3000);
+    }
+
+    void timelineDragWithinBlockSendsAfterAndBeforeAnchors() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        const QJsonObject day = dragDay();
+        auto reads = readHandler(day);
+        daemon.setHandler([reads](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            if (request.value("method").toString() == "item.move") {
+                const QJsonObject params = request.value("params").toObject();
+                server->respond(socket, request, QJsonObject{
+                    {"revision", 101}, {"op_id", params.value("op_id")},
+                    {"changed", QJsonObject{{"items", QJsonArray{}}, {"entries", QJsonArray{}},
+                                            {"marks", QJsonArray{}}, {"deleted", QJsonArray{}}}}});
+                return;
+            }
+            reads(request, socket, server);
+        });
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
+
+        Theme theme(dir.path());
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data()); QVERIFY(window);
+        window->show(); window->setWidth(1440); window->setHeight(1600);
+        waitForBackendIdle(backend);
+        auto *list = timelineView(root.data()); QVERIFY(list);
+        QTRY_VERIFY_WITH_TIMEOUT(itemDelegate(list, "<id:1>") != nullptr, 3000);
+        auto *model = backend.dayTimeline();
+        const int id1Before = model->indexOfItem("<id:1>");
+        const int id2Before = model->indexOfItem("fajr-2");
+        QVERIFY(id1Before >= 0); QCOMPARE(id2Before, id1Before + 1);
+
+        auto *card = itemDelegate(list, "<id:1>"); QVERIFY(card);
+        auto *handle = dragHandle(card); QVERIFY(handle);
+        auto *target = rowDelegate(list, id2Before); QVERIFY(target);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, sceneCenter(handle));
+        QTRY_VERIFY_WITH_TIMEOUT(root->property("dragging").toBool(), 1000);
+        QTest::mouseMove(window, sceneCenter(target, 0.8));
+        QTRY_VERIFY_WITH_TIMEOUT(model->indexOfItem("<id:1>") > rowForKey(model, "item:fajr-2"), 1000);
+        QCOMPARE(model->indexOfItem("<id:1>"), rowForKey(model, "item:fajr-2") + 1);
+        QTest::qWait(200);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier,
+                            sceneCenter(rowDelegate(list, model->indexOfItem("<id:1>"))));
+        QTRY_COMPARE_WITH_TIMEOUT(requestCount(daemon, "item.move"), 1, 3000);
+        QJsonObject params = lastRequest(daemon, "item.move").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("<id:1>"));
+        QCOMPARE(params.value("block").toString(), QString("fajr"));
+        QCOMPARE(params.value("after_id").toString(), QString("fajr-2"));
+        QVERIFY(!params.contains("before_id"));
+        QTest::qWait(100);
+
+        card = itemDelegate(list, "<id:1>"); QVERIFY(card);
+        handle = dragHandle(card); QVERIFY(handle);
+        const int id1Now = model->indexOfItem("<id:1>");
+        const int id2Now = model->indexOfItem("fajr-2");
+        QCOMPARE(id2Now, id1Now - 1);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, sceneCenter(handle));
+        QTRY_VERIFY_WITH_TIMEOUT(root->property("dragging").toBool(), 1000);
+        QTest::mouseMove(window, sceneCenter(rowDelegate(list, id2Now), 0.2));
+        QTRY_VERIFY_WITH_TIMEOUT(model->indexOfItem("<id:1>") < rowForKey(model, "item:fajr-2"), 1000);
+        QTest::qWait(200);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier,
+                            sceneCenter(rowDelegate(list, model->indexOfItem("<id:1>"))));
+        QTRY_COMPARE_WITH_TIMEOUT(requestCount(daemon, "item.move"), 2, 3000);
+        params = lastRequest(daemon, "item.move").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("<id:1>"));
+        QCOMPARE(params.value("block").toString(), QString("fajr"));
+        QCOMPARE(params.value("before_id").toString(), QString("fajr-2"));
+        QVERIFY(!params.contains("after_id"));
+    }
+
+    void timelineDragEscapeCancelsAndRestoresOrder() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        daemon.setHandler(readHandler(dragDay()));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
+
+        Theme theme(dir.path());
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data()); QVERIFY(window);
+        window->show(); window->setWidth(1440); window->setHeight(1600);
+        window->requestActivate();
+        waitForBackendIdle(backend);
+        auto *list = timelineView(root.data()); QVERIFY(list);
+        QTRY_VERIFY_WITH_TIMEOUT(itemDelegate(list, "<id:2>") != nullptr, 3000);
+        auto *model = backend.dayTimeline();
+        const QStringList before = timelineKeys(model);
+        const int original = model->indexOfItem("<id:2>");
+        const int targetRow = model->indexOfItem("<id:1>");
+        QVERIFY(original > targetRow);
+
+        auto *card = itemDelegate(list, "<id:2>"); QVERIFY(card);
+        auto *handle = dragHandle(card); QVERIFY(handle);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, sceneCenter(handle));
+        QTRY_VERIFY_WITH_TIMEOUT(root->property("dragging").toBool(), 1000);
+        QTest::mouseMove(window, sceneCenter(rowDelegate(list, targetRow)));
+        QTRY_VERIFY_WITH_TIMEOUT(model->indexOfItem("<id:2>") != original, 1000);
+        QTest::qWait(200);
+
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY_WITH_TIMEOUT(!root->property("dragging").toBool(), 3000);
+        QCOMPARE(timelineKeys(model), before);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier,
+                            sceneCenter(rowDelegate(list, targetRow)));
+        QTest::qWait(100);
+        QCOMPARE(requestCount(daemon, "item.move"), 0);
+    }
+
+    void timelineDragFailedMoveRestoresServerOrder() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        const QJsonObject day = dragDay();
+        auto reads = readHandler(day);
+        daemon.setHandler([reads](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            if (request.value("method").toString() == "item.move") {
+                server->respondError(socket, request, -32000, "test", "move rejected");
+                return;
+            }
+            reads(request, socket, server);
+        });
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
+
+        Theme theme(dir.path());
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data()); QVERIFY(window);
+        window->show(); window->setWidth(1440); window->setHeight(1600);
+        waitForBackendIdle(backend);
+        auto *list = timelineView(root.data()); QVERIFY(list);
+        QTRY_VERIFY_WITH_TIMEOUT(itemDelegate(list, "<id:1>") != nullptr, 3000);
+        auto *model = backend.dayTimeline();
+        const QStringList before = timelineKeys(model);
+        const int original = model->indexOfItem("<id:1>");
+        const int dhuhrRow = rowForKey(model, "header:dhuhr");
+        QVERIFY(original >= 0); QVERIFY(dhuhrRow > original);
+
+        auto *card = itemDelegate(list, "<id:1>"); QVERIFY(card);
+        auto *handle = dragHandle(card); QVERIFY(handle);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, sceneCenter(handle));
+        QTRY_VERIFY_WITH_TIMEOUT(root->property("dragging").toBool(), 1000);
+        QTest::mouseMove(window, sceneCenter(rowDelegate(list, dhuhrRow)));
+        QTRY_VERIFY_WITH_TIMEOUT(model->indexOfItem("<id:1>") != original, 1000);
+        QTest::qWait(200);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier,
+                            sceneCenter(rowDelegate(list, rowForKey(model, "header:dhuhr"))));
+        QTRY_COMPARE_WITH_TIMEOUT(requestCount(daemon, "item.move"), 1, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.error().contains("move rejected"), 3000);
+        QTRY_COMPARE_WITH_TIMEOUT(timelineKeys(model), before, 3000);
+        QCOMPARE(model->indexOfItem("<id:1>"), original);
+    }
+
+    void timelineDragClampsAboveAndBelowTheBlocks() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        daemon.setHandler(readHandler(dragDay()));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
+
+        Theme theme(dir.path());
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data()); QVERIFY(window);
+        window->show(); window->setWidth(1440); window->setHeight(1600);
+        window->requestActivate();
+        waitForBackendIdle(backend);
+        auto *list = timelineView(root.data()); QVERIFY(list);
+        QTRY_VERIFY_WITH_TIMEOUT(itemDelegate(list, "<id:1>") != nullptr, 3000);
+        auto *model = backend.dayTimeline();
+        const QStringList before = timelineKeys(model);
+        const int original = model->indexOfItem("<id:1>");
+        QVERIFY(original >= 0);
+
+        auto *card = itemDelegate(list, "<id:1>"); QVERIFY(card);
+        auto *handle = dragHandle(card); QVERIFY(handle);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, sceneCenter(handle));
+        QTRY_VERIFY_WITH_TIMEOUT(root->property("dragging").toBool(), 1000);
+
+        QTest::mouseMove(window, list->mapToScene(QPointF(10, -20)).toPoint());
+        QTest::qWait(200);
+        QTRY_COMPARE_WITH_TIMEOUT(model->indexOfItem("<id:1>"),
+                                  rowForKey(model, "header:night") + 1, 1000);
+        const int clampedAbove = model->indexOfItem("<id:1>");
+        QCOMPARE(model->kindAt(clampedAbove), QString("item"));
+
+        const int sunrise = rowForKey(model, "marker:sunrise");
+        QVERIFY(sunrise >= 0);
+        QTest::mouseMove(window, sceneCenter(rowDelegate(list, sunrise)));
+        QTest::qWait(200);
+        QCOMPARE(model->indexOfItem("<id:1>"), clampedAbove);
+        QVERIFY(model->kindAt(clampedAbove) != QString("marker"));
+
+        QTest::mouseMove(window, list->mapToScene(QPointF(10, list->height() - 1)).toPoint());
+        QTest::qWait(200);
+        QTRY_COMPARE_WITH_TIMEOUT(model->indexOfItem("<id:1>"),
+                                  rowForKey(model, "add:isha") - 1, 1000);
+        const int clampedBelow = model->indexOfItem("<id:1>");
+        const int addIsha = rowForKey(model, "add:isha");
+        QVERIFY(addIsha >= 0);
+        QCOMPARE(clampedBelow, addIsha - 1);
+        QCOMPARE(model->keyAt(clampedBelow + 1), QString("add:isha"));
+        const int sleep = rowForKey(model, "marker:sleep");
+        QVERIFY(sleep > addIsha);
+        QTest::mouseMove(window, sceneCenter(rowDelegate(list, sleep)));
+        QTest::qWait(200);
+        QCOMPARE(model->indexOfItem("<id:1>"), clampedBelow);
+        QCOMPARE(model->keyAt(clampedBelow + 1), QString("add:isha"));
+
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY_WITH_TIMEOUT(!root->property("dragging").toBool(), 3000);
+        QCOMPARE(timelineKeys(model), before);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier,
+                            sceneCenter(rowDelegate(list, original)));
+        QTest::qWait(100);
+        QCOMPARE(requestCount(daemon, "item.move"), 0);
     }
 
     void dayTimelineModelDiffsRowsInPlace() {

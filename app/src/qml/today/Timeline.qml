@@ -38,9 +38,23 @@ Item {
         dragPointerY = globalY
         var model = backend.dayTimeline
         var p = todayList.mapFromItem(win.contentItem, 0, globalY)
-        var idx = todayList.indexAt(10, p.y + todayList.contentY)
-        if (idx < 0) idx = p.y < 0 ? 0 : model.count - 1
+        var contentY = p.y + todayList.contentY
+        var idx = todayList.indexAt(10, contentY)
         var from = model.indexOfItem(dragId)
+        // Above the list clamps below the first header; below the content
+        // clamps to the gap just above the last block's "+ add" row, never
+        // after the Sleep marker. Points between rows keep the current gap.
+        if (idx < 0) {
+            if (contentY < 0) {
+                idx = 0
+            } else if (contentY >= todayList.contentHeight) {
+                idx = model.count - 1
+                while (idx >= 0 && model.kindAt(idx) !== "add") idx--
+                if (idx < 0) return
+            } else {
+                return
+            }
+        }
         // The gap belongs between a block's header and its "+ add" row: over a
         // header it goes just below it, over "+ add" just above it, and markers
         // (Sunrise, Sleep) never take it. Moving down, moveRow puts the row
@@ -61,15 +75,36 @@ Item {
             if (from >= 0 && dragOriginalIndex >= 0)
                 model.moveRow(from, dragOriginalIndex)
         } else {
-            var block = model.blockAt(from)
+            // The dragged row keeps its old block role while the list is
+            // reordered, so resolve the destination from the nearest header
+            // above the gap instead of from model.blockAt(from).
+            var block = ""
+            for (var h = from; h >= 0; h--) {
+                if (model.kindAt(h) === "header") { block = model.blockAt(h); break }
+            }
+            if (block === "") {
+                if (dragOriginalIndex >= 0)
+                    model.moveRow(from, dragOriginalIndex)
+                dragging = false
+                dragId = ""
+                dragOriginalIndex = -1
+                return
+            }
             var afterId = "", beforeId = ""
             for (var p = from - 1; p >= 0; p--) {
-                if (model.blockAt(p) !== block) break
-                if (model.kindAt(p) === "item") { afterId = model.itemIdAt(p); break }
+                if (model.kindAt(p) === "header") break
+                if (model.kindAt(p) === "item" && model.blockAt(p) === block) {
+                    afterId = model.itemIdAt(p)
+                    break
+                }
             }
             for (var n = from + 1; n < model.count; n++) {
-                if (model.blockAt(n) !== block) break
-                if (model.kindAt(n) === "item") { beforeId = model.itemIdAt(n); break }
+                var kind = model.kindAt(n)
+                if (kind === "add" || kind === "header" || kind === "marker") break
+                if (kind === "item" && model.blockAt(n) === block) {
+                    beforeId = model.itemIdAt(n)
+                    break
+                }
             }
             backend.moveItem(dragId, block, afterId, beforeId)
         }
