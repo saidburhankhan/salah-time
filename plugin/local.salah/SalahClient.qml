@@ -9,6 +9,13 @@ import Quickshell.Io
 // Requests are correlated by JSON-RPC id; every mutation gets a fresh op_id
 // from `newOpId()` so a retry can reuse it safely. The CLI fallback keeps the
 // widget usable without a running daemon and is retried on a backoff timer.
+//
+// The one Socket below is a direct, static child: it is never created in a
+// Loader/Repeater/Component and never destroyed to reconnect. Mutating
+// `connected`/`path` from inside a Socket signal handler makes Quickshell
+// delete the QLocalSocket while QAbstractSocketPrivate::setErrorAndEmit() is
+// still on the stack (a shell segfault). All socket reconfiguration therefore
+// happens only in attemptConnect(), reached from onCompleted or reconnectTimer.
 Item {
   id: client
   visible: false
@@ -39,7 +46,8 @@ Item {
   property var activeOps: ({})
   property bool socketConnecting: false
   property bool handshaking: false
-  property int reconnectDelayMs: 1000
+  property bool alive: true
+  property int reconnectDelayMs: 500
   property var fallbackQueue: []
   property var activeFallback: null
   property bool statusAfterFallback: false
@@ -57,7 +65,7 @@ Item {
   }
 
   function request(method, params, meta) {
-    if (!rpcSocket.connected) return -1
+    if (!client.alive || !rpcSocket.connected) return -1
     var id = client.nextRequestId++
     var message = { "jsonrpc": "2.0", "id": id, "method": method }
     if (params !== undefined && params !== null) message.params = params
@@ -67,15 +75,25 @@ Item {
     return id
   }
 
-  function connectSocket() {
-    if (!client.socketPath || client.socketActive || client.socketConnecting) return
+  // Safe point for every socket mutation. Only onCompleted (after the item is
+  // fully built) and reconnectTimer.onTriggered call this, never a Socket
+  // signal handler, so closing a stale QLocalSocket cannot delete it while Qt
+  // is still emitting from it.
+  function attemptConnect() {
+    if (!client.alive) return
+    if (client.socketActive || client.socketConnecting) return
+    if (rpcSocket.connected) rpcSocket.connected = false
+    if (!client.socketPath) {
+      client.scheduleReconnect()
+      return
+    }
+    if (rpcSocket.path !== client.socketPath) rpcSocket.path = client.socketPath
     client.socketConnecting = true
-    rpcSocket.path = client.socketPath
     rpcSocket.connected = true
-    handshakeTimer.restart()
   }
 
   function scheduleReconnect() {
+    if (!client.alive) return
     if (client.socketActive || client.socketConnecting) return
     if (reconnectTimer.running) return
     reconnectTimer.interval = client.reconnectDelayMs
@@ -84,6 +102,7 @@ Item {
   }
 
   function startHandshake() {
+    if (!client.alive || !rpcSocket.connected) return
     client.requests = ({})
     client.activeOps = ({})
     client.lastKnownRevision = 0
@@ -92,21 +111,26 @@ Item {
     client.pendingStatusRevision = 0
     client.statusInFlight = false
     handshakeTimer.restart()
-    client.request("hello", { "protocol": [1], "client": "salah-widget", "actor": "widget" },
-      { "type": "hello" })
+    if (client.request("hello", { "protocol": [1], "client": "salah-widget", "actor": "widget" },
+      { "type": "hello" }) < 0) {
+      client.markDisconnected("connection closed")
+    }
   }
 
-  function dropSocket(reason) {
+  // Records a broken connection. Deliberately performs no socket mutation:
+  // callers include Socket.onError/onConnectionStateChanged and SplitParser
+  // onRead, all of which run inside Qt's QLocalSocket emission. The reconnect
+  // Timer does the actual close/reopen on a safe stack.
+  function markDisconnected(reason) {
+    if (!client.alive) return
     client.socketConnecting = false
     client.handshaking = false
     handshakeTimer.stop()
-    if (rpcSocket.connected) rpcSocket.connected = false
-    if (client.socketActive) {
-      client.socketActive = false
-      client.pendingStatusRevision = 0
-      client.statusInFlight = false
-      client.transportChanged(false)
-    }
+    var wasActive = client.socketActive
+    client.socketActive = false
+    client.pendingStatusRevision = 0
+    client.statusInFlight = false
+    if (wasActive) client.transportChanged(false)
     client.failOutstanding(reason)
     client.scheduleReconnect()
   }
@@ -115,41 +139,58 @@ Item {
     var pending = client.requests
     client.requests = ({})
     client.activeOps = ({})
+    var failures = []
     for (var key in pending) {
       var meta = pending[key]
       if (!meta) continue
       if (meta.type === "status") {
         client.statusInFlight = false
         client.lastStatusRevision = 0
-        client.statusFailed(reason)
+        failures.push({ "type": "status", "reason": reason })
       } else if (meta.type === "mutation") {
-        client.mutationFailed(meta.opId, meta.kind, reason)
+        failures.push({ "type": "mutation", "opId": meta.opId,
+          "kind": meta.kind, "reason": reason })
       }
     }
+    if (failures.length === 0) return
+    // Fail asynchronously: these handlers may call back into the widget, and
+    // the disconnect/error path must unwind before anyone can destroy it.
+    Qt.callLater(function() {
+      if (!client.alive) return
+      for (var i = 0; i < failures.length; i++) {
+        var failure = failures[i]
+        if (failure.type === "status") client.statusFailed(failure.reason)
+        else client.mutationFailed(failure.opId, failure.kind, failure.reason)
+      }
+    })
   }
 
   function handleConnectionState() {
+    if (!client.alive) return
     if (rpcSocket.connected) {
       if (client.socketActive || client.handshaking) return
       client.socketConnecting = false
       client.handshaking = true
-      client.startHandshake()
+      handshakeTimer.restart()
+      // A write is safe here; unlike connected/path it does not recreate the
+      // underlying QLocalSocket. Defer it anyway to leave the signal first.
+      Qt.callLater(client.startHandshake)
       return
     }
     if (client.socketActive || client.socketConnecting || client.handshaking)
-      client.dropSocket("connection closed")
+      client.markDisconnected("connection closed")
   }
 
   function handleSocketError(error) {
-    if (rpcSocket.connected) {
-      rpcSocket.connected = false
-      Qt.callLater(client.handleConnectionState)
-    } else {
-      client.handleConnectionState()
-    }
+    // Only record state and arm the Timer. Quickshell's Socket::onSocketError
+    // still owns the emitting QLocalSocket; setting `connected` here calls
+    // disconnectFromServer() and deleteLater() from inside that emission,
+    // which is the reported segfault.
+    client.markDisconnected("socket error")
   }
 
   function handleLine(line) {
+    if (!client.alive) return
     var text = String(line || "").trim()
     if (text === "") return
     var message
@@ -182,7 +223,7 @@ Item {
         delete client.activeOps[meta.opId]
         client.mutationFailed(meta.opId, meta.kind, detail)
       } else if (meta.type === "hello" || meta.type === "subscribe") {
-        client.dropSocket(detail)
+        client.markDisconnected(detail)
       }
       return
     }
@@ -216,11 +257,11 @@ Item {
 
   function handleHello(result) {
     if (!result) {
-      client.dropSocket("invalid hello response")
+      client.markDisconnected("invalid hello response")
       return
     }
     if (Number(result.protocol) !== 1) {
-      client.dropSocket("unsupported protocol")
+      client.markDisconnected("unsupported protocol")
       return
     }
     handshakeTimer.stop()
@@ -234,7 +275,7 @@ Item {
     client.socketActive = true
     client.socketConnecting = false
     client.handshaking = false
-    client.reconnectDelayMs = 1000
+    client.reconnectDelayMs = 500
     handshakeTimer.stop()
     client.lastKnownRevision = Math.max(client.lastKnownRevision,
       Number(result && result.revision) || 0)
@@ -445,20 +486,34 @@ Item {
 
   Component.onCompleted: {
     initialStatusTimer.start()
-    client.connectSocket()
+    client.attemptConnect()
+  }
+
+  Component.onDestruction: {
+    // Quickshell's own examples never touch Socket.connected while tearing a
+    // Socket owner down; the QLocalSocket is owned by the Socket and is
+    // destroyed with it. Mutating it here would re-enter the socket signal
+    // path during destruction. Stop the Timers and stop accepting callbacks.
+    client.alive = false
+    reconnectTimer.stop()
+    handshakeTimer.stop()
+    initialStatusTimer.stop()
   }
 
   Timer {
     id: initialStatusTimer
     interval: 500
     repeat: false
-    onTriggered: if (!client.socketActive) client.refreshStatus()
+    onTriggered: if (client.alive && !client.socketActive) client.refreshStatus()
   }
 
   Timer {
     id: reconnectTimer
     repeat: false
-    onTriggered: client.connectSocket()
+    // The only recurring place that toggles Socket.connected/path. A Timer
+    // callback runs outside Qt's QLocalSocket emission, so closing a stale
+    // socket here is safe.
+    onTriggered: client.attemptConnect()
   }
 
   Timer {
@@ -466,21 +521,23 @@ Item {
     interval: 5000
     repeat: false
     onTriggered: {
-      if (!client.socketActive) {
-        rpcSocket.connected = false
-        client.dropSocket("handshake timed out")
-      }
+      if (client.alive && !client.socketActive) client.markDisconnected("handshake timed out")
     }
   }
 
+  // One long-lived Socket for the widget's whole lifetime: static, directly
+  // owned, never in a Loader/Repeater/Component. Its handlers only record
+  // state and arm reconnectTimer; they never call back into the Socket.
   Socket {
     id: rpcSocket
     parser: SplitParser {
       splitMarker: "\n"
-      onRead: function(line) { client.handleLine(line) }
+      onRead: function(line) {
+        if (client.alive) client.handleLine(line)
+      }
     }
-    onConnectionStateChanged: client.handleConnectionState()
-    onError: function(error) { client.handleSocketError(error) }
+    onConnectionStateChanged: if (client.alive) client.handleConnectionState()
+    onError: function(error) { if (client.alive) client.handleSocketError(error) }
   }
 
   Process {
@@ -489,6 +546,7 @@ Item {
     stdout: StdioCollector { id: statusStdout; waitForEnd: true }
     stderr: StdioCollector { id: statusStderr; waitForEnd: true }
     onExited: function(exitCode) {
+      if (!client.alive) return
       // A socket snapshot supersedes one that was already in flight when the
       // connection came up.
       if (!client.socketActive) {
@@ -514,6 +572,7 @@ Item {
     stdout: StdioCollector { id: actionStdout; waitForEnd: true }
     stderr: StdioCollector { id: actionStderr; waitForEnd: true }
     onExited: function(exitCode) {
+      if (!client.alive) return
       var active = client.activeFallback
       client.activeFallback = null
       if (active) {
