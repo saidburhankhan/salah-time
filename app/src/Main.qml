@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Effects
 import QtQuick.Layouts
+import QtQuick.Shapes
 
 ApplicationWindow {
     id: win
@@ -49,6 +50,12 @@ ApplicationWindow {
         var repeat=x.repeat==="weekly"?weekdayText(x.weekdays,x.repeat):x.repeat==="daily"?qsTr("Daily"):qsTr("Once")
         return value ? value+"  ·  "+repeat : repeat
     }
+    function joinedDetail(block, schedule) {
+        var parts=[]
+        if(block) parts.push(capitalized(block))
+        if(schedule) parts.push(schedule)
+        return parts.join("  ·  ")
+    }
     function calendarDate(offset) {
         var base=Date.fromLocaleString(Qt.locale(),backend.selectedDay||backend.todayDay,"yyyy-MM-dd")
         var first=new Date(base.getFullYear(),base.getMonth(),1); var monday=(first.getDay()+6)%7
@@ -68,6 +75,22 @@ ApplicationWindow {
         implicitHeight: 40; leftPadding:15; rightPadding:15
         contentItem: Text { text:parent.text; color:parent.selected?"#171612":"#d6d2ca"; font.pixelSize:14; horizontalAlignment:Text.AlignHCenter; verticalAlignment:Text.AlignVCenter }
         background: Rectangle { radius:Math.max(6,theme.radius); color:parent.selected?win.text:(parent.down?win.border:"transparent"); border.width:1; border.color:parent.selected?win.text:win.border }
+    }
+    component SidebarIcon: Item {
+        id: sidebarIcon
+        property string kind: ""
+        property color iconColor: win.muted
+        width:22; height:22; implicitWidth:22; implicitHeight:22
+        Layout.preferredWidth:22; Layout.preferredHeight:22
+        Shape {
+            anchors.centerIn: parent; width:18; height:18
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: sidebarIcon.iconColor; strokeWidth:1.5; fillColor:"transparent"
+                capStyle:ShapePath.RoundCap; joinStyle:ShapePath.RoundJoin
+                PathSvg { path: sidebarIcon.kind === "today" ? "M3 5.5 L15 5.5 M6 2.5 L6 5 M12 2.5 L12 5 M4.5 3.5 L13.5 3.5 Q15 3.5 15 5 L15 14 Q15 15.5 13.5 15.5 L4.5 15.5 Q3 15.5 3 14 L3 5 Q3 3.5 4.5 3.5" : sidebarIcon.kind === "routines" ? "M14.5 5.5 L14.5 2.5 M14.5 5.5 L11.5 5.5 M14.3 5.3 A6.5 6.5 0 1 0 15 11" : sidebarIcon.kind === "statistics" ? "M3.5 15 L3.5 10 L6.5 10 L6.5 15 Z M7.5 15 L7.5 6.5 L10.5 6.5 L10.5 15 Z M11.5 15 L11.5 3 L14.5 3 L14.5 15 Z" : sidebarIcon.kind === "settings" ? "M3 5 L15 5 M3 9 L15 9 M3 13 L15 13 M6 3 L6 7 M12 7 L12 11 M8 11 L8 15" : "M9 16 C9 16 14 11.5 14 7.5 A5 5 0 1 0 4 7.5 C4 11.5 9 16 9 16 Z M9 9.5 A2 2 0 1 0 9 5.5 A2 2 0 1 0 9 9.5" }
+            }
+        }
     }
 
     Shortcut { sequence: "Ctrl+1"; context: Qt.ApplicationShortcut; onActivated: page=0 }
@@ -102,7 +125,7 @@ ApplicationWindow {
                     Rectangle { required property string modelData; required property int index; Layout.fillWidth:true; height:48; radius:theme.radius
                         color:win.page===index?win.card:"transparent"; border.color:win.page===index?win.border:"transparent"
                         Row { anchors.verticalCenter:parent.verticalCenter; leftPadding:14; spacing:13
-                            Label { text:index===0?"◷":index===1?"↻":"▥"; color:win.page===index?win.text:win.muted; font.family:win.mono; font.pixelSize:18; width:22 }
+                            SidebarIcon { kind:index===0?"today":index===1?"routines":"statistics"; iconColor:win.page===index?win.text:win.muted }
                             Label { text:modelData; color:win.page===index?win.text:"#c4c0b8"; font.pixelSize:16 }
                         }
                         MouseArea { anchors.fill:parent; onClicked:{win.page=index;if(index===2)backend.loadStats(statsRange)} }
@@ -111,14 +134,14 @@ ApplicationWindow {
                 Rectangle { Layout.fillWidth:true; height:1; color:win.border; Layout.topMargin:8; Layout.bottomMargin:8 }
                 Rectangle { Layout.fillWidth:true; height:48; radius:theme.radius; color:win.page===3?win.card:"transparent"; border.color:win.page===3?win.border:"transparent"
                     Row { anchors.verticalCenter:parent.verticalCenter; leftPadding:14; spacing:13
-                        Label { text:"⌘"; color:win.page===3?win.text:win.muted; font.family:win.mono; font.pixelSize:18; width:22 }
+                        SidebarIcon { kind:"settings"; iconColor:win.page===3?win.text:win.muted }
                         Label { text:qsTr("Settings"); color:win.page===3?win.text:"#c4c0b8"; font.pixelSize:16 }
                     }
                     MouseArea { anchors.fill:parent; onClicked:win.page=3 }
                 }
                 Item { Layout.fillHeight:true }
                 RowLayout { Layout.fillWidth:true; Layout.preferredHeight:48
-                    Label { text:"⌖"; color:win.muted; font.family:win.mono; font.pixelSize:18; Layout.leftMargin:12 }
+                    SidebarIcon { kind:"location"; iconColor:win.muted; Layout.leftMargin:12 }
                     Label { text:locationName(); color:"#c4c0b8"; font.pixelSize:15; Layout.fillWidth:true; elide:Text.ElideRight }
                 }
             }
@@ -129,7 +152,7 @@ ApplicationWindow {
             Layout.fillWidth:true; Layout.fillHeight:true
             ColumnLayout { anchors.fill:parent; spacing:0
                 Rectangle { Layout.fillWidth:true; height:74; color:"#171612"
-                    RowLayout { anchors.fill:parent; anchors.leftMargin:32; anchors.rightMargin:32
+                    RowLayout { anchors.fill:parent; anchors.leftMargin:28; anchors.rightMargin:28
                         ColumnLayout { visible:page===0; Layout.fillWidth:true; spacing:2
                             RowLayout { spacing:10
                                 Label { text:(backend.selectedDay===backend.todayDay?qsTr("Today · "):"")+backend.hijriHeader(backend.selectedDay); color:win.text; font.pixelSize:22; font.weight:Font.DemiBold }
@@ -137,7 +160,7 @@ ApplicationWindow {
                             }
                         }
                         Label { visible:page!==0; Layout.fillWidth:true; text:page===1?qsTr("Routines"):page===2?qsTr("Statistics"):qsTr("Settings"); color:win.text; font.pixelSize:22; font.weight:Font.DemiBold }
-                        AppButton { visible:page===0; text:qsTr("+  Add"); primary:true; onClicked:openQuick("") }
+                        AppButton { visible:page===0; text:qsTr("+  Add"); primary:true; Layout.alignment:Qt.AlignRight; onClicked:openQuick("") }
                     }
                     Rectangle { anchors.bottom:parent.bottom; height:1; width:parent.width; color:win.border }
                 }
@@ -250,7 +273,7 @@ ApplicationWindow {
                                 RowLayout { anchors.fill:parent;anchors.margins:18;spacing:24
                                     ColumnLayout { Layout.preferredWidth:270;spacing:5
                                         Label { text:modelData.title;color:win.text;font.pixelSize:17;font.weight:Font.Medium;Layout.fillWidth:true;elide:Text.ElideRight }
-                                        Label { text:capitalized(modelData.block)+"  ·  "+weekdayText(modelData.weekdays,modelData.repeat);color:win.muted;font.family:win.mono;font.pixelSize:12 }
+                                        Label { text:joinedDetail(modelData.block,weekdayText(modelData.weekdays,modelData.repeat));color:win.muted;font.family:win.mono;font.pixelSize:12 }
                                         Label { text:qsTr("%1 of %2 days").arg(modelData.done_days).arg(modelData.planned_days);color:"#c7c2b9";font.pixelSize:13 }
                                     }
                                     RowLayout { Layout.fillWidth:true;Layout.fillHeight:true;spacing:5
@@ -302,7 +325,7 @@ ApplicationWindow {
                                 RowLayout { anchors.fill:parent;anchors.margins:18
                                     ColumnLayout { Layout.fillWidth:true
                                         Label { text:modelData.title;color:win.text;font.pixelSize:15;font.weight:Font.Medium }
-                                        Label { text:capitalized(modelData.block)+"  ·  "+weekdayText(modelData.weekdays,modelData.repeat);color:win.muted;font.family:win.mono;font.pixelSize:12 }
+                                        Label { text:joinedDetail(modelData.block,weekdayText(modelData.weekdays,modelData.repeat));color:win.muted;font.family:win.mono;font.pixelSize:12 }
                                         Rectangle { Layout.fillWidth:true;Layout.maximumWidth:420;height:5;radius:3;color:"#38352f"; Rectangle { width:parent.width*(modelData.planned_days?modelData.done_days/modelData.planned_days:0);height:parent.height;radius:3;color:theme.accent } }
                                     }
                                     Label { Layout.preferredWidth:120;horizontalAlignment:Text.AlignRight;text:modelData.measure==="minutes"?qsTr("%1 min").arg(modelData.minutes):modelData.measure==="count"?String(modelData.count):qsTr("%1 / %2 days").arg(modelData.done_days).arg(modelData.planned_days);color:win.text;font.family:win.mono;font.pixelSize:16 }
@@ -359,14 +382,16 @@ ApplicationWindow {
     }
 
     // Detailed entry overlay
-    Popup { id:entryPopup;visible:entryVisible;modal:true;focus:true;anchors.centerIn:Overlay.overlay;width:win.width-44;height:win.height-44;closePolicy:Popup.NoAutoClose
+    Popup { id:entryPopup;visible:entryVisible;modal:true;focus:true;anchors.centerIn:Overlay.overlay
+        width:Math.min(1100,win.width-48);height:Math.min(820,win.height-48);padding:0;closePolicy:Popup.NoAutoClose
         property string block:editItem.block||"fajr";property string measure:editItem.measure||"check";property string repeat:editItem.repeat||"none";property var days:editItem.weekdays||[];property bool confirming:false
-        Overlay.modal: Rectangle { color:"#8c000000" }
-        background:Rectangle{color:"#151411";radius:Math.max(8,theme.radius);border.width:1;border.color:win.border;layer.enabled:true;layer.effect:MultiEffect{shadowEnabled:true;shadowOpacity:.4;shadowBlur:1}}
+        Overlay.modal: Rectangle { color:"#d9000000" }
+        background:null
         onOpened:{block=editItem.block||"fajr";measure=editItem.measure||"check";repeat=editItem.repeat||"none";days=editItem.weekdays||[];confirming=false;titleField.text=editItem.title||"";amount.value=editItem.target||1}
         function draft(){return {id:editItem.id||"",title:titleField.text,block:block,measure:measure,target:amount.value,repeat:repeat,weekdays:days}}
         function toggleDay(d){var a=days.slice();var i=a.indexOf(d);if(i>=0)a.splice(i,1);else a.push(d);days=a}
-        ColumnLayout { anchors.fill:parent;spacing:0
+        Rectangle { anchors.fill:parent;color:"#151411";radius:Math.max(8,theme.radius);border.width:1;border.color:win.border }
+        ColumnLayout { anchors.fill:parent;anchors.margins:1;spacing:0
             RowLayout { Layout.fillWidth:true;Layout.preferredHeight:72;Layout.leftMargin:22;Layout.rightMargin:22
                 Label { text:editItem.id?qsTr("Edit entry"):qsTr("New entry");color:win.text;font.pixelSize:20;font.weight:Font.DemiBold;Layout.fillWidth:true }
                 AppButton { visible:!!editItem.id;text:entryPopup.confirming?qsTr("Confirm delete"):qsTr("Delete");onClicked:{if(entryPopup.confirming){backend.removeItem(editItem.id);entryVisible=false}else entryPopup.confirming=true} }
@@ -379,7 +404,11 @@ ApplicationWindow {
                 ScrollView { id:entryScroll; Layout.fillWidth:true;Layout.fillHeight:true;Layout.minimumWidth:450;clip:true
                     Column { width:entryScroll.availableWidth;spacing:18
                         Rectangle { width:parent.width;height:108;radius:theme.radius;color:win.panel;border.color:win.border
-                            TextField { id:titleField;anchors.fill:parent;anchors.margins:24;placeholderText:qsTr("Activity title…");font.pixelSize:28;verticalAlignment:TextInput.AlignVCenter;leftPadding:6;rightPadding:6;background:Rectangle{color:"transparent";Rectangle{anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:1;color:win.border}} }
+                            Item { anchors.fill:parent;anchors.margins:24
+                                Text { anchors.left:parent.left;anchors.verticalCenter:parent.verticalCenter;text:qsTr("Activity title…");color:win.muted;font.pixelSize:24;visible:titleField.text.length===0 }
+                                TextInput { id:titleField;anchors.left:parent.left;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;color:win.text;selectionColor:theme.accent;selectedTextColor:theme.accentForeground;font.pixelSize:28;clip:true }
+                                Rectangle { anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:1;color:win.border }
+                            }
                         }
                         Rectangle { width:parent.width;height:150;radius:theme.radius;color:win.panel;border.color:win.border
                             ColumnLayout { anchors.fill:parent;anchors.margins:22;spacing:16
