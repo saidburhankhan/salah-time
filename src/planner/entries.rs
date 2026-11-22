@@ -1,5 +1,5 @@
 use super::items::find_item;
-use super::{recorded_block, stamp};
+use super::{recorded_block, stamp, write};
 use crate::config::Config;
 use crate::error::Error;
 use crate::item::{Entry, EntryKind, Item, Measure};
@@ -39,12 +39,14 @@ pub fn done(
     date: Option<NaiveDate>,
 ) -> Result<Entry, Error> {
     let now = stamp(now);
-    let item = find_item(store, id)?;
     let schedule = schedule::resolve(config, now)?;
-    let block = recorded_block(&schedule, &item, date);
-    let entry = new_entry(&item, block, EntryKind::Done, now, ids);
-    store.put_entry(&entry)?;
-    Ok(entry)
+    write(store, config, now, |tx| {
+        let item = find_item(tx, id)?;
+        let block = recorded_block(&schedule, &item, date);
+        let entry = new_entry(&item, block, EntryKind::Done, now, ids);
+        tx.put_entry(&entry)?;
+        Ok(entry)
+    })
 }
 
 /// Removes the tick from an item's day. Logged minutes and counts stay.
@@ -56,19 +58,19 @@ pub fn undo(
     date: Option<NaiveDate>,
 ) -> Result<usize, Error> {
     let now = stamp(now);
-    let item = find_item(store, id)?;
     let schedule = schedule::resolve(config, now)?;
-    let day = recorded_block(&schedule, &item, date).day;
-    let ticks: Vec<Entry> = store
-        .entries_between(day, day)?
-        .into_iter()
-        .filter(|e| e.is_live() && e.item_id == item.id && e.kind == EntryKind::Done)
-        .collect();
-    store.transaction(|store| {
+    write(store, config, now, |tx| {
+        let item = find_item(tx, id)?;
+        let day = recorded_block(&schedule, &item, date).day;
+        let ticks: Vec<Entry> = tx
+            .entries_between(day, day)?
+            .into_iter()
+            .filter(|e| e.is_live() && e.item_id == item.id && e.kind == EntryKind::Done)
+            .collect();
         for mut tick in ticks.iter().cloned() {
             tick.deleted_at = Some(now);
             tick.updated_at = now;
-            store.put_entry(&tick)?;
+            tx.put_entry(&tick)?;
         }
         Ok(ticks.len())
     })
@@ -84,13 +86,8 @@ pub fn log(
     value: i64,
     date: Option<NaiveDate>,
 ) -> Result<Entry, Error> {
-    let item = find_item(store, id)?;
     // Count items adjust their count; every other item records time spent.
-    let kind = match item.measure {
-        Measure::Count => EntryKind::Count,
-        Measure::Check | Measure::Minutes => EntryKind::Minutes,
-    };
-    record(store, config, now, ids, &item, (kind, value), date)
+    record(store, config, now, ids, id, (None, value), date)
 }
 
 /// Adds (or, when negative, subtracts) minutes of time spent on any item,
@@ -104,14 +101,13 @@ pub fn adjust_time(
     value: i64,
     date: Option<NaiveDate>,
 ) -> Result<Entry, Error> {
-    let item = find_item(store, id)?;
     record(
         store,
         config,
         now,
         ids,
-        &item,
-        (EntryKind::Minutes, value),
+        id,
+        (Some(EntryKind::Minutes), value),
         date,
     )
 }
@@ -121,8 +117,8 @@ fn record(
     config: &Config,
     now: DateTime<Utc>,
     ids: &dyn IdGenerator,
-    item: &Item,
-    (kind, value): (EntryKind, i64),
+    id: &str,
+    (kind, value): (Option<EntryKind>, i64),
     date: Option<NaiveDate>,
 ) -> Result<Entry, Error> {
     let now = stamp(now);
@@ -131,10 +127,23 @@ fn record(
         return Err("value must be between -1440 and 1440, and not 0".into());
     }
     let schedule = schedule::resolve(config, now)?;
-    let mut entry = new_entry(item, recorded_block(&schedule, item, date), kind, now, ids);
-    entry.value = Some(value);
-    store.put_entry(&entry)?;
-    Ok(entry)
+    write(store, config, now, |tx| {
+        let item = find_item(tx, id)?;
+        let kind = kind.unwrap_or(match item.measure {
+            Measure::Count => EntryKind::Count,
+            Measure::Check | Measure::Minutes => EntryKind::Minutes,
+        });
+        let mut entry = new_entry(
+            &item,
+            recorded_block(&schedule, &item, date),
+            kind,
+            now,
+            ids,
+        );
+        entry.value = Some(value);
+        tx.put_entry(&entry)?;
+        Ok(entry)
+    })
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use super::stamp;
+use super::{stamp, write};
 use crate::config::Config;
 use crate::day::BoundaryId;
 use crate::error::Error;
@@ -93,22 +93,25 @@ pub fn add(
         BoundaryId::Fajr
     };
     let block = validate_block(request.block.unwrap_or(default_block))?;
-    let item = Item {
-        id: ids.new_id(),
-        title: validate_title(&request.title)?,
-        block,
-        repeat,
-        weekdays: request.weekdays,
-        measure,
-        target: request.target,
-        position: next_position(store, block)?,
-        day,
-        created_at: now,
-        updated_at: now,
-        deleted_at: None,
-    };
-    store.put_item(&item)?;
-    Ok(item)
+    let title = validate_title(&request.title)?;
+    write(store, config, now, |tx| {
+        let item = Item {
+            id: ids.new_id(),
+            title: title.clone(),
+            block,
+            repeat,
+            weekdays: request.weekdays,
+            measure,
+            target: request.target,
+            position: next_position(tx, block)?,
+            day,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        };
+        tx.put_item(&item)?;
+        Ok(item)
+    })
 }
 
 #[derive(Clone, Debug, Default)]
@@ -123,95 +126,106 @@ pub struct ItemChanges {
 
 pub fn edit(
     store: &mut Store,
+    config: &Config,
     now: DateTime<Utc>,
     id: &str,
     changes: ItemChanges,
 ) -> Result<Item, Error> {
-    let mut item = find_item(store, id)?;
-    if let Some(title) = changes.title {
-        item.title = validate_title(&title)?;
-    }
-    if let Some(block) = changes.block {
-        item.block = validate_block(block)?;
-    }
-    if let Some(repeat) = changes.repeat {
-        item.repeat = repeat;
-        if repeat != Repeat::Weekly {
-            item.weekdays = None;
+    let now = stamp(now);
+    write(store, config, now, |tx| {
+        let mut item = find_item(tx, id)?;
+        if let Some(title) = &changes.title {
+            item.title = validate_title(title)?;
         }
-    }
-    if let Some(weekdays) = changes.weekdays {
-        item.weekdays = Some(weekdays);
-    }
-    validate_repeat(item.repeat, item.weekdays)?;
-    if let Some(measure) = changes.measure {
-        item.measure = measure;
-        if measure == Measure::Check {
-            item.target = None;
+        if let Some(block) = changes.block {
+            item.block = validate_block(block)?;
         }
-    }
-    if let Some(target) = changes.target {
-        if target.is_some_and(|t| t <= 0) {
-            return Err("target must be positive".into());
+        if let Some(repeat) = changes.repeat {
+            item.repeat = repeat;
+            if repeat != Repeat::Weekly {
+                item.weekdays = None;
+            }
         }
-        if target.is_some() && item.measure == Measure::Check {
-            return Err("a target needs a minutes or count item".into());
+        if let Some(weekdays) = changes.weekdays {
+            item.weekdays = Some(weekdays);
         }
-        item.target = target;
-    }
-    item.updated_at = stamp(now);
-    store.put_item(&item)?;
-    Ok(item)
+        validate_repeat(item.repeat, item.weekdays)?;
+        if let Some(measure) = changes.measure {
+            item.measure = measure;
+            if measure == Measure::Check {
+                item.target = None;
+            }
+        }
+        if let Some(target) = changes.target {
+            if target.is_some_and(|t| t <= 0) {
+                return Err("target must be positive".into());
+            }
+            if target.is_some() && item.measure == Measure::Check {
+                return Err("a target needs a minutes or count item".into());
+            }
+            item.target = target;
+        }
+        item.updated_at = now;
+        tx.put_item(&item)?;
+        Ok(item)
+    })
 }
 
 /// Moves an item to `block` at `index` (0-based) and renumbers that block.
 pub fn move_item(
     store: &mut Store,
+    config: &Config,
     now: DateTime<Utc>,
     id: &str,
     block: BoundaryId,
     index: usize,
 ) -> Result<Item, Error> {
     let now = stamp(now);
-    let mut moved = find_item(store, id)?;
     let block = validate_block(block)?;
-    let mut siblings: Vec<Item> = store
-        .items()?
-        .into_iter()
-        .filter(|i| i.is_live() && i.block == block && i.id != moved.id)
-        .collect();
-    siblings.sort_by(|a, b| {
-        a.position
-            .cmp(&b.position)
-            .then(a.created_at.cmp(&b.created_at))
-    });
-    let moved_id = moved.id.clone();
-    moved.block = block;
-    siblings.insert(index.min(siblings.len()), moved);
-    store.transaction(|store| {
+    write(store, config, now, |tx| {
+        let mut moved = find_item(tx, id)?;
+        let mut siblings: Vec<Item> = tx
+            .items()?
+            .into_iter()
+            .filter(|i| i.is_live() && i.block == block && i.id != moved.id)
+            .collect();
+        siblings.sort_by(|a, b| {
+            a.position
+                .cmp(&b.position)
+                .then(a.created_at.cmp(&b.created_at))
+        });
+        let moved_id = moved.id.clone();
+        moved.block = block;
+        siblings.insert(index.min(siblings.len()), moved);
         for (position, item) in siblings.iter_mut().enumerate() {
             let position = position as i64;
             if item.position != position || item.id == moved_id {
                 item.position = position;
                 item.updated_at = now;
-                store.put_item(item)?;
+                tx.put_item(item)?;
             }
         }
-        Ok(())
-    })?;
-    siblings
-        .into_iter()
-        .find(|i| i.id == moved_id)
-        .ok_or_else(|| "moved item vanished".into())
+        siblings
+            .into_iter()
+            .find(|i| i.id == moved_id)
+            .ok_or_else(|| "moved item vanished".into())
+    })
 }
 
-pub fn remove(store: &mut Store, now: DateTime<Utc>, id: &str) -> Result<Item, Error> {
-    let mut item = find_item(store, id)?;
+pub fn remove(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    id: &str,
+) -> Result<Item, Error> {
     let now = stamp(now);
-    item.deleted_at = Some(now);
-    item.updated_at = now;
-    store.put_item(&item)?;
-    Ok(item)
+    write(store, config, now, |tx| {
+        let mut item = find_item(tx, id)?;
+        item.deleted_at = Some(now);
+        item.updated_at = now;
+        tx.put_item(&item)?;
+        Ok(item)
+    })
 }
 
 #[cfg(test)]
@@ -335,9 +349,9 @@ mod tests {
         let mut store = Store::open_in_memory().unwrap();
         let mut item = add(&mut store, &config(), at(20, 13, 0), ids(), titled("One")).unwrap();
         item.id = "abcd1111".into();
-        store.put_item(&item).unwrap();
+        store.write(|tx| tx.put_item(&item)).unwrap();
         item.id = "abcd2222".into();
-        store.put_item(&item).unwrap();
+        store.write(|tx| tx.put_item(&item)).unwrap();
         assert!(find_item(&store, "abcd").unwrap_err().contains("ambiguous"));
         assert_eq!(find_item(&store, "abcd1").unwrap().id, "abcd1111");
         assert!(find_item(&store, "abc").is_err(), "too short");
@@ -375,8 +389,24 @@ mod tests {
         )
         .unwrap();
         assert_eq!((a.position, b.position), (0, 1));
-        move_item(&mut store, at(20, 13, 1), &b.id, BoundaryId::Asr, 0).unwrap();
-        move_item(&mut store, at(20, 13, 2), &c.id, BoundaryId::Asr, 1).unwrap();
+        move_item(
+            &mut store,
+            &config(),
+            at(20, 13, 1),
+            &b.id,
+            BoundaryId::Asr,
+            0,
+        )
+        .unwrap();
+        move_item(
+            &mut store,
+            &config(),
+            at(20, 13, 2),
+            &c.id,
+            BoundaryId::Asr,
+            1,
+        )
+        .unwrap();
         let plan = day_plan(&store, &config(), at(20, 13, 3), None).unwrap();
         let asr: Vec<_> = plan.blocks[3]
             .items
@@ -391,7 +421,7 @@ mod tests {
     fn removed_items_disappear_but_keep_a_tombstone() {
         let mut store = Store::open_in_memory().unwrap();
         let item = add(&mut store, &config(), at(20, 13, 0), ids(), titled("Gone")).unwrap();
-        remove(&mut store, at(20, 13, 1), &item.id).unwrap();
+        remove(&mut store, &config(), at(20, 13, 1), &item.id).unwrap();
         assert!(
             today(&store, &config(), at(20, 13, 2))
                 .unwrap()

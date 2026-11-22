@@ -1,4 +1,4 @@
-use super::stamp;
+use super::{stamp, write};
 use crate::config::Config;
 use crate::day::BoundaryId;
 use crate::error::Error;
@@ -35,28 +35,30 @@ fn mark_prayer(
         None => schedule::resolve(config, now)?.day(),
     };
     let id = PrayerMark::id_for(day, prayer);
-    let mut mark = store.mark(&id)?.unwrap_or(PrayerMark {
-        id,
-        day,
-        prayer,
-        marked_at: now,
-        created_at: now,
-        updated_at: now,
-        deleted_at: Some(now),
-    });
-    // Repeating the current state changes nothing, so marking twice is safe.
-    if mark.is_live() == prayed {
-        return Ok(mark);
-    }
-    if prayed {
-        mark.marked_at = now;
-        mark.deleted_at = None;
-    } else {
-        mark.deleted_at = Some(now);
-    }
-    mark.updated_at = now;
-    store.put_mark(&mark)?;
-    Ok(mark)
+    write(store, config, now, |tx| {
+        let mut mark = tx.mark(&id)?.unwrap_or(PrayerMark {
+            id: id.clone(),
+            day,
+            prayer,
+            marked_at: now,
+            created_at: now,
+            updated_at: now,
+            deleted_at: Some(now),
+        });
+        // Repeating the current state changes nothing, so marking twice is safe.
+        if mark.is_live() == prayed {
+            return Ok(mark);
+        }
+        if prayed {
+            mark.marked_at = now;
+            mark.deleted_at = None;
+        } else {
+            mark.deleted_at = Some(now);
+        }
+        mark.updated_at = now;
+        tx.put_mark(&mark)?;
+        Ok(mark)
+    })
 }
 
 /// Marks a prayer as prayed on `date` (default: the current day).

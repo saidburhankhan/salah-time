@@ -1,23 +1,24 @@
 use super::entries::new_entry;
 use super::items::find_item;
-use super::{BlockEnds, stamp};
+use super::{BlockEnds, stamp, write};
 use crate::config::Config;
 use crate::error::Error;
 use crate::item::{Entry, EntryKind};
 use crate::runtime::IdGenerator;
 use crate::schedule;
-use crate::store::Store;
+use crate::store::{Store, WriteTx};
 use chrono::{DateTime, Utc};
 
-/// Persists the automatic stop of timers whose block has ended.
+/// Persists the automatic stop of timers whose block has ended. Callers reach
+/// this only from inside a write transaction; reads derive expiry instead.
 pub fn close_expired_timers(
-    store: &mut Store,
+    tx: &WriteTx<'_>,
     config: &Config,
     now: DateTime<Utc>,
 ) -> Result<usize, Error> {
     let now = stamp(now);
     let mut ends = BlockEnds::new(config);
-    let expired: Vec<(Entry, DateTime<Utc>)> = store
+    let expired: Vec<(Entry, DateTime<Utc>)> = tx
         .running_timers()?
         .into_iter()
         .filter_map(|timer| {
@@ -25,14 +26,12 @@ pub fn close_expired_timers(
             (end <= now).then_some((timer, end))
         })
         .collect();
-    store.transaction(|store| {
-        for (mut timer, end) in expired.iter().cloned() {
-            timer.ended_at = Some(end.max(timer.started_at.unwrap_or(end)));
-            timer.updated_at = now;
-            store.put_entry(&timer)?;
-        }
-        Ok(expired.len())
-    })
+    for (mut timer, end) in expired.iter().cloned() {
+        timer.ended_at = Some(end.max(timer.started_at.unwrap_or(end)));
+        timer.updated_at = now;
+        tx.put_entry(&timer)?;
+    }
+    Ok(expired.len())
 }
 
 /// Starts a timer for a minutes item, stopping any other running timer.
@@ -44,25 +43,23 @@ pub fn start_timer(
     id: &str,
 ) -> Result<Entry, Error> {
     let now = stamp(now);
-    let item = find_item(store, id)?;
     let schedule = schedule::resolve(config, now)?;
-    close_expired_timers(store, config, now)?;
-    let mut timer = new_entry(&item, schedule.current_block(), EntryKind::Timer, now, ids);
-    timer.started_at = Some(now);
-    store.transaction(|store| {
-        stop_running(store, now)?;
-        store.put_entry(&timer)?;
-        Ok(())
-    })?;
-    Ok(timer)
+    write(store, config, now, |tx| {
+        let item = find_item(tx, id)?;
+        let mut timer = new_entry(&item, schedule.current_block(), EntryKind::Timer, now, ids);
+        timer.started_at = Some(now);
+        stop_running(tx, now)?;
+        tx.put_entry(&timer)?;
+        Ok(timer)
+    })
 }
 
-fn stop_running(store: &Store, now: DateTime<Utc>) -> Result<Vec<Entry>, Error> {
+fn stop_running(tx: &WriteTx<'_>, now: DateTime<Utc>) -> Result<Vec<Entry>, Error> {
     let mut stopped = Vec::new();
-    for mut timer in store.running_timers()? {
+    for mut timer in tx.running_timers()? {
         timer.ended_at = Some(now);
         timer.updated_at = now;
-        store.put_entry(&timer)?;
+        tx.put_entry(&timer)?;
         stopped.push(timer);
     }
     Ok(stopped)
@@ -76,15 +73,14 @@ pub fn stop_item_timer(
     id: &str,
 ) -> Result<Vec<Entry>, Error> {
     let now = stamp(now);
-    let item = find_item(store, id)?;
-    close_expired_timers(store, config, now)?;
-    store.transaction(|store| {
+    write(store, config, now, |tx| {
+        let item = find_item(tx, id)?;
         let mut stopped = Vec::new();
-        for mut timer in store.running_timers()? {
+        for mut timer in tx.running_timers()? {
             if timer.item_id == item.id {
                 timer.ended_at = Some(now);
                 timer.updated_at = now;
-                store.put_entry(&timer)?;
+                tx.put_entry(&timer)?;
                 stopped.push(timer);
             }
         }
@@ -99,8 +95,7 @@ pub fn stop_timer(
     now: DateTime<Utc>,
 ) -> Result<Vec<Entry>, Error> {
     let now = stamp(now);
-    close_expired_timers(store, config, now)?;
-    store.transaction(|store| stop_running(store, now))
+    write(store, config, now, |tx| stop_running(tx, now))
 }
 
 #[cfg(test)]
@@ -110,7 +105,7 @@ mod tests {
     use crate::item::{Measure, Repeat, State};
     use crate::planner::NewItem;
     use crate::planner::test_support::{at, config, date, ids, titled};
-    use crate::planner::{add, log, today};
+    use crate::planner::{add, day_plan, history, log, stats, today};
 
     #[test]
     fn a_running_timer_stops_at_the_end_of_its_block() {
@@ -133,7 +128,9 @@ mod tests {
         start_timer(&mut store, &config(), at(20, 11, 0), ids(), &quran.id).unwrap();
         // Well after Dhuhr, the Fajr block's timer has ended on its own.
         assert_eq!(
-            close_expired_timers(&mut store, &config(), at(20, 15, 0)).unwrap(),
+            store
+                .write(|tx| close_expired_timers(tx, &config(), at(20, 15, 0)))
+                .unwrap(),
             1
         );
         let entry = &store.entries().unwrap()[0];
@@ -143,6 +140,42 @@ mod tests {
         let row = view.items.iter().find(|r| r.id == quran.id).unwrap();
         assert_eq!(row.minutes, (end - at(20, 11, 0)).num_minutes());
         assert!(row.timer_started_at.is_none());
+    }
+
+    #[test]
+    fn read_paths_derive_expiry_without_writing() {
+        let mut store = Store::open_in_memory().unwrap();
+        let quran = add(
+            &mut store,
+            &config(),
+            at(20, 6, 30),
+            ids(),
+            NewItem {
+                title: "Quran".into(),
+                block: Some(BoundaryId::Fajr),
+                repeat: Some(Repeat::Daily),
+                measure: Some(Measure::Minutes),
+                target: Some(500),
+                ..NewItem::default()
+            },
+        )
+        .unwrap();
+        start_timer(&mut store, &config(), at(20, 11, 0), ids(), &quran.id).unwrap();
+        let before = store.entries().unwrap();
+
+        let now = at(20, 15, 0);
+        today(&store, &config(), now).unwrap();
+        day_plan(&store, &config(), now, None).unwrap();
+        history(&store, &config(), now, date(20), date(20)).unwrap();
+        stats(&store, &config(), now, date(20), date(20)).unwrap();
+        crate::export::export(&store, now).unwrap();
+
+        assert_eq!(store.entries().unwrap(), before, "reads must not write");
+        assert_eq!(
+            store.running_timers().unwrap().len(),
+            1,
+            "the timer stays open until a write transaction persists the close"
+        );
     }
 
     #[test]

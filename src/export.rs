@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::item::{
     Entry, EntryKind, Item, PrayerMark, validate_block, validate_repeat, validate_title,
 };
-use crate::store::Store;
+use crate::store::{Store, WriteTx};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -122,63 +122,63 @@ pub fn validate(data: &Export) -> Result<(), Error> {
 
 pub fn import(store: &mut Store, data: &Export) -> Result<ImportSummary, Error> {
     validate(data)?;
-    store.transaction(|store| {
-        let exported_items: HashSet<&str> =
-            data.items.iter().map(|item| item.id.as_str()).collect();
-        for entry in &data.entries {
-            if !exported_items.contains(entry.item_id.as_str())
-                && store.item(&entry.item_id)?.is_none()
-            {
-                return Err(format!(
-                    "entry {} references missing item {}",
-                    entry.id, entry.item_id
-                )
-                .into());
-            }
-        }
+    store.write(|tx| import_tx(tx, data))
+}
 
-        let mut summary = ImportSummary::default();
-        for item in &data.items {
-            match store.item(&item.id)? {
-                None => {
-                    store.put_item(item)?;
-                    summary.added += 1;
-                }
-                Some(current) if item.updated_at > current.updated_at => {
-                    store.put_item(item)?;
-                    summary.updated += 1;
-                }
-                Some(_) => summary.unchanged += 1,
-            }
+/// The import body, for callers that already own a write transaction.
+pub fn import_tx(tx: &WriteTx<'_>, data: &Export) -> Result<ImportSummary, Error> {
+    let exported_items: HashSet<&str> = data.items.iter().map(|item| item.id.as_str()).collect();
+    for entry in &data.entries {
+        if !exported_items.contains(entry.item_id.as_str()) && tx.item(&entry.item_id)?.is_none() {
+            return Err(format!(
+                "entry {} references missing item {}",
+                entry.id, entry.item_id
+            )
+            .into());
         }
-        for entry in &data.entries {
-            match store.entry(&entry.id)? {
-                None => {
-                    store.put_entry(entry)?;
-                    summary.added += 1;
-                }
-                Some(current) if entry.updated_at > current.updated_at => {
-                    store.put_entry(entry)?;
-                    summary.updated += 1;
-                }
-                Some(_) => summary.unchanged += 1,
+    }
+
+    let mut summary = ImportSummary::default();
+    for item in &data.items {
+        match tx.item(&item.id)? {
+            None => {
+                tx.put_item(item)?;
+                summary.added += 1;
             }
-        }
-        for mark in &data.prayer_marks {
-            match store.mark(&mark.id)? {
-                None => {
-                    store.put_mark(mark)?;
-                    summary.added += 1;
-                }
-                Some(current) if mark.updated_at > current.updated_at => {
-                    store.put_mark(mark)?;
-                    summary.updated += 1;
-                }
-                Some(_) => summary.unchanged += 1,
+            Some(current) if item.updated_at > current.updated_at => {
+                tx.put_item(item)?;
+                summary.updated += 1;
             }
+            Some(_) => summary.unchanged += 1,
         }
-        Ok(summary)
-    })
+    }
+    for entry in &data.entries {
+        match tx.entry(&entry.id)? {
+            None => {
+                tx.put_entry(entry)?;
+                summary.added += 1;
+            }
+            Some(current) if entry.updated_at > current.updated_at => {
+                tx.put_entry(entry)?;
+                summary.updated += 1;
+            }
+            Some(_) => summary.unchanged += 1,
+        }
+    }
+    for mark in &data.prayer_marks {
+        match tx.mark(&mark.id)? {
+            None => {
+                tx.put_mark(mark)?;
+                summary.added += 1;
+            }
+            Some(current) if mark.updated_at > current.updated_at => {
+                tx.put_mark(mark)?;
+                summary.updated += 1;
+            }
+            Some(_) => summary.unchanged += 1,
+        }
+    }
+    Ok(summary)
 }
 
 fn validate_id(kind: &str, id: &str) -> Result<(), Error> {

@@ -575,7 +575,6 @@ fn item_command(
             }
         }
         ItemCommand::Add(args) => {
-            planner::close_expired_timers(&mut store, &config, now)?;
             let text = args.title.join(" ");
             let mut request = if args.quick {
                 quick::parse(&text)?.into_new_item()
@@ -626,7 +625,7 @@ fn item_command(
         }
         ItemCommand::Move(args) => {
             let block = parse_block(&args.block)?;
-            let item = planner::move_item(&mut store, now, &args.id, block, args.index)?;
+            let item = planner::move_item(&mut store, &config, now, &args.id, block, args.index)?;
             if args.json {
                 json(&item)
             } else {
@@ -635,7 +634,6 @@ fn item_command(
             }
         }
         ItemCommand::Done(args) => {
-            planner::close_expired_timers(&mut store, &config, now)?;
             let date = optional_date(args.date.as_deref())?;
             let entry = planner::done(&mut store, &config, now, ids, &args.id, date)?;
             if args.json {
@@ -646,7 +644,6 @@ fn item_command(
             }
         }
         ItemCommand::Undo(args) => {
-            planner::close_expired_timers(&mut store, &config, now)?;
             let date = optional_date(args.date.as_deref())?;
             let count = planner::undo(&mut store, &config, now, &args.id, date)?;
             if args.json {
@@ -657,7 +654,6 @@ fn item_command(
             }
         }
         ItemCommand::Log(args) => {
-            planner::close_expired_timers(&mut store, &config, now)?;
             let date = optional_date(args.date.as_deref())?;
             let entry = if args.minutes {
                 planner::adjust_time(&mut store, &config, now, ids, &args.id, args.value, date)?
@@ -681,7 +677,6 @@ fn item_command(
             "Started",
         ),
         ItemCommand::Stop(args) => {
-            planner::close_expired_timers(&mut store, &config, now)?;
             let entries = match args.id.as_deref() {
                 Some(id) => planner::stop_item_timer(&mut store, &config, now, id)?,
                 None => planner::stop_timer(&mut store, &config, now)?,
@@ -694,13 +689,12 @@ fn item_command(
             }
         }
         ItemCommand::Edit(args) => {
-            planner::close_expired_timers(&mut store, &config, now)?;
             let target = if args.no_target {
                 Some(None)
             } else {
                 args.target.map(Some)
             };
-            let item = planner::edit(&mut store, now, &args.id, {
+            let item = planner::edit(&mut store, &config, now, &args.id, {
                 let (repeat, weekdays) =
                     parse_repeat(args.repeat.as_deref(), args.days.as_deref())?;
                 planner::ItemChanges {
@@ -720,8 +714,7 @@ fn item_command(
             }
         }
         ItemCommand::Remove(args) => {
-            planner::close_expired_timers(&mut store, &config, now)?;
-            let item = planner::remove(&mut store, now, &args.id)?;
+            let item = planner::remove(&mut store, &config, now, &args.id)?;
             if args.json {
                 json(&item)
             } else {
@@ -749,7 +742,6 @@ fn write_entry(
     operation: EntryOperation,
     verb: &str,
 ) -> Result<(), String> {
-    planner::close_expired_timers(store, config, now)?;
     let entry = operation(store, config, now, ids, &args.id)?;
     if args.json {
         json(&entry)
@@ -760,8 +752,7 @@ fn write_entry(
 }
 
 fn day_command(args: DayArgs, now: DateTime<Utc>) -> Result<(), String> {
-    let (mut store, config) = open_planner()?;
-    planner::close_expired_timers(&mut store, &config, now)?;
+    let (store, config) = open_planner()?;
     let plan = planner::day_plan(&store, &config, now, optional_date(args.date.as_deref())?)?;
     if args.json {
         return json(&plan);
@@ -926,8 +917,10 @@ fn import_command(args: ImportArgs, now: DateTime<Utc>) -> Result<(), String> {
     let bytes = fs::read(&args.file).map_err(|e| format!("read {}: {e}", args.file.display()))?;
     let data = export::parse(&bytes)?;
     let (mut store, config) = open_planner()?;
-    planner::close_expired_timers(&mut store, &config, now)?;
-    let summary = export::import(&mut store, &data)?;
+    let summary = store.write(|tx| {
+        planner::close_expired_timers(tx, &config, now)?;
+        export::import_tx(tx, &data)
+    })?;
     if args.json {
         json(&summary)
     } else {

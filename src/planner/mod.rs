@@ -20,8 +20,10 @@ pub use views::{
 };
 
 use crate::config::Config;
+use crate::error::Error;
 use crate::item::{self, DayItem, DayView, Entry, Item, Repeat};
 use crate::schedule::{self, BlockKey, Schedule};
+use crate::store::{Store, WriteTx};
 use chrono::{DateTime, NaiveDate, SubsecRound, Utc};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry as Slot;
@@ -95,6 +97,22 @@ fn report_day(
     view: DayView,
 ) -> Vec<DayItem> {
     item::day_items(items, entries, view, |key| ends.end(key))
+}
+
+/// Runs one planner mutation in a single immediate transaction. Reads and
+/// writes share the `WriteTx`, and any timer that a read projection already
+/// treats as expired is closed in the same transaction.
+fn write<T>(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    mut work: impl FnMut(&WriteTx<'_>) -> Result<T, Error>,
+) -> Result<T, Error> {
+    let now = stamp(now);
+    store.write(|tx| {
+        timers::close_expired_timers(tx, config, now)?;
+        work(tx)
+    })
 }
 
 #[cfg(test)]

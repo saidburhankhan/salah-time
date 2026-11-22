@@ -10,8 +10,14 @@ use crate::schedule::BlockKey;
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Serialize, de::DeserializeOwned};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+/// How many times a busy write transaction is retried before `Error::Busy`
+/// reaches the caller. SQLite's own busy timeout already waits 3 s per
+/// attempt; these short retries cover lock hand-offs between processes.
+const WRITE_ATTEMPTS: u32 = 5;
 
 /// Each entry upgrades the schema by one version. Never edit a released
 /// migration; append a new one.
@@ -82,19 +88,43 @@ pub struct Store {
     conn: Connection,
 }
 
-fn sqlite_error(error: rusqlite::Error) -> Error {
-    let message = format!("store: {error}");
-    match &error {
+fn sqlite_busy(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
         rusqlite::Error::SqliteFailure(details, _)
             if matches!(
                 details.code,
                 rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
-            ) =>
-        {
-            Error::Busy(message)
-        }
-        _ => Error::Storage(message),
+            )
+    )
+}
+
+fn sqlite_error(error: rusqlite::Error) -> Error {
+    let message = format!("store: {error}");
+    if sqlite_busy(&error) {
+        Error::Busy(message)
+    } else {
+        Error::Storage(message)
     }
+}
+
+fn retry_delay(attempt: u32) -> Duration {
+    Duration::from_millis(5u64 << attempt)
+}
+
+/// Switching a fresh database to WAL can return `SQLITE_BUSY` immediately,
+/// before SQLite's busy handler runs, so retry this step explicitly too.
+fn set_journal_mode(conn: &Connection) -> Result<(), Error> {
+    for attempt in 0..WRITE_ATTEMPTS {
+        match conn.pragma_update(None, "journal_mode", "WAL") {
+            Ok(()) => return Ok(()),
+            Err(error) if sqlite_busy(&error) && attempt + 1 < WRITE_ATTEMPTS => {
+                std::thread::sleep(retry_delay(attempt));
+            }
+            Err(error) => return Err(sqlite_error(error)),
+        }
+    }
+    unreachable!("the loop returns on its last attempt")
 }
 
 fn time_text(time: DateTime<Utc>) -> String {
@@ -188,9 +218,12 @@ impl Store {
                 .map_err(|error| Error::Storage(format!("store: {error}")))?;
         }
         let conn = Connection::open(path).map_err(sqlite_error)?;
-        // WAL lets the widget read while the app or CLI writes.
-        conn.pragma_update(None, "journal_mode", "WAL")
+        // Set the timeout before touching journal mode so two processes
+        // opening a fresh database wait for each other instead of failing.
+        conn.busy_timeout(Duration::from_secs(3))
             .map_err(sqlite_error)?;
+        // WAL lets the widget read while the app or CLI writes.
+        set_journal_mode(&conn)?;
         Store::init(conn)
     }
 
@@ -221,120 +254,74 @@ impl Store {
             )
             .into());
         }
-        for (index, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
-            let tx = self.conn.transaction().map_err(sqlite_error)?;
-            tx.execute_batch(sql).map_err(sqlite_error)?;
-            tx.pragma_update(None, "user_version", index as i64 + 1)
-                .map_err(sqlite_error)?;
-            tx.commit().map_err(sqlite_error)?;
+        // Re-read the version under the write lock: another process may have
+        // migrated the database while this one was waiting for the lock.
+        while self.version()? < schema_version() {
+            self.write(|tx| {
+                let current = tx.version()?;
+                if current > schema_version() {
+                    return Err(format!(
+                        "store: database schema {current} is newer than this salah ({}); update salah",
+                        schema_version()
+                    )
+                    .into());
+                }
+                if let Some(sql) = MIGRATIONS.get(current as usize) {
+                    tx.store.conn.execute_batch(sql).map_err(sqlite_error)?;
+                    tx.store
+                        .conn
+                        .pragma_update(None, "user_version", current + 1)
+                        .map_err(sqlite_error)?;
+                }
+                Ok(())
+            })?;
         }
         Ok(())
     }
 
-    /// Runs `work` in one transaction; nothing is saved if it fails.
-    pub fn transaction<T>(
+    /// Runs `work` in one `BEGIN IMMEDIATE` transaction. Every read the use
+    /// case needs must happen through the handle, so no read-then-write can
+    /// straddle transactions. Nothing is saved if `work` fails.
+    ///
+    /// A busy database retries the whole transaction a bounded number of times
+    /// with short backoff; after that `Error::Busy` is returned.
+    pub fn write<T>(
         &mut self,
-        work: impl FnOnce(&Store) -> Result<T, Error>,
+        mut work: impl FnMut(&WriteTx<'_>) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        for attempt in 0..WRITE_ATTEMPTS {
+            match self.write_once(&mut work) {
+                Ok(value) => return Ok(value),
+                Err(Error::Busy(_)) if attempt + 1 < WRITE_ATTEMPTS => {
+                    std::thread::sleep(retry_delay(attempt));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("the loop returns on its last attempt")
+    }
+
+    fn write_once<T>(
+        &self,
+        work: &mut impl FnMut(&WriteTx<'_>) -> Result<T, Error>,
     ) -> Result<T, Error> {
         self.conn
             .execute_batch("BEGIN IMMEDIATE")
             .map_err(sqlite_error)?;
-        match work(self) {
-            Ok(value) => {
-                self.conn.execute_batch("COMMIT").map_err(sqlite_error)?;
-                Ok(value)
-            }
-            Err(e) => {
+        let value = match work(&WriteTx { store: self }) {
+            Ok(value) => value,
+            Err(error) => {
                 let _ = self.conn.execute_batch("ROLLBACK");
-                Err(e)
+                return Err(error);
+            }
+        };
+        match self.conn.execute_batch("COMMIT") {
+            Ok(()) => Ok(value),
+            Err(error) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(sqlite_error(error))
             }
         }
-    }
-
-    pub fn put_item(&self, item: &Item) -> Result<(), Error> {
-        self.conn
-            .execute(
-                "INSERT INTO items (id, title, block, repeat, measure, target, day,
-                                    created_at, updated_at, deleted_at, position, weekdays)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-                 ON CONFLICT(id) DO UPDATE SET
-                    title = excluded.title, block = excluded.block,
-                    repeat = excluded.repeat, measure = excluded.measure,
-                    target = excluded.target, day = excluded.day,
-                    position = excluded.position, weekdays = excluded.weekdays,
-                    created_at = excluded.created_at, updated_at = excluded.updated_at,
-                    deleted_at = excluded.deleted_at",
-                params![
-                    item.id,
-                    item.title,
-                    enum_text(&item.block),
-                    enum_text(&item.repeat),
-                    enum_text(&item.measure),
-                    item.target,
-                    item.day.format("%Y-%m-%d").to_string(),
-                    time_text(item.created_at),
-                    time_text(item.updated_at),
-                    item.deleted_at.map(time_text),
-                    item.position,
-                    item.weekdays.map(|w| w.0),
-                ],
-            )
-            .map(|_| ())
-            .map_err(sqlite_error)
-    }
-
-    pub fn put_entry(&self, entry: &Entry) -> Result<(), Error> {
-        self.conn
-            .execute(
-                "INSERT INTO entries (id, item_id, day, block, kind, value, started_at,
-                                      ended_at, created_at, updated_at, deleted_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-                 ON CONFLICT(id) DO UPDATE SET
-                    item_id = excluded.item_id, day = excluded.day,
-                    block = excluded.block, kind = excluded.kind,
-                    value = excluded.value, started_at = excluded.started_at,
-                    ended_at = excluded.ended_at, created_at = excluded.created_at,
-                    updated_at = excluded.updated_at, deleted_at = excluded.deleted_at",
-                params![
-                    entry.id,
-                    entry.item_id,
-                    entry.block.day.format("%Y-%m-%d").to_string(),
-                    enum_text(&entry.block.start),
-                    enum_text(&entry.kind),
-                    entry.value,
-                    entry.started_at.map(time_text),
-                    entry.ended_at.map(time_text),
-                    time_text(entry.created_at),
-                    time_text(entry.updated_at),
-                    entry.deleted_at.map(time_text),
-                ],
-            )
-            .map(|_| ())
-            .map_err(sqlite_error)
-    }
-
-    pub fn put_mark(&self, mark: &PrayerMark) -> Result<(), Error> {
-        self.conn
-            .execute(
-                "INSERT INTO prayer_marks (id, day, prayer, marked_at, created_at,
-                                           updated_at, deleted_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(id) DO UPDATE SET
-                    day = excluded.day, prayer = excluded.prayer,
-                    marked_at = excluded.marked_at, created_at = excluded.created_at,
-                    updated_at = excluded.updated_at, deleted_at = excluded.deleted_at",
-                params![
-                    mark.id,
-                    mark.day.format("%Y-%m-%d").to_string(),
-                    enum_text(&mark.prayer),
-                    time_text(mark.marked_at),
-                    time_text(mark.created_at),
-                    time_text(mark.updated_at),
-                    mark.deleted_at.map(time_text),
-                ],
-            )
-            .map(|_| ())
-            .map_err(sqlite_error)
     }
 
     pub fn mark(&self, id: &str) -> Result<Option<PrayerMark>, Error> {
@@ -433,6 +420,111 @@ impl Store {
     }
 }
 
+/// A transaction handle. It exposes the store's reads (through `Deref`) and
+/// the only write helpers, so a mutation cannot escape its transaction.
+pub struct WriteTx<'a> {
+    store: &'a Store,
+}
+
+impl Deref for WriteTx<'_> {
+    type Target = Store;
+
+    fn deref(&self) -> &Store {
+        self.store
+    }
+}
+
+impl WriteTx<'_> {
+    pub fn put_item(&self, item: &Item) -> Result<(), Error> {
+        self.store
+            .conn
+            .execute(
+                "INSERT INTO items (id, title, block, repeat, measure, target, day,
+                                    created_at, updated_at, deleted_at, position, weekdays)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                 ON CONFLICT(id) DO UPDATE SET
+                    title = excluded.title, block = excluded.block,
+                    repeat = excluded.repeat, measure = excluded.measure,
+                    target = excluded.target, day = excluded.day,
+                    position = excluded.position, weekdays = excluded.weekdays,
+                    created_at = excluded.created_at, updated_at = excluded.updated_at,
+                    deleted_at = excluded.deleted_at",
+                params![
+                    item.id,
+                    item.title,
+                    enum_text(&item.block),
+                    enum_text(&item.repeat),
+                    enum_text(&item.measure),
+                    item.target,
+                    item.day.format("%Y-%m-%d").to_string(),
+                    time_text(item.created_at),
+                    time_text(item.updated_at),
+                    item.deleted_at.map(time_text),
+                    item.position,
+                    item.weekdays.map(|w| w.0),
+                ],
+            )
+            .map(|_| ())
+            .map_err(sqlite_error)
+    }
+
+    pub fn put_entry(&self, entry: &Entry) -> Result<(), Error> {
+        self.store
+            .conn
+            .execute(
+                "INSERT INTO entries (id, item_id, day, block, kind, value, started_at,
+                                      ended_at, created_at, updated_at, deleted_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                 ON CONFLICT(id) DO UPDATE SET
+                    item_id = excluded.item_id, day = excluded.day,
+                    block = excluded.block, kind = excluded.kind,
+                    value = excluded.value, started_at = excluded.started_at,
+                    ended_at = excluded.ended_at, created_at = excluded.created_at,
+                    updated_at = excluded.updated_at, deleted_at = excluded.deleted_at",
+                params![
+                    entry.id,
+                    entry.item_id,
+                    entry.block.day.format("%Y-%m-%d").to_string(),
+                    enum_text(&entry.block.start),
+                    enum_text(&entry.kind),
+                    entry.value,
+                    entry.started_at.map(time_text),
+                    entry.ended_at.map(time_text),
+                    time_text(entry.created_at),
+                    time_text(entry.updated_at),
+                    entry.deleted_at.map(time_text),
+                ],
+            )
+            .map(|_| ())
+            .map_err(sqlite_error)
+    }
+
+    pub fn put_mark(&self, mark: &PrayerMark) -> Result<(), Error> {
+        self.store
+            .conn
+            .execute(
+                "INSERT INTO prayer_marks (id, day, prayer, marked_at, created_at,
+                                           updated_at, deleted_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(id) DO UPDATE SET
+                    day = excluded.day, prayer = excluded.prayer,
+                    marked_at = excluded.marked_at, created_at = excluded.created_at,
+                    updated_at = excluded.updated_at, deleted_at = excluded.deleted_at",
+                params![
+                    mark.id,
+                    mark.day.format("%Y-%m-%d").to_string(),
+                    enum_text(&mark.prayer),
+                    time_text(mark.marked_at),
+                    time_text(mark.created_at),
+                    time_text(mark.updated_at),
+                    mark.deleted_at.map(time_text),
+                ],
+            )
+            .map(|_| ())
+            .map_err(sqlite_error)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,9 +573,13 @@ mod tests {
 
     #[test]
     fn rows_round_trip_exactly() {
-        let store = Store::open_in_memory().unwrap();
-        store.put_item(&sample_item()).unwrap();
-        store.put_entry(&sample_entry()).unwrap();
+        let mut store = Store::open_in_memory().unwrap();
+        store
+            .write(|tx| {
+                tx.put_item(&sample_item())?;
+                tx.put_entry(&sample_entry())
+            })
+            .unwrap();
         assert_eq!(store.item("item-1").unwrap(), Some(sample_item()));
         assert_eq!(store.entries().unwrap(), [sample_entry()]);
         assert_eq!(store.running_timers().unwrap().len(), 1);
@@ -492,18 +588,18 @@ mod tests {
 
     #[test]
     fn put_updates_in_place_and_keeps_tombstones() {
-        let store = Store::open_in_memory().unwrap();
+        let mut store = Store::open_in_memory().unwrap();
         let mut item = sample_item();
-        store.put_item(&item).unwrap();
+        store.write(|tx| tx.put_item(&item)).unwrap();
         item.deleted_at = Some(t(3));
         item.updated_at = t(3);
-        store.put_item(&item).unwrap();
+        store.write(|tx| tx.put_item(&item)).unwrap();
         assert_eq!(store.items().unwrap(), [item]);
     }
 
     #[test]
     fn prayer_marks_round_trip() {
-        let store = Store::open_in_memory().unwrap();
+        let mut store = Store::open_in_memory().unwrap();
         let mark = PrayerMark {
             id: PrayerMark::id_for(day(), BoundaryId::Asr),
             day: day(),
@@ -513,7 +609,7 @@ mod tests {
             updated_at: t(10),
             deleted_at: None,
         };
-        store.put_mark(&mark).unwrap();
+        store.write(|tx| tx.put_mark(&mark)).unwrap();
         assert_eq!(store.mark("2026-11-20:asr").unwrap(), Some(mark.clone()));
         assert_eq!(store.marks_between(day(), day()).unwrap(), [mark]);
     }
@@ -538,8 +634,8 @@ mod tests {
     #[test]
     fn failed_transactions_save_nothing() {
         let mut store = Store::open_in_memory().unwrap();
-        let result: Result<(), Error> = store.transaction(|s| {
-            s.put_item(&sample_item())?;
+        let result: Result<(), Error> = store.write(|tx| {
+            tx.put_item(&sample_item())?;
             Err("boom".into())
         });
         assert!(result.is_err());
@@ -551,9 +647,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("salah-store-{}", std::process::id()));
         let path = dir.join("salah.db");
         {
-            let store = Store::open(&path).unwrap();
+            let mut store = Store::open(&path).unwrap();
             assert_eq!(store.version().unwrap(), schema_version());
-            store.put_item(&sample_item()).unwrap();
+            store.write(|tx| tx.put_item(&sample_item())).unwrap();
         }
         assert_eq!(Store::open(&path).unwrap().items().unwrap().len(), 1);
         Connection::open(&path)

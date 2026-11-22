@@ -61,18 +61,19 @@ fn data(items: Vec<Item>, entries: Vec<Entry>) -> Export {
 
 #[test]
 fn round_trip_reproduces_every_row_including_tombstones() {
-    let source = Store::open_in_memory().unwrap();
+    let mut source = Store::open_in_memory().unwrap();
     let mut deleted_item = item("item-deleted", time(4));
     deleted_item.deleted_at = Some(time(5));
     let live_item = item("item-live", time(2));
-    source.put_item(&deleted_item).unwrap();
-    source.put_item(&live_item).unwrap();
-
     let mut deleted_entry = entry("entry-deleted", "item-deleted", time(4));
     deleted_entry.deleted_at = Some(time(5));
-    source.put_entry(&deleted_entry).unwrap();
     source
-        .put_entry(&entry("entry-live", "item-live", time(3)))
+        .write(|tx| {
+            tx.put_item(&deleted_item)?;
+            tx.put_item(&live_item)?;
+            tx.put_entry(&deleted_entry)?;
+            tx.put_entry(&entry("entry-live", "item-live", time(3)))
+        })
         .unwrap();
 
     let exported = export::export(&source, time(10)).unwrap();
@@ -96,7 +97,7 @@ fn newer_updated_at_wins_and_older_is_ignored() {
     let mut store = Store::open_in_memory().unwrap();
     let mut current = item("item", time(3));
     current.title = "Current".into();
-    store.put_item(&current).unwrap();
+    store.write(|tx| tx.put_item(&current)).unwrap();
 
     let mut newer = current.clone();
     newer.title = "Newer".into();
@@ -140,7 +141,9 @@ fn invalid_rows_and_headers_do_not_change_the_store() {
 
     for invalid in invalid_exports {
         let mut store = Store::open_in_memory().unwrap();
-        store.put_item(&item("existing", time(2))).unwrap();
+        store
+            .write(|tx| tx.put_item(&item("existing", time(2))))
+            .unwrap();
         let before = store.items().unwrap();
         assert!(export::import(&mut store, &invalid).is_err());
         assert_eq!(store.items().unwrap(), before);
