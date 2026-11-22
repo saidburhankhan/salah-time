@@ -257,7 +257,11 @@ BarWidget {
     refresh()
   }
 
-  function close() { panel.open = false }
+  function close() {
+    var content = panel.loadedContent
+    if (content && content.collapseExpanded) content.collapseExpanded()
+    panel.open = false
+  }
   function toggle() { opened ? close() : open() }
   function closeForPopoutSwitch() {
     popoutSwitchClosing = true
@@ -483,20 +487,42 @@ BarWidget {
       property real dragPointerY: 0
       property string dragTitle: ""
       property string editingKey: ""
+      property string expandedItemId: ""
       property string occurrenceHint: ""
       anchors.fill: parent
       implicitHeight: Math.min(dayColumn.implicitHeight,
         Math.max(Style.space(240), panel.availableCardHeight - panel.padding * 2))
       blocked: quickField.activeFocus || editingKey !== ""
+      function collapseExpanded() {
+        expandedItemId = ""
+        editingKey = ""
+      }
+
+      function toggleExpanded(id) {
+        var next = expandedItemId === id ? "" : id
+        expandedItemId = next
+        editingKey = ""
+        if (next !== "") Qt.callLater(function() {
+          var index = indexOfKey("item:" + next)
+          var delegate = index >= 0 ? timelineList.itemAtIndex(index) : null
+          if (delegate && delegate.focusTimeField) delegate.focusTimeField()
+        })
+      }
+
       onCloseRequested: {
         if (dragKey !== "") cancelDrag()
+        else if (expandedItemId !== "") collapseExpanded()
         else root.close()
       }
       onTabRequested: function(direction) {
         if (root.bar && typeof root.bar.switchPanelFrom === "function")
           root.bar.switchPanelFrom(root, direction)
       }
-      onActivateRequested: root.refresh()
+      onActivateRequested: {
+        var row = timelineModel.get(timelineList.currentIndex)
+        if (row && row.rowType === "item" && !row.pending) toggleExpanded(row.itemId)
+        else root.refresh()
+      }
 
       function baseRow(type, key, block) {
         return {
@@ -589,6 +615,8 @@ BarWidget {
         }
         for (var tail = timelineModel.count - 1; tail >= desired.length; tail--)
           timelineModel.remove(tail)
+        if (expandedItemId !== "" && indexOfKey("item:" + expandedItemId) < 0)
+          collapseExpanded()
       }
 
       function patchItem(id, changes) {
@@ -963,10 +991,37 @@ BarWidget {
                 required property bool pending
                 readonly property bool dragging: keyCatcher.dragKey === rowKey
                 readonly property bool done: state === "done"
+                readonly property bool expanded: rowType === "item"
+                  && keyCatcher.expandedItemId === itemId
                 property bool editing: false
                 property bool confirmingDelete: false
                 property string editText: title
                 property string correctionError: ""
+                onExpandedChanged: if (!expanded) {
+                  editing = false
+                  confirmingDelete = false
+                  correctionError = ""
+                }
+                function focusTimeField() {
+                  if (!expanded) return
+                  correctionField.forceActiveFocus()
+                  correctionField.selectAll()
+                }
+                function selectRow() {
+                  timelineList.currentIndex = index
+                  if (keyCatcher.expandedItemId !== ""
+                      && keyCatcher.expandedItemId !== itemId)
+                    keyCatcher.collapseExpanded()
+                }
+                function beginTitleEdit() {
+                  if (repeat !== "none") return
+                  editing = true
+                  confirmingDelete = false
+                  editText = title
+                  keyCatcher.editingKey = rowKey
+                  titleEditor.forceActiveFocus()
+                  titleEditor.selectAll()
+                }
                 readonly property int elapsedMinutes: {
                   root.minuteTick
                   var started = Date.parse(timer_started_at)
@@ -982,9 +1037,21 @@ BarWidget {
                 })
                 width: ListView.view.width
                 height: rowType === "header" ? Style.space(40)
-                  : (rowType === "item" ? Style.space(42)
+                  : (rowType === "item" ? Style.space(expanded
+                      ? (correctionError !== "" ? 102 : 84) : 42)
                     : (rowType === "marker" ? Style.space(24) : Style.space(27)))
+                Behavior on height {
+                  NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic }
+                }
                 opacity: dragging ? 0 : (pending ? 0.5 : (passed && !current ? 0.58 : 1))
+
+                Rectangle {
+                  visible: flatRow.rowType === "item" && flatRow.expanded
+                  anchors.fill: parent
+                  anchors.leftMargin: Style.space(28)
+                  radius: Style.cornerRadius
+                  color: Style.hoverFillFor(root.foreground, Commons.Color.accent)
+                }
 
                 Rectangle {
                   visible: flatRow.rowType === "header"
@@ -1089,10 +1156,13 @@ BarWidget {
 
                 Rectangle {
                   visible: flatRow.rowType === "item"
-                  anchors.fill: parent
+                  anchors.top: parent.top
+                  anchors.left: parent.left
+                  anchors.right: parent.right
                   anchors.leftMargin: Style.space(28)
+                  height: Style.space(42)
                   radius: Style.cornerRadius
-                  color: rowHover.containsMouse
+                  color: rowHover.containsMouse && !flatRow.expanded
                     ? Style.hoverFillFor(root.foreground, Commons.Color.accent) : "transparent"
 
                   MouseArea {
@@ -1125,6 +1195,7 @@ BarWidget {
                     property bool activeDrag: false
                     onPressed: function(mouse) {
                       activeDrag = true
+                      flatRow.selectRow()
                       var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
                       keyCatcher.beginDrag(flatRow.rowKey, flatRow.title, point.y)
                     }
@@ -1178,7 +1249,14 @@ BarWidget {
                     cursorShape: Qt.PointingHandCursor
                     pressAndHoldInterval: 250
                     property bool draggedThisPress: false
-                    onPressed: draggedThisPress = false
+                    onPressed: {
+                      draggedThisPress = false
+                      timelineList.currentIndex = flatRow.index
+                      flatRow.forceActiveFocus()
+                      if (keyCatcher.expandedItemId !== ""
+                          && keyCatcher.expandedItemId !== flatRow.itemId)
+                        keyCatcher.collapseExpanded()
+                    }
                     onPressAndHold: function(mouse) {
                       draggedThisPress = true
                       var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
@@ -1251,8 +1329,7 @@ BarWidget {
                       width: parent.width
                       textFormat: Text.PlainText
                       text: flatRow.pending ? strings.t("panel.pending")
-                        : (flatRow.correctionError !== ""
-                            ? flatRow.correctionError : root.itemDetail(flatRow.itemData))
+                        : root.itemDetail(flatRow.itemData)
                       color: root.mutedForeground
                       font.family: root.bar ? root.bar.fontFamily : Style.font.family
                       font.pixelSize: Style.font.caption
@@ -1282,7 +1359,10 @@ BarWidget {
                         fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                         horizontalPadding: 0
                         verticalPadding: 0
-                        onClicked: root.adjustCount(flatRow.itemData, -1)
+                        onClicked: {
+                          flatRow.selectRow()
+                          root.adjustCount(flatRow.itemData, -1)
+                        }
                       }
                       Row {
                         width: flatRow.target > 0 ? Style.space(54) : Style.space(32)
@@ -1316,13 +1396,14 @@ BarWidget {
                         fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                         horizontalPadding: 0
                         verticalPadding: 0
-                        onClicked: root.adjustCount(flatRow.itemData, 1)
+                        onClicked: {
+                          flatRow.selectRow()
+                          root.adjustCount(flatRow.itemData, 1)
+                        }
                       }
                     }
                     Button {
-                      visible: flatRow.elapsedMinutes > 0 || flatRow.timer_started_at !== ""
-                        || rowHover.containsMouse || activeFocus
-                      width: visible ? Style.space(62) : 0
+                      width: Style.space(68)
                       height: Style.space(26)
                       text: (flatRow.timer_started_at !== ""
                           ? strings.t("panel.pauseWithTime") : strings.t("panel.startWithTime"))
@@ -1334,100 +1415,180 @@ BarWidget {
                       horizontalPadding: 0
                       verticalPadding: 0
                       bordered: true
-                      onClicked: root.toggleTimer(flatRow.itemData)
-                    }
-                    TextField {
-                      id: correctionField
-                      visible: rowHover.containsMouse || activeFocus || text !== ""
-                        || flatRow.correctionError !== ""
-                      width: visible ? Style.space(38) : 0
-                      height: Style.space(26)
-                      placeholderText: strings.t("panel.correctionPlaceholder")
-                      foreground: root.mutedForeground
-                      font.family: "monospace"
-                      font.pixelSize: Style.font.caption
-                      horizontalPadding: Style.space(3)
-                      verticalPadding: 0
-                      maximumLength: 5
-                      onAccepted: {
-                        var raw = String(text).trim()
-                        var value = Number(raw)
-                        if (!/^[+-]?\d+$/.test(raw) || value === 0 || value < -1440 || value > 1440) {
-                          flatRow.correctionError = strings.t("panel.correctionError")
-                          correctionErrorTimer.restart()
-                          return
-                        }
-                        root.correctMinutes(flatRow.itemData, value)
-                        text = ""
-                        flatRow.correctionError = ""
-                        focus = false
-                        keyCatcher.forceActiveFocus()
-                      }
-                      Keys.onEscapePressed: function(event) {
-                        text = ""
-                        flatRow.correctionError = ""
-                        focus = false
-                        keyCatcher.forceActiveFocus()
-                        event.accepted = true
-                      }
-                      Timer {
-                        id: correctionErrorTimer
-                        interval: 2500
-                        onTriggered: flatRow.correctionError = ""
+                      onClicked: {
+                        flatRow.selectRow()
+                        root.toggleTimer(flatRow.itemData)
                       }
                     }
                     Button {
-                      visible: rowHover.containsMouse || activeFocus
-                      width: visible ? Style.space(22) : 0
-                      height: Style.space(26)
-                      text: strings.t("panel.editSymbol")
-                      tooltipText: strings.t("panel.editTitle")
+                      width: Style.space(30)
+                      height: Style.space(28)
+                      text: strings.t("panel.moreSymbol")
+                      tooltipText: strings.t("panel.moreActions")
                       foreground: root.mutedForeground
                       fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                       horizontalPadding: 0
                       verticalPadding: 0
                       onClicked: {
-                        flatRow.editing = true
-                        keyCatcher.editingKey = flatRow.rowKey
-                        flatRow.editText = flatRow.title
-                        titleEditor.forceActiveFocus()
-                        titleEditor.selectAll()
+                        timelineList.currentIndex = flatRow.index
+                        keyCatcher.toggleExpanded(flatRow.itemId)
+                      }
+                    }
+                  }
+                }
+
+                Item {
+                  visible: flatRow.rowType === "item" && flatRow.expanded
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(58)
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.space(3)
+                  anchors.top: parent.top
+                  anchors.topMargin: Style.space(44)
+                  height: Style.space(38)
+
+                  Row {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.space(4)
+
+                    Text {
+                      anchors.verticalCenter: parent.verticalCenter
+                      textFormat: Text.PlainText
+                      text: strings.t("panel.time")
+                      color: root.mutedForeground
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+                    TextField {
+                      id: correctionField
+                      width: Style.space(78)
+                      height: Style.space(28)
+                      placeholderText: strings.t("panel.correctionPlaceholder")
+                      foreground: root.foreground
+                      font.family: "monospace"
+                      font.pixelSize: Style.font.caption
+                      horizontalPadding: Style.space(5)
+                      verticalPadding: 0
+                      maximumLength: 5
+                      onActiveFocusChanged: {
+                        if (activeFocus) keyCatcher.editingKey = flatRow.rowKey
+                        else if (keyCatcher.editingKey === flatRow.rowKey && !titleEditor.activeFocus)
+                          keyCatcher.editingKey = ""
+                      }
+                      onAccepted: {
+                        var raw = String(text).trim()
+                        var value = Number(raw)
+                        if (!/^[+-]?\d+$/.test(raw) || value === 0 || value < -1440 || value > 1440) {
+                          flatRow.correctionError = strings.t("panel.correctionError")
+                          return
+                        }
+                        root.correctMinutes(flatRow.itemData, value)
+                        text = ""
+                        flatRow.correctionError = ""
+                      }
+                      Keys.onEscapePressed: function(event) {
+                        text = ""
+                        flatRow.correctionError = ""
+                        keyCatcher.collapseExpanded()
+                        keyCatcher.forceActiveFocus()
+                        event.accepted = true
+                      }
+                    }
+                    Repeater {
+                      model: [
+                        { "amount": -5, "key": "panel.minusFive" },
+                        { "amount": 5, "key": "panel.plusFive" },
+                        { "amount": 15, "key": "panel.plusFifteen" }
+                      ]
+                      Button {
+                        required property var modelData
+                        width: Style.space(34)
+                        height: Style.space(28)
+                        text: strings.t(modelData.key)
+                        foreground: root.mutedForeground
+                        fontFamily: "monospace"
+                        horizontalPadding: 0
+                        verticalPadding: 0
+                        onClicked: root.correctMinutes(flatRow.itemData, modelData.amount)
                       }
                     }
                     Button {
-                      visible: rowHover.containsMouse || activeFocus || flatRow.confirmingDelete
-                      width: visible ? (flatRow.confirmingDelete ? Style.space(102) : Style.space(22)) : 0
-                      height: Style.space(26)
-                      text: flatRow.confirmingDelete ? strings.t("panel.confirmDelete") : strings.t("panel.deleteSymbol")
-                      tooltipText: flatRow.confirmingDelete ? "" : strings.t("panel.deleteItem")
+                      visible: flatRow.repeat === "none" && !flatRow.confirmingDelete
+                      width: Style.space(42)
+                      height: Style.space(28)
+                      text: strings.t("panel.edit")
                       foreground: root.mutedForeground
                       fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                      horizontalPadding: Style.space(2)
+                      horizontalPadding: Style.space(3)
+                      verticalPadding: 0
+                      onClicked: flatRow.beginTitleEdit()
+                    }
+                    Button {
+                      visible: flatRow.repeat === "none" && !flatRow.confirmingDelete
+                      width: Style.space(52)
+                      height: Style.space(28)
+                      text: strings.t("panel.delete")
+                      foreground: root.mutedForeground
+                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                      horizontalPadding: Style.space(3)
                       verticalPadding: 0
                       onClicked: flatRow.confirmingDelete = true
                     }
-                    Button {
+                    Text {
+                      visible: flatRow.repeat !== "none"
+                      anchors.verticalCenter: parent.verticalCenter
+                      textFormat: Text.PlainText
+                      text: strings.t("panel.editRoutinesInApp")
+                      color: root.mutedForeground
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+                    Text {
                       visible: flatRow.confirmingDelete
-                      width: visible ? Style.space(28) : 0
-                      height: Style.space(26)
-                      text: strings.t("panel.yes")
-                      foreground: root.foreground
-                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                      horizontalPadding: 0
-                      verticalPadding: 0
-                      onClicked: root.removeItem(flatRow.itemData)
+                      anchors.verticalCenter: parent.verticalCenter
+                      textFormat: Text.PlainText
+                      text: strings.t("panel.confirmDelete")
+                      color: root.mutedForeground
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.caption
                     }
                     Button {
                       visible: flatRow.confirmingDelete
-                      width: visible ? Style.space(28) : 0
-                      height: Style.space(26)
+                      width: Style.space(32)
+                      height: Style.space(28)
+                      text: strings.t("panel.yes")
+                      foreground: root.foreground
+                      horizontalPadding: 0
+                      verticalPadding: 0
+                      onClicked: {
+                        keyCatcher.collapseExpanded()
+                        root.removeItem(flatRow.itemData)
+                      }
+                    }
+                    Button {
+                      visible: flatRow.confirmingDelete
+                      width: Style.space(32)
+                      height: Style.space(28)
                       text: strings.t("panel.no")
                       foreground: root.foreground
-                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                       horizontalPadding: 0
                       verticalPadding: 0
                       onClicked: flatRow.confirmingDelete = false
                     }
+                  }
+
+                  Text {
+                    visible: flatRow.correctionError !== ""
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.bottom
+                    textFormat: Text.PlainText
+                    text: flatRow.correctionError
+                    color: root.mutedForeground
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
                   }
                 }
 
