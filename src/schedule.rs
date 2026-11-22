@@ -7,6 +7,7 @@
 use crate::calculation::{PrayerTime, calculate, method};
 use crate::config::Config;
 use crate::day::{self, Boundary, BoundaryId, Timeline};
+use crate::error::Error;
 use crate::official;
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
@@ -92,12 +93,12 @@ fn shift(date: NaiveDate, days: i64) -> NaiveDate {
         .unwrap_or(date)
 }
 
-fn offset(config: &Config) -> Result<FixedOffset, String> {
+fn offset(config: &Config) -> Result<FixedOffset, Error> {
     FixedOffset::east_opt((config.timezone_offset * 3600.0).round() as i32)
         .ok_or_else(|| "invalid timezone offset".into())
 }
 
-fn calculated(config: &Config, date: NaiveDate) -> Result<Vec<PrayerTime>, String> {
+fn calculated(config: &Config, date: NaiveDate) -> Result<Vec<PrayerTime>, Error> {
     let selected =
         method(&config.method).ok_or_else(|| format!("unknown method: {}", config.method))?;
     Ok(calculate(
@@ -112,7 +113,7 @@ fn calculated(config: &Config, date: NaiveDate) -> Result<Vec<PrayerTime>, Strin
 
 /// Prayer times for a civil date: the cached official timetable when it
 /// covers that date, otherwise the offline calculation.
-pub fn prayers_for(config: &Config, date: NaiveDate) -> Result<(Vec<PrayerTime>, Source), String> {
+pub fn prayers_for(config: &Config, date: NaiveDate) -> Result<(Vec<PrayerTime>, Source), Error> {
     let selected =
         method(&config.method).ok_or_else(|| format!("unknown method: {}", config.method))?;
     let official_schedule = if config.method == "uzbekistan" {
@@ -140,7 +141,7 @@ pub fn prayers_for(config: &Config, date: NaiveDate) -> Result<(Vec<PrayerTime>,
     })
 }
 
-pub fn resolve(config: &Config, utc_now: DateTime<Utc>) -> Result<Schedule, String> {
+pub fn resolve(config: &Config, utc_now: DateTime<Utc>) -> Result<Schedule, Error> {
     let selected =
         method(&config.method).ok_or_else(|| format!("unknown method: {}", config.method))?;
     let now = utc_now.with_timezone(&offset(config)?);
@@ -167,19 +168,19 @@ pub fn resolve(config: &Config, utc_now: DateTime<Utc>) -> Result<Schedule, Stri
 /// The six blocks of a day with their UTC start and end instants. The night
 /// block runs from the previous evening's sleep time to Fajr; the Isha block
 /// ends at this evening's sleep time.
-pub fn day_blocks(config: &Config, day: NaiveDate) -> Result<Vec<BlockWindow>, String> {
+pub fn day_blocks(config: &Config, day: NaiveDate) -> Result<Vec<BlockWindow>, Error> {
     let zone = offset(config)?;
     let (prayers, _) = prayers_for(config, day)?;
     let sleep_minutes = day::parse_clock_minutes(&config.sleep_time)?;
-    let minutes_of = |id: BoundaryId| -> Result<i64, String> {
-        prayers
+    let minutes_of = |id: BoundaryId| -> Result<i64, Error> {
+        Ok(prayers
             .iter()
             .find(|p| p.id == id.as_str())
             .map(|p| p.minutes)
-            .ok_or_else(|| format!("missing {}", id.as_str()))
+            .ok_or_else(|| format!("missing {}", id.as_str()))?)
     };
     let fajr = minutes_of(BoundaryId::Fajr)?;
-    let instant = |days: i64, minutes: i64| -> Result<DateTime<Utc>, String> {
+    let instant = |days: i64, minutes: i64| -> Result<DateTime<Utc>, Error> {
         let midnight = shift(day, days)
             .and_hms_opt(0, 0, 0)
             .ok_or("invalid date")?;

@@ -6,6 +6,7 @@
 //! history, totals, and future streaks are all derived from entries.
 
 use crate::day::BoundaryId;
+use crate::error::Error;
 use crate::schedule::BlockKey;
 use chrono::{DateTime, Datelike, NaiveDate, Utc, Weekday};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -43,7 +44,7 @@ impl Weekdays {
     }
 
     /// Parses a comma-separated list such as `mon,wed,fri`.
-    pub fn parse_list(text: &str) -> Result<Weekdays, String> {
+    pub fn parse_list(text: &str) -> Result<Weekdays, Error> {
         let mut mask = 0u8;
         for name in text.split(',').map(str::trim).filter(|n| !n.is_empty()) {
             mask |= 1 << weekday_index(name).ok_or_else(|| format!("unknown weekday {name:?}"))?;
@@ -155,15 +156,13 @@ pub struct Entry {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
-pub fn validate_title(title: &str) -> Result<String, String> {
+pub fn validate_title(title: &str) -> Result<String, Error> {
     let title = title.trim();
     if title.is_empty() {
         return Err("title must not be empty".into());
     }
     if title.chars().count() > TITLE_MAX_CHARS {
-        return Err(format!(
-            "title must be at most {TITLE_MAX_CHARS} characters"
-        ));
+        return Err(format!("title must be at most {TITLE_MAX_CHARS} characters").into());
     }
     if title.chars().any(char::is_control) {
         return Err("title must not contain control characters".into());
@@ -172,7 +171,7 @@ pub fn validate_title(title: &str) -> Result<String, String> {
 }
 
 /// A weekly item needs weekdays; any other item must not have them.
-pub fn validate_repeat(repeat: Repeat, weekdays: Option<Weekdays>) -> Result<(), String> {
+pub fn validate_repeat(repeat: Repeat, weekdays: Option<Weekdays>) -> Result<(), Error> {
     match (repeat, weekdays) {
         (Repeat::Weekly, Some(days)) if !days.is_empty() && days.0 & !Weekdays::ALL == 0 => Ok(()),
         (Repeat::Weekly, _) => Err("a weekly item needs at least one weekday".into()),
@@ -204,7 +203,7 @@ impl PrayerMark {
     }
 }
 
-pub fn validate_block(block: BoundaryId) -> Result<BoundaryId, String> {
+pub fn validate_block(block: BoundaryId) -> Result<BoundaryId, Error> {
     if block == BoundaryId::Sleep {
         return Err("items cannot be planned in the sleeping block".into());
     }

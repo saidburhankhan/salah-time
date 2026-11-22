@@ -1,3 +1,4 @@
+use crate::error::Error;
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -49,7 +50,7 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), Error> {
         if self.location.trim().is_empty() {
             return Err("location cannot be empty".into());
         }
@@ -63,7 +64,7 @@ impl Config {
             return Err("timezone offset must be between -14 and 14".into());
         }
         if crate::calculation::method(&self.method).is_none() {
-            return Err(format!("unknown method: {}", self.method));
+            return Err(format!("unknown method: {}", self.method).into());
         }
         if self.asr != "standard" && self.asr != "hanafi" {
             return Err("asr must be standard or hanafi".into());
@@ -111,46 +112,49 @@ fn path_from(
     base.join("salah/config.json")
 }
 
-pub fn load_from(path: &Path) -> Result<Config, String> {
+pub fn load_from(path: &Path) -> Result<Config, Error> {
     if !path.exists() {
         return Ok(Config::default());
     }
-    let contents = fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    let config: Config =
-        serde_json::from_str(&contents).map_err(|e| format!("parse {}: {e}", path.display()))?;
+    let contents = fs::read_to_string(path)
+        .map_err(|e| Error::Config(format!("read {}: {e}", path.display())))?;
+    let config: Config = serde_json::from_str(&contents)
+        .map_err(|e| Error::Config(format!("parse {}: {e}", path.display())))?;
     config.validate()?;
     Ok(config)
 }
 
-pub fn load() -> Result<Config, String> {
+pub fn load() -> Result<Config, Error> {
     load_from(&path())
 }
 
-pub fn save_to(config: &Config, path: &Path) -> Result<(), String> {
+pub fn save_to(config: &Config, path: &Path) -> Result<(), Error> {
     config.validate()?;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|e| Error::Config(format!("create {}: {e}", parent.display())))?;
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|e| format!("system clock: {e}"))?
+        .map_err(|e| Error::Config(format!("system clock: {e}")))?
         .as_nanos();
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("config.json");
     let temp = parent.join(format!(".{file_name}.{}.{}.tmp", std::process::id(), nonce));
-    let mut bytes = serde_json::to_vec_pretty(config).map_err(|e| e.to_string())?;
+    let mut bytes = serde_json::to_vec_pretty(config).map_err(|e| Error::Config(e.to_string()))?;
     bytes.push(b'\n');
     let result = (|| {
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&temp)
-            .map_err(|e| format!("create {}: {e}", temp.display()))?;
+            .map_err(|e| Error::Config(format!("create {}: {e}", temp.display())))?;
         file.write_all(&bytes)
             .and_then(|_| file.sync_all())
-            .map_err(|e| format!("write {}: {e}", temp.display()))?;
-        fs::rename(&temp, path).map_err(|e| format!("replace {}: {e}", path.display()))
+            .map_err(|e| Error::Config(format!("write {}: {e}", temp.display())))?;
+        fs::rename(&temp, path)
+            .map_err(|e| Error::Config(format!("replace {}: {e}", path.display())))
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temp);
@@ -158,7 +162,7 @@ pub fn save_to(config: &Config, path: &Path) -> Result<(), String> {
     result
 }
 
-pub fn save(config: &Config) -> Result<(), String> {
+pub fn save(config: &Config) -> Result<(), Error> {
     save_to(config, &path())
 }
 

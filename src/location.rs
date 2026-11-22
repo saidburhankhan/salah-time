@@ -1,4 +1,5 @@
 use crate::config::{self, Config};
+use crate::error::Error;
 use chrono::{DateTime, Duration, Local, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -44,7 +45,7 @@ struct IpApiResponse {
     utc_offset: Option<String>,
 }
 
-pub fn parse_response(bytes: &[u8]) -> Result<DetectedLocation, String> {
+pub fn parse_response(bytes: &[u8]) -> Result<DetectedLocation, Error> {
     let text = validated_response_text(bytes)?;
     let mut detected: DetectedLocation = serde_json::from_str(text)
         .map_err(|e| format!("invalid location service response: {e}"))?;
@@ -53,17 +54,18 @@ pub fn parse_response(bytes: &[u8]) -> Result<DetectedLocation, String> {
     Ok(detected)
 }
 
-fn validated_response_text(bytes: &[u8]) -> Result<&str, String> {
+fn validated_response_text(bytes: &[u8]) -> Result<&str, Error> {
     if bytes.is_empty() {
         return Err("location service returned an empty response".into());
     }
     if bytes.len() > MAX_RESPONSE_BYTES {
         return Err("location service response is too large".into());
     }
-    std::str::from_utf8(bytes).map_err(|_| "location service returned invalid UTF-8".to_string())
+    Ok(std::str::from_utf8(bytes)
+        .map_err(|_| "location service returned invalid UTF-8".to_string())?)
 }
 
-pub fn parse_ipapi_response(bytes: &[u8]) -> Result<FetchedLocation, String> {
+pub fn parse_ipapi_response(bytes: &[u8]) -> Result<FetchedLocation, Error> {
     let response: IpApiResponse = serde_json::from_str(validated_response_text(bytes)?)
         .map_err(|e| format!("invalid fallback location response: {e}"))?;
     let location = DetectedLocation {
@@ -84,7 +86,7 @@ pub fn parse_ipapi_response(bytes: &[u8]) -> Result<FetchedLocation, String> {
     })
 }
 
-pub fn parse_utc_offset(value: &str) -> Result<f64, String> {
+pub fn parse_utc_offset(value: &str) -> Result<f64, Error> {
     let compact = value.trim().replace(':', "");
     let bytes = compact.as_bytes();
     if bytes.len() != 5
@@ -110,7 +112,7 @@ pub fn parse_utc_offset(value: &str) -> Result<f64, String> {
     })
 }
 
-fn validate_detected(location: &DetectedLocation) -> Result<(), String> {
+fn validate_detected(location: &DetectedLocation) -> Result<(), Error> {
     if location.name.is_empty() {
         return Err("detected location name is empty".into());
     }
@@ -132,7 +134,7 @@ pub fn apply_detected(
     timezone_offset: f64,
     synced_at: String,
     provider: &str,
-) -> Result<Config, String> {
+) -> Result<Config, Error> {
     validate_detected(&detected)?;
     let mut updated = current.clone();
     updated.location = detected.name;
@@ -146,7 +148,7 @@ pub fn apply_detected(
     Ok(updated)
 }
 
-fn fetch_url(url: &str) -> Result<Vec<u8>, String> {
+fn fetch_url(url: &str) -> Result<Vec<u8>, Error> {
     let max_response = MAX_RESPONSE_BYTES.to_string();
     let output = Command::new("curl")
         .args([
@@ -167,20 +169,20 @@ fn fetch_url(url: &str) -> Result<Vec<u8>, String> {
             url,
         ])
         .output()
-        .map_err(|e| format!("start curl: {e}"))?;
+        .map_err(|e| Error::SourceUnavailable(format!("start curl: {e}")))?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
         let detail = detail.trim().chars().take(300).collect::<String>();
-        return Err(if detail.is_empty() {
+        return Err(Error::SourceUnavailable(if detail.is_empty() {
             format!("location request failed with {}", output.status)
         } else {
             format!("location request failed: {detail}")
-        });
+        }));
     }
     Ok(output.stdout)
 }
 
-pub fn fetch() -> Result<FetchedLocation, String> {
+pub fn fetch() -> Result<FetchedLocation, Error> {
     let primary = fetch_url(GEO_URL).and_then(|bytes| {
         parse_response(&bytes).map(|location| FetchedLocation {
             location,
@@ -190,13 +192,13 @@ pub fn fetch() -> Result<FetchedLocation, String> {
     });
     match primary {
         Ok(found) => Ok(found),
-        Err(primary_error) => fetch_url(FALLBACK_GEO_URL)
+        Err(primary_error) => Ok(fetch_url(FALLBACK_GEO_URL)
             .and_then(|bytes| parse_ipapi_response(&bytes))
             .map_err(|fallback_error| {
                 format!(
                     "both location providers failed (geo.omarchy.org: {primary_error}; ipapi.co: {fallback_error})"
                 )
-            }),
+            })?),
     }
 }
 
@@ -216,7 +218,7 @@ pub fn current_timezone_offset() -> f64 {
     f64::from(Local::now().offset().local_minus_utc()) / 3600.0
 }
 
-pub fn sync(current: &Config) -> Result<(Config, &'static str), String> {
+pub fn sync(current: &Config) -> Result<(Config, &'static str), Error> {
     // A location explicitly selected in Omarchy Weather is more precise and
     // more private than IP geolocation. Fall back to the online providers
     // only when Weather has no valid saved coordinates.
@@ -253,7 +255,7 @@ impl Drop for SyncLock {
     }
 }
 
-fn acquire_sync_lock() -> Result<SyncLock, String> {
+fn acquire_sync_lock() -> Result<SyncLock, Error> {
     let config_path = config::path();
     let parent = config_path
         .parent()
@@ -283,13 +285,13 @@ fn acquire_sync_lock() -> Result<SyncLock, String> {
                     thread::sleep(StdDuration::from_millis(50));
                 }
             }
-            Err(error) => return Err(format!("create {}: {error}", lock_path.display())),
+            Err(error) => return Err(format!("create {}: {error}", lock_path.display()).into()),
         }
     }
-    Err("another location sync is still running".into())
+    Err(Error::Busy("another location sync is still running".into()))
 }
 
-pub fn sync_saved(if_needed: bool) -> Result<SyncOutcome, String> {
+pub fn sync_saved(if_needed: bool) -> Result<SyncOutcome, Error> {
     let _lock = acquire_sync_lock()?;
     // Reload only after taking the lock: another bar instance may have just
     // completed the same startup sync.

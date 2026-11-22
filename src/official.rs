@@ -1,4 +1,5 @@
 use crate::calculation::PrayerTime;
+use crate::error::Error;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -56,7 +57,7 @@ fn visible_words(html: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn parse_html(html: &[u8], date: NaiveDate) -> Result<OfficialSchedule, String> {
+pub fn parse_html(html: &[u8], date: NaiveDate) -> Result<OfficialSchedule, Error> {
     if html.is_empty() || html.len() > MAX_RESPONSE_BYTES {
         return Err("official timetable response has an invalid size".into());
     }
@@ -93,7 +94,7 @@ pub fn parse_html(html: &[u8], date: NaiveDate) -> Result<OfficialSchedule, Stri
     })
 }
 
-pub fn fetch(date: NaiveDate) -> Result<OfficialSchedule, String> {
+pub fn fetch(date: NaiveDate) -> Result<OfficialSchedule, Error> {
     let output = Command::new("curl")
         .args([
             "--fail",
@@ -113,35 +114,36 @@ pub fn fetch(date: NaiveDate) -> Result<OfficialSchedule, String> {
             OFFICIAL_URL,
         ])
         .output()
-        .map_err(|e| format!("start curl: {e}"))?;
+        .map_err(|e| Error::SourceUnavailable(format!("start curl: {e}")))?;
     if !output.status.success() {
-        return Err(format!(
+        return Err(Error::SourceUnavailable(format!(
             "official timetable request failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        )));
     }
     parse_html(&output.stdout, date)
 }
 
-fn save_to(schedule: &OfficialSchedule, path: &Path) -> Result<(), String> {
+fn save_to(schedule: &OfficialSchedule, path: &Path) -> Result<(), Error> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    fs::create_dir_all(parent).map_err(|e| Error::Storage(e.to_string()))?;
     let temp = parent.join(format!(".official.{}.tmp", std::process::id()));
     let mut file = OpenOptions::new()
         .create(true)
         .truncate(true)
         .write(true)
         .open(&temp)
-        .map_err(|e| e.to_string())?;
-    let mut bytes = serde_json::to_vec_pretty(schedule).map_err(|e| e.to_string())?;
+        .map_err(|e| Error::Storage(e.to_string()))?;
+    let mut bytes =
+        serde_json::to_vec_pretty(schedule).map_err(|e| Error::Storage(e.to_string()))?;
     bytes.push(b'\n');
     file.write_all(&bytes)
         .and_then(|_| file.sync_all())
-        .map_err(|e| e.to_string())?;
-    fs::rename(&temp, path).map_err(|e| e.to_string())
+        .map_err(|e| Error::Storage(e.to_string()))?;
+    fs::rename(&temp, path).map_err(|e| Error::Storage(e.to_string()))
 }
 
-pub fn sync(date: NaiveDate) -> Result<OfficialSchedule, String> {
+pub fn sync(date: NaiveDate) -> Result<OfficialSchedule, Error> {
     let schedule = fetch(date)?;
     save_to(&schedule, &cache_path())?;
     Ok(schedule)

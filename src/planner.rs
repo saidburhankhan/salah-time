@@ -4,6 +4,7 @@
 
 use crate::config::Config;
 use crate::day::BoundaryId;
+use crate::error::Error;
 use crate::item::{
     self, DayItem, DayView, Entry, EntryKind, Item, Measure, PrayerMark, Repeat, State, Weekdays,
     validate_block, validate_repeat, validate_title,
@@ -83,7 +84,7 @@ fn recorded_block(schedule: &Schedule, item: &Item, date: Option<NaiveDate>) -> 
 }
 
 /// The next free position at the end of a block.
-fn next_position(store: &Store, block: BoundaryId) -> Result<i64, String> {
+fn next_position(store: &Store, block: BoundaryId) -> Result<i64, Error> {
     Ok(store
         .items()?
         .iter()
@@ -98,7 +99,7 @@ pub fn close_expired_timers(
     store: &mut Store,
     config: &Config,
     now: DateTime<Utc>,
-) -> Result<usize, String> {
+) -> Result<usize, Error> {
     let now = stamp(now);
     let mut ends = BlockEnds::new(config);
     let expired: Vec<(Entry, DateTime<Utc>)> = store
@@ -121,15 +122,16 @@ pub fn close_expired_timers(
 
 /// Finds a live item by its full id or a unique prefix of at least four
 /// characters.
-pub fn find_item(store: &Store, id: &str) -> Result<Item, String> {
+pub fn find_item(store: &Store, id: &str) -> Result<Item, Error> {
     let id = id.trim();
     if let Some(item) = store.item(id)?.filter(Item::is_live) {
         return Ok(item);
     }
     if id.len() < MIN_ID_PREFIX {
-        return Err(format!(
-            "no item {id:?}; use at least {MIN_ID_PREFIX} characters of the id"
-        ));
+        return Err(Error::NotFound {
+            what: "item",
+            id: id.to_owned(),
+        });
     }
     let mut matches = store
         .items()?
@@ -137,8 +139,11 @@ pub fn find_item(store: &Store, id: &str) -> Result<Item, String> {
         .filter(|item| item.is_live() && item.id.starts_with(id));
     match (matches.next(), matches.next()) {
         (Some(item), None) => Ok(item),
-        (None, _) => Err(format!("no item {id:?}")),
-        (Some(_), Some(_)) => Err(format!("item id {id:?} is ambiguous; use more characters")),
+        (None, _) => Err(Error::NotFound {
+            what: "item",
+            id: id.to_owned(),
+        }),
+        (Some(_), Some(_)) => Err(Error::Ambiguous { id: id.to_owned() }),
     }
 }
 
@@ -161,7 +166,7 @@ pub fn add(
     config: &Config,
     now: DateTime<Utc>,
     request: NewItem,
-) -> Result<Item, String> {
+) -> Result<Item, Error> {
     let now = stamp(now);
     let schedule = schedule::resolve(config, now)?;
     let planning = schedule.planning_block();
@@ -217,7 +222,7 @@ pub fn edit(
     now: DateTime<Utc>,
     id: &str,
     changes: ItemChanges,
-) -> Result<Item, String> {
+) -> Result<Item, Error> {
     let mut item = find_item(store, id)?;
     if let Some(title) = changes.title {
         item.title = validate_title(&title)?;
@@ -262,7 +267,7 @@ pub fn move_item(
     id: &str,
     block: BoundaryId,
     index: usize,
-) -> Result<Item, String> {
+) -> Result<Item, Error> {
     let now = stamp(now);
     let mut moved = find_item(store, id)?;
     let block = validate_block(block)?;
@@ -296,7 +301,7 @@ pub fn move_item(
         .ok_or_else(|| "moved item vanished".into())
 }
 
-pub fn remove(store: &mut Store, now: DateTime<Utc>, id: &str) -> Result<Item, String> {
+pub fn remove(store: &mut Store, now: DateTime<Utc>, id: &str) -> Result<Item, Error> {
     let mut item = find_item(store, id)?;
     let now = stamp(now);
     item.deleted_at = Some(now);
@@ -327,7 +332,7 @@ pub fn done(
     now: DateTime<Utc>,
     id: &str,
     date: Option<NaiveDate>,
-) -> Result<Entry, String> {
+) -> Result<Entry, Error> {
     let now = stamp(now);
     let item = find_item(store, id)?;
     let schedule = schedule::resolve(config, now)?;
@@ -344,7 +349,7 @@ pub fn undo(
     now: DateTime<Utc>,
     id: &str,
     date: Option<NaiveDate>,
-) -> Result<usize, String> {
+) -> Result<usize, Error> {
     let now = stamp(now);
     let item = find_item(store, id)?;
     let schedule = schedule::resolve(config, now)?;
@@ -372,7 +377,7 @@ pub fn log(
     id: &str,
     value: i64,
     date: Option<NaiveDate>,
-) -> Result<Entry, String> {
+) -> Result<Entry, Error> {
     let item = find_item(store, id)?;
     // Count items adjust their count; every other item records time spent.
     let kind = match item.measure {
@@ -391,7 +396,7 @@ pub fn adjust_time(
     id: &str,
     value: i64,
     date: Option<NaiveDate>,
-) -> Result<Entry, String> {
+) -> Result<Entry, Error> {
     let item = find_item(store, id)?;
     record(store, config, now, &item, EntryKind::Minutes, value, date)
 }
@@ -404,7 +409,7 @@ fn record(
     kind: EntryKind,
     value: i64,
     date: Option<NaiveDate>,
-) -> Result<Entry, String> {
+) -> Result<Entry, Error> {
     let now = stamp(now);
     // A negative value subtracts; daily totals are clamped at zero.
     if value == 0 || value.abs() > 24 * 60 {
@@ -423,7 +428,7 @@ pub fn start_timer(
     config: &Config,
     now: DateTime<Utc>,
     id: &str,
-) -> Result<Entry, String> {
+) -> Result<Entry, Error> {
     let now = stamp(now);
     let item = find_item(store, id)?;
     let schedule = schedule::resolve(config, now)?;
@@ -438,7 +443,7 @@ pub fn start_timer(
     Ok(timer)
 }
 
-fn stop_running(store: &Store, now: DateTime<Utc>) -> Result<Vec<Entry>, String> {
+fn stop_running(store: &Store, now: DateTime<Utc>) -> Result<Vec<Entry>, Error> {
     let mut stopped = Vec::new();
     for mut timer in store.running_timers()? {
         timer.ended_at = Some(now);
@@ -455,7 +460,7 @@ pub fn stop_item_timer(
     config: &Config,
     now: DateTime<Utc>,
     id: &str,
-) -> Result<Vec<Entry>, String> {
+) -> Result<Vec<Entry>, Error> {
     let now = stamp(now);
     let item = find_item(store, id)?;
     close_expired_timers(store, config, now)?;
@@ -478,7 +483,7 @@ pub fn stop_timer(
     store: &mut Store,
     config: &Config,
     now: DateTime<Utc>,
-) -> Result<Vec<Entry>, String> {
+) -> Result<Vec<Entry>, Error> {
     let now = stamp(now);
     close_expired_timers(store, config, now)?;
     store.transaction(|store| stop_running(store, now))
@@ -531,7 +536,7 @@ fn report_day(
     item::day_items(items, entries, view, |key| ends.end(key))
 }
 
-pub fn today(store: &Store, config: &Config, now: DateTime<Utc>) -> Result<Today, String> {
+pub fn today(store: &Store, config: &Config, now: DateTime<Utc>) -> Result<Today, Error> {
     let now = stamp(now);
     let schedule = schedule::resolve(config, now)?;
     let current_block = schedule.current_block();
@@ -582,12 +587,12 @@ pub fn history(
     now: DateTime<Utc>,
     first: NaiveDate,
     last: NaiveDate,
-) -> Result<Vec<DayReport>, String> {
+) -> Result<Vec<DayReport>, Error> {
     if last < first {
         return Err("history range ends before it starts".into());
     }
     if (last - first).num_days() >= MAX_HISTORY_DAYS {
-        return Err(format!("history covers at most {MAX_HISTORY_DAYS} days"));
+        return Err(format!("history covers at most {MAX_HISTORY_DAYS} days").into());
     }
     let now = stamp(now);
     let schedule = schedule::resolve(config, now)?;
@@ -615,7 +620,7 @@ pub fn history(
     Ok(days)
 }
 
-fn live_marks(store: &Store, day: NaiveDate) -> Result<Vec<BoundaryId>, String> {
+fn live_marks(store: &Store, day: NaiveDate) -> Result<Vec<BoundaryId>, Error> {
     let mut marks: Vec<BoundaryId> = store
         .marks_between(day, day)?
         .into_iter()
@@ -633,9 +638,9 @@ fn mark_prayer(
     prayer: BoundaryId,
     date: Option<NaiveDate>,
     prayed: bool,
-) -> Result<PrayerMark, String> {
+) -> Result<PrayerMark, Error> {
     if !prayer.is_prayer() {
-        return Err(format!("{} is not a prayer", prayer.name()));
+        return Err(format!("{} is not a prayer", prayer.name()).into());
     }
     let now = stamp(now);
     let day = match date {
@@ -674,7 +679,7 @@ pub fn mark(
     now: DateTime<Utc>,
     prayer: BoundaryId,
     date: Option<NaiveDate>,
-) -> Result<PrayerMark, String> {
+) -> Result<PrayerMark, Error> {
     mark_prayer(store, config, now, prayer, date, true)
 }
 
@@ -685,7 +690,7 @@ pub fn unmark(
     now: DateTime<Utc>,
     prayer: BoundaryId,
     date: Option<NaiveDate>,
-) -> Result<PrayerMark, String> {
+) -> Result<PrayerMark, Error> {
     mark_prayer(store, config, now, prayer, date, false)
 }
 
@@ -747,7 +752,7 @@ pub fn day_plan(
     config: &Config,
     now: DateTime<Utc>,
     date: Option<NaiveDate>,
-) -> Result<DayPlan, String> {
+) -> Result<DayPlan, Error> {
     let now = stamp(now);
     let schedule = schedule::resolve(config, now)?;
     let today = schedule.day();
@@ -915,7 +920,7 @@ pub fn stats(
     now: DateTime<Utc>,
     first: NaiveDate,
     last: NaiveDate,
-) -> Result<Stats, String> {
+) -> Result<Stats, Error> {
     let reports = history(store, config, now, first, last)?;
     let days = reports.len();
     let mut items: Vec<ItemStats> = Vec::new();

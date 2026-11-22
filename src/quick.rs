@@ -2,6 +2,7 @@
 //! item draft. Words that are not part of a recognised phrase form the title.
 
 use crate::day::BoundaryId;
+use crate::error::Error;
 use crate::item::{Measure, Repeat, Weekdays, validate_title, weekday_index};
 use crate::planner::NewItem;
 use serde::Serialize;
@@ -118,7 +119,7 @@ fn weekday_run(words: &[String], start: usize) -> Option<(Weekdays, usize)> {
     (mask != 0).then_some((Weekdays(mask), used))
 }
 
-pub fn parse(text: &str) -> Result<Draft, String> {
+pub fn parse(text: &str) -> Result<Draft, Error> {
     let original: Vec<&str> = text.split_whitespace().collect();
     // Matching ignores case and trailing punctuation; the title keeps the
     // user's own spelling.

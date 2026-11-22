@@ -719,7 +719,7 @@ fn write_entry(
         &salah::config::Config,
         chrono::DateTime<Utc>,
         &str,
-    ) -> Result<salah::item::Entry, String>,
+    ) -> Result<salah::item::Entry, salah::error::Error>,
     verb: &str,
 ) -> Result<(), String> {
     planner::close_expired_timers(store, config, now)?;

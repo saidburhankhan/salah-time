@@ -1,4 +1,5 @@
 use crate::calculation::PrayerTime;
+use crate::error::Error;
 use serde::{Deserialize, Serialize};
 
 /// A boundary that starts a block of the day. Prayers and the sleep boundary
@@ -138,7 +139,7 @@ impl Timeline {
     }
 }
 
-pub fn parse_clock_minutes(value: &str) -> Result<i64, String> {
+pub fn parse_clock_minutes(value: &str) -> Result<i64, Error> {
     let bytes = value.as_bytes();
     if bytes.len() != 5
         || bytes[2] != b':'
@@ -192,7 +193,7 @@ pub fn timeline(
     tomorrow_fajr: &PrayerTime,
     sleep_minutes: i64,
     now_seconds: i64,
-) -> Result<Timeline, String> {
+) -> Result<Timeline, Error> {
     let fajr_minutes = today
         .iter()
         .find(|prayer| prayer.id == "fajr")

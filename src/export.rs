@@ -1,4 +1,5 @@
 use crate::day::BoundaryId;
+use crate::error::Error;
 use crate::item::{
     Entry, EntryKind, Item, PrayerMark, validate_block, validate_repeat, validate_title,
 };
@@ -31,7 +32,7 @@ pub struct ImportSummary {
     pub unchanged: usize,
 }
 
-pub fn export(store: &Store, now: DateTime<Utc>) -> Result<Export, String> {
+pub fn export(store: &Store, now: DateTime<Utc>) -> Result<Export, Error> {
     Ok(Export {
         format: FORMAT.to_string(),
         version: VERSION,
@@ -42,9 +43,9 @@ pub fn export(store: &Store, now: DateTime<Utc>) -> Result<Export, String> {
     })
 }
 
-pub fn parse(bytes: &[u8]) -> Result<Export, String> {
+pub fn parse(bytes: &[u8]) -> Result<Export, Error> {
     if bytes.len() > MAX_BYTES {
-        return Err(format!("export exceeds maximum size of {MAX_BYTES} bytes"));
+        return Err(format!("export exceeds maximum size of {MAX_BYTES} bytes").into());
     }
     let text = std::str::from_utf8(bytes).map_err(|e| format!("export is not valid UTF-8: {e}"))?;
     let data: Export =
@@ -53,32 +54,33 @@ pub fn parse(bytes: &[u8]) -> Result<Export, String> {
     Ok(data)
 }
 
-pub fn validate(data: &Export) -> Result<(), String> {
+pub fn validate(data: &Export) -> Result<(), Error> {
     if data.format != FORMAT {
-        return Err(format!("unsupported export format {:?}", data.format));
+        return Err(format!("unsupported export format {:?}", data.format).into());
     }
     if data.version > VERSION {
         return Err(format!(
             "export version {} is newer than this salah (version {VERSION})",
             data.version
-        ));
+        )
+        .into());
     }
 
     let mut item_ids = HashSet::new();
     for item in &data.items {
         validate_id("item", &item.id)?;
         if !item_ids.insert(item.id.as_str()) {
-            return Err(format!("duplicate item id {:?}", item.id));
+            return Err(format!("duplicate item id {:?}", item.id).into());
         }
         let title = validate_title(&item.title).map_err(|e| format!("item {}: {e}", item.id))?;
         if title != item.title {
-            return Err(format!("item {}: title must already be trimmed", item.id));
+            return Err(format!("item {}: title must already be trimmed", item.id).into());
         }
         validate_block(item.block).map_err(|e| format!("item {}: {e}", item.id))?;
         validate_repeat(item.repeat, item.weekdays)
             .map_err(|e| format!("item {}: {e}", item.id))?;
         if item.target.is_some_and(|value| value < 0) {
-            return Err(format!("item {}: target must not be negative", item.id));
+            return Err(format!("item {}: target must not be negative", item.id).into());
         }
         validate_times("item", &item.id, item.created_at, item.updated_at)?;
     }
@@ -88,37 +90,37 @@ pub fn validate(data: &Export) -> Result<(), String> {
         validate_id("entry", &entry.id)?;
         validate_id("entry item", &entry.item_id)?;
         if !entry_ids.insert(entry.id.as_str()) {
-            return Err(format!("duplicate entry id {:?}", entry.id));
+            return Err(format!("duplicate entry id {:?}", entry.id).into());
         }
         // Negative values are adjustments that subtract time or count.
         if entry.value.is_some_and(|value| value.abs() > 24 * 60) {
-            return Err(format!("entry {}: value is out of range", entry.id));
+            return Err(format!("entry {}: value is out of range", entry.id).into());
         }
         validate_times("entry", &entry.id, entry.created_at, entry.updated_at)?;
         if entry.kind == EntryKind::Timer && entry.started_at.is_none() {
-            return Err(format!("entry {}: timer requires started_at", entry.id));
+            return Err(format!("entry {}: timer requires started_at", entry.id).into());
         }
         if let (Some(started), Some(ended)) = (entry.started_at, entry.ended_at)
             && ended < started
         {
-            return Err(format!("entry {}: ended_at precedes started_at", entry.id));
+            return Err(format!("entry {}: ended_at precedes started_at", entry.id).into());
         }
     }
     let mut mark_ids = HashSet::new();
     for mark in &data.prayer_marks {
         if !mark_ids.insert(mark.id.as_str()) {
-            return Err(format!("duplicate prayer mark id {:?}", mark.id));
+            return Err(format!("duplicate prayer mark id {:?}", mark.id).into());
         }
         if mark.prayer == BoundaryId::Sleep || mark.id != PrayerMark::id_for(mark.day, mark.prayer)
         {
-            return Err(format!("prayer mark {:?} is invalid", mark.id));
+            return Err(format!("prayer mark {:?} is invalid", mark.id).into());
         }
         validate_times("prayer mark", &mark.id, mark.created_at, mark.updated_at)?;
     }
     Ok(())
 }
 
-pub fn import(store: &mut Store, data: &Export) -> Result<ImportSummary, String> {
+pub fn import(store: &mut Store, data: &Export) -> Result<ImportSummary, Error> {
     validate(data)?;
     store.transaction(|store| {
         let exported_items: HashSet<&str> =
@@ -130,7 +132,8 @@ pub fn import(store: &mut Store, data: &Export) -> Result<ImportSummary, String>
                 return Err(format!(
                     "entry {} references missing item {}",
                     entry.id, entry.item_id
-                ));
+                )
+                .into());
             }
         }
 
@@ -178,16 +181,16 @@ pub fn import(store: &mut Store, data: &Export) -> Result<ImportSummary, String>
     })
 }
 
-fn validate_id(kind: &str, id: &str) -> Result<(), String> {
+fn validate_id(kind: &str, id: &str) -> Result<(), Error> {
     let length = id.chars().count();
     if length == 0 {
-        return Err(format!("{kind} id must not be empty"));
+        return Err(format!("{kind} id must not be empty").into());
     }
     if length > 64 {
-        return Err(format!("{kind} id must be at most 64 characters"));
+        return Err(format!("{kind} id must be at most 64 characters").into());
     }
     if id.chars().any(char::is_control) {
-        return Err(format!("{kind} id must not contain control characters"));
+        return Err(format!("{kind} id must not contain control characters").into());
     }
     Ok(())
 }
@@ -197,9 +200,9 @@ fn validate_times(
     id: &str,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     if updated_at < created_at {
-        return Err(format!("{kind} {id}: updated_at precedes created_at"));
+        return Err(format!("{kind} {id}: updated_at precedes created_at").into());
     }
     Ok(())
 }

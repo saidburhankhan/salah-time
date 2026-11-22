@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::day::{self, Boundary};
+use crate::error::Error;
 use crate::planner::Today;
 use crate::schedule::{self, BlockKey, Schedule};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
@@ -74,7 +75,7 @@ pub struct Status {
 }
 
 impl Status {
-    pub fn attach_planner(&mut self, planner: Result<Today, String>) {
+    pub fn attach_planner(&mut self, planner: Result<Today, Error>) {
         match planner {
             Ok(today) => {
                 self.planner = Some(today);
@@ -82,7 +83,7 @@ impl Status {
             }
             Err(error) => {
                 self.planner = None;
-                self.planner_error = Some(error);
+                self.planner_error = Some(error.to_string());
             }
         }
     }
@@ -92,7 +93,7 @@ impl Status {
 /// new fields are additive and keep the version.
 pub const SCHEMA_VERSION: u32 = 1;
 
-pub fn build(config: &Config, utc_now: DateTime<Utc>) -> Result<Status, String> {
+pub fn build(config: &Config, utc_now: DateTime<Utc>) -> Result<Status, Error> {
     let schedule = schedule::resolve(config, utc_now)?;
     let next = &schedule.timeline.next;
     let now_seconds = schedule.now_seconds;

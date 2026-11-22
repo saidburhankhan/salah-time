@@ -4,6 +4,7 @@
 //! `planner`. Rows are never physically deleted: `deleted_at` tombstones let
 //! deletions travel through export/import and, later, sync.
 
+use crate::error::Error;
 use crate::item::{Entry, EntryKind, Item, Measure, PrayerMark, Repeat, Weekdays};
 use crate::schedule::BlockKey;
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
@@ -81,8 +82,19 @@ pub struct Store {
     conn: Connection,
 }
 
-fn err(e: impl std::fmt::Display) -> String {
-    format!("store: {e}")
+fn sqlite_error(error: rusqlite::Error) -> Error {
+    let message = format!("store: {error}");
+    match &error {
+        rusqlite::Error::SqliteFailure(details, _)
+            if matches!(
+                details.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            ) =>
+        {
+            Error::Busy(message)
+        }
+        _ => Error::Storage(message),
+    }
 }
 
 fn time_text(time: DateTime<Utc>) -> String {
@@ -170,48 +182,51 @@ fn entry_from(row: &Row) -> rusqlite::Result<Entry> {
 }
 
 impl Store {
-    pub fn open(path: &Path) -> Result<Store, String> {
+    pub fn open(path: &Path) -> Result<Store, Error> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(err)?;
+            std::fs::create_dir_all(parent)
+                .map_err(|error| Error::Storage(format!("store: {error}")))?;
         }
-        let conn = Connection::open(path).map_err(err)?;
+        let conn = Connection::open(path).map_err(sqlite_error)?;
         // WAL lets the widget read while the app or CLI writes.
         conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(err)?;
+            .map_err(sqlite_error)?;
         Store::init(conn)
     }
 
-    pub fn open_in_memory() -> Result<Store, String> {
-        Store::init(Connection::open_in_memory().map_err(err)?)
+    pub fn open_in_memory() -> Result<Store, Error> {
+        Store::init(Connection::open_in_memory().map_err(sqlite_error)?)
     }
 
-    fn init(conn: Connection) -> Result<Store, String> {
-        conn.busy_timeout(Duration::from_secs(3)).map_err(err)?;
+    fn init(conn: Connection) -> Result<Store, Error> {
+        conn.busy_timeout(Duration::from_secs(3))
+            .map_err(sqlite_error)?;
         let mut store = Store { conn };
         store.migrate()?;
         Ok(store)
     }
 
-    pub fn version(&self) -> Result<i64, String> {
+    pub fn version(&self) -> Result<i64, Error> {
         self.conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
-            .map_err(err)
+            .map_err(sqlite_error)
     }
 
-    fn migrate(&mut self) -> Result<(), String> {
+    fn migrate(&mut self) -> Result<(), Error> {
         let current = self.version()?;
         if current > schema_version() {
             return Err(format!(
                 "store: database schema {current} is newer than this salah ({}); update salah",
                 schema_version()
-            ));
+            )
+            .into());
         }
         for (index, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
-            let tx = self.conn.transaction().map_err(err)?;
-            tx.execute_batch(sql).map_err(err)?;
+            let tx = self.conn.transaction().map_err(sqlite_error)?;
+            tx.execute_batch(sql).map_err(sqlite_error)?;
             tx.pragma_update(None, "user_version", index as i64 + 1)
-                .map_err(err)?;
-            tx.commit().map_err(err)?;
+                .map_err(sqlite_error)?;
+            tx.commit().map_err(sqlite_error)?;
         }
         Ok(())
     }
@@ -219,12 +234,14 @@ impl Store {
     /// Runs `work` in one transaction; nothing is saved if it fails.
     pub fn transaction<T>(
         &mut self,
-        work: impl FnOnce(&Store) -> Result<T, String>,
-    ) -> Result<T, String> {
-        self.conn.execute_batch("BEGIN IMMEDIATE").map_err(err)?;
+        work: impl FnOnce(&Store) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        self.conn
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(sqlite_error)?;
         match work(self) {
             Ok(value) => {
-                self.conn.execute_batch("COMMIT").map_err(err)?;
+                self.conn.execute_batch("COMMIT").map_err(sqlite_error)?;
                 Ok(value)
             }
             Err(e) => {
@@ -234,7 +251,7 @@ impl Store {
         }
     }
 
-    pub fn put_item(&self, item: &Item) -> Result<(), String> {
+    pub fn put_item(&self, item: &Item) -> Result<(), Error> {
         self.conn
             .execute(
                 "INSERT INTO items (id, title, block, repeat, measure, target, day,
@@ -263,10 +280,10 @@ impl Store {
                 ],
             )
             .map(|_| ())
-            .map_err(err)
+            .map_err(sqlite_error)
     }
 
-    pub fn put_entry(&self, entry: &Entry) -> Result<(), String> {
+    pub fn put_entry(&self, entry: &Entry) -> Result<(), Error> {
         self.conn
             .execute(
                 "INSERT INTO entries (id, item_id, day, block, kind, value, started_at,
@@ -293,10 +310,10 @@ impl Store {
                 ],
             )
             .map(|_| ())
-            .map_err(err)
+            .map_err(sqlite_error)
     }
 
-    pub fn put_mark(&self, mark: &PrayerMark) -> Result<(), String> {
+    pub fn put_mark(&self, mark: &PrayerMark) -> Result<(), Error> {
         self.conn
             .execute(
                 "INSERT INTO prayer_marks (id, day, prayer, marked_at, created_at,
@@ -317,18 +334,18 @@ impl Store {
                 ],
             )
             .map(|_| ())
-            .map_err(err)
+            .map_err(sqlite_error)
     }
 
-    pub fn mark(&self, id: &str) -> Result<Option<PrayerMark>, String> {
+    pub fn mark(&self, id: &str) -> Result<Option<PrayerMark>, Error> {
         self.conn
             .query_row("SELECT * FROM prayer_marks WHERE id = ?1", [id], mark_from)
             .optional()
-            .map_err(err)
+            .map_err(sqlite_error)
     }
 
     /// Every prayer mark, deleted ones included, oldest first.
-    pub fn marks(&self) -> Result<Vec<PrayerMark>, String> {
+    pub fn marks(&self) -> Result<Vec<PrayerMark>, Error> {
         self.query(
             "SELECT * FROM prayer_marks ORDER BY created_at, id",
             [],
@@ -341,7 +358,7 @@ impl Store {
         &self,
         first: NaiveDate,
         last: NaiveDate,
-    ) -> Result<Vec<PrayerMark>, String> {
+    ) -> Result<Vec<PrayerMark>, Error> {
         self.query(
             "SELECT * FROM prayer_marks WHERE day BETWEEN ?1 AND ?2 ORDER BY day, id",
             [
@@ -352,27 +369,27 @@ impl Store {
         )
     }
 
-    pub fn item(&self, id: &str) -> Result<Option<Item>, String> {
+    pub fn item(&self, id: &str) -> Result<Option<Item>, Error> {
         self.conn
             .query_row("SELECT * FROM items WHERE id = ?1", [id], item_from)
             .optional()
-            .map_err(err)
+            .map_err(sqlite_error)
     }
 
-    pub fn entry(&self, id: &str) -> Result<Option<Entry>, String> {
+    pub fn entry(&self, id: &str) -> Result<Option<Entry>, Error> {
         self.conn
             .query_row("SELECT * FROM entries WHERE id = ?1", [id], entry_from)
             .optional()
-            .map_err(err)
+            .map_err(sqlite_error)
     }
 
     /// Every item, deleted ones included, oldest first.
-    pub fn items(&self) -> Result<Vec<Item>, String> {
+    pub fn items(&self) -> Result<Vec<Item>, Error> {
         self.query("SELECT * FROM items ORDER BY created_at, id", [], item_from)
     }
 
     /// Every entry, deleted ones included, oldest first.
-    pub fn entries(&self) -> Result<Vec<Entry>, String> {
+    pub fn entries(&self) -> Result<Vec<Entry>, Error> {
         self.query(
             "SELECT * FROM entries ORDER BY created_at, id",
             [],
@@ -381,7 +398,7 @@ impl Store {
     }
 
     /// Entries whose block lies in the inclusive day range.
-    pub fn entries_between(&self, first: NaiveDate, last: NaiveDate) -> Result<Vec<Entry>, String> {
+    pub fn entries_between(&self, first: NaiveDate, last: NaiveDate) -> Result<Vec<Entry>, Error> {
         self.query(
             "SELECT * FROM entries WHERE day BETWEEN ?1 AND ?2 ORDER BY created_at, id",
             [
@@ -392,7 +409,7 @@ impl Store {
         )
     }
 
-    pub fn running_timers(&self) -> Result<Vec<Entry>, String> {
+    pub fn running_timers(&self) -> Result<Vec<Entry>, Error> {
         self.query(
             "SELECT * FROM entries
              WHERE kind = 'timer' AND ended_at IS NULL AND deleted_at IS NULL",
@@ -406,13 +423,13 @@ impl Store {
         sql: &str,
         params: P,
         map: fn(&Row) -> rusqlite::Result<T>,
-    ) -> Result<Vec<T>, String> {
-        let mut statement = self.conn.prepare(sql).map_err(err)?;
+    ) -> Result<Vec<T>, Error> {
+        let mut statement = self.conn.prepare(sql).map_err(sqlite_error)?;
         statement
             .query_map(params, map)
-            .map_err(err)?
+            .map_err(sqlite_error)?
             .collect::<rusqlite::Result<Vec<T>>>()
-            .map_err(err)
+            .map_err(sqlite_error)
     }
 }
 
@@ -521,7 +538,7 @@ mod tests {
     #[test]
     fn failed_transactions_save_nothing() {
         let mut store = Store::open_in_memory().unwrap();
-        let result: Result<(), String> = store.transaction(|s| {
+        let result: Result<(), Error> = store.transaction(|s| {
             s.put_item(&sample_item())?;
             Err("boom".into())
         });

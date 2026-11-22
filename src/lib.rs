@@ -1,6 +1,7 @@
 pub mod calculation;
 pub mod config;
 pub mod day;
+pub mod error;
 pub mod export;
 pub mod item;
 pub mod location;
