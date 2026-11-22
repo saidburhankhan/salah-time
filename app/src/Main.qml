@@ -18,7 +18,13 @@ ApplicationWindow {
     property double timerNow: Date.now()
     property string quickBlock: ""
     property var editItem: ({})
-    property int statsRange: 7
+    property string statsMode: "week"
+    property date statsAnchor: new Date()
+    property date customFrom: new Date()
+    property date customTo: new Date()
+    property bool customRangeVisible: false
+    property bool statsTableVisible: false
+    property string selectedStatsItem: ""
     property int countdown: backend.dayPlan.now && backend.dayPlan.now.next ? backend.dayPlan.now.next.remaining_seconds : 0
     property var prayerIds: ["fajr", "dhuhr", "asr", "maghrib", "isha"]
     property var blockIds: ["night", "fajr", "dhuhr", "asr", "maghrib", "isha"]
@@ -96,6 +102,21 @@ ApplicationWindow {
         return new Date(first.getFullYear(),first.getMonth(),1-monday+offset)
     }
     function iso(d) { return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0") }
+    function statsBounds(mode, anchor, from, to) {
+        var a=new Date(anchor.getFullYear(),anchor.getMonth(),anchor.getDate()), first, last
+        if(mode==="month") { first=new Date(a.getFullYear(),a.getMonth(),1);last=new Date(a.getFullYear(),a.getMonth()+1,0) }
+        else if(mode==="custom") { first=new Date(from.getFullYear(),from.getMonth(),from.getDate());last=new Date(to.getFullYear(),to.getMonth(),to.getDate());if(first>last){var swap=first;first=last;last=swap} }
+        else { var monday=(a.getDay()+6)%7;first=new Date(a.getFullYear(),a.getMonth(),a.getDate()-monday);last=new Date(first.getFullYear(),first.getMonth(),first.getDate()+6) }
+        return {from:iso(first),to:iso(last),first:first,last:last}
+    }
+    function stepStats(amount) { var b=statsBounds(statsMode,statsAnchor,customFrom,customTo);if(statsMode==="custom"){var n=Math.round((b.last-b.first)/86400000)+1;customFrom=new Date(b.first.getFullYear(),b.first.getMonth(),b.first.getDate()+amount*n);customTo=new Date(b.last.getFullYear(),b.last.getMonth(),b.last.getDate()+amount*n);statsAnchor=customFrom}else if(statsMode==="month")statsAnchor=new Date(statsAnchor.getFullYear(),statsAnchor.getMonth()+amount,1);else statsAnchor=new Date(statsAnchor.getFullYear(),statsAnchor.getMonth(),statsAnchor.getDate()+amount*7);loadStatistics() }
+    function loadStatistics() { var b=statsBounds(statsMode,statsAnchor,customFrom,customTo);backend.loadStatsRange(b.from,b.to) }
+    function statsRangeLabel() { var b=statsBounds(statsMode,statsAnchor,customFrom,customTo),l=Qt.locale("en_US");if(statsMode==="month")return l.toString(b.first,"MMMM yyyy");if(b.first.getMonth()===b.last.getMonth())return l.toString(b.first,"d")+"–"+l.toString(b.last,"d MMM yyyy");return l.toString(b.first,"d MMM")+" – "+l.toString(b.last,"d MMM yyyy") }
+    function tooltipText(day) { var d=Date.fromLocaleString(Qt.locale(),day.day,"yyyy-MM-dd");return Qt.locale("en_US").toString(d,"ddd d MMM")+" · "+(day.done||0)+" / "+(day.planned||0)+" done · "+(day.minutes||0)+" min · "+(day.count||0)+" counts · "+(day.prayers||0)+" prayers" }
+    function formatMinutes(n) { n=Number(n||0);return n>=60?Math.floor(n/60)+" h "+(n%60)+" m":n+" m" }
+    function selectedDaily() { if(!selectedStatsItem)return backend.stats.daily||[];var items=backend.stats.items||[];for(var i=0;i<items.length;i++)if(items[i].id===selectedStatsItem){var out=[],s=items[i].series||[];for(var j=0;j<s.length;j++)out.push({day:s[j].day,planned:s[j].planned?1:0,done:s[j].done?1:0,minutes:s[j].minutes||0,count:s[j].count||0,prayers:0});return out}return [] }
+    function newestDaily() { var source=selectedDaily(),out=[];for(var i=source.length-1;i>=0;i--)out.push(source[i]);return out }
+    function maxDaily(field) { var a=selectedDaily(),m=0;for(var i=0;i<a.length;i++)m=Math.max(m,Number(a[i][field]||0));return Math.max(1,m) }
     function isTyping() { var f=win.activeFocusItem; return f && f.inputMethodHints !== undefined }
     ListModel { id: timelineModel }
     property bool timelineSyncing: false
@@ -197,11 +218,13 @@ ApplicationWindow {
 
     Shortcut { sequence: "Ctrl+1"; context: Qt.ApplicationShortcut; onActivated: page=0 }
     Shortcut { sequence: "Ctrl+2"; context: Qt.ApplicationShortcut; onActivated: page=1 }
-    Shortcut { sequence: "Ctrl+3"; context: Qt.ApplicationShortcut; onActivated: {page=2;backend.loadStats(statsRange)} }
+    Shortcut { sequence: "Ctrl+3"; context: Qt.ApplicationShortcut; onActivated: {page=2;loadStatistics()} }
     Shortcut { sequence: "Ctrl+4"; context: Qt.ApplicationShortcut; onActivated: page=3 }
     Shortcut { sequence: "Ctrl+K"; context: Qt.ApplicationShortcut; onActivated: openQuick("") }
     Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: page===0&&!quickVisible&&!entryVisible; onActivated: backend.moveDay(-1) }
     Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: page===0&&!quickVisible&&!entryVisible; onActivated: backend.moveDay(1) }
+    Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: page===2&&!customRangeVisible&&!isTyping(); onActivated: stepStats(-1) }
+    Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: page===2&&!customRangeVisible&&!isTyping(); onActivated: stepStats(1) }
     Shortcut { sequence: "T"; context: Qt.ApplicationShortcut; enabled: !isTyping(); onActivated: backend.jumpToday() }
     Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: helpVisible=!helpVisible }
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: !isTyping(); onActivated: Qt.quit() }
@@ -210,7 +233,7 @@ ApplicationWindow {
     Timer { interval:1000; running:true; repeat:true; onTriggered:{if(countdown>0)countdown--;timerNow=Date.now()} }
     Timer { interval:60000; running:true; repeat:true; onTriggered: backend.reload() }
     Connections { target:backend; function onChanged(){ if(backend.dayPlan.now&&backend.dayPlan.now.next) countdown=backend.dayPlan.now.next.remaining_seconds||0; syncTimeline() } }
-    Shortcut { sequence:"Escape"; context:Qt.ApplicationShortcut; onActivated:closeTopOverlay() }
+    Shortcut { sequence:"Escape"; context:Qt.ApplicationShortcut; onActivated:{if(customRangeVisible)customRangeVisible=false;else closeTopOverlay()} }
     onActiveChanged: if(active) backend.reload()
 
     RowLayout {
@@ -233,7 +256,7 @@ ApplicationWindow {
                             SidebarIcon { kind:index===0?"today":index===1?"routines":"statistics"; iconColor:win.page===index?win.text:win.muted }
                             Label { text:modelData; color:win.page===index?win.text:"#c4c0b8"; font.pixelSize:16 }
                         }
-                        MouseArea { anchors.fill:parent; onClicked:{win.page=index;if(index===2)backend.loadStats(statsRange)} }
+                        MouseArea { anchors.fill:parent; onClicked:{win.page=index;if(index===2)loadStatistics()} }
                     }
                 }
                 Rectangle { Layout.fillWidth:true; height:1; color:win.border; Layout.topMargin:8; Layout.bottomMargin:8 }
@@ -413,46 +436,125 @@ ApplicationWindow {
                 }
 
                 // Statistics
-                ScrollView { id:statsScroll; visible:page===2;Layout.fillWidth:true;Layout.fillHeight:true;clip:true;Layout.margins:30
-                    Column { width:statsScroll.availableWidth;spacing:20
-                        Row { spacing:8
-                            Repeater { model:[7,30]
-                                ChoiceChip { required property int modelData;text:qsTr("%1 days").arg(modelData);selected:statsRange===modelData;onClicked:{statsRange=modelData;backend.loadStats(modelData)} }
-                            }
-                        }
-                        Rectangle { width:parent.width;height:280;radius:theme.radius;color:win.panel;border.color:win.border
-                            ColumnLayout { anchors.fill:parent;anchors.margins:22;spacing:10
-                                RowLayout { Layout.fillWidth:true
-                                    Label { text:qsTr("Prayer completion");color:win.text;font.pixelSize:18;font.weight:Font.DemiBold;Layout.fillWidth:true }
-                                    Label { text:qsTr("%1 / %2 overall").arg(backend.stats.marked_total||0).arg(backend.stats.prayer_slots||0);color:win.muted;font.family:win.mono }
-                                }
-                                Repeater { model:backend.stats.prayers||[]
-                                    RowLayout { required property var modelData;Layout.fillWidth:true;spacing:14
-                                        Label { text:String(modelData.prayer).charAt(0).toUpperCase()+String(modelData.prayer).slice(1);color:"#d8d4cc";Layout.preferredWidth:90 }
-                                        Rectangle { Layout.fillWidth:true;height:10;radius:5;color:"#38352f"
-                                            Rectangle { width:parent.width*(modelData.days?modelData.marked_days/modelData.days:0);height:parent.height;radius:5;color:theme.accent }
+                ScrollView { id:statsScroll; visible:page===2;Layout.fillWidth:true;Layout.fillHeight:true;clip:true;Layout.margins:26
+                    Column { width:statsScroll.availableWidth;spacing:16
+                        RowLayout { width:parent.width;spacing:10
+                            Rectangle { height:38;width:250;radius:8;color:win.panel;border.color:win.border
+                                Row { anchors.fill:parent
+                                    Repeater { model:[["week",qsTr("Week")],["month",qsTr("Month")],["custom",qsTr("Custom")]]
+                                        Rectangle { required property var modelData;width:parent.parent.width/3;height:parent.parent.height;radius:7;color:statsMode===modelData[0]?"#3a3730":"transparent"
+                                            Label { anchors.centerIn:parent;text:modelData[1];color:statsMode===modelData[0]?win.text:win.muted;font.pixelSize:13 }
+                                            MouseArea { anchors.fill:parent;onClicked:{statsMode=modelData[0];if(statsMode==="custom")customRangeVisible=true;else loadStatistics()} }
                                         }
-                                        Label { text:modelData.marked_days+" / "+modelData.days;color:win.muted;font.family:win.mono;Layout.preferredWidth:55;horizontalAlignment:Text.AlignRight }
+                                    }
+                                }
+                            }
+                            AppButton { text:"‹";implicitWidth:40;onClicked:stepStats(-1) }
+                            Label { Layout.preferredWidth:210;text:statsRangeLabel();color:win.text;font.pixelSize:15;font.weight:Font.Medium;horizontalAlignment:Text.AlignHCenter }
+                            AppButton { text:"›";implicitWidth:40;onClicked:stepStats(1) }
+                            Item { Layout.fillWidth:true }
+                            AppButton { text:qsTr("Today");onClicked:{statsAnchor=new Date();loadStatistics()} }
+                        }
+                        Row { width:parent.width;spacing:12
+                            Repeater { model:[
+                                [qsTr("Tasks done"),(backend.stats.totals||{}).done+" / "+(backend.stats.totals||{}).planned,((backend.stats.totals||{}).planned?Math.round(100*(backend.stats.totals||{}).done/(backend.stats.totals||{}).planned):0)+"% completed"],
+                                [qsTr("Time spent"),formatMinutes((backend.stats.totals||{}).minutes),qsTr("%1 active days").arg((backend.stats.totals||{}).active_days||0)],
+                                [qsTr("Counts"),String((backend.stats.totals||{}).count||0),qsTr("logged in this range")],
+                                [qsTr("Prayers"),(backend.stats.totals||{}).prayers+" / "+(backend.stats.prayer_slots||0),qsTr("five daily prayers")]]
+                                Rectangle { required property var modelData;width:(parent.width-36)/4;height:116;radius:theme.radius;color:win.panel;border.color:win.border
+                                    Column { anchors.fill:parent;anchors.margins:16;spacing:7
+                                        Label { text:modelData[0];color:win.muted;font.pixelSize:13 }
+                                        Label { text:modelData[1];color:win.text;font.family:win.mono;font.pixelSize:27;font.weight:Font.DemiBold }
+                                        Label { text:modelData[2];color:win.muted;font.pixelSize:12 }
                                     }
                                 }
                             }
                         }
-                        Label { text:qsTr("Activities");color:win.text;font.pixelSize:18;font.weight:Font.DemiBold }
-                        Repeater { model:(backend.stats.items||[]).slice().sort(function(a,b){return String(a.title).localeCompare(String(b.title))})
-                            Rectangle { required property var modelData;width:parent.width;height:88;radius:theme.radius;color:win.panel;border.color:win.border
-                                RowLayout { anchors.fill:parent;anchors.margins:18
-                                    ColumnLayout { Layout.fillWidth:true
-                                        Label { text:modelData.title;color:win.text;font.pixelSize:15;font.weight:Font.Medium }
-                                        Label { text:joinedDetail(modelData.block,weekdayText(modelData.weekdays,modelData.repeat));color:win.muted;font.family:win.mono;font.pixelSize:12 }
-                                        Rectangle { Layout.fillWidth:true;Layout.maximumWidth:420;height:5;radius:3;color:"#38352f"; Rectangle { width:parent.width*(modelData.planned_days?modelData.done_days/modelData.planned_days:0);height:parent.height;radius:3;color:theme.accent } }
-                                    }
-                                    ColumnLayout { Layout.preferredWidth:150
-                                        Label { text:qsTr("%1 min").arg(modelData.minutes||0);color:win.text;font.family:win.mono;font.pixelSize:16;Layout.alignment:Qt.AlignRight }
-                                        Label { visible:modelData.measure==="count";text:qsTr("%1 count").arg(modelData.count||0);color:win.muted;font.family:win.mono;font.pixelSize:12;Layout.alignment:Qt.AlignRight }
+                        RowLayout { width:parent.width
+                            Label { text:selectedStatsItem?qsTr("Filtered task"):qsTr("Daily activity");color:win.text;font.pixelSize:18;font.weight:Font.DemiBold;Layout.fillWidth:true }
+                            AppButton { visible:selectedStatsItem;text:qsTr("All tasks  ×");onClicked:selectedStatsItem="" }
+                            Rectangle { width:138;height:34;radius:7;color:win.panel;border.color:win.border
+                                Row { anchors.fill:parent
+                                    Repeater { model:[[false,qsTr("Chart")],[true,qsTr("Table")]]
+                                        Rectangle { required property var modelData;width:69;height:34;radius:6;color:statsTableVisible===modelData[0]?"#3a3730":"transparent"
+                                            Label { anchors.centerIn:parent;text:modelData[1];color:statsTableVisible===modelData[0]?win.text:win.muted;font.pixelSize:12 }
+                                            MouseArea { anchors.fill:parent;onClicked:statsTableVisible=modelData[0] }
+                                        }
                                     }
                                 }
                             }
                         }
+                        Column { visible:!statsTableVisible;width:parent.width;spacing:12
+                            Repeater { model:[[qsTr("Tasks done per day"),"done"],[qsTr("Time spent per day"),"minutes"]]
+                                Rectangle { required property var modelData;width:parent.width;height:218;radius:theme.radius;color:win.panel;border.color:win.border
+                                    property var rows:selectedDaily();property real maximum:modelData[1]==="done"?Math.max(maxDaily("planned"),maxDaily("done")):maxDaily("minutes")
+                                    Label { x:18;y:15;text:modelData[0];color:win.text;font.pixelSize:15;font.weight:Font.Medium }
+                                    Item { id:plot;anchors{left:parent.left;right:parent.right;top:parent.top;bottom:parent.bottom;leftMargin:52;rightMargin:18;topMargin:48;bottomMargin:34}
+                                        Repeater { model:4
+                                            Item { required property int index;width:plot.width;height:1;y:index*(plot.height-1)/3
+                                                Rectangle { width:parent.width;height:1;color:"#302e29" }
+                                                Label { x:-45;y:-7;width:38;horizontalAlignment:Text.AlignRight;color:win.muted;font.family:win.mono;font.pixelSize:10;text:{var v=Math.round(parent.parent.parent.maximum*(3-index)/3);return parent.parent.parent.modelData[1]==="minutes"&&parent.parent.parent.maximum>=120?(v/60).toFixed(v%60?1:0)+"h":v} }
+                                            }
+                                        }
+                                        Row { anchors.fill:parent;spacing:2
+                                            Repeater { model:plot.parent.rows
+                                                Item { required property var modelData;required property int index;width:(plot.width-Math.max(0,plot.parent.rows.length-1)*2)/Math.max(1,plot.parent.rows.length);height:plot.height
+                                                    property bool future:modelData.day>backend.todayDay
+                                                    Rectangle { visible:parent.parent.parent.parent.modelData[1]==="done";anchors.bottom:parent.bottom;anchors.horizontalCenter:parent.horizontalCenter;width:Math.max(3,Math.min(42,parent.width-3));height:plot.height*(modelData.planned||0)/parent.parent.parent.parent.maximum;radius:4;color:"#45423b";opacity:future?.3:1 }
+                                                    Rectangle { anchors.bottom:parent.bottom;anchors.horizontalCenter:parent.horizontalCenter;width:Math.max(3,Math.min(42,parent.width-3));height:plot.height*Number(modelData[parent.parent.parent.parent.modelData[1]]||0)/parent.parent.parent.parent.maximum;radius:4;color:theme.accent;opacity:future?.22:.9 }
+                                                    Rectangle { visible:modelData.day===backend.todayDay;anchors.bottom:parent.bottom;anchors.horizontalCenter:parent.horizontalCenter;width:Math.max(5,Math.min(46,parent.width-1));height:parent.height;color:"transparent";border.color:win.text;border.width:1;opacity:.55 }
+                                                    Label { anchors.top:parent.bottom;anchors.topMargin:7;anchors.horizontalCenter:parent.horizontalCenter;color:future?"#5f5b54":win.muted;font.family:win.mono;font.pixelSize:10;text:{var d=Date.fromLocaleString(Qt.locale(),modelData.day,"yyyy-MM-dd");if(statsMode==="week")return Qt.locale("en_US").toString(d,"ddd").charAt(0);return (index%Math.max(1,Math.ceil(plot.parent.rows.length/12))===0||index===plot.parent.rows.length-1)?d.getDate():""} }
+                                                    MouseArea { anchors.fill:parent;anchors.leftMargin:-2;anchors.rightMargin:-2;hoverEnabled:true;onEntered:{tip.text=tooltipText(modelData);tip.visible=true;var p=mapToItem(win.contentItem,width/2,0);tip.x=Math.max(230,Math.min(win.width-tip.width-10,p.x-tip.width/2));tip.y=Math.max(10,p.y-tip.height-8)} onExited:tip.visible=false }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Rectangle { width:parent.width;height:106;radius:theme.radius;color:win.panel;border.color:win.border
+                                Label { x:18;y:15;text:qsTr("Prayers per day");color:win.text;font.pixelSize:15;font.weight:Font.Medium }
+                                Row { x:18;y:53;width:parent.width-36;spacing:2
+                                    Repeater { model:selectedDaily()
+                                        Item { required property var modelData;width:(parent.parent.width-Math.max(0,selectedDaily().length-1)*2)/Math.max(1,selectedDaily().length);height:35
+                                            Row { anchors.centerIn:parent;spacing:2;Repeater { model:5;Rectangle { required property int index;width:Math.max(2,Math.min(6,(parent.parent.width-8)/5));height:width;radius:width/2;color:index<(parent.parent.modelData.prayers||0)?theme.accent:"#45423b" } } }
+                                            MouseArea { anchors.fill:parent;hoverEnabled:true;onEntered:{tip.text=tooltipText(modelData);tip.visible=true;var p=mapToItem(win.contentItem,width/2,0);tip.x=Math.max(230,Math.min(win.width-tip.width-10,p.x-tip.width/2));tip.y=p.y-tip.height-8} onExited:tip.visible=false }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle { id:tableCard;visible:statsTableVisible;property var rows:newestDaily();width:parent.width;height:74+rows.length*35;radius:theme.radius;color:win.panel;border.color:win.border
+                            Column { anchors.fill:parent;anchors.margins:14
+                                Row { width:parent.width;height:34
+                                    Repeater { model:[[qsTr("Date"),.34],[qsTr("Done / Planned"),.2],[qsTr("Time"),.16],[qsTr("Counts"),.15],[qsTr("Prayers"),.15]];Label { required property var modelData;required property int index;width:parent.width*modelData[1];text:modelData[0];color:win.muted;font.pixelSize:11;horizontalAlignment:index?Text.AlignRight:Text.AlignLeft } }
+                                }
+                                Repeater { model:tableCard.rows
+                                    Row { required property var modelData;width:tableCard.width-28;height:35;opacity:(modelData.done||modelData.minutes||modelData.count||modelData.prayers)?.95:.38
+                                        Label { width:parent.width*.34;text:Qt.locale("en_US").toString(Date.fromLocaleString(Qt.locale(),parent.modelData.day,"yyyy-MM-dd"),"ddd, d MMM");color:win.text;font.pixelSize:12 }
+                                        Label { width:parent.width*.2;text:(parent.modelData.done||0)+" / "+(parent.modelData.planned||0);color:win.text;font.family:win.mono;font.pixelSize:12;horizontalAlignment:Text.AlignRight }
+                                        Label { width:parent.width*.16;text:formatMinutes(parent.modelData.minutes);color:win.text;font.family:win.mono;font.pixelSize:12;horizontalAlignment:Text.AlignRight }
+                                        Label { width:parent.width*.15;text:String(parent.modelData.count||0);color:win.text;font.family:win.mono;font.pixelSize:12;horizontalAlignment:Text.AlignRight }
+                                        Label { width:parent.width*.15;text:(parent.modelData.prayers||0)+" / 5";color:win.text;font.family:win.mono;font.pixelSize:12;horizontalAlignment:Text.AlignRight }
+                                    }
+                                }
+                                Row { width:parent.width;height:38;property var t:backend.stats.totals||{};Rectangle{anchors.top:parent.top;width:parent.width;height:1;color:win.border}Label{width:parent.width*.34;text:qsTr("Total");color:win.text;font.weight:Font.DemiBold}Label{width:parent.width*.2;text:(parent.t.done||0)+" / "+(parent.t.planned||0);color:win.text;font.family:win.mono;horizontalAlignment:Text.AlignRight}Label{width:parent.width*.16;text:formatMinutes(parent.t.minutes);color:win.text;font.family:win.mono;horizontalAlignment:Text.AlignRight}Label{width:parent.width*.15;text:parent.t.count||0;color:win.text;font.family:win.mono;horizontalAlignment:Text.AlignRight}Label{width:parent.width*.15;text:(parent.t.prayers||0)+" / "+(backend.stats.prayer_slots||0);color:win.text;font.family:win.mono;horizontalAlignment:Text.AlignRight} }
+                            }
+                        }
+                        Label { text:qsTr("By task");color:win.text;font.pixelSize:18;font.weight:Font.DemiBold;topPadding:4 }
+                        Repeater { model:(backend.stats.items||[]).slice().sort(function(a,b){return (b.minutes||0)-(a.minutes||0)})
+                            Rectangle { required property var modelData;width:parent.width;height:88;radius:theme.radius;color:selectedStatsItem===modelData.id?"#292722":win.panel;border.color:selectedStatsItem===modelData.id?theme.accent:win.border
+                                RowLayout { anchors.fill:parent;anchors.margins:15;spacing:16
+                                    ColumnLayout { Layout.preferredWidth:260;spacing:4;Label{text:modelData.title;color:win.text;font.pixelSize:14;font.weight:Font.Medium;Layout.fillWidth:true;elide:Text.ElideRight}Label{text:joinedDetail(modelData.block,modelData.repeat);color:win.muted;font.family:win.mono;font.pixelSize:11} }
+                                    ColumnLayout { Layout.preferredWidth:190;spacing:6;Label{text:(modelData.done_days||0)+" / "+(modelData.planned_days||0)+qsTr(" days");color:win.muted;font.family:win.mono;font.pixelSize:11}Rectangle{Layout.fillWidth:true;height:4;radius:2;color:"#403d37";Rectangle{height:parent.height;width:parent.width*(modelData.planned_days?modelData.done_days/modelData.planned_days:0);radius:2;color:theme.accent}} }
+                                    Item { Layout.fillWidth:true;Layout.preferredHeight:42;Row{anchors.fill:parent;spacing:2;Repeater{model:modelData.series||[];Rectangle{required property var modelData;width:(parent.parent.width-Math.max(0,(parent.parent.parent.modelData.series||[]).length-1)*2)/Math.max(1,(parent.parent.parent.modelData.series||[]).length);height:Math.max(2,parent.parent.height*Math.min(1,(modelData.minutes||0)/60));anchors.bottom:parent.bottom;radius:2;color:"#777168"}}} }
+                                    Label { Layout.preferredWidth:90;text:formatMinutes(modelData.minutes);color:win.text;font.family:win.mono;font.pixelSize:14;horizontalAlignment:Text.AlignRight }
+                                    Label { Layout.preferredWidth:76;text:modelData.measure==="count"?(modelData.count||0)+" ×":"—";color:win.muted;font.family:win.mono;font.pixelSize:12;horizontalAlignment:Text.AlignRight }
+                                }
+                                MouseArea { anchors.fill:parent;onClicked:selectedStatsItem=modelData.id }
+                            }
+                        }
+                        Label { visible:!backend.busy&&!(backend.stats.daily||[]).some(function(x){return x.done||x.minutes||x.count||x.prayers});width:parent.width;height:80;text:qsTr("No activity in this range");color:win.muted;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter }
+                        Label { visible:backend.busy;width:parent.width;height:50;text:qsTr("Loading statistics…");color:win.muted;horizontalAlignment:Text.AlignHCenter }
                     }
                 }
 
@@ -480,6 +582,33 @@ ApplicationWindow {
                 }
             }
         }
+    }
+
+    Popup { id:customRangePopup;visible:customRangeVisible;modal:true;focus:true;x:250;y:90;width:330;height:390;closePolicy:Popup.CloseOnPressOutside
+        property date shownMonth:statsAnchor
+        property bool pickingEnd:false
+        onClosed:customRangeVisible=false
+        background:Rectangle{color:win.panel;radius:theme.radius;border.color:win.border}
+        Column { anchors.fill:parent;anchors.margins:18;spacing:12
+            RowLayout { width:parent.width;AppButton{text:"‹";onClicked:customRangePopup.shownMonth=new Date(shownMonth.getFullYear(),shownMonth.getMonth()-1,1)}Label{Layout.fillWidth:true;text:Qt.locale("en_US").toString(customRangePopup.shownMonth,"MMMM yyyy");color:win.text;font.pixelSize:15;horizontalAlignment:Text.AlignHCenter}AppButton{text:"›";onClicked:customRangePopup.shownMonth=new Date(shownMonth.getFullYear(),shownMonth.getMonth()+1,1)} }
+            Row { width:parent.width;height:22;Repeater{model:["M","T","W","T","F","S","S"];Label{required property string modelData;width:parent.parent.width/7;text:modelData;color:win.muted;font.family:win.mono;font.pixelSize:11;horizontalAlignment:Text.AlignHCenter}} }
+            Grid { width:parent.width;columns:7;rows:6
+                Repeater { model:42
+                    Rectangle { required property int index;width:parent.width/7;height:38;radius:6
+                        property date cellDate:{var f=new Date(customRangePopup.shownMonth.getFullYear(),customRangePopup.shownMonth.getMonth(),1),off=(f.getDay()+6)%7;return new Date(f.getFullYear(),f.getMonth(),1-off+index)}
+                        property string cellIso:iso(cellDate);property var bounds:statsBounds("custom",statsAnchor,customFrom,customTo)
+                        color:cellIso===bounds.from||cellIso===bounds.to?theme.accent:(cellIso>bounds.from&&cellIso<bounds.to?"#3a3730":"transparent")
+                        opacity:cellDate.getMonth()===customRangePopup.shownMonth.getMonth()?1:.35
+                        Label { anchors.centerIn:parent;text:parent.cellDate.getDate();color:parent.cellIso===parent.bounds.from||parent.cellIso===parent.bounds.to?theme.accentForeground:win.text;font.family:win.mono;font.pixelSize:12 }
+                        MouseArea { anchors.fill:parent;onClicked:{if(!customRangePopup.pickingEnd){customFrom=parent.cellDate;customTo=parent.cellDate;customRangePopup.pickingEnd=true}else{customTo=parent.cellDate;customRangePopup.pickingEnd=false}} }
+                    }
+                }
+            }
+            RowLayout { width:parent.width;Label{Layout.fillWidth:true;text:statsRangeLabel();color:win.muted;font.family:win.mono;font.pixelSize:11}AppButton{text:qsTr("Apply");primary:true;onClicked:{statsAnchor=customFrom;customRangeVisible=false;loadStatistics()}} }
+        }
+    }
+    Rectangle { id:tip;objectName:"statsTooltip";z:3000;visible:false;property alias text:tipLabel.text;width:tipLabel.implicitWidth+24;height:38;radius:7;color:"#35322c";border.color:"#575249"
+        Label { id:tipLabel;anchors.centerIn:parent;color:win.text;font.family:win.mono;font.pixelSize:11 }
     }
 
     // Quick add overlay

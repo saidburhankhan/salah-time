@@ -133,6 +133,18 @@ void Backend::loadStats(int days) {
     });
 }
 
+void Backend::loadStatsRange(const QString &from, const QString &to) {
+    const QDate first = QDate::fromString(from, Qt::ISODate);
+    const QDate last = QDate::fromString(to, Qt::ISODate);
+    if (!first.isValid() || !last.isValid() || first > last || first.daysTo(last) >= 366) {
+        fail(tr("Invalid statistics date range.")); emit changed(); return;
+    }
+    enqueue({"stats", "--from", from, "--to", to, "--json"}, [this](const QJsonDocument &doc) {
+        if (doc.isObject()) { if (setJsonModel(m_stats, m_statsJson, doc)) emit changed(); }
+        else fail(tr("Salah returned invalid statistics data."));
+    });
+}
+
 void Backend::moveDay(int amount) { if (!m_selected.isValid()) m_selected = m_today; m_selected = m_selected.addDays(amount); reload(); }
 void Backend::selectDay(const QString &day) { const QDate parsed = QDate::fromString(day, Qt::ISODate); if (parsed.isValid() && parsed != m_selected) { m_selected = parsed; reload(); } }
 void Backend::jumpToday() { m_selected = m_today; reload(); }

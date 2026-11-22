@@ -37,6 +37,7 @@ public:
 
     Q_INVOKABLE void reload();
     Q_INVOKABLE void loadStats(int days);
+    Q_INVOKABLE void loadStatsRange(const QString &from, const QString &to);
     Q_INVOKABLE void moveDay(int amount);
     Q_INVOKABLE void selectDay(const QString &day);
     Q_INVOKABLE void jumpToday();
