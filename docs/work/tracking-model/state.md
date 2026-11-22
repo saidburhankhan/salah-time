@@ -6,27 +6,24 @@
 
 ## Now
 
-Committed: S1 7d1299e, S2 bf4de55, S3 core 241326d + c1753ec (sessions, metric validation,
-snapshots, fulfilment, day/metric/project/tag/block stats). All workspace suites including
-daemon sockets + strict Clippy green at each commit.
+Backend complete and reviewed: S1 7d1299e, S2 bf4de55, S3 241326d c1753ec, S4 4b1c5b7 dbbf021,
+review fixes 496da37 (decisions in interface.md "Review decisions"). 125 workspace tests incl.
+daemon sockets, 0 ignored; strict Clippy clean. Schema v1 was changed in place (no user data;
+an older DB is renamed aside).
 
-Uncommitted, not green-checked: W1's partial S4 protocol wiring (`crates/salah-protocol`,
-RPC fixtures, Cargo.lock) and W2's frontend work (`app/**`, `plugin/**`). W2's first attempt
-was rejected: it deleted 43 of 48 app tests; it was told to restore and adapt them.
+Frontend (W2, Codex) has uncommitted, unaccepted work in app/** and plugin/**; its first attempt
+deleted 43/48 app tests and was rejected.
 
-Both Codex workers stopped at 20:15 on the Codex usage limit (resets 00:39).
-Codex workers run sandboxed (no .git writes, no sockets): they declare CHECKPOINT in
-their progress file and the orchestrator verifies and commits.
+Limits at 22:57: Claude 5h 62% (resets 03:10), 7d 32%. Codex 5h exhausted (resets 00:39).
 
 ## Next
 
-- 22:13 (cron): Claude resets at 22:10. Start a Claude worker on W1's remaining S4
-  (protocol wiring, legacy removal, fixtures) from w1-progress.md, so the critical path
-  doesn't wait for Codex.
-- 00:41 (systemd timer `salah-resume-w2`): Codex resumes W2 (test restoration).
-  W1 Codex is resumed by the orchestrator only if the Claude worker hasn't finished S4.
-- Then: S6 integration (full checks, install, live daemon/logs), archive, and
-  `handoff-telegram.sh`.
+- 00:41 (systemd timer `salah-resume-w2`): Codex resumes W2 with `w2-resume.txt` (restore and
+  adapt tests, switch to the real fixtures, fix the app and widget to the real shapes).
+- 00:44 (cron in salah-orch): confirm W2 is running and re-arm the Monitor; verify and commit
+  checkpoints (explicit paths only).
+- Then S6: `./scripts/test`, clippy, `./scripts/install`, `salah status --json`, daemon and
+  journal checks; archive; `handoff-telegram.sh`.
 
 ## Interfaces
 
