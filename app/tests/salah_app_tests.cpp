@@ -10,12 +10,14 @@
 #include <QtTest>
 #include "backend.h"
 #include "client/coreclient.h"
+#include "client/dto.h"
 #include "theme.h"
 #include "translator.h"
 
 class SalahAppTests : public QObject {
     Q_OBJECT
     static void write(const QString &path, const QByteArray &data) { QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly)); QCOMPARE(f.write(data), data.size()); }
+    static QJsonDocument readJson(const QString &path) { QFile f(path); if (!f.open(QIODevice::ReadOnly)) qFatal("fixture not readable"); return QJsonDocument::fromJson(f.readAll()); }
     static QString fake(QTemporaryDir &dir) {
         const QString path=dir.filePath("salah"), log=dir.filePath("args");
         QByteArray script = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '"+log.toUtf8()+"'\n";
@@ -23,10 +25,10 @@ class SalahAppTests : public QObject {
 if [ "$5" = "slow" ]; then sleep 2; printf '{}\n'; exit 0; fi
 if [ "$1 $2" = "item done" ]; then sleep 1; printf '{}\n'; exit 0; fi
 if [ "$1" = "day" ]; then
- printf '%s\n' '{"day":"2026-11-22","is_today":true,"now":{"block":"dhuhr","sleeping":false,"next":{"id":"asr","name":"Asr","time":"15:18","remaining_seconds":7200}},"prayers":[{"id":"fajr","name":"Fajr","time":"05:58","marked":true},{"id":"dhuhr","name":"Dhuhr","time":"12:11","current":true},{"id":"asr","name":"Asr","time":"15:18"},{"id":"maghrib","name":"Maghrib","time":"17:00"},{"id":"isha","name":"Isha","time":"18:20"}],"sunrise":"07:16","sleep":{"time":"23:00"},"night_start":"23:00","blocks":[{"start":"night","end":"fajr","items":[{"id":"n1","title":"Tahajjud","block":"night","repeat":"daily","weekdays":null,"measure":"check","target":null,"position":0,"state":"open","minutes":3,"count":0,"timer_started_at":"2026-11-22T08:00:00Z"}]},{"start":"fajr","end":"dhuhr","items":[{"id":"a1","title":"Read","block":"fajr","repeat":"daily","weekdays":null,"measure":"minutes","target":20,"position":0,"state":"done","minutes":15,"count":0,"timer_started_at":null}]},{"start":"dhuhr","end":"asr","items":[]},{"start":"asr","end":"maghrib","items":[]},{"start":"maghrib","end":"isha","items":[]},{"start":"isha","end":"sleep","items":[]}],"open":1}'
+ printf '%s\n' '{"day":"2026-11-22","is_today":true,"now":{"block":"dhuhr","sleeping":false,"next":{"id":"asr","name":"Asr","time":"15:18","remaining_seconds":7200}},"prayers":[{"id":"fajr","name":"Fajr","time":"05:58","passed":true,"current":false,"marked":true},{"id":"dhuhr","name":"Dhuhr","time":"12:11","passed":false,"current":true,"marked":false},{"id":"asr","name":"Asr","time":"15:18","passed":false,"current":false,"marked":false},{"id":"maghrib","name":"Maghrib","time":"17:00","passed":false,"current":false,"marked":false},{"id":"isha","name":"Isha","time":"18:20","passed":false,"current":false,"marked":false}],"sunrise":"07:16","sleep":{"time":"23:00","passed":false},"night_start":"23:00","blocks":[{"start":"night","end":"fajr","items":[{"id":"n1","title":"Tahajjud","block":"night","repeat":"daily","weekdays":null,"measure":"check","target":null,"position":0,"state":"open","minutes":3,"count":0,"timer_started_at":"2026-11-22T08:00:00Z"}]},{"start":"fajr","end":"dhuhr","items":[{"id":"a1","title":"Read","block":"fajr","repeat":"daily","weekdays":null,"measure":"minutes","target":20,"position":0,"state":"done","minutes":15,"count":0,"timer_started_at":null}]},{"start":"dhuhr","end":"asr","items":[]},{"start":"asr","end":"maghrib","items":[]},{"start":"maghrib","end":"isha","items":[]},{"start":"isha","end":"sleep","items":[]}],"open":1}'
 elif [ "$1" = "stats" ]; then
  printf '%s\n' '{"from":"2026-11-09","to":"2026-11-22","days":14,"items":[{"id":"a1","title":"Read","block":"fajr","repeat":"daily","weekdays":null,"measure":"minutes","target":20,"planned_days":14,"done_days":9,"minutes":180,"count":0,"series":[{"day":"2026-11-22","planned":true,"done":true,"minutes":25,"count":0}]}],"prayers":[{"prayer":"fajr","marked_days":10,"days":14}],"marked_total":10,"prayer_slots":70,"daily":[{"day":"2026-11-22","planned":1,"done":1,"minutes":25,"count":0,"prayers":4}],"totals":{"planned":14,"done":9,"minutes":180,"count":0,"prayers":10,"active_days":11}}'
-elif [ "$1 $2" = "config show" ]; then printf '%s\n' '{' '  "location": "Tashkent",' '  "method": "uzbekistan",' '  "sleep_time": "23:00"' '}'
+elif [ "$1 $2" = "config show" ]; then printf '%s\n' '{"asr":"hanafi","auto_location":true,"last_location_provider":null,"last_location_sync":null,"latitude":41.2,"location":"Tashkent","longitude":69.2,"method":"uzbekistan","sleep_time":"23:00","timezone_offset":5}'
 elif [ "$1 $2" = "item parse" ]; then printf '%s\n' '{"title":"Read","block":"isha","repeat":"daily","weekdays":null,"measure":"minutes","target":20}'
 else printf '%s\n' '{}'; fi
 )SH";
@@ -36,13 +38,19 @@ else printf '%s\n' '{}'; fi
     static QString fakeCore(QTemporaryDir &dir) {
         const QString path = dir.filePath("core-salah"), log = dir.filePath("core-args");
         QByteArray script = "#!/bin/sh\nfor arg in \"$@\"; do printf '<%s>' \"$arg\"; done >> '" + log.toUtf8() + "'\nprintf '\\n' >> '" + log.toUtf8() + "'\n";
-        script += R"SH(
+        script += QByteArray(R"SH(
 case "$*" in
   *2099-01-01*) sleep 1 ;;
   *malformed*) printf 'not-json\n'; exit 0 ;;
   *failure*) printf 'salah: requested failure\n' >&2; exit 7 ;;
 esac
-printf '{"ok":true}\n'
+)SH") + "fixture='" TEST_SOURCE_DIR "/../../tests/fixtures/contract/'\n" + R"SH(
+case "$1 $2" in
+  'day --date') cat "${fixture}day.json" ;;
+  'stats --days'|'stats --from') cat "${fixture}stats_days.json" ;;
+  'config show') cat "${fixture}config_show.json" ;;
+  *) printf '{"ok":true}\n' ;;
+esac
 )SH";
         write(path, script);
         QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
@@ -54,6 +62,43 @@ printf '{"ok":true}\n'
         return QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts);
     }
 private slots:
+    void decodersAcceptGoldenFixtures() {
+        const QString base = QStringLiteral(TEST_SOURCE_DIR "/../../tests/fixtures/contract/");
+        auto json = [&](const QString &name) { return readJson(base + name + ".json"); };
+        QVERIFY(Dto::decode<Dto::DayPlan>(json("day").object()));
+        QVERIFY(Dto::decode<Dto::Today>(json("item_list").object()));
+        QVERIFY(Dto::decode<Dto::Stats>(json("stats_range").object()));
+        QVERIFY(Dto::decode<Dto::Stats>(json("stats_days").object()));
+        QVERIFY(Dto::decode<Dto::ParseDraft>(json("item_parse").object()));
+        QVERIFY(Dto::decode<Dto::Config>(json("config_show").object()));
+        QVERIFY(Dto::decode<Dto::Item>(json("item_add_plain").object()));
+        QVERIFY(Dto::decode<Dto::Entry>(json("item_start").object()));
+        QVERIFY(Dto::decode<std::vector<Dto::Entry>>(json("item_stop").array()));
+        QVERIFY(Dto::decode<Dto::PrayerMark>(json("prayer_mark").object()));
+    }
+    void decoderRejectsBadFieldsAndAllowsExtras() {
+        const QString base = QStringLiteral(TEST_SOURCE_DIR "/../../tests/fixtures/contract/day.json");
+        QFile f(base); QVERIFY(f.open(QIODevice::ReadOnly)); QJsonObject day=QJsonDocument::fromJson(f.readAll()).object();
+        day["future_v1_field"] = QJsonObject{{"anything",true}};
+        QVERIFY(Dto::decode<Dto::DayPlan>(day));
+        QJsonObject missing=day; missing.remove("blocks"); auto a=Dto::decode<Dto::DayPlan>(missing);
+        QVERIFY(!a); QCOMPARE(a.error->formatted(),QString("day.blocks: missing required field"));
+        QJsonObject mistyped=day; mistyped["open"]="zero"; auto b=Dto::decode<Dto::DayPlan>(mistyped);
+        QVERIFY(!b); QCOMPARE(b.error->formatted(),QString("day.open: expected number"));
+        QJsonArray blocks=day["blocks"].toArray(); QJsonObject block=blocks[1].toObject(); QJsonArray items=block["items"].toArray();
+        QJsonObject item=items[0].toObject(); item["state"]="future"; items[0]=item; block["items"]=items; blocks[1]=block; day["blocks"]=blocks;
+        auto c=Dto::decode<Dto::DayPlan>(day); QVERIFY(!c);
+        QCOMPARE(c.error->formatted(),QString("day.blocks[1].items[0].state: expected one of open|done|missed"));
+    }
+    void coreClientDecodesTimerStopArray() {
+        QTemporaryDir dir; const QString path=dir.filePath("salah");
+        const QString fixture=QStringLiteral(TEST_SOURCE_DIR "/../../tests/fixtures/contract/item_stop.json");
+        write(path,"#!/bin/sh\ncat '"+fixture.toUtf8()+"'\n"); QFile::setPermissions(path,QFile::ReadOwner|QFile::WriteOwner|QFile::ExeOwner);
+        CoreClient client(nullptr,path); QSignalSpy spy(&client,&CoreClient::requestFinished); CoreClient::Result result;
+        client.timerStop("id-1",[&](const CoreClient::Result&r){result=r;}); QTRY_COMPARE(spy.size(),1);
+        QVERIFY(result.ok); QVERIFY(std::holds_alternative<std::vector<Dto::Entry>>(result.value));
+        QCOMPARE(std::get<std::vector<Dto::Entry>>(result.value).size(),size_t(1));
+    }
     void coreClientBuildsEveryCommand() {
         QTemporaryDir dir; CoreClient client(nullptr, fakeCore(dir)); QSignalSpy spy(&client, &CoreClient::requestFinished);
         CoreClient::ItemFields add; add.title = "Title -- literal"; add.block = "asr"; add.repeat = "weekly";
@@ -132,6 +177,18 @@ private slots:
         // Month chart plot spans x=298..1396. Day 17 is column index 16.
         QTest::mouseMove(window,QPoint(902,450));auto *tooltip=root->findChild<QObject *>("statsTooltip");QVERIFY(tooltip);QTRY_VERIFY_WITH_TIMEOUT(tooltip->property("visible").toBool(),1000);QCOMPARE(tooltip->property("text").toString(),QString("Tue 17 Nov · 2 / 2 done · 105 min · 9 counts · 3 prayers"));shot("a9-tooltip.png");
         window->hide();
+    }
+    void isolatedRealCliSmoke() {
+        if (qEnvironmentVariableIsEmpty("SALAH_APP_SMOKE")) return;
+        Backend backend(nullptr,qEnvironmentVariable("SALAH_BIN")); Theme theme;
+        QSignalSpy spy(&backend,&Backend::requestFinished); backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(),3,5000);
+        QVERIFY2(backend.error().isEmpty(),qPrintable(backend.error()));
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend",&backend); engine.rootContext()->setContextProperty("theme",&theme);
+        QQmlComponent component(&engine,QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/Main.qml")));
+        QScopedPointer<QObject> root(component.create()); QVERIFY2(root,qPrintable(component.errorString())); root->setProperty("visible",false);
+        root->setProperty("page",2); root->setProperty("statsMode","week");
+        QVERIFY(QMetaObject::invokeMethod(root.data(),"loadStatistics")); QTRY_VERIFY_WITH_TIMEOUT(!backend.busy(),5000);
+        QVERIFY2(backend.error().isEmpty(),qPrintable(backend.error())); QVERIFY(!backend.stats().isEmpty());
     }
     void asyncQueueAndModels() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);

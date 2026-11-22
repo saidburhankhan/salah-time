@@ -29,7 +29,7 @@ CoreClient::~CoreClient() {
     }
 }
 
-void CoreClient::enqueue(const QStringList &args, Callback callback, bool read, bool expectJson) {
+void CoreClient::enqueue(const QStringList &args, Callback callback, bool read, std::function<Dto::AnyDecoded(const QJsonValue &)> decoder) {
     if (read) {
         const bool queuedMutation = std::any_of(m_queue.cbegin(), m_queue.cend(), [](const Request &r) { return !r.read; });
         if (!queuedMutation && m_running && m_current.read && m_current.args == args) {
@@ -45,11 +45,16 @@ void CoreClient::enqueue(const QStringList &args, Callback callback, bool read, 
             }
         }
     }
-    Request request{args, {}, read, expectJson};
+    Request request{args, {}, read, true, std::move(decoder)};
     if (callback) request.callbacks.append(std::move(callback));
     m_queue.enqueue(std::move(request));
     emit busyChanged();
     startNext();
+}
+void CoreClient::enqueueNoJson(const QStringList &args, Callback callback) {
+    Request request{args, {}, false, false, {}};
+    if (callback) request.callbacks.append(std::move(callback));
+    m_queue.enqueue(std::move(request)); emit busyChanged(); startNext();
 }
 
 void CoreClient::startNext() {
@@ -88,17 +93,15 @@ void CoreClient::finish(bool timedOut) {
     } else {
         QJsonParseError parseError;
         const QJsonDocument document = QJsonDocument::fromJson(m_process.readAllStandardOutput(), &parseError);
-        if (parseError.error == QJsonParseError::NoError && document.isArray()) {
-            // Some commands (e.g. `item stop --json`) answer with a list.
-            result.ok = true;
-            result.value = QJsonObject{{"items", document.array()}};
-        } else if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        if (parseError.error != QJsonParseError::NoError || (!document.isObject() && !document.isArray())) {
             const QString detail = parseError.error == QJsonParseError::NoError
                 ? tr("JSON root is not an object or array") : parseError.errorString();
             result.error = {ErrorKind::Decode, tr("Salah returned invalid JSON: %1").arg(detail)};
         } else {
-            result.ok = true;
-            result.value = document.object();
+            const QJsonValue root = document.isObject() ? QJsonValue(document.object()) : QJsonValue(document.array());
+            const Dto::AnyDecoded decoded = m_current.decoder(root);
+            if (!decoded) result.error = {ErrorKind::Decode, tr("Salah returned invalid data: %1").arg(decoded.error->formatted())};
+            else { result.ok = true; result.value = *decoded.value; }
         }
     }
     const QStringList args = m_current.args;
@@ -115,13 +118,13 @@ QStringList CoreClient::dateArgs(const QDate &date) {
 }
 
 void CoreClient::day(const QDate &date, Callback callback) {
-    QStringList args{"day"}; args << dateArgs(date) << "--json"; enqueue(args, std::move(callback), true);
+    QStringList args{"day"}; args << dateArgs(date) << "--json"; enqueue(args, std::move(callback), true, Dto::decodeDayPlan);
 }
 void CoreClient::stats(const QDate &from, const QDate &to, Callback callback) {
-    enqueue({"stats", "--from", from.toString(Qt::ISODate), "--to", to.toString(Qt::ISODate), "--json"}, std::move(callback), true);
+    enqueue({"stats", "--from", from.toString(Qt::ISODate), "--to", to.toString(Qt::ISODate), "--json"}, std::move(callback), true, Dto::decodeStats);
 }
 void CoreClient::statsDays(int days, Callback callback) {
-    enqueue({"stats", "--days", QString::number(days), "--json"}, std::move(callback), true);
+    enqueue({"stats", "--days", QString::number(days), "--json"}, std::move(callback), true, Dto::decodeStats);
 }
 void CoreClient::itemAdd(const ItemFields &f, Callback callback) {
     QStringList args{"item", "add", "--json"};
@@ -134,24 +137,24 @@ void CoreClient::itemAdd(const ItemFields &f, Callback callback) {
         if (f.hasTarget) args << "--target" << QString::number(f.target);
     }
     args << dateArgs(f.date) << "--" << f.title;
-    enqueue(args, std::move(callback));
+    enqueue(args, std::move(callback), false, Dto::decodeItem);
 }
 void CoreClient::itemEdit(const QString &id, const ItemFields &f, Callback callback) {
     QStringList args{"item", "edit", "--json", id, "--title=" + f.title, "--block", f.block, "--repeat", f.repeat};
     if (!f.weekdays.isEmpty()) args << "--days" << f.weekdays.join(',');
     args << "--measure" << f.measure;
     if (f.hasTarget) args << "--target" << QString::number(f.target); else args << "--no-target";
-    enqueue(args, std::move(callback));
+    enqueue(args, std::move(callback), false, Dto::decodeItem);
 }
-void CoreClient::itemRemove(const QString &id, Callback callback) { enqueue({"item", "remove", "--json", id}, std::move(callback)); }
-void CoreClient::itemMove(const QString &id, const QString &block, int index, Callback callback) { enqueue({"item", "move", "--json", id, "--block", block, "--index", QString::number(index)}, std::move(callback)); }
-void CoreClient::itemDone(const QString &id, const QDate &date, Callback callback) { QStringList a{"item","done","--json",id}; a << dateArgs(date); enqueue(a,std::move(callback)); }
-void CoreClient::itemUndo(const QString &id, const QDate &date, Callback callback) { QStringList a{"item","undo","--json",id}; a << dateArgs(date); enqueue(a,std::move(callback)); }
-void CoreClient::itemLog(const QString &id, int value, bool minutes, const QDate &date, Callback callback) { QStringList a{"item","log","--json"}; if(minutes)a<<"--minutes"; a<<id<<QString::number(value); a<<dateArgs(date); enqueue(a,std::move(callback)); }
-void CoreClient::timerStart(const QString &id, Callback callback) { enqueue({"item","start","--json",id},std::move(callback)); }
-void CoreClient::timerStop(const QString &id, Callback callback) { enqueue({"item","stop","--json",id},std::move(callback)); }
-void CoreClient::prayerMark(const QString &prayer, const QDate &date, Callback callback) { QStringList a{"prayer","mark","--json",prayer}; a<<dateArgs(date); enqueue(a,std::move(callback)); }
-void CoreClient::prayerUnmark(const QString &prayer, const QDate &date, Callback callback) { QStringList a{"prayer","unmark","--json",prayer}; a<<dateArgs(date); enqueue(a,std::move(callback)); }
-void CoreClient::parse(const QString &text, Callback callback) { enqueue({"item","parse","--json","--",text},std::move(callback),true); }
-void CoreClient::configShow(Callback callback) { enqueue({"config","show"},std::move(callback),true); }
-void CoreClient::configSetSleepTime(const QString &time, Callback callback) { enqueue({"config","set","--sleep-time",time},std::move(callback),false,false); }
+void CoreClient::itemRemove(const QString &id, Callback callback) { enqueue({"item", "remove", "--json", id}, std::move(callback),false,Dto::decodeItem); }
+void CoreClient::itemMove(const QString &id, const QString &block, int index, Callback callback) { enqueue({"item", "move", "--json", id, "--block", block, "--index", QString::number(index)}, std::move(callback),false,Dto::decodeItem); }
+void CoreClient::itemDone(const QString &id, const QDate &date, Callback callback) { QStringList a{"item","done","--json",id}; a << dateArgs(date); enqueue(a,std::move(callback),false,Dto::decodeEntry); }
+void CoreClient::itemUndo(const QString &id, const QDate &date, Callback callback) { QStringList a{"item","undo","--json",id}; a << dateArgs(date); enqueue(a,std::move(callback),false,Dto::decodeUndo); }
+void CoreClient::itemLog(const QString &id, int value, bool minutes, const QDate &date, Callback callback) { QStringList a{"item","log","--json"}; if(minutes)a<<"--minutes"; a<<id<<QString::number(value); a<<dateArgs(date); enqueue(a,std::move(callback),false,Dto::decodeEntry); }
+void CoreClient::timerStart(const QString &id, Callback callback) { enqueue({"item","start","--json",id},std::move(callback),false,Dto::decodeEntry); }
+void CoreClient::timerStop(const QString &id, Callback callback) { enqueue({"item","stop","--json",id},std::move(callback),false,Dto::decodeEntries); }
+void CoreClient::prayerMark(const QString &prayer, const QDate &date, Callback callback) { QStringList a{"prayer","mark","--json",prayer}; a<<dateArgs(date); enqueue(a,std::move(callback),false,Dto::decodePrayerMark); }
+void CoreClient::prayerUnmark(const QString &prayer, const QDate &date, Callback callback) { QStringList a{"prayer","unmark","--json",prayer}; a<<dateArgs(date); enqueue(a,std::move(callback),false,Dto::decodePrayerMark); }
+void CoreClient::parse(const QString &text, Callback callback) { enqueue({"item","parse","--json","--",text},std::move(callback),true,Dto::decodeParseDraft); }
+void CoreClient::configShow(Callback callback) { enqueue({"config","show"},std::move(callback),true,Dto::decodeConfig); }
+void CoreClient::configSetSleepTime(const QString &time, Callback callback) { enqueueNoJson({"config","set","--sleep-time",time},std::move(callback)); }

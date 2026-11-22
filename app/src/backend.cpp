@@ -23,7 +23,7 @@ CoreClient::Callback Backend::response(std::function<void(const QJsonObject &)> 
     return [this, success = std::move(success), reloadAfter](const CoreClient::Result &result) {
         if (!result.ok) fail(result.error.message);
         else {
-            if (success) success(result.value);
+            if (success) success(Dto::jsonObject(result.value));
             if (reloadAfter) m_refreshPending = true;
         }
         emit changed();

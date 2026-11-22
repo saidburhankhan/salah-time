@@ -1,12 +1,12 @@
 #pragma once
 
 #include <QDate>
-#include <QJsonObject>
 #include <QObject>
 #include <QProcess>
 #include <QQueue>
 #include <QTimer>
 #include <functional>
+#include "dto.h"
 
 class CoreClient : public QObject {
     Q_OBJECT
@@ -14,7 +14,7 @@ public:
     enum class ErrorKind { Process, Exit, Decode, Timeout };
     struct Error { ErrorKind kind; QString message; };
     struct Result {
-        QJsonObject value;
+        Dto::Value value;
         Error error{ErrorKind::Process, {}};
         bool ok = false;
     };
@@ -63,8 +63,10 @@ private:
         QList<Callback> callbacks;
         bool read = false;
         bool expectJson = true;
+        std::function<Dto::AnyDecoded(const QJsonValue &)> decoder;
     };
-    void enqueue(const QStringList &args, Callback callback, bool read = false, bool expectJson = true);
+    void enqueue(const QStringList &args, Callback callback, bool read, std::function<Dto::AnyDecoded(const QJsonValue &)> decoder);
+    void enqueueNoJson(const QStringList &args, Callback callback);
     void startNext();
     void finish(bool timedOut = false);
     static QStringList dateArgs(const QDate &date);
