@@ -7,18 +7,19 @@
 
 ## Now
 
-Round 3 committed and installed (b747ea2, core f960921): timers on every item
-(pause/continue), − / + adjustments (count ±1, otherwise minutes ±5, totals
-clamped at 0), running timer in the bar instead of the open count, Esc
-handling, quick-add Cancel, inline edit/delete in the widget, next-occurrence
-hints, and future routines listed in stats. Widget unverified live.
+Round 4 committed and installed (cff85f7, core 778b182): every item tracks
+time (timer chip + typed correction box), counters show a stepper, the form
+offers Task/Counter with an optional goal, weekly needs a day, stop accepts an
+id. Stats now carry `daily` and `totals` (2fe8266). Codex A8 is redesigning
+the Statistics page (range bar, summary tiles, separate daily charts, table by
+day, per-task breakdown).
 
 ## Next
 
-1. User restarts the shell and checks the widget (timers, ±, edit/delete,
-   Esc, drag).
-2. Statistics redesign by date range, then tags (new work item).
-3. Merge `sleep-boundary` and `items-mvp` into `main` once accepted.
+1. Review A8 diff and screenshots against real seeded data; commit; install.
+2. User restarts the shell and checks the widget (time chip, correction box,
+   stepper, edit/delete, Esc, drag).
+3. Tags (after statistics), then merge into `main`.
 
 ## Interfaces
 
