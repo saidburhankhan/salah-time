@@ -58,7 +58,8 @@ private:
 
     void beginConnect();
     void scheduleReconnect();
-    void handleSocketFailure();
+    void handleSocketFailure(QLocalSocket::LocalSocketError error = QLocalSocket::UnknownSocketError);
+    void failToCli();
     void handshakeFailed(const QString &message);
     void handleDrop();
     void failPending(const QString &kind, const QString &message);

@@ -1,4 +1,7 @@
 #include <QDir>
+#include <cstring>
+#include <QElapsedTimer>
+#include <QFileInfo>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -14,6 +17,9 @@
 #include <QQuickWindow>
 #include <QSet>
 #include <QtTest>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 #include "backend.h"
 #include "client/coreclient.h"
 #include "client/dto.h"
@@ -183,7 +189,48 @@ esac
     }
 
     static QString daemon_path(const QTemporaryDir &dir) { return dir.filePath("salah.sock"); }
+    // Create a Unix socket inode with no listener: connecting to it is refused,
+    // exactly like a daemon that exited without cleaning up its socket file.
+    static bool createStaleSocket(const QString &path) {
+        const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+        if (fd < 0) return false;
+        sockaddr_un address{};
+        address.sun_family = AF_UNIX;
+        const QByteArray encoded = QFile::encodeName(path);
+        if (encoded.size() >= int(sizeof(address.sun_path))) { ::close(fd); return false; }
+        std::memcpy(address.sun_path, encoded.constData(), size_t(encoded.size()) + 1);
+        QLocalServer::removeServer(path);
+        const bool bound = ::bind(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0;
+        ::close(fd);
+        return bound;
+    }
+
+    QTemporaryDir *m_runtime = nullptr;
+    bool m_integrationEnvironment = false;
+
 private slots:
+    void initTestCase() {
+        // The opt-in integration tests below intentionally use the caller's
+        // desktop environment; everything else runs in the sandbox set up in
+        // init().
+        m_integrationEnvironment = !qEnvironmentVariableIsEmpty("SALAH_PROTOCOL_SMOKE") ||
+                                   !qEnvironmentVariableIsEmpty("SALAH_APP_SMOKE") ||
+                                   !qEnvironmentVariableIsEmpty("A9_SCREENSHOT_DIR");
+    }
+    void init() {
+        if (m_integrationEnvironment) return;
+        delete m_runtime;
+        m_runtime = new QTemporaryDir;
+        QVERIFY(m_runtime->isValid());
+        // Never inherit the desktop session's daemon socket or CLI binary.
+        qputenv("XDG_RUNTIME_DIR", m_runtime->path().toUtf8());
+        qunsetenv("SALAH_SOCKET");
+        qputenv("SALAH_BIN", m_runtime->filePath("salah").toUtf8());
+    }
+    void cleanup() {
+        delete m_runtime;
+        m_runtime = nullptr;
+    }
 
     void socketHandshakeSubscribesAndCorrelatesRequests() {
         QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
@@ -352,6 +399,48 @@ private slots:
         QVERIFY(client.offline());
     }
 
+    void refusingSocketFallsBackToCliImmediately() {
+        QTemporaryDir dir;
+        const QString socket = dir.filePath("stale.sock");
+        QVERIFY(createStaleSocket(socket));
+        QVERIFY(QFileInfo::exists(socket));
+
+        const QString log = dir.filePath("cli-args");
+        const QString script = dir.filePath("salah");
+        const QString fixturePath = QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/contract/config_show.json");
+        write(script, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + log.toUtf8() + "'\ncat '" + fixturePath.toUtf8() + "'\n");
+        QFile::setPermissions(script, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        CoreClient client(nullptr, script, 2000, socket);
+        QSignalSpy spy(&client, &CoreClient::requestFinished);
+        CoreClient::Result result;
+        QElapsedTimer elapsed;
+        elapsed.start();
+        client.configShow([&](const CoreClient::Result &reply) { result = reply; });
+        QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 1, 3000);
+        QVERIFY2(result.ok, qPrintable(result.error.message));
+        QVERIFY(client.offline());
+        // No activation retry/delay when the socket refuses the connection.
+        QVERIFY2(elapsed.elapsed() < 1000, qPrintable(QString::number(elapsed.elapsed())));
+        QFile file(log); QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(QString::fromUtf8(file.readAll()).trimmed(), QString("config show"));
+    }
+
+    void failedCliResultIsReportedWithoutCrashing() {
+        QTemporaryDir dir;
+        const QString script = dir.filePath("salah");
+        write(script, "#!/bin/sh\nprintf 'salah: no item \\\"id-1\\\"\\n' >&2\nexit 7\n");
+        QFile::setPermissions(script, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        CoreClient client(nullptr, script, 2000, dir.filePath("missing.sock"));
+        QSignalSpy spy(&client, &CoreClient::requestFinished);
+        CoreClient::Result result;
+        client.timerStop("id-1", [&](const CoreClient::Result &reply) { result = reply; });
+        QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 1, 3000);
+        QVERIFY(!result.ok);
+        QCOMPARE(result.error.kind, CoreClient::ErrorKind::Exit);
+        QCOMPARE(result.error.message, QString("no item \"id-1\""));
+        QVERIFY(std::holds_alternative<std::monostate>(result.value));
+    }
+
     void protocolSmoke() {
         if (qEnvironmentVariableIsEmpty("SALAH_PROTOCOL_SMOKE")) return;
         Backend backend;
@@ -435,9 +524,10 @@ private slots:
         QTemporaryDir dir; const QString path=dir.filePath("salah");
         const QString fixture=QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/contract/item_stop.json");
         write(path,"#!/bin/sh\ncat '"+fixture.toUtf8()+"'\n"); QFile::setPermissions(path,QFile::ReadOwner|QFile::WriteOwner|QFile::ExeOwner);
-        CoreClient client(nullptr,path); QSignalSpy spy(&client,&CoreClient::requestFinished); CoreClient::Result result;
+        CoreClient client(nullptr,path,2000,dir.filePath("missing.sock"));
+        QSignalSpy spy(&client,&CoreClient::requestFinished); CoreClient::Result result;
         client.timerStop("id-1",[&](const CoreClient::Result&r){result=r;}); QTRY_COMPARE(spy.size(),1);
-        QVERIFY(result.ok); QVERIFY(std::holds_alternative<std::vector<Dto::Entry>>(result.value));
+        QVERIFY2(result.ok, qPrintable(result.error.message)); QVERIFY(std::holds_alternative<std::vector<Dto::Entry>>(result.value));
         QCOMPARE(std::get<std::vector<Dto::Entry>>(result.value).size(),size_t(1));
     }
     void coreClientBuildsEveryCommand() {
@@ -454,6 +544,7 @@ private slots:
         client.parse("read -- carefully",{}); client.configShow({}); client.configSetSleepTime("22:45");
         QTRY_COMPARE_WITH_TIMEOUT(spy.size(),17,5000);
         const QStringList lines = coreLogLines(dir);
+        QCOMPARE(lines.size(), 17);
         QCOMPARE(lines.at(0),"<day><--date><2026-11-22><--json>");
         QCOMPARE(lines.at(1),"<stats><--from><2026-11-01><--to><2026-11-30><--json>");
         QCOMPARE(lines.at(2),"<item><add><--json><--block><asr><--repeat><weekly><--days><mon,wed><--measure><minutes><--target><30><--date><2026-11-23><--><Title -- literal>");

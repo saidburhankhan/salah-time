@@ -14,14 +14,16 @@ CoreClient::CoreClient(QObject *parent, const QString &program, int timeoutMs, c
     QString path = socketPath;
     if (path.isEmpty()) {
         path = qEnvironmentVariable("SALAH_SOCKET");
-        // The app itself leaves program empty and always probes the canonical
-        // socket. An explicit program is the legacy CLI path, but still uses
-        // the daemon when its socket is already present (the app may pass a
-        // binary for the fallback).
-        if (path.isEmpty()) {
-            const QString canonical = SocketTransport::defaultSocketPath();
-            if (!canonical.isEmpty() && (program.isEmpty() || QFileInfo::exists(canonical))) path = canonical;
-        }
+        // Only the app (no explicit CLI program) probes the canonical socket.
+        // Tests and other callers that pass a program own their transport;
+        // silently switching to the user's real daemon would make them depend
+        // on the desktop session and on whatever state that daemon holds.
+        if (path.isEmpty() && program.isEmpty()) path = SocketTransport::defaultSocketPath();
+    }
+    if (!path.isEmpty() && !QFileInfo::exists(path)) {
+        // No socket at all: use the CLI immediately instead of waiting for a
+        // failed connect (and never hold a request in the Waiting state).
+        path.clear();
     }
     m_timeout.setSingleShot(true);
     connect(&m_timeout, &QTimer::timeout, this, [this] { finish(true); });
@@ -130,6 +132,14 @@ void CoreClient::startNext() {
 
 void CoreClient::startSocket(Request request) {
     m_timeout.stop();
+    if (!m_transport) {
+        // Defensive: a request can only be dispatched in Socket mode, but never
+        // dereference the transport if that invariant is broken (for example
+        // during teardown or a failed configuration).
+        completeSocket(request, SocketTransport::Reply{false, false, QStringLiteral("not_ready"),
+                                                       tr("Salah daemon is not reachable."), {}});
+        return;
+    }
     const QString method = request.method;
     const QJsonObject params = request.params;
     m_transport->send(method, params,

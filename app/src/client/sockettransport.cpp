@@ -35,9 +35,9 @@ SocketTransport::SocketTransport(QObject *parent) : QObject(parent), m_socket(ne
             handleSocketFailure();
         }
     });
-    connect(m_socket, &QLocalSocket::errorOccurred, this, [this](QLocalSocket::LocalSocketError) {
+    connect(m_socket, &QLocalSocket::errorOccurred, this, [this](QLocalSocket::LocalSocketError error) {
         if (m_state == State::Reconnecting || m_state == State::Idle || m_state == State::Failed) return;
-        handleSocketFailure();
+        handleSocketFailure(error);
     });
     connect(m_socket, &QLocalSocket::readyRead, this, &SocketTransport::onReadyRead);
 }
@@ -57,9 +57,9 @@ QString SocketTransport::defaultSocketPath() {
 
 void SocketTransport::start() {
     if (m_state != State::Idle) return;
-    if (m_path.isEmpty()) {
-        m_state = State::Failed;
-        QTimer::singleShot(0, this, [this] { emit fellBackToCli(); });
+    if (m_path.isEmpty() || !QFileInfo::exists(m_path)) {
+        // Nothing to connect to: fall back to the CLI at once and quietly.
+        failToCli();
         return;
     }
     beginConnect();
@@ -76,6 +76,10 @@ void SocketTransport::stop() {
 
 void SocketTransport::beginConnect() {
     if (m_state == State::Failed) return;
+    if (!QFileInfo::exists(m_path)) {
+        failToCli();
+        return;
+    }
     m_state = State::Connecting;
     m_handshakeTimer.stop();
     m_buffer.clear();
@@ -92,10 +96,20 @@ void SocketTransport::scheduleReconnect() {
     m_backoffMs = qMin(m_backoffMs * 2, 5000);
 }
 
-void SocketTransport::handleSocketFailure() {
+void SocketTransport::handleSocketFailure(QLocalSocket::LocalSocketError error) {
     clearHandshakeTimer();
     if (m_everReady) {
         handleDrop();
+        return;
+    }
+    const bool noListener = error == QLocalSocket::ConnectionRefusedError ||
+                            error == QLocalSocket::ServerNotFoundError ||
+                            error == QLocalSocket::SocketAccessError ||
+                            !QFileInfo::exists(m_path);
+    if (noListener) {
+        // A missing path or a refused connection means there is no
+        // daemon (and no systemd activation pending): go to the CLI at once.
+        failToCli();
         return;
     }
     ++m_initialFailures;
@@ -107,6 +121,12 @@ void SocketTransport::handleSocketFailure() {
         m_backoffMs = 250;
         return;
     }
+    failToCli();
+}
+
+void SocketTransport::failToCli() {
+    clearHandshakeTimer();
+    m_reconnectTimer.stop();
     m_state = State::Failed;
     m_suppressDisconnect = true;
     m_socket->abort();
