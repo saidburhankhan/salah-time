@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Salah
+Comment=Plan your day between the prayers
+Exec=salah open
+Icon=salah
+Terminal=false
+Categories=Utility;
+StartupWMClass=salah
