@@ -44,7 +44,7 @@ case "$*" in
   *malformed*) printf 'not-json\n'; exit 0 ;;
   *failure*) printf 'salah: requested failure\n' >&2; exit 7 ;;
 esac
-)SH") + "fixture='" TEST_SOURCE_DIR "/../../tests/fixtures/contract/'\n" + R"SH(
+)SH") + "fixture='" TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/contract/'\n" + R"SH(
 case "$1 $2" in
   'day --date') cat "${fixture}day.json" ;;
   'stats --days'|'stats --from') cat "${fixture}stats_days.json" ;;
@@ -63,7 +63,7 @@ esac
     }
 private slots:
     void decodersAcceptGoldenFixtures() {
-        const QString base = QStringLiteral(TEST_SOURCE_DIR "/../../tests/fixtures/contract/");
+        const QString base = QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/contract/");
         auto json = [&](const QString &name) { return readJson(base + name + ".json"); };
         QVERIFY(Dto::decode<Dto::DayPlan>(json("day").object()));
         QVERIFY(Dto::decode<Dto::Today>(json("item_list").object()));
@@ -77,7 +77,7 @@ private slots:
         QVERIFY(Dto::decode<Dto::PrayerMark>(json("prayer_mark").object()));
     }
     void decoderRejectsBadFieldsAndAllowsExtras() {
-        const QString base = QStringLiteral(TEST_SOURCE_DIR "/../../tests/fixtures/contract/day.json");
+        const QString base = QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/contract/day.json");
         QFile f(base); QVERIFY(f.open(QIODevice::ReadOnly)); QJsonObject day=QJsonDocument::fromJson(f.readAll()).object();
         day["future_v1_field"] = QJsonObject{{"anything",true}};
         QVERIFY(Dto::decode<Dto::DayPlan>(day));
@@ -92,7 +92,7 @@ private slots:
     }
     void coreClientDecodesTimerStopArray() {
         QTemporaryDir dir; const QString path=dir.filePath("salah");
-        const QString fixture=QStringLiteral(TEST_SOURCE_DIR "/../../tests/fixtures/contract/item_stop.json");
+        const QString fixture=QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/contract/item_stop.json");
         write(path,"#!/bin/sh\ncat '"+fixture.toUtf8()+"'\n"); QFile::setPermissions(path,QFile::ReadOwner|QFile::WriteOwner|QFile::ExeOwner);
         CoreClient client(nullptr,path); QSignalSpy spy(&client,&CoreClient::requestFinished); CoreClient::Result result;
         client.timerStop("id-1",[&](const CoreClient::Result&r){result=r;}); QTRY_COMPARE(spy.size(),1);

@@ -1,0 +1,14 @@
+[package]
+name = "salah-core"
+description = "Salah application layer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+salah-domain = { path = "../salah-domain" }
+salah-prayer = { path = "../salah-prayer" }
+salah-store = { path = "../salah-store" }
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true

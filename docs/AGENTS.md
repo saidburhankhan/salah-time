@@ -10,14 +10,18 @@ daily timetable when selected.
 
 ## Architecture
 
-- `src/calculation.rs` contains deterministic offline astronomical maths.
-- `src/location.rs` resolves location, preferring the saved Omarchy Weather
-  coordinates before bounded HTTPS IP-location providers.
-- `src/official.rs` downloads, validates, and caches the Muslim Board of
-  Uzbekistan daily Tashkent timetable.
-- `src/status.rs` selects the active schedule and produces the JSON consumed
-  by QML.
-- `src/config.rs` validates settings and replaces the config atomically.
+- `crates/salah-domain/` holds pure planning types and rules, with no I/O:
+  day boundaries and timelines, items/entries, errors, and clock/id traits.
+- `crates/salah-prayer/` contains deterministic offline astronomical maths
+  (`calculation.rs`), the Muslim Board timetable parser/client/cache
+  (`official.rs`), location discovery (`location.rs`), and schedule/block
+  resolution (`schedule.rs`).
+- `crates/salah-store/` is the SQLite store and its numbered migrations.
+- `crates/salah-core/` is the application layer: validated config and its XDG
+  repository, planner use cases, quick add, export, status, and location sync
+  policy.
+- `crates/salah-cli/` builds the `salah` binary and owns its integration tests
+  and contract fixtures.
 - `plugin/local.salah/BarWidget.qml` owns presentation and process lifecycle;
   it must not contain prayer-time mathematics.
 - `scripts/install` and `scripts/uninstall` are ownership-checked and must not

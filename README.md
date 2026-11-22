@@ -188,18 +188,13 @@ Do not present an unverified preset as an exact official timetable.
 ## Development layout
 
 ```text
-src/day.rs           day keys, prayer boundaries, and block ordering
-src/schedule.rs      resolves the schedule and each block's start and end
-src/item.rs          items, entries, repeats, and measurement rules
-src/store.rs         SQLite persistence and numbered migrations
-src/planner.rs       planner use cases shared by the CLI, widget, and app
-src/quick.rs         quick-add text parser
-src/export.rs        versioned JSON export and idempotent import
-src/status.rs        status and countdown JSON for the widget
-src/main.rs          CLI commands
-app/                 Qt Quick desktop app
-plugin/local.salah/  Omarchy bar widget and popup
-tests/               calculation, planner, export, and CLI tests
-scripts/install      reversible local install
-scripts/uninstall    ownership- and content-checked uninstall
+crates/salah-domain/   pure day/item rules, errors, clock/id traits (no I/O)
+crates/salah-prayer/   calculation, official timetable, location, schedule
+crates/salah-store/    SQLite persistence and numbered migrations
+crates/salah-core/     config, planner use cases, quick add, export, status
+crates/salah-cli/      `salah` binary, integration tests, contract fixtures
+app/                   Qt Quick desktop app
+plugin/local.salah/    Omarchy bar widget and popup
+scripts/install        reversible local install
+scripts/uninstall      ownership- and content-checked uninstall
 ```

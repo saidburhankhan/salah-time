@@ -1,0 +1,23 @@
+[package]
+name = "salah-cli"
+description = "Salah command-line interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "salah"
+path = "src/main.rs"
+
+[dependencies]
+salah-core = { path = "../salah-core" }
+salah-domain = { path = "../salah-domain" }
+salah-prayer = { path = "../salah-prayer" }
+salah-store = { path = "../salah-store" }
+clap.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true

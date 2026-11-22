@@ -1,0 +1,13 @@
+[package]
+name = "salah-store"
+description = "SQLite persistence for Salah"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+salah-domain = { path = "../salah-domain" }
+rusqlite.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true

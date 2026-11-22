@@ -1,11 +1,19 @@
-[package]
-name = "salah"
+[workspace]
+members = [
+    "crates/salah-domain",
+    "crates/salah-prayer",
+    "crates/salah-store",
+    "crates/salah-core",
+    "crates/salah-cli",
+]
+resolver = "3"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-description = "Offline prayer times for the Omarchy bar"
 license = "MIT"
 
-[dependencies]
+[workspace.dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 uuid = { version = "1.26.1", features = ["v4"] }

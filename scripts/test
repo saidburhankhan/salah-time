@@ -4,8 +4,8 @@ set -euo pipefail
 project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 plugin_source="$project_dir/plugin/local.salah"
 
-cargo fmt --check --manifest-path "$project_dir/Cargo.toml"
-cargo test --locked --offline --manifest-path "$project_dir/Cargo.toml"
+cargo fmt --all --check --manifest-path "$project_dir/Cargo.toml"
+cargo test --locked --offline --workspace --manifest-path "$project_dir/Cargo.toml"
 bash -n "$project_dir/scripts/install" "$project_dir/scripts/uninstall"
 jq empty "$plugin_source/manifest.json" "$plugin_source/i18n/en.json"
 omarchy plugin validate "$plugin_source"

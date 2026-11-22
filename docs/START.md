@@ -70,9 +70,9 @@ Example split for a substantial feature:
 
 | Worker | Owns | Responsibility |
 |---|---|---|
-| Calculation | `src/calculation.rs`, focused tests | Maths, methods, reference fixtures |
-| Data/source | `src/location.rs`, `src/official.rs` | Network validation, cache, fallback |
-| CLI/status | `src/main.rs`, `src/config.rs`, `src/status.rs` | Contract, persistence, rollover |
+| Calculation | `crates/salah-prayer/src/calculation.rs`, focused tests | Maths, methods, reference fixtures |
+| Data/source | `crates/salah-prayer/src/location.rs`, `crates/salah-prayer/src/official.rs` | Network validation, cache, fallback |
+| CLI/status | `crates/salah-cli/src/main.rs`, `crates/salah-core/src/config.rs`, `crates/salah-core/src/status.rs` | Contract, persistence, rollover |
 | UI/package | `plugin/`, `scripts/`, user docs | QML lifecycle, installation, presentation |
 
 Do not assign the same file to multiple workers. If two slices require one

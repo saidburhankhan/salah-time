@@ -68,7 +68,7 @@ if command -v qmake6 >/dev/null && [[ -f "$app_dir/salah-app.pro" ]]; then
 fi
 
 printf 'Building Salah in release mode…\n'
-cargo build --locked --release --manifest-path "$project_dir/Cargo.toml"
+cargo build --locked --release --manifest-path "$project_dir/Cargo.toml" -p salah-cli
 
 mkdir -p -- "$(dirname -- "$binary_target")" "$(dirname -- "$plugin_target")" "$state_dir"
 install -m 0755 -- "$binary_source" "$binary_target"
