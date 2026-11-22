@@ -1,7 +1,9 @@
 #pragma once
 
 #include <QDate>
+#include <QHash>
 #include <QObject>
+#include <QSet>
 #include <QVariantMap>
 #include <functional>
 #include "client/coreclient.h"
@@ -17,9 +19,11 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantMap parseDraft READ parseDraft NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
+    Q_PROPERTY(bool offlineMode READ offlineMode NOTIFY changed)
     Q_PROPERTY(int dayRevision READ dayRevision NOTIFY changed)
 public:
-    explicit Backend(QObject *parent = nullptr, const QString &program = {}, int timeoutMs = 10000);
+    explicit Backend(QObject *parent = nullptr, const QString &program = {}, int timeoutMs = 10000,
+                     const QString &socketPath = {});
     ~Backend() override;
     QString selectedDay() const { return m_selected.toString(Qt::ISODate); }
     QString todayDay() const { return m_today.toString(Qt::ISODate); }
@@ -30,6 +34,7 @@ public:
     QVariantMap parseDraft() const { return m_parseDraft; }
     QString error() const { return m_error; }
     bool busy() const { return m_client.busy(); }
+    bool offlineMode() const { return m_client.offline(); }
     int dayRevision() const { return m_dayRevision; }
 
     Q_INVOKABLE void reload();
@@ -63,8 +68,16 @@ private:
     static QVariantMap normalizedObject(const QJsonObject &object);
     bool setJsonModel(QVariantMap &target, QByteArray &previous, const QJsonObject &object);
     CoreClient::Callback response(std::function<void(const QJsonObject &)> success = {}, bool reloadAfter = false);
-    void mutateItem(const QString &id, const std::function<void(QVariantMap &)> &change);
+    CoreClient::Callback mutationResponse(const QString &pendingId = {}, const QString &pendingOpId = {});
+    void applyMutation(const Dto::MutationResult &mutation);
+    void setItemPending(const QString &id, bool pending);
+    void setPrayerPending(const QString &prayer, bool pending);
     void insertPendingItem(const QVariantMap &item);
+    void removePendingCreate(const QString &opId);
+    void applyPendingFlags();
+    qint64 versionFor(const QString &id) const;
+    bool removeItemFromModel(const QString &id);
+    void reloadFromNotification(qint64 revision);
 
     CoreClient m_client;
     QDate m_today = QDate::currentDate();
@@ -74,4 +87,9 @@ private:
     QString m_error;
     bool m_refreshPending = false;
     int m_dayRevision = 0;
+    qint64 m_lastNotificationRevision = -1;
+    QHash<QString, qint64> m_versions;
+    QSet<QString> m_pendingItems;
+    QSet<QString> m_pendingPrayers;
+    QHash<QString, QVariantMap> m_pendingCreates;
 };

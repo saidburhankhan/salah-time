@@ -88,6 +88,16 @@ Rectangle {
                 elide: Text.ElideRight
             }
         }
+        Label {
+            text: qsTr("Offline mode")
+            visible: backend.offlineMode
+            color: sidebar.win.muted
+            font.pixelSize: 12
+            opacity: 0.75
+            Layout.leftMargin: 12
+            Layout.topMargin: -4
+            textFormat: Text.PlainText
+        }
     }
     Rectangle {
         anchors.right: parent.right

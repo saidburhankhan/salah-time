@@ -1,5 +1,10 @@
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QQmlComponent>
@@ -7,12 +12,114 @@
 #include <QQmlEngine>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QSet>
 #include <QtTest>
 #include "backend.h"
 #include "client/coreclient.h"
 #include "client/dto.h"
 #include "theme.h"
 #include "translator.h"
+
+namespace {
+class FakeDaemon : public QObject {
+public:
+    using Handler = std::function<void(const QJsonObject &, QLocalSocket *, FakeDaemon *)>;
+    explicit FakeDaemon(const QString &path) : m_path(path) {
+        QLocalServer::removeServer(path);
+        m_server.listen(path);
+        connect(&m_server, &QLocalServer::newConnection, this, [this] { onNewConnection(); });
+    }
+    ~FakeDaemon() override {
+        const auto clients = m_clients;
+        for (QLocalSocket *socket : clients) {
+            socket->disconnect(this);
+            socket->abort();
+            delete socket;
+        }
+        m_clients.clear();
+        m_buffers.clear();
+        m_server.close();
+        QLocalServer::removeServer(m_path);
+    }
+    bool ok() const { return m_server.isListening(); }
+    void setHandler(Handler handler) { m_handler = std::move(handler); }
+    void respond(QLocalSocket *socket, const QJsonObject &request, const QJsonValue &result) {
+        write(socket, QJsonObject{{"jsonrpc", "2.0"}, {"id", request.value("id")}, {"result", result}});
+    }
+    void respondError(QLocalSocket *socket, const QJsonObject &request, int code, const QString &kind, const QString &message) {
+        write(socket, QJsonObject{{"jsonrpc", "2.0"}, {"id", request.value("id")},
+                                  {"error", QJsonObject{{"code", code}, {"message", message},
+                                                        {"data", QJsonObject{{"kind", kind}, {"retryable", false}}}}}});
+    }
+    void notifyChanged(qint64 revision, const QStringList &scopes = {"items"}) {
+        QJsonArray scopeArray;
+        for (const QString &scope : scopes) scopeArray.append(scope);
+        const QJsonObject frame{{"jsonrpc", "2.0"}, {"method", "changed"},
+                                {"params", QJsonObject{{"revision", revision}, {"scopes", scopeArray}, {"actor", "test"}}}};
+        const QByteArray line = QJsonDocument(frame).toJson(QJsonDocument::Compact) + '\n';
+        for (QLocalSocket *socket : std::as_const(m_clients)) socket->write(line);
+    }
+    void dropClients() {
+        const auto clients = m_clients;
+        for (QLocalSocket *socket : clients) socket->disconnectFromServer();
+    }
+    QList<QJsonObject> requests;
+    int hellos = 0;
+    int subscribes = 0;
+    QJsonObject helloResult{{"protocol", 1}, {"server", "salah test"},
+                            {"capabilities", QJsonArray{"timer.v1", "events.v1"}}, {"revision", 100}};
+    QJsonObject subscribeResult{{"revision", 100}};
+private:
+    void write(QLocalSocket *socket, const QJsonObject &object) {
+        if (!socket) return;
+        socket->write(QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n');
+        socket->flush();
+    }
+    void onNewConnection() {
+        while (QLocalSocket *socket = m_server.nextPendingConnection()) {
+            m_clients.append(socket);
+            m_buffers.insert(socket, {});
+            connect(socket, &QLocalSocket::readyRead, this, [this, socket] { onReadyRead(socket); });
+            connect(socket, &QLocalSocket::disconnected, this, [this, socket] {
+                m_clients.removeAll(socket);
+                m_buffers.remove(socket);
+                socket->deleteLater();
+            });
+        }
+    }
+    void onReadyRead(QLocalSocket *socket) {
+        QByteArray &buffer = m_buffers[socket];
+        buffer += socket->readAll();
+        for (;;) {
+            const int newline = buffer.indexOf('\n');
+            if (newline < 0) break;
+            const QByteArray line = buffer.left(newline);
+            buffer.remove(0, newline + 1);
+            if (line.trimmed().isEmpty()) continue;
+            const QJsonObject request = QJsonDocument::fromJson(line).object();
+            requests.append(request);
+            const QString method = request.value("method").toString();
+            if (method == "hello") {
+                ++hellos;
+                respond(socket, request, helloResult);
+                continue;
+            }
+            if (method == "subscribe") {
+                ++subscribes;
+                respond(socket, request, subscribeResult);
+                continue;
+            }
+            if (m_handler) m_handler(request, socket, this);
+            else respond(socket, request, QJsonObject{});
+        }
+    }
+    QLocalServer m_server;
+    QString m_path;
+    QList<QLocalSocket *> m_clients;
+    QHash<QLocalSocket *, QByteArray> m_buffers;
+    Handler m_handler;
+};
+}
 
 class SalahAppTests : public QObject {
     Q_OBJECT
@@ -61,7 +168,241 @@ esac
         if (!file.open(QIODevice::ReadOnly)) return {};
         return QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts);
     }
+
+    static QJsonObject fixture(const QString &name) {
+        return readJson(QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/contract/") + name + ".json").object();
+    }
+    static FakeDaemon::Handler readHandler(QJsonObject day) {
+        return [day](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *daemon) {
+            const QString method = request.value("method").toString();
+            if (method == "day.get") daemon->respond(socket, request, day);
+            else if (method == "stats.get") daemon->respond(socket, request, QJsonValue(fixture("stats_days")));
+            else if (method == "config.get") daemon->respond(socket, request, QJsonValue(fixture("config_show")));
+            else daemon->respond(socket, request, QJsonObject{});
+        };
+    }
+
+    static QString daemon_path(const QTemporaryDir &dir) { return dir.filePath("salah.sock"); }
 private slots:
+
+    void socketHandshakeSubscribesAndCorrelatesRequests() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        daemon.setHandler(readHandler(fixture("day")));
+        CoreClient client(nullptr, QString(), 2000, daemon_path(dir));
+        QSignalSpy spy(&client, &CoreClient::requestFinished);
+        QTRY_VERIFY_WITH_TIMEOUT(!client.offline(), 3000);
+        CoreClient::Result dayResult, configResult;
+        client.day(QDate(2026,11,22), [&](const CoreClient::Result &result) { dayResult = result; });
+        client.configShow([&](const CoreClient::Result &result) { configResult = result; });
+        QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 2, 3000);
+        QVERIFY2(dayResult.ok, qPrintable(dayResult.error.message)); QVERIFY(std::holds_alternative<Dto::DayPlan>(dayResult.value));
+        QVERIFY(configResult.ok); QVERIFY(std::holds_alternative<Dto::Config>(configResult.value));
+        QCOMPARE(daemon.hellos, 1); QCOMPARE(daemon.subscribes, 1);
+        QCOMPARE(daemon.requests.at(0).value("method").toString(), QString("hello"));
+        QCOMPARE(daemon.requests.at(0).value("params").toObject().value("protocol").toArray().first().toInt(), 1);
+        QCOMPARE(daemon.requests.at(0).value("params").toObject().value("actor").toString(), QString("app"));
+        QCOMPARE(daemon.requests.at(1).value("method").toString(), QString("subscribe"));
+        QCOMPARE(daemon.requests.at(1).value("params").toObject().value("topics").toArray().first().toString(), QString("changes"));
+        QSet<qint64> ids;
+        for (const QJsonObject &request : std::as_const(daemon.requests)) ids.insert(request.value("id").toVariant().toLongLong());
+        QCOMPARE(ids.size(), daemon.requests.size());
+    }
+    void socketRequestTimesOut() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        daemon.setHandler([](const QJsonObject &, QLocalSocket *, FakeDaemon *) {});
+        CoreClient client(nullptr, QString(), 120, daemon_path(dir));
+        QSignalSpy spy(&client, &CoreClient::requestFinished);
+        CoreClient::Result result;
+        QTRY_VERIFY_WITH_TIMEOUT(!client.offline(), 3000);
+        client.parse("slow", [&](const CoreClient::Result &reply) { result = reply; });
+        QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 1, 3000);
+        QVERIFY(!result.ok); QCOMPARE(result.error.kind, CoreClient::ErrorKind::Timeout);
+        QVERIFY(result.error.message.contains("timed out"));
+    }
+    void socketReconnectsAfterDrop() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        daemon.setHandler(readHandler(fixture("day")));
+        CoreClient client(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&client, &CoreClient::requestFinished);
+        CoreClient::Result first;
+        QTRY_VERIFY_WITH_TIMEOUT(!client.offline(), 3000);
+        client.configShow([&](const CoreClient::Result &result) { first = result; });
+        QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 1, 3000); QVERIFY(first.ok);
+        daemon.dropClients();
+        QTest::qWait(200);
+        CoreClient::Result second;
+        client.configShow([&](const CoreClient::Result &result) { second = result; });
+        QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 2, 6000);
+        QVERIFY(second.ok);
+        QCOMPARE(daemon.hellos, 2); QCOMPARE(daemon.subscribes, 2);
+    }
+    void socketConflictReloadsAndShowsServerMessage() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        QJsonObject day = fixture("day");
+        QJsonArray blocks = day.value("blocks").toArray();
+        for (int b = 0; b < blocks.size(); ++b) {
+            QJsonObject block = blocks[b].toObject();
+            QJsonArray items = block.value("items").toArray();
+            for (int i = 0; i < items.size(); ++i) {
+                QJsonObject item = items[i].toObject();
+                if (item.value("id").toString() == "<id:1>") item["version"] = 7;
+                items[i] = item;
+            }
+            block["items"] = items;
+            blocks[b] = block;
+        }
+        day["blocks"] = blocks;
+        auto reads = readHandler(day);
+        int dayRequests = 0, editRequests = 0;
+        QJsonObject editParams;
+        daemon.setHandler([&, reads](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            if (request.value("method").toString() == "item.edit") {
+                ++editRequests;
+                editParams = request.value("params").toObject();
+                server->respondError(socket, request, -32004, "conflict", "item \"<id:1>\" is at version 4, not 3");
+                return;
+            }
+            if (request.value("method").toString() == "day.get") ++dayRequests;
+            reads(request, socket, server);
+        });
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
+        QVariantMap item;
+        for (const QVariant &block : backend.dayPlan().value("blocks").toList())
+            for (const QVariant &row : block.toMap().value("items").toList())
+                if (row.toMap().value("id").toString() == "<id:1>") item = row.toMap();
+        QVERIFY(!item.isEmpty());
+        item["title"] = "Changed";
+        backend.saveItem(item);
+        QTRY_VERIFY_WITH_TIMEOUT(editRequests == 1, 3000);
+        QCOMPARE(editParams.value("expected_version").toInt(), 7);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.error().contains("version 4, not 3"), 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(dayRequests >= 2, 3000);
+    }
+    void changedNotificationReloadsOncePerRevision() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        daemon.setHandler(readHandler(fixture("day")));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
+        auto dayRequests = [&] {
+            int count = 0;
+            for (const QJsonObject &request : std::as_const(daemon.requests))
+                if (request.value("method").toString() == "day.get") ++count;
+            return count;
+        };
+        const int base = dayRequests();
+        daemon.notifyChanged(11);
+        daemon.notifyChanged(11);
+        QTRY_VERIFY_WITH_TIMEOUT(dayRequests() >= base + 1, 3000);
+        QTest::qWait(300);
+        QCOMPARE(dayRequests(), base + 1);
+        daemon.notifyChanged(12);
+        QTRY_COMPARE_WITH_TIMEOUT(dayRequests(), base + 2, 3000);
+    }
+    void socketMutationAppliesCanonicalRows() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        auto reads = readHandler(fixture("day"));
+        daemon.setHandler([reads](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            if (request.value("method").toString() == "item.add") {
+                const QJsonObject params = request.value("params").toObject();
+                QJsonObject row{{"id", "new-1"}, {"title", params.value("title").toString()}, {"block", "fajr"},
+                                {"repeat", "none"}, {"weekdays", QJsonValue::Null}, {"measure", "check"},
+                                {"target", QJsonValue::Null}, {"position", 0}, {"state", "open"},
+                                {"minutes", 0}, {"count", 0}, {"timer_started_at", QJsonValue::Null}, {"version", 2}};
+                QJsonObject changed{{"items", QJsonArray{row}}, {"entries", QJsonArray{}},
+                                    {"marks", QJsonArray{}}, {"deleted", QJsonArray{}}};
+                server->respond(socket, request, QJsonObject{{"revision", 101}, {"op_id", params.value("op_id")}, {"changed", changed}});
+                return;
+            }
+            reads(request, socket, server);
+        });
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
+        backend.addQuick("Canonical", "fajr");
+        auto contains = [&](const QString &id) {
+            for (const QVariant &block : backend.dayPlan().value("blocks").toList())
+                for (const QVariant &row : block.toMap().value("items").toList())
+                    if (row.toMap().value("id").toString() == id) return true;
+            return false;
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(contains("new-1"), 3000);
+        for (const QVariant &block : backend.dayPlan().value("blocks").toList())
+            for (const QVariant &row : block.toMap().value("items").toList())
+                QVERIFY(!row.toMap().value("id").toString().startsWith("pending-"));
+    }
+    void missingSocketFallsBackToCliAndReportsOffline() {
+        QTemporaryDir dir;
+        const QString log = dir.filePath("cli-args");
+        const QString script = dir.filePath("salah");
+        const QString fixturePath = QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/contract/config_show.json");
+        write(script, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + log.toUtf8() + "'\ncat '" + fixturePath.toUtf8() + "'\n");
+        QFile::setPermissions(script, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        CoreClient client(nullptr, script, 2000, dir.filePath("missing/salah.sock"));
+        QSignalSpy spy(&client, &CoreClient::requestFinished);
+        QTRY_VERIFY_WITH_TIMEOUT(client.offline(), 3000);
+        CoreClient::Result result;
+        client.configShow([&](const CoreClient::Result &reply) { result = reply; });
+        QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 1, 3000);
+        QVERIFY(result.ok);
+        QFile file(log); QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(QString::fromUtf8(file.readAll()).trimmed(), QString("config show"));
+        QVERIFY(client.offline());
+    }
+
+    void protocolSmoke() {
+        if (qEnvironmentVariableIsEmpty("SALAH_PROTOCOL_SMOKE")) return;
+        Backend backend;
+        Theme theme;
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload();
+        QTRY_VERIFY_WITH_TIMEOUT(spy.size() >= 3, 8000);
+        QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
+        QVERIFY(!backend.offlineMode());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        root->setProperty("visible", false);
+        auto findItem = [&](const QString &title) {
+            for (const QVariant &block : backend.dayPlan().value("blocks").toList())
+                for (const QVariant &row : block.toMap().value("items").toList())
+                    if (row.toMap().value("title").toString() == title) return row.toMap();
+            return QVariantMap{};
+        };
+        backend.addQuick("Smoke add", "fajr");
+        auto canonical = [&](const QString &title) {
+            const QVariantMap item = findItem(title);
+            return !item.isEmpty() && !item.value("id").toString().startsWith("pending-") && !item.value("pending").toBool();
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(canonical("Smoke add"), 8000);
+        const QVariantMap added = findItem("Smoke add");
+        const QString id = added.value("id").toString();
+        backend.toggleTimer(id, false);
+        QTRY_VERIFY_WITH_TIMEOUT(!findItem("Smoke add").value("timer_started_at").toString().isEmpty(), 8000);
+        backend.toggleTimer(id, true);
+        QTRY_VERIFY_WITH_TIMEOUT(findItem("Smoke add").value("timer_started_at").toString().isEmpty(), 8000);
+        bool marked = false;
+        for (const QVariant &row : backend.dayPlan().value("prayers").toList())
+            if (row.toMap().value("id").toString() == "fajr") marked = row.toMap().value("marked").toBool();
+        backend.togglePrayer("fajr", marked);
+        QTRY_VERIFY_WITH_TIMEOUT([&] {
+            for (const QVariant &row : backend.dayPlan().value("prayers").toList())
+                if (row.toMap().value("id").toString() == "fajr") return row.toMap().value("marked").toBool() != marked;
+            return false;
+        }(), 8000);
+        QProcess external;
+        external.start(qEnvironmentVariable("SALAH_BIN", "salah"), {"item", "add", "--json", "--", "External smoke"});
+        QVERIFY(external.waitForFinished(8000));
+        QCOMPARE(external.exitCode(), 0);
+        QTRY_VERIFY_WITH_TIMEOUT(!findItem("External smoke").isEmpty(), 8000);
+        QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
+        root->setProperty("visible", false);
+    }
     void decodersAcceptGoldenFixtures() {
         const QString base = QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/contract/");
         auto json = [&](const QString &name) { return readJson(base + name + ".json"); };
@@ -230,11 +571,13 @@ private slots:
         b.reload(); QTRY_COMPARE(spy.size(),3); const int revision=b.dayRevision();
         b.reload(); QTRY_COMPARE(spy.size(),6); QCOMPARE(b.dayRevision(),revision);
     }
-    void optimisticTickChangesBeforeCliReturns() {
+    void pendingTickWaitsForCanonicalResponse() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
         b.reload(); QTRY_COMPARE(spy.size(),3); b.toggleDone("a1","done");
         const auto blocks=b.dayPlan().value("blocks").toList();
-        QCOMPARE(blocks.at(1).toMap().value("items").toList().first().toMap().value("state").toString(),QString("open"));
+        const auto row=blocks.at(1).toMap().value("items").toList().first().toMap();
+        QCOMPARE(row.value("state").toString(),QString("done"));
+        QVERIFY(row.value("pending").toBool());
         QVERIFY(b.busy());
     }
     void adjustmentArgumentsAndClamp() {
@@ -250,12 +593,13 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json --minutes a1 5 --date 2026-11-23"),3000);
         QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json --minutes a1 -5 --date 2026-11-23"),3000);
     }
-    void timerStartStopsAnotherOptimistically() {
+    void timerStartMarksOnlyTheTouchedRowPending() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
         b.reload(); QTRY_COMPARE(spy.size(),3); b.toggleTimer("a1",false);
         const auto blocks=b.dayPlan().value("blocks").toList();
-        QVERIFY(blocks.at(0).toMap().value("items").toList().first().toMap().value("timer_started_at").toString().isEmpty());
-        QVERIFY(!blocks.at(1).toMap().value("items").toList().first().toMap().value("timer_started_at").toString().isEmpty());
+        QVERIFY(blocks.at(0).toMap().value("items").toList().first().toMap().value("timer_started_at").toString() == QString("2026-11-22T08:00:00Z"));
+        QVERIFY(blocks.at(1).toMap().value("items").toList().first().toMap().value("pending").toBool());
+        QVERIFY(blocks.at(1).toMap().value("items").toList().first().toMap().value("timer_started_at").toString().isEmpty());
         b.toggleTimer("a1",true);
         QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item stop --json a1"),3000);
     }

@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QString>
+#include <QStringList>
 #include <optional>
 #include <variant>
 #include <vector>
@@ -38,9 +39,20 @@ struct PrayerMark { QJsonObject json; QString id, day, prayer; };
 struct ParseDraft { QJsonObject json; QString title, repeat, measure; };
 struct Config { QJsonObject json; QString location, method, sleepTime; };
 struct Undo { QJsonObject json; int undone = 0; };
+// Canonical protocol v1 mutation result: the projection rows the UI renders.
+struct MutationResult {
+    QJsonObject json;
+    qint64 revision = 0;
+    QString opId;
+    std::vector<DayItem> items;
+    std::vector<Entry> entries;
+    std::vector<PrayerMark> marks;
+    QStringList deleted;
+};
 
 using Value = std::variant<std::monostate, DayPlan, Today, Stats, Item, Entry,
-                           std::vector<Entry>, PrayerMark, ParseDraft, Config, Undo>;
+                           std::vector<Entry>, PrayerMark, ParseDraft, Config, Undo,
+                           MutationResult>;
 using AnyDecoded = Decoded<Value>;
 
 template <typename T> Decoded<T> decode(const QJsonValue &value);
@@ -49,6 +61,7 @@ AnyDecoded decodeStats(const QJsonValue &); AnyDecoded decodeItem(const QJsonVal
 AnyDecoded decodeEntry(const QJsonValue &); AnyDecoded decodeEntries(const QJsonValue &);
 AnyDecoded decodePrayerMark(const QJsonValue &); AnyDecoded decodeParseDraft(const QJsonValue &);
 AnyDecoded decodeConfig(const QJsonValue &); AnyDecoded decodeUndo(const QJsonValue &);
+AnyDecoded decodeMutationResult(const QJsonValue &);
 QJsonObject jsonObject(const Value &value);
 
 } // namespace Dto
