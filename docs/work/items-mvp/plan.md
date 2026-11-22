@@ -66,11 +66,11 @@ entries(id TEXT PK, item_id TEXT, day TEXT, block TEXT,
 
 ## Slices
 
-- [ ] S1 — CLI migration to clap with unchanged behaviour (Codex; `src/main.rs`, `tests/cli.rs`)
-- [ ] S2 — `schedule` extraction, typed `BoundaryId`, `DayKey`, block key (lead; `src/day.rs`, `src/status.rs`, new `src/schedule.rs`)
-- [ ] S3 — item/entry domain and SQLite store with migrations (lead; `src/item.rs`, `src/store.rs`)
-- [ ] S4 — export/import and round-trip tests (worker; `src/export.rs`, `tests/export.rs`)
-- [ ] S5 — `salah item …`, `salah export|import` commands, status `items` block
+- [x] S1 — CLI migration to clap with unchanged behaviour (Codex; `src/main.rs`, `tests/cli.rs`)
+- [x] S2 — `schedule` extraction, typed `BoundaryId`, `DayKey`, block key (lead; `src/day.rs`, `src/status.rs`, new `src/schedule.rs`)
+- [x] S3 — item/entry domain and SQLite store with migrations (lead; `src/item.rs`, `src/store.rs`)
+- [x] S4 — export/import and round-trip tests (worker; `src/export.rs`, `tests/export.rs`)
+- [x] S5 — `salah item …`, `salah export|import` commands, status `items` block
 - [ ] S6 — widget: current block items, tick, quick add, open count, sleep time
 - [ ] S7 — `app/` Qt Quick desktop app: day/block history and per-item totals
 - [ ] S8 — integration, install, live verification

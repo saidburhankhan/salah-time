@@ -20,7 +20,7 @@ the final user report. Workers own only the slice assigned to them.
 
 | Work item | Status | Next | Updated |
 |---|---|---|---|
-| `items-mvp` | In progress | S1 clap CLI (Codex) and S2 schedule/day keys (lead) | 2026-11-22 |
+| `items-mvp` | In progress | Live widget check after shell restart; review S7 app | 2026-11-22 |
 
 Completed work may be moved from `docs/work/` to `docs/archive/`. Do not load
 archived work unless the current task explicitly depends on it.
