@@ -19,18 +19,29 @@ plug in. Inputs: `review.md`, `proposal.md`, `review-frontends.md`,
   by the lead.
 - The lead reviews by tests, diff stats, and short reports, not full reads.
 
-## Phases (core step numbers from proposal.md, front-end from proposal-frontends.md)
+## Phases (revised 2026-11-22 after `protocol-review.md`)
 
-| Phase | Steps | Parallel lanes |
+The protocol review replaced the easy choices with proper ones: JSON-RPC 2.0
+(NDJSON) over a 0600 Unix socket served by `salah serve` (systemd user socket
+activation; `salah rpc` stdio fallback), per-entity versions + client op ids,
+mutations returning canonical rows, pushed `changed` notifications instead of
+polling, one append-only `changes` log with per-consumer cursors, HLC-based
+sync last. The optimistic journal (FE 8) is dropped.
+
+Done: P1 fixtures + typed errors; P2 planner split, Clock/IdGenerator,
+desktop CoreClient, app DTO decoders.
+
+| Phase | Work | Worker |
 |---|---|---|
-| P1 Guard rails | core 1 + FE 1 (contract fixtures, consumer tests); core 2 (typed errors) | fixtures ∥ errors |
-| P2 Seams | core 3 (split planner.rs), core 4 (Clock/IdGenerator); FE 3 (desktop CoreClient) | core ∥ app client |
-| P3 Persistence | core 5 (repository/unit-of-work, atomic invariants) | serial |
-| P4 Workspace | core 6 (salah-domain crate), 7 (prayer-times), 8 (contract crate + v1 envelope); FE 2 (decoders) | 7 ∥ 8 after 6 |
-| P5 Adapters & zones | core 9 (SQLite/official/location adapters), 10 (IANA zones) | adapters ∥ |
-| P6 Front ends | FE 4 (typed models), 5 (split QML), 6 (domain projections to Rust), 7 (widget controller/components) | app ∥ widget |
-| P7 Reliability | FE 8 (optimistic journal), FE 9 (i18n/a11y), FE 10 (packaging) | ∥ |
-| P8 Platform | core 11 (events/outbox), 12 (proof integration adapter), 13 + FE 11 (salahd daemon), core 14 | serial |
+| S1 Storage correctness | Every mutation in one `BEGIN IMMEDIATE` transaction; reads never write (no `close_expired_timers` on read paths; derive expiry); busy handling | Codex |
+| S2 Schema | `revision`, per-entity `version`, `changes` log, `applied_ops` (idempotency); migration; export v3 | Codex |
+| S3 Contract | JSON-RPC method/notification DTOs, error `kind` on the wire, `hello` handshake, mutations return changed rows + revision; CLI JSON keeps working | Codex |
+| S4 Daemon | `salah serve` (single writer, `PRAGMA data_version` watch for direct CLI writes), `salah rpc`, systemd user socket units, installer | Codex |
+| S5 Clients | App CoreClient → socket with subscriptions; widget → Quickshell `Socket`; remove polling and client re-derivation | Codex (app) ∥ DeepSeek (widget) |
+| S6 Front-end structure | Typed models, split QML, domain projections to Rust, i18n/a11y | DeepSeek ∥ Codex |
+| S7 Workspace | Crates (domain, prayer-times, contract, adapters) with enforced dependency direction; IANA zones | DeepSeek / Codex |
+| S8 Integrations | Telegram bot over the `changes` cursor (proof), then notes/Slack | DeepSeek |
+| S9 Sync | HLC + device id, per-entity merge, fractional order keys; relay later | Codex |
 
 ## Acceptance
 

@@ -11,7 +11,7 @@ Reviews and proposals written (b3ffadb). Plan in `plan.md`. No code moved.
 
 ## Next
 
-P2b: Clock/IdGenerator (DeepSeek) ∥ app DTO decoders (Codex); then P3 repository (Codex).
+S1 storage correctness (Codex): atomic mutations, read paths never write.
 
 ## Verification
 
