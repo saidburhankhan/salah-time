@@ -83,30 +83,30 @@ pub struct Status {
 }
 
 impl Status {
-    /// Adds today's plan and the running session. A store failure is reported
-    /// in `planner_error` so prayer times still display.
+    /// Adds today's plan, the running session, and its prompt. Each part
+    /// fails on its own: a store failure is reported in `planner_error` so
+    /// prayer times, and whatever else could be read, still display.
     pub fn attach_planner(&mut self, store: &mut Store, config: &Config, now: DateTime<Utc>) {
-        let mut tracking = || -> Result<_, Error> {
-            let today = crate::day::today(store, config, now)?;
-            let running = sessions::running(store)?;
-            let prompt = sessions::prompt(
-                store,
-                running.as_ref().and_then(|s| s.project_id.as_deref()),
-            )?;
-            Ok((today, running, prompt))
-        };
-        match tracking() {
-            Ok((today, running, prompt)) => {
-                self.planner = Some(today);
-                self.planner_error = None;
-                self.running = running.as_ref().map(SessionView::from);
+        let mut errors = Vec::new();
+        match crate::day::today(store, config, now) {
+            Ok(today) => self.planner = Some(today),
+            Err(error) => errors.push(error.to_string()),
+        }
+        let running = sessions::running(store).and_then(|running| {
+            let project = running.as_ref().and_then(|s| s.project_id.as_deref());
+            Ok((
+                running.as_ref().map(SessionView::from),
+                sessions::prompt(store, project)?,
+            ))
+        });
+        match running {
+            Ok((running, prompt)) => {
+                self.running = running;
                 self.prompt = prompt;
             }
-            Err(error) => {
-                self.planner = None;
-                self.planner_error = Some(error.to_string());
-            }
+            Err(error) => errors.push(error.to_string()),
         }
+        self.planner_error = (!errors.is_empty()).then(|| errors.join("; "));
     }
 }
 
@@ -359,5 +359,39 @@ mod tests {
             assert!(prayer["passed"].is_boolean());
             assert!(prayer["is_next"].is_boolean());
         }
+    }
+
+    #[test]
+    fn the_running_session_survives_a_failing_plan() {
+        let mut store = crate::Store::open_in_memory().unwrap();
+        let config = Config {
+            method: "mwl".into(),
+            ..Config::default()
+        };
+        let now = chrono::TimeZone::with_ymd_and_hms(&Utc, 2031, 5, 14, 4, 30, 0).unwrap();
+        let project = crate::test_support::project(&mut store, "Quran").id;
+        store
+            .write(|tx| {
+                crate::sessions::start(
+                    tx,
+                    &config,
+                    now,
+                    &salah_domain::runtime::UuidV4,
+                    crate::sessions::Target {
+                        item_id: None,
+                        project_id: Some(project.clone()),
+                    },
+                )
+            })
+            .unwrap();
+        let mut report = build(&config, now).unwrap();
+        let broken = Config {
+            sleep_time: "not a time".into(),
+            ..config.clone()
+        };
+        report.attach_planner(&mut store, &broken, now);
+        assert!(report.planner.is_none() && report.planner_error.is_some());
+        assert!(report.running.is_some());
+        assert_eq!(report.prompt.len(), 2);
     }
 }

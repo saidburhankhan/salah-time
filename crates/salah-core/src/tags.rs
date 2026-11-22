@@ -73,11 +73,20 @@ pub fn edit(
     ensure_version("tag", id, tag.version, expected_version)?;
     if let Some(name) = name {
         let name = label("name", name, NAME_MAX)?;
-        if tx.tags()?.iter().any(|t| t.name == name && t.id != tag.id) {
-            return Err(Error::validation(
-                "name",
-                format!("a tag named {name:?} already exists"),
-            ));
+        match tx.tags()?.iter().find(|t| t.name == name && t.id != tag.id) {
+            Some(other) if other.deleted_at.is_some() => {
+                return Err(Error::validation(
+                    "name",
+                    format!("a removed tag is named {name:?}; add it again to restore it"),
+                ));
+            }
+            Some(_) => {
+                return Err(Error::validation(
+                    "name",
+                    format!("a tag named {name:?} already exists"),
+                ));
+            }
+            None => {}
         }
         tag.name = name;
     }
@@ -109,4 +118,31 @@ pub fn remove(
     tag.updated_at = now;
     tag.version = tx.put_tag(&tag)?;
     Ok(tag)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{at, ids};
+
+    #[test]
+    fn renaming_onto_a_removed_tag_says_how_to_restore_it() {
+        let mut store = Store::open_in_memory().unwrap();
+        let (old, other) = store
+            .write(|tx| {
+                let old = add(tx, at(20, 9, 0), ids(), "Deen", "#00aa00")?;
+                let other = add(tx, at(20, 9, 0), ids(), "Work", "#0000aa")?;
+                remove(tx, at(20, 9, 1), &old.id, None)?;
+                Ok((old, other))
+            })
+            .unwrap();
+        let error = store
+            .write(|tx| edit(tx, at(20, 9, 2), &other.id, Some(&old.name), None, None))
+            .unwrap_err();
+        assert!(error.to_string().contains("add it again"), "{error}");
+        let restored = store
+            .write(|tx| add(tx, at(20, 9, 3), ids(), "Deen", "#00bb00"))
+            .unwrap();
+        assert_eq!(restored.id, old.id);
+    }
 }

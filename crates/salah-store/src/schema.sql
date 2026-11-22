@@ -100,7 +100,14 @@ CREATE TABLE session_values (
     PRIMARY KEY (session_id, metric_id)
 );
 
--- Snapshot of a day's prayer blocks, written the first time the day is used.
+-- Snapshots of past days. Days from today on are computed live; once a day is
+-- past, its blocks and plan are written once and marked here, so an empty plan
+-- is told apart from one that was never written.
+CREATE TABLE days_written (
+    day         TEXT PRIMARY KEY,
+    written_at  TEXT NOT NULL
+);
+
 CREATE TABLE day_blocks (
     day        TEXT NOT NULL,
     block      TEXT NOT NULL
@@ -111,12 +118,12 @@ CREATE TABLE day_blocks (
     PRIMARY KEY (day, block)
 );
 
--- Snapshot of the items planned on a day; past days never change.
 CREATE TABLE day_plan (
     day              TEXT NOT NULL,
     block            TEXT NOT NULL
                      CHECK (block IN ('night', 'fajr', 'dhuhr', 'asr', 'maghrib', 'isha', 'sleep')),
     item_id          TEXT NOT NULL REFERENCES items (id),
+    project_id       TEXT REFERENCES projects (id),
     planned_minutes  INTEGER CHECK (planned_minutes IS NULL OR planned_minutes >= 0),
     PRIMARY KEY (day, block, item_id)
 );
@@ -151,9 +158,10 @@ CREATE TABLE changes (
     op_id      TEXT
 );
 
--- Idempotency: the stored result of every client op id.
+-- Idempotency: the method and stored result of every client op id.
 CREATE TABLE applied_ops (
     op_id        TEXT PRIMARY KEY,
+    method       TEXT NOT NULL,
     revision     INTEGER NOT NULL,
     result_json  TEXT NOT NULL,
     at           TEXT NOT NULL

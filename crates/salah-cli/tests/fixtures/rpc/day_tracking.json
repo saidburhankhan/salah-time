@@ -9,10 +9,11 @@
         "end": "fajr",
         "items": [],
         "planned_minutes": 0,
-        "start": "night"
+        "start": "night",
+        "unplanned_minutes": 0
       },
       {
-        "actual_minutes": 45,
+        "actual_minutes": 25,
         "capacity_minutes": 547,
         "end": "dhuhr",
         "items": [
@@ -90,7 +91,8 @@
           }
         ],
         "planned_minutes": 45,
-        "start": "fajr"
+        "start": "fajr",
+        "unplanned_minutes": 20
       },
       {
         "actual_minutes": 0,
@@ -98,7 +100,8 @@
         "end": "asr",
         "items": [],
         "planned_minutes": 0,
-        "start": "dhuhr"
+        "start": "dhuhr",
+        "unplanned_minutes": 0
       },
       {
         "actual_minutes": 0,
@@ -106,7 +109,8 @@
         "end": "maghrib",
         "items": [],
         "planned_minutes": 0,
-        "start": "asr"
+        "start": "asr",
+        "unplanned_minutes": 0
       },
       {
         "actual_minutes": 0,
@@ -114,7 +118,8 @@
         "end": "isha",
         "items": [],
         "planned_minutes": 0,
-        "start": "maghrib"
+        "start": "maghrib",
+        "unplanned_minutes": 0
       },
       {
         "actual_minutes": 0,
@@ -122,15 +127,17 @@
         "end": "sleep",
         "items": [],
         "planned_minutes": 0,
-        "start": "isha"
+        "start": "isha",
+        "unplanned_minutes": 0
       }
     ],
     "day": "2031-05-14",
     "fulfilment": {
-      "actual_minutes": 45,
+      "actual_minutes": 25,
       "done_items": 2,
       "planned_items": 2,
-      "planned_minutes": 45
+      "planned_minutes": 45,
+      "unplanned_minutes": 20
     },
     "is_today": true,
     "night_start": "23:00",

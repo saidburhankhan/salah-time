@@ -301,3 +301,35 @@ fn a_config_set_replay_keeps_the_first_body() {
     let error = fixture.err("config.set", json!({"op_id":"op-config-empty"}));
     assert_eq!(error.data.unwrap().kind, "validation");
 }
+
+#[test]
+fn an_op_id_must_be_non_empty_and_belongs_to_one_method() {
+    let mut fixture = Fixture::new();
+    fixture.handshake();
+    let empty = fixture.err(
+        "tag.add",
+        json!({"op_id":" ","name":"Deen","color":"#00aa00"}),
+    );
+    let data = empty.data.unwrap();
+    assert_eq!(
+        (data.kind.as_str(), data.field.as_deref()),
+        ("validation", Some("op_id"))
+    );
+
+    fixture.ok(
+        "tag.add",
+        json!({"op_id":"op-1","name":"Deen","color":"#00aa00"}),
+    );
+    let reused = fixture.err("project.add", json!({"op_id":"op-1","name":"Quran"}));
+    assert_eq!(reused.data.unwrap().kind, "validation");
+    assert!(reused.message.contains("tag.add"), "{}", reused.message);
+    assert!(
+        fixture
+            .ok("projects.list", Value::Null)
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let config = fixture.err("config.set", json!({"op_id":"op-1","sleep_time":"22:00"}));
+    assert_eq!(config.data.unwrap().kind, "validation");
+}

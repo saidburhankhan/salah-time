@@ -36,7 +36,14 @@ impl Context<'_> {
     }
 }
 
-type Handler = fn(&Value, &mut Context<'_>) -> Result<Value, RpcError>;
+/// One request as a handler sees it.
+#[derive(Clone, Copy)]
+pub(crate) struct Call<'a> {
+    pub method: &'static str,
+    pub params: &'a Value,
+}
+
+type Handler = fn(Call<'_>, &mut Context<'_>) -> Result<Value, RpcError>;
 
 /// Whether a method writes. The daemon routes writes through its single
 /// writer thread; reads run on a per-connection store.
@@ -75,8 +82,8 @@ const METHODS: &[(&str, Kind, Handler)] = &[
     ("session.log", Kind::Write, writes::session_log),
     ("session.edit", Kind::Write, writes::session_edit),
     ("session.remove", Kind::Write, writes::session_remove),
-    ("prayer.mark", Kind::Write, writes::prayer_mark),
-    ("prayer.unmark", Kind::Write, writes::prayer_unmark),
+    ("prayer.mark", Kind::Write, writes::prayer),
+    ("prayer.unmark", Kind::Write, writes::prayer),
     ("config.set", Kind::Write, writes::config_set),
 ];
 
@@ -170,7 +177,7 @@ impl Dispatcher {
                 "hello must be the first request on a connection",
             ));
         }
-        let (_, _, handler) = METHODS
+        let (method, _, handler) = METHODS
             .iter()
             .find(|(name, _, _)| *name == method)
             .ok_or_else(|| RpcError::method_not_found(method))?;
@@ -179,7 +186,7 @@ impl Dispatcher {
                 "params must be a JSON object or omitted",
             ));
         }
-        handler(params, ctx)
+        handler(Call { method, params }, ctx)
     }
 
     fn hello(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {

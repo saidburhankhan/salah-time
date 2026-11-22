@@ -106,7 +106,8 @@
         "actual_minutes": 0,
         "done_items": 0,
         "planned_items": 0,
-        "planned_minutes": 0
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
       },
       "items": [],
       "open": 0,

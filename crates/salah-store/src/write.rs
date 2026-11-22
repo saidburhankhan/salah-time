@@ -39,18 +39,29 @@ impl WriteTx<'_> {
         *self.op_id.borrow_mut() = op_id.map(str::to_owned);
     }
 
-    /// Stores the result of `op_id` for idempotent replay, at the revision
-    /// this transaction produced (or the current one if it wrote nothing).
-    pub fn record_applied_op(&self, op_id: &str, result_json: &str) -> Result<(), Error> {
+    /// Stores the method and result of `op_id` for idempotent replay, at the
+    /// revision this transaction produced (or the current one if it wrote nothing).
+    pub fn record_applied_op(
+        &self,
+        op_id: &str,
+        method: &str,
+        result_json: &str,
+    ) -> Result<(), Error> {
         let revision = match self.revision.get() {
             Some(revision) => revision,
             None => self.store.revision()?,
         };
         self.execute(
-            "INSERT INTO applied_ops (op_id, revision, result_json, at)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO applied_ops (op_id, method, revision, result_json, at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT DO NOTHING",
-            params![op_id, revision, result_json, codec::timestamp(Utc::now())],
+            params![
+                op_id,
+                method,
+                revision,
+                result_json,
+                codec::timestamp(Utc::now())
+            ],
         )
     }
 
@@ -284,10 +295,15 @@ impl WriteTx<'_> {
         self.log_change("prayer_mark", &mark.id, op, version)
     }
 
-    /// Replaces a day's block snapshot. Snapshots are derived data, so they
+    /// Writes the frozen snapshot of a past day once: its blocks, its plan,
+    /// and the marker that it was written. Snapshots are derived data, so they
     /// neither bump the revision nor appear in the change log.
-    pub fn replace_day_blocks(&self, day: NaiveDate, blocks: &[DayBlock]) -> Result<(), Error> {
-        self.execute("DELETE FROM day_blocks WHERE day = ?1", [codec::day(day)])?;
+    pub fn write_day(
+        &self,
+        day: NaiveDate,
+        blocks: &[DayBlock],
+        plan: &[DayPlanLine],
+    ) -> Result<(), Error> {
         for block in blocks {
             self.execute(
                 "INSERT INTO day_blocks (day, block, starts_at, ends_at, source)
@@ -301,25 +317,23 @@ impl WriteTx<'_> {
                 ],
             )?;
         }
-        Ok(())
-    }
-
-    /// Replaces a day's plan snapshot; derived data like `replace_day_blocks`.
-    pub fn replace_day_plan(&self, day: NaiveDate, lines: &[DayPlanLine]) -> Result<(), Error> {
-        self.execute("DELETE FROM day_plan WHERE day = ?1", [codec::day(day)])?;
-        for line in lines {
+        for line in plan {
             self.execute(
-                "INSERT INTO day_plan (day, block, item_id, planned_minutes)
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO day_plan (day, block, item_id, project_id, planned_minutes)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     codec::day(line.day),
                     codec::name(&line.block),
                     line.item_id,
+                    line.project_id,
                     line.planned_minutes,
                 ],
             )?;
         }
-        Ok(())
+        self.execute(
+            "INSERT INTO days_written (day, written_at) VALUES (?1, ?2)",
+            params![codec::day(day), codec::timestamp(Utc::now())],
+        )
     }
 
     fn execute(&self, sql: &str, params: impl rusqlite::Params) -> Result<(), Error> {

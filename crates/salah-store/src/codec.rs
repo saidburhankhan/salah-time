@@ -185,6 +185,7 @@ pub(crate) fn day_plan_line(row: &Row) -> rusqlite::Result<DayPlanLine> {
         day: get_day(row, "day")?,
         block: get_name(row, "block")?,
         item_id: row.get("item_id")?,
+        project_id: row.get("project_id")?,
         planned_minutes: row.get("planned_minutes")?,
     })
 }
@@ -217,6 +218,7 @@ pub(crate) fn change(row: &Row) -> rusqlite::Result<crate::Change> {
 
 pub(crate) fn applied_op(row: &Row) -> rusqlite::Result<crate::AppliedOp> {
     Ok(crate::AppliedOp {
+        method: row.get("method")?,
         revision: row.get("revision")?,
         result_json: row.get("result_json")?,
         at: get_timestamp(row, "at")?,

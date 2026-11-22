@@ -96,9 +96,9 @@ store-wide counter, never a precondition.
 |---|---|---|---|---|---|
 | `hello` | `protocol[]`, `client`, `actor?` | `protocol`, `server`, `capabilities`, `revision` | protocol | — | — |
 | `status.get` | — | `Status`: prayer projection, `planner` (today's rows), `running: SessionView\|null`, `prompt: [PromptMetric]` | config, source, storage | — | — |
-| `day.get` | `date?` | `DayPlan`: prayers, blocks with `capacity_minutes`/`planned_minutes`/`actual_minutes` and rows, `open`, `fulfilment` | validation, source, storage | — | — |
+| `day.get` | `date?` | `DayPlan`: prayers, blocks with `capacity_minutes`/`planned_minutes`/`actual_minutes`/`unplanned_minutes` and rows, `open`, `fulfilment` | validation, source, storage | — | — |
 | `items.list` | — | `[ItemView]` | storage | — | — |
-| `stats.get` | `from,to` or `days?` (default 30), `tag_id?`, `project_id?` | `range`, `filter`, `days`, `series` (minutes first), `projects`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
+| `stats.get` | `from,to` or `days?` (default 30), `tag_id?`, `project_id?` | `range`, `filter`, `days` (with `unplanned_minutes`, nullable `fulfilment_ratio`), `series` (minutes first), `projects`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
 | `item.parse` | `text` | draft `{title, block, repeat, weekdays, planned_minutes}` | validation | — | — |
 | `item.preview` | `block`, `repeat`, `weekdays?`, `planned_minutes?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
 | `item.add` | `op_id`, `title` or `quick_text`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `planned_minutes?`, `date?` | mutation result (`changed.items`) | validation, not_found, source, storage | yes | no |
@@ -149,15 +149,32 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   `null`), `planned_minutes` (the day's snapshot), `actual_minutes`,
   `sessions`, `done` (a session of the item finished that day; a tick counts),
   `schedule_text`, `next_occurrence`, and `detail_text` (`"20 / 30 min ·
-  Daily"`). Running sessions add no minutes until they stop.
+  Daily"`). Running sessions add no minutes until they stop. A row's `project`
+  is the project as planned that day.
 - `fulfilment`: `planned_items`, `done_items`, `planned_minutes`,
-  `actual_minutes`.
-- `stats.get`: an `avg` rollup is weighted by session minutes, a tick weighing
-  1; `fulfilment_ratio` is logged over planned minutes, 0 without a plan.
-- A day's block times and plan lines are snapshotted the first time the day is
-  read or written. Today's and later plans follow item edits; past days keep
-  their snapshot. Snapshots are not entities: they neither bump the revision
-  nor appear in `changed`.
+  `actual_minutes` (only sessions of that day's planned items) and
+  `unplanned_minutes` (every other session: unplanned items, bare projects).
+  Each day block carries `capacity_minutes`, `planned_minutes`,
+  `actual_minutes` and `unplanned_minutes` the same way.
+- `stats.get`: only finished sessions count. An `avg` rollup is weighted by
+  session minutes, a tick weighing 1. Each `days[]` row is `{day, minutes,
+  capacity_minutes, planned_minutes, unplanned_minutes, fulfilment_ratio}`;
+  `fulfilment_ratio` is plan-line minutes over planned minutes, capped at 1,
+  and `null` when nothing was planned. A day's `capacity_minutes` leaves out
+  the night block (sleep to Fajr); per-block capacity still lists it.
+- Snapshots: days from today on are computed live from the current config and
+  items and are never stored. Once a day is past, its blocks and plan are
+  written once (from the items that existed by its end, with their project
+  then) and marked written, so an empty plan stays empty. A past day's prayer
+  times and sleep time come from its stored blocks. Item writes first freeze
+  every unwritten past day, so later edits never reach them. Snapshots are not
+  entities: they neither bump the revision nor appear in `changed`.
+- `item.add` rejects a `date` before today.
+- An archived metric is neither required nor in `prompt`. A session keeps its
+  existing values of an archived metric on `session.edit`; new values for one
+  are rejected.
+- A timer's minutes end at the sleep boundary of the session's day (at most
+  1440), however late it is stopped.
 
 `now.next.at` in `day.get` and `next.at` in `status.get` are UTC instants. A
 client computes a countdown as `next.at - Date.now()`; it does not add local
@@ -208,7 +225,9 @@ Example stale edit:
 ## Idempotency and versions
 
 - A repeated `op_id` returns the stored result and revision and performs no
-  write, even if the retry body differs. On first application the dispatcher
+  write, even if the retry body differs. An `op_id` belongs to the method it
+  was first used with: reusing it for another method is `validation`
+  (`data.field = "op_id"`), and an empty `op_id` is rejected the same way. On first application the dispatcher
   records the complete serialized protocol result in `applied_ops` inside the
   same `BEGIN IMMEDIATE` transaction as the mutation. A replay returns those
   exact bytes, including the `changed` rows as they were then, even if later

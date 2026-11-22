@@ -42,53 +42,60 @@
     ],
     "days": [
       {
-        "capacity_minutes": 1440,
+        "capacity_minutes": 1178,
         "day": "2031-05-08",
-        "fulfilment_ratio": 0.0,
+        "fulfilment_ratio": null,
         "minutes": 0,
-        "planned_minutes": 0
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
       },
       {
-        "capacity_minutes": 1440,
+        "capacity_minutes": 1179,
         "day": "2031-05-09",
-        "fulfilment_ratio": 0.0,
+        "fulfilment_ratio": null,
         "minutes": 0,
-        "planned_minutes": 0
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
       },
       {
-        "capacity_minutes": 1440,
+        "capacity_minutes": 1181,
         "day": "2031-05-10",
-        "fulfilment_ratio": 0.0,
+        "fulfilment_ratio": null,
         "minutes": 0,
-        "planned_minutes": 0
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
       },
       {
-        "capacity_minutes": 1440,
+        "capacity_minutes": 1183,
         "day": "2031-05-11",
-        "fulfilment_ratio": 0.0,
+        "fulfilment_ratio": null,
         "minutes": 0,
-        "planned_minutes": 0
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
       },
       {
-        "capacity_minutes": 1440,
+        "capacity_minutes": 1184,
         "day": "2031-05-12",
-        "fulfilment_ratio": 0.0,
+        "fulfilment_ratio": null,
         "minutes": 0,
-        "planned_minutes": 0
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
       },
       {
-        "capacity_minutes": 1440,
+        "capacity_minutes": 1186,
         "day": "2031-05-13",
-        "fulfilment_ratio": 0.0,
+        "fulfilment_ratio": null,
         "minutes": 0,
-        "planned_minutes": 0
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
       },
       {
-        "capacity_minutes": 1440,
+        "capacity_minutes": 1188,
         "day": "2031-05-14",
-        "fulfilment_ratio": 1.5,
+        "fulfilment_ratio": 0.8333333333333334,
         "minutes": 45,
-        "planned_minutes": 30
+        "planned_minutes": 30,
+        "unplanned_minutes": 20
       }
     ],
     "filter": {

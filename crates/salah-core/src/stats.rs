@@ -1,16 +1,16 @@
 //! Statistics over a range of days, optionally narrowed to one project or to
-//! the projects carrying one tag.
+//! the projects carrying one tag. Only finished sessions count.
 //!
 //! An `avg` rollup is weighted by session minutes; a tick weighs 1.
 
 use crate::config::Config;
-use crate::day::{self, total_minutes};
+use crate::day::{self, Fulfilment, Snapshot, block_minutes, day_capacity, total_minutes};
 use crate::{Store, projects, tags};
 use chrono::NaiveDate;
 use salah_domain::{
     day::BoundaryId,
     error::Error,
-    tracking::{DayBlock, Rollup, Session},
+    tracking::{Metric, Rollup, Session, Tag},
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -51,8 +51,10 @@ pub struct DayStat {
     pub minutes: i64,
     pub capacity_minutes: i64,
     pub planned_minutes: i64,
-    /// Logged over planned minutes; 0 when nothing was planned.
-    pub fulfilment_ratio: f64,
+    /// Minutes of sessions outside the day's plan lines.
+    pub unplanned_minutes: i64,
+    /// Plan-line minutes over planned minutes, at most 1; `null` without a plan.
+    pub fulfilment_ratio: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -105,7 +107,14 @@ pub struct Totals {
     pub avg_quality: Option<f64>,
 }
 
-pub fn stats(store: &Store, config: &Config, range: Range, filter: Filter) -> Result<Stats, Error> {
+/// Freezes the past days of the range, then summarises it.
+pub fn stats(
+    store: &mut Store,
+    config: &Config,
+    today: NaiveDate,
+    range: Range,
+    filter: Filter,
+) -> Result<Stats, Error> {
     if range.to < range.from {
         return Err(Error::validation("to", "the range ends before it starts"));
     }
@@ -115,161 +124,230 @@ pub fn stats(store: &Store, config: &Config, range: Range, filter: Filter) -> Re
             format!("a range covers at most {MAX_DAYS} days"),
         ));
     }
-    let scope = Scope::new(store, &filter)?;
-    let sessions: Vec<Session> = store
-        .sessions_between(range.from, range.to)?
-        .into_iter()
-        .filter(|s| s.is_live() && scope.covers(s.project_id.as_deref()))
-        .collect();
     let days: Vec<NaiveDate> = range
         .from
         .iter_days()
         .take_while(|d| *d <= range.to)
         .collect();
-    let blocks: Vec<DayBlock> = days
-        .iter()
-        .map(|d| day::blocks(store, config, *d))
-        .collect::<Result<Vec<_>, _>>()?
-        .concat();
-    let on = |day: NaiveDate| sessions.iter().filter(move |s| s.block.day == day);
-
-    let mut day_stats = Vec::with_capacity(days.len());
-    for day in &days {
-        let minutes = total_minutes(on(*day));
-        let planned_minutes = scope.planned_minutes(store, *day)?;
-        day_stats.push(DayStat {
-            day: *day,
-            minutes,
-            capacity_minutes: capacity(blocks.iter().filter(|b| b.day == *day)),
-            planned_minutes,
-            fulfilment_ratio: if planned_minutes > 0 {
-                minutes as f64 / planned_minutes as f64
-            } else {
-                0.0
-            },
-        });
+    if range.from < today {
+        store.write(|tx| {
+            days.iter()
+                .try_for_each(|d| day::freeze(tx, config, *d, today))
+        })?;
     }
-
-    let mut series = vec![Series {
-        metric_id: MINUTES_SERIES.into(),
-        name: "Minutes".into(),
-        unit: "min".into(),
-        rollup: Rollup::Sum,
-        points: day_stats
-            .iter()
-            .map(|d| Point {
-                day: d.day,
-                value: Some(d.minutes as f64),
-            })
-            .collect(),
-    }];
-    for metric in store
-        .metrics()?
-        .into_iter()
-        .filter(|m| m.deleted_at.is_none())
-    {
-        let points = days
-            .iter()
-            .map(|day| Point {
-                day: *day,
-                value: rollup(metric.rollup, on(*day), &metric.id),
-            })
-            .collect();
-        series.push(Series {
-            metric_id: metric.id,
-            name: metric.name,
-            unit: metric.unit,
-            rollup: metric.rollup,
-            points,
-        });
-    }
-
-    let rollups: BTreeMap<String, Rollup> = store
-        .metrics()?
-        .into_iter()
-        .map(|m| (m.id, m.rollup))
-        .collect();
-    let mut project_stats = Vec::new();
-    for project in projects::list(store, None)? {
-        let mine: Vec<&Session> = sessions
-            .iter()
-            .filter(|s| s.project_id.as_deref() == Some(project.project.id.as_str()))
-            .collect();
-        if mine.is_empty() {
-            continue;
-        }
-        let metric_ids: BTreeSet<&str> = mine
-            .iter()
-            .flat_map(|s| s.values.iter().map(|v| v.metric_id.as_str()))
-            .collect();
-        let metrics = metric_ids
-            .into_iter()
-            .filter_map(|id| {
-                let kind = rollups.get(id).copied().unwrap_or(Rollup::Avg);
-                Some((id.to_owned(), rollup(kind, mine.iter().copied(), id)?))
-            })
-            .collect();
-        project_stats.push(ProjectStat {
-            minutes: total_minutes(mine.iter().copied()),
-            sessions: mine.len() as i64,
-            metrics,
-            id: project.project.id,
-            name: project.project.name,
-            color: project.project.color,
-        });
-    }
-
-    let all_projects = projects::list(store, None)?;
-    let tag_stats = tags::list(store)?
-        .into_iter()
-        .map(|tag| {
-            let tagged: BTreeSet<&str> = all_projects
-                .iter()
-                .filter(|p| p.project.tag_ids.contains(&tag.id))
-                .map(|p| p.project.id.as_str())
-                .collect();
-            TagStat {
-                minutes: total_minutes(
-                    sessions
-                        .iter()
-                        .filter(|s| s.project_id.as_deref().is_some_and(|p| tagged.contains(p))),
-                ),
-                id: tag.id,
-                name: tag.name,
-                color: tag.color,
-            }
-        })
-        .collect();
-
-    let block_stats = BoundaryId::AWAKE
-        .into_iter()
-        .map(|block| {
-            let inside = || sessions.iter().filter(move |s| s.block.start == block);
-            BlockStat {
-                block,
-                minutes: total_minutes(inside()),
-                capacity_minutes: capacity(blocks.iter().filter(|b| b.block == block)),
-                avg_focus: rollup(Rollup::Avg, inside(), "focus"),
-            }
-        })
-        .collect();
-
+    let ledger = Ledger::load(store, config, today, days, &filter)?;
     Ok(Stats {
-        totals: Totals {
-            minutes: total_minutes(sessions.iter()),
-            sessions: sessions.len() as i64,
-            active_days: day_stats.iter().filter(|d| d.minutes > 0).count() as i64,
-            avg_focus: rollup(Rollup::Avg, sessions.iter(), "focus"),
-            avg_quality: rollup(Rollup::Avg, sessions.iter(), "quality"),
-        },
+        days: ledger.day_stats(),
+        series: ledger.series(),
+        projects: ledger.project_stats(),
+        tags: ledger.tag_stats(),
+        blocks: ledger.block_stats(),
+        totals: ledger.totals(),
         range,
         filter,
-        days: day_stats,
-        series,
-        projects: project_stats,
-        tags: tag_stats,
-        blocks: block_stats,
     })
+}
+
+/// Everything in range that the filter keeps.
+struct Ledger {
+    days: Vec<(NaiveDate, Snapshot)>,
+    sessions: Vec<Session>,
+    metrics: Vec<Metric>,
+    projects: Vec<projects::ProjectView>,
+    tags: Vec<Tag>,
+}
+
+impl Ledger {
+    fn load(
+        store: &Store,
+        config: &Config,
+        today: NaiveDate,
+        days: Vec<NaiveDate>,
+        filter: &Filter,
+    ) -> Result<Self, Error> {
+        let scope = Scope::new(store, filter)?;
+        let (Some(first), Some(last)) = (days.first(), days.last()) else {
+            return Err(Error::validation("from", "the range is empty"));
+        };
+        let sessions = store
+            .sessions_between(*first, *last)?
+            .into_iter()
+            .filter(|s| s.is_live() && !s.is_running() && scope.covers(s.project_id.as_deref()))
+            .collect();
+        let days = days
+            .into_iter()
+            .map(|d| {
+                let mut snapshot = day::snapshot(store, config, d, today)?;
+                snapshot
+                    .plan
+                    .retain(|line| scope.covers(line.project_id.as_deref()));
+                Ok((d, snapshot))
+            })
+            .collect::<Result<_, Error>>()?;
+        Ok(Self {
+            days,
+            sessions,
+            metrics: store
+                .metrics()?
+                .into_iter()
+                .filter(|m| m.deleted_at.is_none())
+                .collect(),
+            projects: projects::list(store, None)?,
+            tags: tags::list(store)?,
+        })
+    }
+
+    fn on(&self, day: NaiveDate) -> impl Iterator<Item = &Session> {
+        self.sessions.iter().filter(move |s| s.block.day == day)
+    }
+
+    fn day_stats(&self) -> Vec<DayStat> {
+        self.days
+            .iter()
+            .map(|(day, snapshot)| {
+                let sessions: Vec<Session> = self.on(*day).cloned().collect();
+                let fulfilment = Fulfilment::of(&snapshot.plan, &sessions);
+                DayStat {
+                    day: *day,
+                    minutes: total_minutes(&sessions),
+                    capacity_minutes: day_capacity(&snapshot.blocks),
+                    planned_minutes: fulfilment.planned_minutes,
+                    unplanned_minutes: fulfilment.unplanned_minutes,
+                    fulfilment_ratio: fulfilment.ratio(),
+                }
+            })
+            .collect()
+    }
+
+    /// Minutes first, then one series per metric.
+    fn series(&self) -> Vec<Series> {
+        let minutes = Series {
+            metric_id: MINUTES_SERIES.into(),
+            name: "Minutes".into(),
+            unit: "min".into(),
+            rollup: Rollup::Sum,
+            points: self
+                .days
+                .iter()
+                .map(|(day, _)| Point {
+                    day: *day,
+                    value: Some(total_minutes(self.on(*day)) as f64),
+                })
+                .collect(),
+        };
+        let metrics = self.metrics.iter().map(|metric| Series {
+            metric_id: metric.id.clone(),
+            name: metric.name.clone(),
+            unit: metric.unit.clone(),
+            rollup: metric.rollup,
+            points: self
+                .days
+                .iter()
+                .map(|(day, _)| Point {
+                    day: *day,
+                    value: rollup(metric.rollup, self.on(*day), &metric.id),
+                })
+                .collect(),
+        });
+        std::iter::once(minutes).chain(metrics).collect()
+    }
+
+    /// Projects with at least one session, each metric rolled up its own way.
+    fn project_stats(&self) -> Vec<ProjectStat> {
+        self.projects
+            .iter()
+            .filter_map(|view| {
+                let project = &view.project;
+                let mine: Vec<&Session> = self
+                    .sessions
+                    .iter()
+                    .filter(|s| s.project_id.as_deref() == Some(project.id.as_str()))
+                    .collect();
+                if mine.is_empty() {
+                    return None;
+                }
+                let recorded: BTreeSet<&str> = mine
+                    .iter()
+                    .flat_map(|s| s.values.iter().map(|v| v.metric_id.as_str()))
+                    .collect();
+                let metrics = self
+                    .metrics
+                    .iter()
+                    .filter(|m| recorded.contains(m.id.as_str()))
+                    .filter_map(|m| {
+                        Some((m.id.clone(), rollup(m.rollup, mine.iter().copied(), &m.id)?))
+                    })
+                    .collect();
+                Some(ProjectStat {
+                    id: project.id.clone(),
+                    name: project.name.clone(),
+                    color: project.color.clone(),
+                    minutes: total_minutes(mine.iter().copied()),
+                    sessions: mine.len() as i64,
+                    metrics,
+                })
+            })
+            .collect()
+    }
+
+    fn tag_stats(&self) -> Vec<TagStat> {
+        self.tags
+            .iter()
+            .map(|tag| {
+                let tagged: BTreeSet<&str> = self
+                    .projects
+                    .iter()
+                    .filter(|p| p.project.tag_ids.contains(&tag.id))
+                    .map(|p| p.project.id.as_str())
+                    .collect();
+                TagStat {
+                    id: tag.id.clone(),
+                    name: tag.name.clone(),
+                    color: tag.color.clone(),
+                    minutes: total_minutes(
+                        self.sessions.iter().filter(|s| {
+                            s.project_id.as_deref().is_some_and(|p| tagged.contains(p))
+                        }),
+                    ),
+                }
+            })
+            .collect()
+    }
+
+    fn block_stats(&self) -> Vec<BlockStat> {
+        BoundaryId::AWAKE
+            .into_iter()
+            .map(|block| {
+                let inside = || self.sessions.iter().filter(move |s| s.block.start == block);
+                BlockStat {
+                    block,
+                    minutes: total_minutes(inside()),
+                    capacity_minutes: self
+                        .days
+                        .iter()
+                        .flat_map(|(_, snapshot)| &snapshot.blocks)
+                        .filter(|b| b.block == block)
+                        .map(block_minutes)
+                        .sum(),
+                    avg_focus: rollup(Rollup::Avg, inside(), "focus"),
+                }
+            })
+            .collect()
+    }
+
+    fn totals(&self) -> Totals {
+        Totals {
+            minutes: total_minutes(&self.sessions),
+            sessions: self.sessions.len() as i64,
+            active_days: self
+                .days
+                .iter()
+                .filter(|(day, _)| total_minutes(self.on(*day)) > 0)
+                .count() as i64,
+            avg_focus: rollup(Rollup::Avg, self.sessions.iter(), "focus"),
+            avg_quality: rollup(Rollup::Avg, self.sessions.iter(), "quality"),
+        }
+    }
 }
 
 /// A metric's values over `sessions`, summed or minute-weighted; `None`
@@ -296,12 +374,6 @@ fn rollup<'a>(
                 / weight
         }
     })
-}
-
-fn capacity<'a>(blocks: impl Iterator<Item = &'a DayBlock>) -> i64 {
-    blocks
-        .map(|b| (b.ends_at - b.starts_at).num_minutes().max(0))
-        .sum()
 }
 
 /// The projects a filter keeps; `None` keeps everything.
@@ -336,20 +408,6 @@ impl Scope {
             None => true,
             Some(chosen) => project_id.is_some_and(|id| chosen.contains(id)),
         }
-    }
-
-    fn planned_minutes(&self, store: &Store, day: NaiveDate) -> Result<i64, Error> {
-        let mut planned = 0;
-        for line in day::plan(store, day)? {
-            if self.projects.is_some() {
-                let project = store.item(&line.item_id)?.and_then(|i| i.project_id);
-                if !self.covers(project.as_deref()) {
-                    continue;
-                }
-            }
-            planned += line.planned_minutes.unwrap_or(0);
-        }
-        Ok(planned)
     }
 }
 
@@ -412,7 +470,7 @@ mod tests {
             from: date(20),
             to: date(21),
         };
-        let all = stats(&store, &config(), range(), Filter::default()).unwrap();
+        let all = stats(&mut store, &config(), date(22), range(), Filter::default()).unwrap();
         assert_eq!(
             (
                 all.totals.minutes,
@@ -436,8 +494,9 @@ mod tests {
         assert_eq!(dhuhr.minutes, 40);
 
         let tagged = stats(
-            &store,
+            &mut store,
             &config(),
+            date(22),
             range(),
             Filter {
                 tag_id: Some(tag.id),
@@ -448,8 +507,9 @@ mod tests {
         assert_eq!((tagged.totals.minutes, tagged.projects.len()), (30, 1));
         assert!(
             stats(
-                &store,
+                &mut store,
                 &config(),
+                date(22),
                 Range {
                     from: date(21),
                     to: date(20)
@@ -457,6 +517,76 @@ mod tests {
                 Filter::default()
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn running_sessions_are_not_counted_and_the_ratio_is_capped_or_null() {
+        let mut store = Store::open_in_memory().unwrap();
+        let quran = project(&mut store, "Quran");
+        let read = store
+            .write(|tx| {
+                crate::items::add(
+                    tx,
+                    &config(),
+                    at(20, 6, 0),
+                    ids(),
+                    crate::items::NewItem {
+                        title: "Read".into(),
+                        project_id: Some(quran.id.clone()),
+                        planned_minutes: Some(10),
+                        ..Default::default()
+                    },
+                )
+            })
+            .unwrap();
+        store
+            .write(|tx| {
+                sessions::log(
+                    tx,
+                    &config(),
+                    at(20, 13, 0),
+                    ids(),
+                    NewLog {
+                        target: Target {
+                            item_id: Some(read.id.clone()),
+                            project_id: None,
+                        },
+                        minutes: Some(25),
+                        values: Values::from([("focus".into(), 4.0), ("quality".into(), 3.0)]),
+                        ..NewLog::default()
+                    },
+                )?;
+                sessions::start(
+                    tx,
+                    &config(),
+                    at(20, 14, 0),
+                    ids(),
+                    Target {
+                        item_id: None,
+                        project_id: Some(quran.id.clone()),
+                    },
+                )
+            })
+            .unwrap();
+        let range = Range {
+            from: date(20),
+            to: date(21),
+        };
+        let stats = stats(&mut store, &config(), date(21), range, Filter::default()).unwrap();
+        assert_eq!(stats.totals.sessions, 1, "the running timer is not counted");
+        assert_eq!(
+            stats.days[0].fulfilment_ratio,
+            Some(1.0),
+            "25 of 10 minutes caps at 1"
+        );
+        assert_eq!(
+            stats.days[1].fulfilment_ratio, None,
+            "nothing was planned on day 21"
+        );
+        assert!(
+            stats.days[0].capacity_minutes < 1440,
+            "the night is not capacity"
         );
     }
 }

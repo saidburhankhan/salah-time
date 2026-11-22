@@ -2,7 +2,7 @@
 
 use crate::config::Config;
 use crate::guard::{ensure_version, minutes, not_found, nullable};
-use crate::{Store, WriteTx, projects};
+use crate::{Store, WriteTx, day, projects};
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use salah_domain::{
     day::BoundaryId,
@@ -129,7 +129,14 @@ pub fn add(
     new: NewItem,
 ) -> Result<Item, Error> {
     let planning = schedule::resolve(config, now)?.planning_block();
+    day::freeze_past(tx, config, planning.day)?;
     let day = new.date.unwrap_or(planning.day);
+    if day < planning.day {
+        return Err(Error::validation(
+            "date",
+            "an item cannot start before today; past days are not re-planned",
+        ));
+    }
     let default_block = if day == planning.day {
         planning.start
     } else {
@@ -162,6 +169,7 @@ pub fn add(
 
 pub fn edit(
     tx: &WriteTx<'_>,
+    config: &Config,
     now: DateTime<Utc>,
     id: &str,
     changes: ItemChanges,
@@ -169,6 +177,7 @@ pub fn edit(
 ) -> Result<Item, Error> {
     let mut item = find(tx, id)?;
     ensure_version("item", id, item.version, expected_version)?;
+    day::freeze_past(tx, config, day::current(config, now)?)?;
     if let Some(title) = &changes.title {
         item.title = validate_title(title)?;
     }
@@ -203,6 +212,7 @@ pub fn edit(
 /// Returns every item whose block or position changed, the moved one first.
 pub fn move_to(
     tx: &WriteTx<'_>,
+    config: &Config,
     now: DateTime<Utc>,
     id: &str,
     block: BoundaryId,
@@ -212,6 +222,7 @@ pub fn move_to(
     let block = validate_block(block)?;
     let mut moved = find(tx, id)?;
     ensure_version("item", id, moved.version, expected_version)?;
+    day::freeze_past(tx, config, day::current(config, now)?)?;
     let mut siblings: Vec<Item> = list(tx)?
         .into_iter()
         .filter(|i| i.block == block && i.id != moved.id)
@@ -240,12 +251,14 @@ pub fn move_to(
 
 pub fn remove(
     tx: &WriteTx<'_>,
+    config: &Config,
     now: DateTime<Utc>,
     id: &str,
     expected_version: Option<i64>,
 ) -> Result<Item, Error> {
     let mut item = find(tx, id)?;
     ensure_version("item", id, item.version, expected_version)?;
+    day::freeze_past(tx, config, day::current(config, now)?)?;
     item.deleted_at = Some(now);
     item.updated_at = now;
     item.version = tx.put_item(&item)?;
@@ -368,11 +381,29 @@ mod tests {
         )
         .unwrap();
         let edited = store
-            .write(|tx| edit(tx, at(20, 14, 0), &item.id, changes.clone(), Some(1)))
+            .write(|tx| {
+                edit(
+                    tx,
+                    &config(),
+                    at(20, 14, 0),
+                    &item.id,
+                    changes.clone(),
+                    Some(1),
+                )
+            })
             .unwrap();
         assert_eq!(edited.project_id.as_deref(), Some(project.id.as_str()));
         assert_eq!((edited.planned_minutes, edited.version), (None, 2));
-        let stale = store.write(|tx| edit(tx, at(20, 14, 0), &item.id, changes.clone(), Some(1)));
+        let stale = store.write(|tx| {
+            edit(
+                tx,
+                &config(),
+                at(20, 14, 0),
+                &item.id,
+                changes.clone(),
+                Some(1),
+            )
+        });
         assert_eq!(stale.unwrap_err().code(), "conflict");
     }
 
@@ -388,6 +419,7 @@ mod tests {
             .write(|tx| {
                 move_to(
                     tx,
+                    &config(),
                     at(20, 13, 5),
                     &c.id,
                     BoundaryId::Dhuhr,
@@ -428,5 +460,23 @@ mod tests {
         assert_eq!(preview.schedule_text, "Mon");
         assert!(super::preview(BoundaryId::Sleep, Repeat::None, None, None, date(20)).is_err());
         assert!(super::preview(BoundaryId::Fajr, Repeat::None, None, Some(0), date(20)).is_err());
+    }
+
+    #[test]
+    fn an_item_cannot_start_before_today() {
+        let mut store = Store::open_in_memory().unwrap();
+        let back_dated = store.write(|tx| {
+            add(
+                tx,
+                &config(),
+                at(20, 13, 0),
+                ids(),
+                NewItem {
+                    date: Some(date(19)),
+                    ..titled("Yesterday")
+                },
+            )
+        });
+        assert_eq!(back_dated.unwrap_err().code(), "validation");
     }
 }

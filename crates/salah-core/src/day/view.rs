@@ -1,139 +1,21 @@
-//! A day's plan: its prayer blocks, the items planned in them, the sessions
-//! recorded, and how much of the plan was fulfilled.
-//!
-//! The block times and plan lines of a day are snapshotted the first time the
-//! day is read or written. Today's and future plans follow item edits; a past
-//! day keeps its snapshot.
+//! The day timeline and the widget's view of the day in progress.
 
+use super::fulfilment::has_finished;
+use super::{Fulfilment, Snapshot, block_minutes, freeze, snapshot, total_minutes};
+use crate::Store;
 use crate::config::Config;
 use crate::marks::live_marks;
 use crate::sessions::SessionView;
 use crate::status::format_minutes;
-use crate::{Store, WriteTx, items};
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use salah_domain::{
     day::{BlockKey, BoundaryId},
     error::Error,
-    item::Repeat,
-    tracking::{DayBlock, DayBlockSource, DayPlanLine, Item, Project, Session},
+    item::{Repeat, Weekdays},
+    tracking::{DayBlock, DayPlanLine, Item, Project, Session},
 };
 use salah_prayer::schedule;
 use serde::Serialize;
-
-/// The day in progress at `now`; after sleep it is already the coming day.
-pub fn current(config: &Config, now: DateTime<Utc>) -> Result<NaiveDate, Error> {
-    Ok(schedule::resolve(config, now)?.day())
-}
-
-/// Writes the block and plan snapshots of `day` when they are missing, and
-/// refreshes the plan of `today` and later days from the current items.
-pub fn materialize(
-    tx: &WriteTx<'_>,
-    config: &Config,
-    day: NaiveDate,
-    today: NaiveDate,
-) -> Result<(), Error> {
-    if tx.day_blocks(day)?.is_empty() {
-        tx.replace_day_blocks(day, &scheduled_blocks(config, day)?)?;
-    }
-    let stored = tx.day_plan(day)?;
-    if stored.is_empty() || day >= today {
-        let planned = planned_lines(tx, day)?;
-        if planned != stored {
-            tx.replace_day_plan(day, &planned)?;
-        }
-    }
-    Ok(())
-}
-
-/// The day's block snapshot, or the schedule's blocks when it has none.
-pub fn blocks(store: &Store, config: &Config, day: NaiveDate) -> Result<Vec<DayBlock>, Error> {
-    let stored = store.day_blocks(day)?;
-    if stored.is_empty() {
-        scheduled_blocks(config, day)
-    } else {
-        Ok(stored)
-    }
-}
-
-/// The day's plan snapshot, or the current items' plan when it has none.
-pub fn plan(store: &Store, day: NaiveDate) -> Result<Vec<DayPlanLine>, Error> {
-    let stored = store.day_plan(day)?;
-    if stored.is_empty() {
-        planned_lines(store, day)
-    } else {
-        Ok(stored)
-    }
-}
-
-fn scheduled_blocks(config: &Config, day: NaiveDate) -> Result<Vec<DayBlock>, Error> {
-    let (_, source) = schedule::prayers_for(config, day)?;
-    let source = if source.id == "official" {
-        DayBlockSource::Official
-    } else {
-        DayBlockSource::Calculated
-    };
-    Ok(schedule::day_blocks(config, day)?
-        .into_iter()
-        .map(|window| DayBlock {
-            day,
-            block: window.key.start,
-            starts_at: window.start,
-            ends_at: window.end,
-            source,
-        })
-        .collect())
-}
-
-fn planned_lines(store: &Store, day: NaiveDate) -> Result<Vec<DayPlanLine>, Error> {
-    let mut lines: Vec<DayPlanLine> = items::list(store)?
-        .into_iter()
-        .filter(|item| item.applies_to(day))
-        .map(|item| DayPlanLine {
-            day,
-            block: item.block,
-            item_id: item.id,
-            planned_minutes: item.planned_minutes,
-        })
-        .collect();
-    lines.sort_by(|a, b| (a.block, &a.item_id).cmp(&(b.block, &b.item_id)));
-    Ok(lines)
-}
-
-/// How much of a day's plan was done.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
-pub struct Fulfilment {
-    pub planned_items: i64,
-    pub done_items: i64,
-    pub planned_minutes: i64,
-    pub actual_minutes: i64,
-}
-
-impl Fulfilment {
-    /// A plan line is done once a session of its item finished that day.
-    pub fn of(plan: &[DayPlanLine], sessions: &[Session]) -> Self {
-        Self {
-            planned_items: plan.len() as i64,
-            done_items: plan
-                .iter()
-                .filter(|line| has_session(sessions, &line.item_id))
-                .count() as i64,
-            planned_minutes: plan.iter().filter_map(|line| line.planned_minutes).sum(),
-            actual_minutes: total_minutes(sessions.iter()),
-        }
-    }
-}
-
-/// Logged minutes; running sessions and ticks contribute nothing.
-pub fn total_minutes<'a>(sessions: impl Iterator<Item = &'a Session>) -> i64 {
-    sessions.filter_map(|s| s.minutes).sum()
-}
-
-fn has_session(sessions: &[Session], item_id: &str) -> bool {
-    sessions
-        .iter()
-        .any(|s| !s.is_running() && s.item_id.as_deref() == Some(item_id))
-}
 
 /// The colour-coded project a row belongs to.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -160,11 +42,11 @@ pub struct DayRow {
     pub title: String,
     pub block: BoundaryId,
     pub repeat: Repeat,
-    pub weekdays: Option<salah_domain::item::Weekdays>,
+    pub weekdays: Option<Weekdays>,
     pub position: i64,
     pub version: i64,
     pub project: Option<ProjectRef>,
-    /// Minutes planned for this day (the snapshot of a past day).
+    /// The project and minutes as planned that day (the snapshot of a past day).
     pub planned_minutes: Option<i64>,
     pub actual_minutes: i64,
     pub sessions: Vec<SessionView>,
@@ -183,8 +65,10 @@ pub struct BlockPlan {
     pub end: BoundaryId,
     pub capacity_minutes: i64,
     pub planned_minutes: i64,
-    /// Minutes of every session recorded in the block, project-only ones too.
+    /// Minutes of the block's sessions of planned items.
     pub actual_minutes: i64,
+    /// Minutes of the block's other sessions: unplanned items, bare projects.
+    pub unplanned_minutes: i64,
     pub items: Vec<DayRow>,
 }
 
@@ -270,13 +154,12 @@ pub fn day_plan(
     let ledger = Ledger::load(store, config, day, today)?;
 
     let (prayer_times, _) = schedule::prayers_for(config, day)?;
-    let time_of = |id: &str| {
-        prayer_times
-            .iter()
-            .find(|p| p.id == id)
-            .map(|p| format_minutes(p.minutes))
-    };
+    let sunrise = prayer_times
+        .iter()
+        .find(|p| p.id == "sunrise")
+        .map(|p| format_minutes(p.minutes));
     let marks = live_marks(store, day)?;
+    let clock = |at: DateTime<Utc>| local_clock(config, at);
     let prayers = ledger
         .blocks
         .iter()
@@ -284,12 +167,13 @@ pub fn day_plan(
         .map(|block| PrayerRow {
             id: block.block,
             name: block.block.name(),
-            time: time_of(block.block.as_str()).unwrap_or_default(),
+            time: clock(block.starts_at),
             passed: day < today || (is_today && block.starts_at <= now),
             current: current == Some(block.block),
             marked: marks.contains(&block.block),
         })
         .collect();
+    let night_start = ledger.blocks.first().map(|block| block.starts_at);
     let sleep_at = ledger.blocks.last().map(|block| block.ends_at);
     let blocks: Vec<BlockPlan> = BoundaryId::AWAKE
         .into_iter()
@@ -320,10 +204,10 @@ pub fn day_plan(
             })
             .transpose()?,
         prayers,
-        sunrise: time_of("sunrise"),
-        night_start: config.sleep_time.clone(),
+        sunrise,
+        night_start: night_start.map(clock).unwrap_or_default(),
         sleep: SleepRow {
-            time: config.sleep_time.clone(),
+            time: sleep_at.map(clock).unwrap_or_default(),
             passed: day < today || (is_today && sleep_at.is_some_and(|at| at <= now)),
         },
         blocks,
@@ -376,11 +260,14 @@ impl Ledger {
         day: NaiveDate,
         today: NaiveDate,
     ) -> Result<Self, Error> {
-        store.write(|tx| materialize(tx, config, day, today))?;
+        if day < today {
+            store.write(|tx| freeze(tx, config, day, today))?;
+        }
+        let Snapshot { blocks, plan } = snapshot(store, config, day, today)?;
         Ok(Self {
             day,
-            blocks: store.day_blocks(day)?,
-            plan: store.day_plan(day)?,
+            blocks,
+            plan,
             items: store.items()?,
             projects: store.projects()?,
             sessions: store
@@ -397,6 +284,13 @@ impl Ledger {
 
     fn block_plan(&self, start: BoundaryId) -> BlockPlan {
         let items = self.rows(start);
+        let inside: Vec<Session> = self
+            .sessions
+            .iter()
+            .filter(|s| s.block.start == start)
+            .cloned()
+            .collect();
+        let fulfilment = Fulfilment::of(&self.plan, &inside);
         BlockPlan {
             start,
             end: start.next().unwrap_or(BoundaryId::Sleep),
@@ -404,10 +298,11 @@ impl Ledger {
                 .blocks
                 .iter()
                 .filter(|block| block.block == start)
-                .map(|block| (block.ends_at - block.starts_at).num_minutes().max(0))
+                .map(block_minutes)
                 .sum(),
             planned_minutes: items.iter().filter_map(|row| row.planned_minutes).sum(),
-            actual_minutes: total_minutes(self.sessions.iter().filter(|s| s.block.start == start)),
+            actual_minutes: fulfilment.actual_minutes,
+            unplanned_minutes: fulfilment.unplanned_minutes,
             items,
         }
     }
@@ -448,14 +343,14 @@ impl Ledger {
             weekdays: item.weekdays,
             position: item.position,
             version: item.version,
-            project: item
+            project: line
                 .project_id
                 .as_ref()
                 .and_then(|id| self.projects.iter().find(|p| p.id == *id))
                 .map(ProjectRef::from),
             planned_minutes: line.planned_minutes,
             actual_minutes,
-            done: has_session(&self.sessions, &item.id),
+            done: has_finished(&self.sessions, &item.id),
             sessions: sessions.into_iter().map(SessionView::from).collect(),
             next_occurrence: item.next_occurrence(self.day),
             schedule_text,
@@ -464,10 +359,17 @@ impl Ledger {
     }
 }
 
+/// `HH:MM` of an instant in the configured zone.
+fn local_clock(config: &Config, at: DateTime<Utc>) -> String {
+    let offset = FixedOffset::east_opt((config.timezone_offset * 3600.0).round() as i32)
+        .unwrap_or(FixedOffset::east_opt(0).expect("zero offset"));
+    at.with_timezone(&offset).format("%H:%M").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::items::{ItemChanges, NewItem};
+    use crate::items::{self, ItemChanges, NewItem};
     use crate::sessions::{self, NewLog, Target, Values};
     use crate::test_support::{at, config, date, ids, project};
 
@@ -553,6 +455,7 @@ mod tests {
                 done_items: 1,
                 planned_minutes: 30,
                 actual_minutes: 20,
+                unplanned_minutes: 0,
             }
         );
         let widget = today(&mut store, &config(), at(20, 13, 0)).unwrap();
@@ -570,12 +473,133 @@ mod tests {
             ..ItemChanges::default()
         };
         store
-            .write(|tx| items::edit(tx, at(21, 9, 0), &read.id, changes.clone(), None))
+            .write(|tx| items::edit(tx, &config(), at(21, 9, 0), &read.id, changes.clone(), None))
             .unwrap();
         let past = day_plan(&mut store, &config(), at(21, 9, 0), Some(date(20))).unwrap();
         let today = day_plan(&mut store, &config(), at(21, 9, 0), None).unwrap();
         assert_eq!(past.blocks[1].items[0].planned_minutes, Some(30));
         assert_eq!(today.blocks[1].items[0].planned_minutes, Some(45));
         assert!(past.now.is_none() && past.sleep.passed);
+    }
+
+    fn project_log(store: &mut Store, project_id: &str, minutes: i64, when: DateTime<Utc>) {
+        store
+            .write(|tx| {
+                sessions::log(
+                    tx,
+                    &config(),
+                    when,
+                    ids(),
+                    NewLog {
+                        target: Target {
+                            item_id: None,
+                            project_id: Some(project_id.into()),
+                        },
+                        minutes: Some(minutes),
+                        values: Values::from([("focus".into(), 4.0), ("quality".into(), 4.0)]),
+                        ..NewLog::default()
+                    },
+                )
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn sessions_outside_the_plan_are_unplanned_minutes() {
+        let mut store = Store::open_in_memory().unwrap();
+        let quran = project(&mut store, "Quran");
+        let read = add(
+            &mut store,
+            "Read",
+            BoundaryId::Fajr,
+            Some(30),
+            Some(&quran.id),
+        );
+        log(&mut store, &read, 20, at(20, 6, 30));
+        project_log(&mut store, &quran.id, 10, at(20, 6, 40));
+        let plan = day_plan(&mut store, &config(), at(20, 13, 0), None).unwrap();
+        assert_eq!(
+            (
+                plan.fulfilment.actual_minutes,
+                plan.fulfilment.unplanned_minutes
+            ),
+            (20, 10)
+        );
+        let fajr = &plan.blocks[1];
+        assert_eq!((fajr.actual_minutes, fajr.unplanned_minutes), (20, 10));
+        assert_eq!(plan.fulfilment.ratio(), Some(20.0 / 30.0));
+    }
+
+    #[test]
+    fn a_past_day_is_built_once_from_the_items_that_existed_then() {
+        let mut store = Store::open_in_memory().unwrap();
+        add(&mut store, "Read", BoundaryId::Fajr, Some(30), None);
+        // Nothing read day 20; an item added on day 22 never existed on day 20,
+        // and the empty plan written for day 21 is not rebuilt later.
+        let later = store
+            .write(|tx| {
+                items::add(
+                    tx,
+                    &config(),
+                    at(22, 9, 0),
+                    ids(),
+                    NewItem {
+                        title: "Later".into(),
+                        repeat: Some(Repeat::Daily),
+                        date: Some(date(22)),
+                        ..NewItem::default()
+                    },
+                )
+            })
+            .unwrap();
+        assert!(store.day_written(date(20)).unwrap() && store.day_written(date(21)).unwrap());
+        assert!(
+            !store.day_written(date(22)).unwrap(),
+            "today is never stored"
+        );
+        let past = day_plan(&mut store, &config(), at(22, 9, 0), Some(date(20))).unwrap();
+        let rows: Vec<_> = past.blocks.iter().flat_map(|b| &b.items).collect();
+        assert_eq!(rows.len(), 1);
+        assert!(rows.iter().all(|row| row.id != later.id));
+    }
+
+    #[test]
+    fn an_empty_written_plan_stays_empty() {
+        let mut store = Store::open_in_memory().unwrap();
+        day_plan(&mut store, &config(), at(21, 9, 0), Some(date(20))).unwrap();
+        assert!(store.day_written(date(20)).unwrap());
+        add(&mut store, "Read", BoundaryId::Fajr, Some(30), None);
+        let past = day_plan(&mut store, &config(), at(21, 9, 0), Some(date(20))).unwrap();
+        assert_eq!(past.fulfilment.planned_items, 0);
+    }
+
+    #[test]
+    fn past_prayer_times_come_from_the_stored_blocks_and_today_is_live() {
+        let mut store = Store::open_in_memory().unwrap();
+        let past = day_plan(&mut store, &config(), at(21, 9, 0), Some(date(20))).unwrap();
+        let moved = Config {
+            sleep_time: "22:00".into(),
+            latitude: 39.65,
+            longitude: 66.96,
+            ..config()
+        };
+        let again = day_plan(&mut store, &moved, at(21, 9, 0), Some(date(20))).unwrap();
+        assert_eq!(again.sleep.time, past.sleep.time);
+        assert_eq!(again.prayers[0].time, past.prayers[0].time);
+        let today = day_plan(&mut store, &moved, at(21, 9, 0), None).unwrap();
+        assert_eq!(today.sleep.time, "22:00");
+        assert_ne!(today.prayers[0].time, past.prayers[0].time);
+    }
+
+    #[test]
+    fn day_capacity_leaves_out_the_night() {
+        let mut store = Store::open_in_memory().unwrap();
+        let plan = day_plan(&mut store, &config(), at(20, 13, 0), None).unwrap();
+        let awake: i64 = plan.blocks[1..].iter().map(|b| b.capacity_minutes).sum();
+        let blocks = super::super::snapshot(&store, &config(), date(20), date(20))
+            .unwrap()
+            .blocks;
+        assert_eq!(super::super::day_capacity(&blocks), awake);
+        assert!(awake < 1440);
     }
 }

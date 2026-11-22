@@ -142,6 +142,8 @@ pub struct DayPlanLine {
     pub day: NaiveDate,
     pub block: BoundaryId,
     pub item_id: String,
+    /// The item's project when the line was planned.
+    pub project_id: Option<String>,
     pub planned_minutes: Option<i64>,
 }
 
@@ -177,18 +179,22 @@ impl Item {
     }
 
     pub fn applies_to(&self, day: NaiveDate) -> bool {
+        self.is_live() && self.recurs_on(day)
+    }
+
+    /// Whether the repeat rule falls on `day`, whatever the item's liveness.
+    pub fn recurs_on(&self, day: NaiveDate) -> bool {
         use chrono::Datelike;
-        self.is_live()
-            && match self.repeat {
-                Repeat::None => self.day == day,
-                Repeat::Daily => self.day <= day,
-                Repeat::Weekly => {
-                    self.day <= day
-                        && self
-                            .weekdays
-                            .is_some_and(|days| days.contains(day.weekday()))
-                }
+        match self.repeat {
+            Repeat::None => self.day == day,
+            Repeat::Daily => self.day <= day,
+            Repeat::Weekly => {
+                self.day <= day
+                    && self
+                        .weekdays
+                        .is_some_and(|days| days.contains(day.weekday()))
             }
+        }
     }
 
     /// First date on or after `from` (and the item's first day) on which it applies.

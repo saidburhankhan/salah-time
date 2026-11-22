@@ -172,6 +172,29 @@ impl Store {
         )
     }
 
+    /// Whether the snapshot of `day` was written.
+    pub fn day_written(&self, day: NaiveDate) -> Result<bool, Error> {
+        Ok(self
+            .one(
+                "SELECT 1 FROM days_written WHERE day = ?1",
+                [codec::day(day)],
+                |_| Ok(()),
+            )?
+            .is_some())
+    }
+
+    /// The latest day whose snapshot was written.
+    pub fn last_written_day(&self) -> Result<Option<NaiveDate>, Error> {
+        let day: Option<String> = self
+            .one("SELECT MAX(day) FROM days_written", [], |row| row.get(0))?
+            .flatten();
+        day.map(|day| {
+            NaiveDate::parse_from_str(&day, "%Y-%m-%d")
+                .map_err(|e| Error::Storage(format!("store: {e}")))
+        })
+        .transpose()
+    }
+
     pub fn mark(&self, id: &str) -> Result<Option<PrayerMark>, Error> {
         self.one(
             "SELECT * FROM prayer_marks WHERE id = ?1",

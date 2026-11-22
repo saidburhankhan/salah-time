@@ -160,7 +160,8 @@
         "actual_minutes": 0,
         "done_items": 0,
         "planned_items": 2,
-        "planned_minutes": 45
+        "planned_minutes": 45,
+        "unplanned_minutes": 0
       },
       "items": [
         {

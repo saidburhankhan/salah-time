@@ -54,6 +54,7 @@ pub struct Change {
 /// The stored result of a client op id.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppliedOp {
+    pub method: String,
     pub revision: i64,
     pub result_json: String,
     pub at: DateTime<Utc>,
@@ -194,17 +195,20 @@ fn user_version(conn: &Connection) -> Result<i64, Error> {
         .map_err(storage_error)
 }
 
-/// A versioned database without the tracking `metrics` table.
+/// A versioned database from before this schema: the planner schema, or an
+/// unreleased tracking draft without the `days_written` table.
 fn is_old_schema(path: &Path) -> Result<bool, Error> {
     let conn = Connection::open(path).map_err(storage_error)?;
-    let has_metrics: bool = conn
+    let current: bool = conn
         .query_row(
-            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'metrics')",
+            "SELECT EXISTS (
+                 SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'days_written'
+             )",
             [],
             |row| row.get(0),
         )
         .map_err(storage_error)?;
-    Ok(user_version(&conn)? > 0 && !has_metrics)
+    Ok(user_version(&conn)? > 0 && !current)
 }
 
 fn set_aside(path: &Path) -> Result<(), Error> {
@@ -348,7 +352,7 @@ mod tests {
             x.set_op_id(Some("op-1"));
             x.put_project(&p())?;
             x.put_session(&session)?;
-            x.record_applied_op("op-1", "{}")
+            x.record_applied_op("op-1", "item.add", "{}")
         })
         .unwrap();
         assert_eq!(s.revision().unwrap(), 1);

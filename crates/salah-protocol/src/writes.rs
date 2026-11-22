@@ -2,7 +2,7 @@
 //! complete result under the client's `op_id`, so a retry returns the same
 //! bytes and writes nothing.
 
-use crate::dispatcher::{Context, parse, to_value};
+use crate::dispatcher::{Call, Context, parse, to_value};
 use crate::error::RpcError;
 use crate::methods::*;
 use chrono::NaiveDate;
@@ -12,32 +12,55 @@ use salah_core::sessions::SessionView;
 use salah_core::{Store, WriteTx, day, items, marks, metrics, projects, quick, sessions, tags};
 use salah_domain::error::Error;
 use salah_domain::tracking::{Item, Project, Session};
+use serde::Serialize;
 use serde_json::Value;
 
-/// Runs `work` once per `op_id`: a replay returns the stored result before
-/// any validation or write.
-fn mutate(
+/// Runs `work` once per `op_id` and stores its result under the op id and
+/// `method`. A replay returns the stored result before any validation or
+/// write; reusing an op id for another method is a validation error.
+fn replayable<T: Serialize>(
     store: &mut Store,
+    method: &str,
     op_id: &str,
-    mut work: impl FnMut(&WriteTx<'_>) -> Result<Changed, Error>,
+    mut work: impl FnMut(&WriteTx<'_>) -> Result<T, Error>,
 ) -> Result<Value, RpcError> {
+    if op_id.trim().is_empty() {
+        return Err(Error::validation("op_id", "op_id must not be empty").into());
+    }
     let result = store.write(|tx| {
         tx.set_op_id(Some(op_id));
         if let Some(applied) = tx.applied_op(op_id)? {
+            if applied.method != method {
+                return Err(Error::validation(
+                    "op_id",
+                    format!("op_id {op_id:?} was already used for {}", applied.method),
+                ));
+            }
             return serde_json::from_str(&applied.result_json)
                 .map_err(|error| Error::Storage(format!("invalid applied op result: {error}")));
         }
-        let changed = work(tx)?;
-        let result = serde_json::to_value(MutationResult {
-            revision: tx.revision()?,
-            op_id: op_id.to_owned(),
-            changed,
-        })
-        .map_err(|error| Error::Internal(format!("serialize result: {error}")))?;
-        tx.record_applied_op(op_id, &result.to_string())?;
+        let result = serde_json::to_value(work(tx)?)
+            .map_err(|error| Error::Internal(format!("serialize result: {error}")))?;
+        tx.record_applied_op(op_id, method, &result.to_string())?;
         Ok(result)
     })?;
     Ok(result)
+}
+
+/// A replayable mutation whose result is `{revision, op_id, changed}`.
+fn mutate(
+    store: &mut Store,
+    method: &str,
+    op_id: &str,
+    mut work: impl FnMut(&WriteTx<'_>) -> Result<Changed, Error>,
+) -> Result<Value, RpcError> {
+    replayable(store, method, op_id, |tx| {
+        Ok(MutationResult {
+            changed: work(tx)?,
+            revision: tx.revision()?,
+            op_id: op_id.to_owned(),
+        })
+    })
 }
 
 fn item_views(today: NaiveDate, rows: Vec<Item>) -> Changed {
@@ -71,12 +94,12 @@ fn removed(id: String) -> Changed {
     }
 }
 
-pub(crate) fn item_add(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: ItemAddParams = parse(params)?;
+pub(crate) fn item_add(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: ItemAddParams = parse(call.params)?;
     let config = ctx.config.load()?;
     let (now, ids) = (ctx.now(), ctx.ids);
     let today = day::current(&config, now)?;
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         let mut new = match (&p.quick_text, &p.title) {
             (Some(text), _) => quick::parse(text)?.into_new_item(),
             (None, Some(title)) => NewItem {
@@ -104,18 +127,26 @@ pub(crate) fn item_add(params: &Value, ctx: &mut Context<'_>) -> Result<Value, R
     })
 }
 
-pub(crate) fn item_edit(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: ItemEditParams = parse(params)?;
+pub(crate) fn item_edit(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: ItemEditParams = parse(call.params)?;
+    let config = ctx.config.load()?;
     let now = ctx.now();
-    let today = day::current(&ctx.config.load()?, now)?;
-    mutate(ctx.store, &p.op_id, |tx| {
-        let item = items::edit(tx, now, &p.id, p.changes.clone(), p.expected_version)?;
+    let today = day::current(&config, now)?;
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
+        let item = items::edit(
+            tx,
+            &config,
+            now,
+            &p.id,
+            p.changes.clone(),
+            p.expected_version,
+        )?;
         Ok(item_views(today, vec![item]))
     })
 }
 
-pub(crate) fn item_move(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: ItemMoveParams = parse(params)?;
+pub(crate) fn item_move(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: ItemMoveParams = parse(call.params)?;
     let position = match (&p.index, &p.after_id, &p.before_id) {
         (None, None, None) => MovePosition::Index(0),
         (Some(index), None, None) => MovePosition::Index(*index),
@@ -129,11 +160,13 @@ pub(crate) fn item_move(params: &Value, ctx: &mut Context<'_>) -> Result<Value, 
             .into());
         }
     };
+    let config = ctx.config.load()?;
     let now = ctx.now();
-    let today = day::current(&ctx.config.load()?, now)?;
-    mutate(ctx.store, &p.op_id, |tx| {
+    let today = day::current(&config, now)?;
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         let moved = items::move_to(
             tx,
+            &config,
             now,
             &p.id,
             p.block,
@@ -144,38 +177,39 @@ pub(crate) fn item_move(params: &Value, ctx: &mut Context<'_>) -> Result<Value, 
     })
 }
 
-pub(crate) fn item_remove(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: RemoveParams = parse(params)?;
+pub(crate) fn item_remove(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: RemoveParams = parse(call.params)?;
+    let config = ctx.config.load()?;
     let now = ctx.now();
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         Ok(removed(
-            items::remove(tx, now, &p.id, p.expected_version)?.id,
+            items::remove(tx, &config, now, &p.id, p.expected_version)?.id,
         ))
     })
 }
 
-pub(crate) fn project_add(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: ProjectAddParams = parse(params)?;
+pub(crate) fn project_add(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: ProjectAddParams = parse(call.params)?;
     let (now, ids) = (ctx.now(), ctx.ids);
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         let project = projects::add(tx, now, ids, p.project.clone())?;
         project_view(tx, project)
     })
 }
 
-pub(crate) fn project_edit(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: ProjectEditParams = parse(params)?;
+pub(crate) fn project_edit(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: ProjectEditParams = parse(call.params)?;
     let now = ctx.now();
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         let project = projects::edit(tx, now, &p.id, p.changes.clone(), p.expected_version)?;
         project_view(tx, project)
     })
 }
 
-pub(crate) fn tag_add(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: TagAddParams = parse(params)?;
+pub(crate) fn tag_add(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: TagAddParams = parse(call.params)?;
     let (now, ids) = (ctx.now(), ctx.ids);
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         Ok(Changed {
             tags: vec![tags::add(tx, now, ids, &p.name, &p.color)?],
             ..Changed::default()
@@ -183,10 +217,10 @@ pub(crate) fn tag_add(params: &Value, ctx: &mut Context<'_>) -> Result<Value, Rp
     })
 }
 
-pub(crate) fn tag_edit(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: TagEditParams = parse(params)?;
+pub(crate) fn tag_edit(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: TagEditParams = parse(call.params)?;
     let now = ctx.now();
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         let tag = tags::edit(
             tx,
             now,
@@ -203,10 +237,10 @@ pub(crate) fn tag_edit(params: &Value, ctx: &mut Context<'_>) -> Result<Value, R
 }
 
 /// Removing a tag also detaches it from its projects, which are returned.
-pub(crate) fn tag_remove(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: RemoveParams = parse(params)?;
+pub(crate) fn tag_remove(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: RemoveParams = parse(call.params)?;
     let now = ctx.now();
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         let tagged: Vec<String> = tx
             .projects()?
             .into_iter()
@@ -225,10 +259,10 @@ pub(crate) fn tag_remove(params: &Value, ctx: &mut Context<'_>) -> Result<Value,
     })
 }
 
-pub(crate) fn metric_add(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: MetricAddParams = parse(params)?;
+pub(crate) fn metric_add(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: MetricAddParams = parse(call.params)?;
     let (now, ids) = (ctx.now(), ctx.ids);
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         Ok(Changed {
             metrics: vec![metrics::add(tx, now, ids, p.metric.clone())?],
             ..Changed::default()
@@ -236,10 +270,10 @@ pub(crate) fn metric_add(params: &Value, ctx: &mut Context<'_>) -> Result<Value,
     })
 }
 
-pub(crate) fn metric_edit(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: MetricEditParams = parse(params)?;
+pub(crate) fn metric_edit(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: MetricEditParams = parse(call.params)?;
     let now = ctx.now();
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         let metric = metrics::edit(tx, now, &p.id, p.changes.clone(), p.expected_version)?;
         Ok(Changed {
             metrics: vec![metric],
@@ -248,67 +282,69 @@ pub(crate) fn metric_edit(params: &Value, ctx: &mut Context<'_>) -> Result<Value
     })
 }
 
-pub(crate) fn session_start(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: SessionStartParams = parse(params)?;
+pub(crate) fn session_start(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: SessionStartParams = parse(call.params)?;
     let config = ctx.config.load()?;
     let (now, ids) = (ctx.now(), ctx.ids);
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         let session = sessions::start(tx, &config, now, ids, p.target.clone())?;
         Ok(session_view(&session))
     })
 }
 
-pub(crate) fn session_stop(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: SessionStopParams = parse(params)?;
+pub(crate) fn session_stop(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: SessionStopParams = parse(call.params)?;
+    let config = ctx.config.load()?;
     let now = ctx.now();
-    mutate(ctx.store, &p.op_id, |tx| {
-        let session = sessions::stop(tx, now, p.id.as_deref(), p.values.clone(), p.note.clone())?;
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
+        let session = sessions::stop(
+            tx,
+            &config,
+            now,
+            p.id.as_deref(),
+            p.values.clone(),
+            p.note.clone(),
+        )?;
         Ok(session_view(&session))
     })
 }
 
-pub(crate) fn session_log(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: SessionLogParams = parse(params)?;
+pub(crate) fn session_log(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: SessionLogParams = parse(call.params)?;
     let config = ctx.config.load()?;
     let (now, ids) = (ctx.now(), ctx.ids);
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         let session = sessions::log(tx, &config, now, ids, p.log.clone())?;
         Ok(session_view(&session))
     })
 }
 
-pub(crate) fn session_edit(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: SessionEditParams = parse(params)?;
+pub(crate) fn session_edit(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: SessionEditParams = parse(call.params)?;
     let now = ctx.now();
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         let session = sessions::edit(tx, now, &p.id, p.changes.clone(), p.expected_version)?;
         Ok(session_view(&session))
     })
 }
 
-pub(crate) fn session_remove(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: RemoveParams = parse(params)?;
+pub(crate) fn session_remove(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: RemoveParams = parse(call.params)?;
     let now = ctx.now();
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         Ok(removed(
             sessions::remove(tx, now, &p.id, p.expected_version)?.id,
         ))
     })
 }
 
-pub(crate) fn prayer_mark(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    prayer(params, ctx, true)
-}
-
-pub(crate) fn prayer_unmark(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    prayer(params, ctx, false)
-}
-
-fn prayer(params: &Value, ctx: &mut Context<'_>, prayed: bool) -> Result<Value, RpcError> {
-    let p: PrayerParams = parse(params)?;
+/// `prayer.mark` and `prayer.unmark`.
+pub(crate) fn prayer(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: PrayerParams = parse(call.params)?;
+    let prayed = call.method == "prayer.mark";
     let config = ctx.config.load()?;
     let now = ctx.now();
-    mutate(ctx.store, &p.op_id, |tx| {
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
         let mark = marks::set(
             tx,
             &config,
@@ -329,31 +365,24 @@ fn prayer(params: &Value, ctx: &mut Context<'_>, prayed: bool) -> Result<Value, 
 /// first (by atomic rename) and the op is then recorded in the store. A replay
 /// returns the recorded `Config` without touching the file; a crash between
 /// the two lets a retry apply its body once more.
-pub(crate) fn config_set(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: ConfigSetParams = parse(params)?;
+pub(crate) fn config_set(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: ConfigSetParams = parse(call.params)?;
     if !p.supplied() {
         return Err(
             Error::validation("config", "no settings supplied; set at least one field").into(),
         );
     }
-    let config = p.apply(ctx.config.load()?);
-    config.validate()?;
     let Some(op_id) = &p.op_id else {
+        let config = p.apply(ctx.config.load()?);
+        config.validate()?;
         ctx.config.save(&config)?;
         return to_value(config);
     };
     let repository = ctx.config;
-    let stored = ctx.store.write(|tx| {
-        tx.set_op_id(Some(op_id));
-        if let Some(applied) = tx.applied_op(op_id)? {
-            return serde_json::from_str::<Value>(&applied.result_json)
-                .map_err(|error| Error::Storage(format!("invalid applied op result: {error}")));
-        }
+    replayable(ctx.store, call.method, op_id, |_| {
+        let config = p.apply(repository.load()?);
+        config.validate()?;
         repository.save(&config)?;
-        let result = serde_json::to_value(&config)
-            .map_err(|error| Error::Internal(format!("serialize config: {error}")))?;
-        tx.record_applied_op(op_id, &result.to_string())?;
-        Ok(result)
-    })?;
-    Ok(stored)
+        Ok(config)
+    })
 }

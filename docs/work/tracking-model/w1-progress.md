@@ -110,3 +110,27 @@ Remaining: none for S4. Open risks: running timers are never auto-closed at
 the block or day end; status/day reads open a short write transaction to
 materialize snapshots; `docs/work/architecture/contract-v1.md` (human CLI
 JSON) is stale and owned by another worker.
+
+CHECKPOINT S4 review (W1-C): implement the orchestrator's review decisions
+
+- Snapshots: new `days_written` marker and `day_plan.project_id`; days from
+  today on are computed live and never stored; a past day is written once
+  from the items that existed by its end. Item writes first freeze every
+  unwritten past day (`day::freeze_past`), and stats freezes the past days of
+  its range, so later edits never reach a past plan. Past prayer and sleep
+  times come from stored blocks. `day` is now `day/{snapshot,fulfilment,view}`.
+- Day capacity leaves out Night (one `day_capacity`/`block_minutes`).
+- Fulfilment counts plan-line minutes only; `unplanned_minutes` on the day,
+  each block and `stats.days[]`; `fulfilment_ratio` capped at 1, `null`
+  without a plan. Stats skip running sessions; `stats::stats` is a `Ledger`
+  with one helper per section.
+- Archived metrics are not required or prompted; kept values stay valid on
+  edit. Timer minutes end at the session day's sleep boundary (≤ 1440).
+- `item.add` rejects a date before today. Status reads running/prompt
+  independently of the plan.
+- op_id: `applied_ops.method`; empty op ids and cross-method reuse are
+  `validation`; `config.set` replays through the same `replayable` helper.
+  Handlers receive the method (`Call`), so prayer mark/unmark share one.
+- Tag rename onto a removed tag's name says how to restore it.
+- Schema changed in place (still v1): a database without `days_written` is
+  set aside like the old planner schema.

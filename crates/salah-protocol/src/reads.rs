@@ -1,7 +1,7 @@
 //! Read-only methods. Day reads may write the day's snapshots, which neither
 //! bump the revision nor appear in the change log.
 
-use crate::dispatcher::{Context, parse, to_value};
+use crate::dispatcher::{Call, Context, parse, to_value};
 use crate::error::RpcError;
 use crate::methods::{
     DayParams, ListParams, ParseParams, PreviewParams, StatsParams, SubscribeParams,
@@ -17,7 +17,7 @@ use serde_json::Value;
 /// Days `stats.get` covers when neither a range nor `days` is given.
 const DEFAULT_STATS_DAYS: i64 = 30;
 
-pub(crate) fn status(_: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+pub(crate) fn status(_: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let config = ctx.config.load()?;
     let now = ctx.now();
     let mut report = status::build(&config, now)?;
@@ -25,14 +25,14 @@ pub(crate) fn status(_: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError
     to_value(report)
 }
 
-pub(crate) fn day(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let params: DayParams = parse(params)?;
+pub(crate) fn day(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let params: DayParams = parse(call.params)?;
     let config = ctx.config.load()?;
     let now = ctx.now();
     to_value(day::day_plan(ctx.store, &config, now, params.date)?)
 }
 
-pub(crate) fn items(_: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+pub(crate) fn items(_: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let today = day::current(&ctx.config.load()?, ctx.now())?;
     let rows: Vec<ItemView> = items::list(ctx.store)?
         .into_iter()
@@ -41,8 +41,8 @@ pub(crate) fn items(_: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError>
     to_value(rows)
 }
 
-pub(crate) fn stats(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let params: StatsParams = parse(params)?;
+pub(crate) fn stats(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let params: StatsParams = parse(call.params)?;
     let config = ctx.config.load()?;
     let range = match (params.from, params.to, params.days) {
         (Some(from), Some(to), None) => Range { from, to },
@@ -71,17 +71,18 @@ pub(crate) fn stats(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcE
         tag_id: params.tag_id,
         project_id: params.project_id,
     };
-    to_value(statistics::stats(ctx.store, &config, range, filter)?)
+    let today = day::current(&config, ctx.now())?;
+    to_value(statistics::stats(ctx.store, &config, today, range, filter)?)
 }
 
-pub(crate) fn item_parse(params: &Value, _: &mut Context<'_>) -> Result<Value, RpcError> {
-    let params: ParseParams = parse(params)?;
+pub(crate) fn item_parse(call: Call<'_>, _: &mut Context<'_>) -> Result<Value, RpcError> {
+    let params: ParseParams = parse(call.params)?;
     to_value(quick::parse(&params.text)?)
 }
 
 /// Previews a draft's recurrence without touching the store.
-pub(crate) fn item_preview(params: &Value, _: &mut Context<'_>) -> Result<Value, RpcError> {
-    let p: PreviewParams = parse(params)?;
+pub(crate) fn item_preview(call: Call<'_>, _: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: PreviewParams = parse(call.params)?;
     to_value(items::preview(
         p.block,
         p.repeat,
@@ -91,28 +92,28 @@ pub(crate) fn item_preview(params: &Value, _: &mut Context<'_>) -> Result<Value,
     )?)
 }
 
-pub(crate) fn projects(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let params: ListParams = parse(params)?;
+pub(crate) fn projects(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let params: ListParams = parse(call.params)?;
     to_value(projects::list(ctx.store, params.archived)?)
 }
 
-pub(crate) fn tags(_: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+pub(crate) fn tags(_: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     to_value(tags::list(ctx.store)?)
 }
 
-pub(crate) fn metrics(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let params: ListParams = parse(params)?;
+pub(crate) fn metrics(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let params: ListParams = parse(call.params)?;
     to_value(metrics::list(ctx.store, params.archived)?)
 }
 
-pub(crate) fn config(_: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+pub(crate) fn config(_: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     to_value(ctx.config.load()?)
 }
 
 /// Validates the topics and returns the current revision. The socket daemon
 /// intercepts `subscribe` to register the connection for pushes.
-pub(crate) fn subscribe(params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let params: SubscribeParams = parse(params)?;
+pub(crate) fn subscribe(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let params: SubscribeParams = parse(call.params)?;
     if let Some(topic) = params
         .topics
         .iter()
