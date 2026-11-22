@@ -137,7 +137,10 @@ fn handshake_is_required_and_negotiates_protocol_one() {
     assert_eq!(hello["protocol"], 1);
     assert_eq!(hello["server"], "salah 0.1.0");
     assert_eq!(hello["revision"], 0);
-    assert_eq!(hello["capabilities"], json!(["timer.v1", "events.v1"]));
+    assert_eq!(
+        hello["capabilities"],
+        json!(["timer.v1", "events.v1", "clock.v1"])
+    );
 
     let error = fixture.err("not.a.method", json!({}));
     assert_eq!(error.code, METHOD_NOT_FOUND);
@@ -160,6 +163,7 @@ fn every_method_rejects_invalid_params_with_a_validation_kind() {
         "stats.get",
         "history.get",
         "item.parse",
+        "item.preview",
         "item.add",
         "item.edit",
         "item.move",
@@ -209,6 +213,17 @@ fn reads_and_parse_return_canonical_projections() {
     assert_eq!(parsed["block"], "isha");
     assert_eq!(parsed["measure"], "minutes");
     assert_eq!(parsed["target"], 20);
+
+    let preview = fixture.ok(
+        "item.preview",
+        json!({
+            "block":"asr","repeat":"weekly","weekdays":["mon","wed","fri"],
+            "measure":"minutes","target":20,"date":"2031-05-14"
+        }),
+    );
+    assert_eq!(preview["schedule_text"], "Mon, Wed, Fri");
+    assert_eq!(preview["next_occurrence"], "2031-05-14");
+    assert!(preview["occurrences_this_month"].as_u64().unwrap() > 0);
 
     let config = fixture.ok("config.get", Value::Null);
     assert_eq!(config["method"], "mwl");
@@ -652,6 +667,14 @@ fn every_protocol_method_has_a_happy_path_and_an_error() {
         json!({"text":"read 20m after isha daily"}),
         json!({}),
     );
+    check(
+        &mut fixture,
+        "item.preview",
+        json!({
+            "block":"asr","repeat":"daily","measure":"check","date":"2031-05-14"
+        }),
+        json!({}),
+    );
 
     let added = fixture.ok(
         "item.add",
@@ -747,7 +770,7 @@ fn every_protocol_method_has_a_happy_path_and_an_error() {
     check(
         &mut fixture,
         "subscribe",
-        json!({"topics":["changes"],"after_revision":0}),
+        json!({"topics":["changes","clock"],"after_revision":0}),
         json!({"topics":["unknown"]}),
     );
 }

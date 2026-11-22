@@ -76,30 +76,33 @@ restart it on demand; a manually started daemon stays up.
    "params":{"protocol":[1],"client":"widget/0.4","actor":"widget"}}
 ← {"jsonrpc":"2.0","id":1,
    "result":{"protocol":1,"server":"salah 0.1.0",
-             "capabilities":["timer.v1"],"revision":184}}
+             "capabilities":["timer.v1","events.v1","clock.v1"],"revision":184}}
 ```
 
 Any other method before `hello` fails with JSON-RPC `-32600`. The server
 supports protocol major `1`; if the client does not offer it, `hello` fails with
 `-32602`. `capabilities` is additive: clients ignore names they do not know.
 `events.v1` means the connection supports `subscribe` and `changed` pushes.
+`clock.v1` means the daemon can push `clock.boundary` (see Notifications).
 
 ## Methods
 
 Mutation parameters all include `op_id` (a stable client UUID, or a platform id
 such as `telegram:<update_id>`). `revision` in a mutation result is the
 store-wide counter, never a precondition. `changed.items` are canonical
-`DayItem` rows plus the item `version`; `changed.deleted` lists removed ids.
+`DayItem` rows plus the display projections below; `changed.deleted` lists
+removed ids.
 
 | Method | Params | Result | Errors | Idempotent | Version-checked |
 |---|---|---|---|---|---|
 | `hello` | `protocol[]`, `client`, `actor?` | `protocol`, `server`, `capabilities`, `revision` | protocol | — | — |
-| `status.get` | — | `Status` (today's widget projection, planner attached) | config, source, storage | — | — |
-| `day.get` | `date?` | `DayPlan` | validation, source, storage | — | — |
+| `status.get` | — | `Status` (today's widget projection, planner attached; rows and `next.at` as below) | config, source, storage | — | — |
+| `day.get` | `date?` | `DayPlan` (rows and `now.next.at` as below) | validation, source, storage | — | — |
 | `items.list` | — | live `Item` rows plus `version` | storage | — | — |
-| `stats.get` | `from,to` or `days?` | `Stats` | validation, source, storage | — | — |
+| `stats.get` | `from,to` or `days?` | `Stats` plus `time_ticks` and per-day `tooltip` | validation, source, storage | — | — |
 | `history.get` | `from?`, `to?` (default last 7 days) | `[DayReport]` | validation, source, storage | — | — |
 | `item.parse` | `text` | `NewItemDraft` | validation | — | — |
+| `item.preview` | `block`, `repeat`, `weekdays?`, `measure`, `target?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
 | `item.add` | `op_id`, `title` or `quick_text`, `block?`, `repeat?`, `weekdays?`, `measure?`, `target?`, `date?` | mutation result | validation, source, storage | yes | no |
 | `item.edit` | `op_id`, `id`, `expected_version?`, `title?`, `block?`, `target?` (`null` clears), `repeat?`, `weekdays?`, `measure?` | mutation result | validation, not_found, conflict, storage | yes | yes |
 | `item.move` | `op_id`, `id`, `block`, `after_id?` / `before_id?` (or legacy `index?`), `expected_version?` | mutation result | validation, not_found, conflict, storage | yes | yes |
@@ -115,10 +118,53 @@ store-wide counter, never a precondition. `changed.items` are canonical
 | `config.set` | `op_id?`, any `Config` field | `Config` | validation, config | yes with `op_id` | no |
 | `export` | — | v3 `salah-export` document | storage | — | — |
 | `import` | `data` (export document), `op_id?` | `revision`, `ImportSummary` | validation, storage | yes with `op_id` | no |
-| `subscribe` | `topics?` (`["changes"]`), `after_revision?` | `revision`, `after_revision?`; only the socket transport then pushes `changed` | validation | — | — |
+| `subscribe` | `topics?` (`["changes"]`, `["clock"]`, or both), `after_revision?` | `revision`, `after_revision?`; the socket transport then pushes `changed` and/or `clock.boundary` | validation | — | — |
 
 Ids are **full ids** over RPC. Prefix resolution remains a human-CLI
 convenience only. A missing or stale entity is `not_found` or `conflict`.
+
+## Display projections
+
+Every item row in `day.get`, the planner in `status.get`, and mutation
+`changed.items` carries the fields below in addition to the stored `DayItem`
+fields. They are computed by Rust, so clients never re-derive recurrence,
+progress, or timers. Labels are locale-neutral English for compatibility with
+the current UIs; later clients may map the semantic fields to another locale.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `version` | integer | Entity version for an immediate `expected_version` on edit/move/remove. |
+| `schedule_text` | string | `"Once"`, `"Daily"`, `"Mon–Fri"`, `"Mon, Wed, Fri"`, … |
+| `next_occurrence` | date or null | First date on or after the requested day when the item applies; equal to the row day when planned then. |
+| `detail_text` | string | `"20 / 30 min · Daily"`, `"3 / 10 · Mon–Fri"`, or the schedule alone for check items. |
+| `timer.running` | boolean | Whether a timer session is running for this row. |
+| `timer.started_at` | timestamp or null | UTC start of the running session. |
+| `timer.minutes_including_running` | integer | Row minutes at the projection instant, running session included. |
+| `carried` | boolean | True when this open item is carried into a later block. |
+
+`now.next.at` in `day.get` and `next.at` in `status.get` are UTC instants. A
+client computes a countdown as `next.at - Date.now()`; it does not add local
+boundary maths.
+
+`item.preview` is read-only and needs no `op_id`. It validates the draft like
+`item.add` (`block` may not be `sleep`, a weekly draft needs weekdays, a target
+needs the matching measure) and returns the first occurrence on or after
+`date`, the number of remaining occurrences in that calendar month, and
+`schedule_text`. It never reads or writes the store.
+
+`item.move` accepts `after_id` or `before_id` and resolves them inside the
+write transaction. Clients should send a neighbour id from the rendered row
+list; there is deliberately no `item.move_target` method, because a row already
+exposes its `block`, `position`, and `id`, so a row-index→`(block, anchor)`
+mapping is trivially derivable and the server would only duplicate it.
+
+`stats.get` adds `time_ticks`, an ordered array of chart axis ticks:
+`{"minutes":90,"label":"1h30"}`. Clients draw these instead of choosing steps
+or formatting durations. Every `daily` row also has `tooltip`, the English text
+the charts currently build (`"Wed 14 May · 2 / 3 done · 40 min · 5 counts · 2
+prayers"`). Every `items[]` row additionally has `schedule_text` and
+`next_occurrence` (relative to today), which replaces the routines page's
+recurrence scan.
 
 ## Errors
 
@@ -209,6 +255,22 @@ Notifications have no `id`:
 notification may cover more than one commit observed in the same poll, so
 clients treat its `revision` as the newest state to fetch and de-duplicate by
 revision.
+
+The daemon also pushes `clock.boundary` when the current block or next boundary
+changes, and once as an immediate snapshot after `subscribe` with the `clock`
+topic:
+
+```json
+{"jsonrpc":"2.0","method":"clock.boundary",
+ "params":{"day":"2031-05-14","block":"fajr",
+           "now":"2031-05-14T04:30:00Z",
+           "next":{"id":"dhuhr","name":"Dhuhr","time":"12:19",
+                   "at":"2031-05-14T07:19:00Z","remaining_seconds":10140}}}
+```
+
+`now` and `next.at` are the authoritative instants. `remaining_seconds` is a
+convenience snapshot at that instant; clients should count down from `next.at`
+rather than assuming the notification arrives at `now`.
 
 ## Evolution rules
 

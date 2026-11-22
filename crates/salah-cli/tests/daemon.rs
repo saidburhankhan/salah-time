@@ -284,6 +284,20 @@ impl Client {
         response["error"]["code"].as_i64().unwrap()
     }
 
+    fn wait_method(&mut self, method: &str) -> Value {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            assert!(
+                Instant::now() < deadline,
+                "no {method} notification arrived"
+            );
+            let value = self.recv_value();
+            if value.get("method").and_then(Value::as_str) == Some(method) {
+                return value;
+            }
+        }
+    }
+
     fn wait_changed_after(&mut self, revision: i64) -> Value {
         let deadline = Instant::now() + WAIT;
         loop {
@@ -352,6 +366,18 @@ fn method_success_and_error(client: &mut Client) {
     );
     assert_eq!(client.bad("item.parse", json!({})), -32602);
 
+    let preview = client.good(
+        "item.preview",
+        json!({
+            "block":"asr","repeat":"weekly","weekdays":["mon","wed","fri"],
+            "measure":"minutes","target":20,"date":DATE
+        }),
+    );
+    assert_eq!(preview["schedule_text"], "Mon, Wed, Fri");
+    assert_eq!(preview["next_occurrence"], DATE);
+    assert!(preview["occurrences_this_month"].as_u64().unwrap() > 0);
+    assert_eq!(client.bad("item.preview", json!({"block":"asr"})), -32602);
+
     let added = client.good(
         "item.add",
         json!({"op_id":"s4-add","title":"All methods","block":"fajr","measure":"minutes","target":30}),
@@ -360,9 +386,37 @@ fn method_success_and_error(client: &mut Client) {
         .as_str()
         .unwrap()
         .to_string();
+    let changed_row = &added["changed"]["items"][0];
+    assert_eq!(changed_row["version"], 1);
+    assert_eq!(changed_row["schedule_text"], "Once");
+    assert_eq!(changed_row["detail_text"], "0 / 30 min · Once");
+    assert_eq!(changed_row["next_occurrence"], DATE);
+    assert_eq!(changed_row["timer"]["running"], false);
+    assert_eq!(changed_row["carried"], false);
     assert_eq!(
         client.bad("item.add", json!({"op_id":"s4-add-bad"})),
         -32001
+    );
+
+    let day = client.good("day.get", json!({"date": DATE}));
+    let day_row = day["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|block| block["items"].as_array().unwrap())
+        .find(|row| row["id"] == id)
+        .unwrap();
+    assert_eq!(day_row["version"], 1);
+    assert!(day_row["schedule_text"].is_string());
+    assert_eq!(day_row["timer"]["minutes_including_running"], 0);
+    let status = client.good("status.get", json!({}));
+    assert!(status["next"]["at"].is_string());
+    assert!(
+        status["planner"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == id && row["version"] == 1)
     );
 
     let extra = client.good(
@@ -595,6 +649,54 @@ fn every_protocol_method_has_a_success_and_an_error_over_the_socket() {
     let mut client = daemon.client();
     client.hello();
     method_success_and_error(&mut client);
+}
+
+#[test]
+fn clock_boundary_is_pushed_when_the_next_boundary_changes() {
+    let daemon = Daemon::start();
+    let mut subscriber = daemon.client();
+    subscriber.hello();
+    let subscribed = subscriber.good("subscribe", json!({"topics":["clock"],"after_revision":0}));
+    assert!(subscribed["revision"].as_i64().is_some());
+
+    // The subscribe response carries an immediate snapshot with a server
+    // instant, so no local boundary maths is needed.
+    let initial = subscriber.wait_method("clock.boundary");
+    assert_eq!(initial["params"]["day"], DATE);
+    assert_eq!(initial["params"]["next"]["id"], "dhuhr");
+    assert_eq!(initial["params"]["next"]["at"], "2031-05-14T07:19:00Z");
+    assert!(
+        initial["params"]["next"]["remaining_seconds"]
+            .as_i64()
+            .unwrap()
+            > 0
+    );
+
+    // Move the sleep boundary to one minute after the frozen clock. The
+    // scheduler must notice and push the new next boundary.
+    let mut writer = daemon.client();
+    writer.hello();
+    writer.good(
+        "config.set",
+        json!({"op_id":"s4-clock-boundary","sleep_time":"09:31"}),
+    );
+    let deadline = Instant::now() + WAIT;
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "no clock.boundary for the changed sleep boundary"
+        );
+        let value = subscriber.recv_value();
+        if value.get("method").and_then(Value::as_str) != Some("clock.boundary") {
+            continue;
+        }
+        if value["params"]["next"]["id"] != "sleep" {
+            continue;
+        }
+        assert_eq!(value["params"]["next"]["remaining_seconds"], 60);
+        assert_eq!(value["params"]["next"]["at"], "2031-05-14T04:31:00Z");
+        break;
+    }
 }
 
 #[test]

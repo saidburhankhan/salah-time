@@ -238,6 +238,103 @@ impl Item {
                 }
             }
     }
+
+    /// First date on or after `from` on which this item applies. `None` when a
+    /// one-time item is already in the past or a weekly item has no days.
+    pub fn next_occurrence(&self, from: NaiveDate) -> Option<NaiveDate> {
+        next_occurrence(self.repeat, self.weekdays, self.day.max(from))
+    }
+
+    pub fn schedule_text(&self) -> String {
+        schedule_text(self.repeat, self.weekdays)
+    }
+
+    pub fn detail_text(&self, minutes: i64, count: i64) -> String {
+        detail_text(
+            self.measure,
+            self.target,
+            minutes,
+            count,
+            &self.schedule_text(),
+        )
+    }
+}
+
+/// First occurrence of a repeat rule on or after `from`.
+pub fn next_occurrence(
+    repeat: Repeat,
+    weekdays: Option<Weekdays>,
+    from: NaiveDate,
+) -> Option<NaiveDate> {
+    match repeat {
+        Repeat::None => Some(from),
+        Repeat::Daily => Some(from),
+        Repeat::Weekly => {
+            let days = weekdays.filter(|days| !days.is_empty())?;
+            let mut day = from;
+            for _ in 0..=7 {
+                if days.contains(day.weekday()) {
+                    return Some(day);
+                }
+                day = day.succ_opt()?;
+            }
+            None
+        }
+    }
+}
+
+/// Locale-neutral English schedule label shared by day rows and previews.
+pub fn schedule_text(repeat: Repeat, weekdays: Option<Weekdays>) -> String {
+    match repeat {
+        Repeat::None => "Once".into(),
+        Repeat::Daily => "Daily".into(),
+        Repeat::Weekly => {
+            let Some(days) = weekdays else {
+                return "Weekly".into();
+            };
+            let names = days.names();
+            if names.is_empty() {
+                return "Weekly".into();
+            }
+            if names.len() == 7 {
+                return "Daily".into();
+            }
+            if names == ["mon", "tue", "wed", "thu", "fri"] {
+                return "Mon–Fri".into();
+            }
+            let short = |name: &str| {
+                let mut chars = name.chars();
+                chars
+                    .next()
+                    .map(|first| first.to_ascii_uppercase().to_string() + chars.as_str())
+                    .unwrap_or_default()
+            };
+            names
+                .iter()
+                .map(|name| short(name))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    }
+}
+
+/// Locale-neutral display detail for a day row.
+pub fn detail_text(
+    measure: Measure,
+    target: Option<i64>,
+    minutes: i64,
+    count: i64,
+    schedule: &str,
+) -> String {
+    let progress = match (measure, target) {
+        (Measure::Minutes, Some(target)) => Some(format!("{minutes} / {target} min")),
+        (Measure::Count, Some(target)) => Some(format!("{count} / {target}")),
+        _ => None,
+    };
+    match progress {
+        Some(progress) => format!("{progress} · {schedule}"),
+        None => schedule.to_string(),
+    }
 }
 
 impl Entry {
@@ -281,6 +378,16 @@ pub enum State {
     Missed,
 }
 
+/// The timer snapshot attached to a day row. `minutes_including_running` is
+/// the row's total at the projection instant, so a client renders it directly
+/// and only counts down/up from the server timestamps.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ItemTimer {
+    pub running: bool,
+    pub started_at: Option<DateTime<Utc>>,
+    pub minutes_including_running: i64,
+}
+
 /// One item as it stands on one day.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct DayItem {
@@ -296,6 +403,25 @@ pub struct DayItem {
     pub minutes: i64,
     pub count: i64,
     pub timer_started_at: Option<DateTime<Utc>>,
+    /// Entity concurrency version, added on the wire by the protocol layer.
+    #[serde(skip_serializing)]
+    pub version: i64,
+    /// Locale-neutral English schedule label ("Daily", "Mon–Fri", "Once", …).
+    #[serde(skip_serializing)]
+    pub schedule_text: String,
+    /// First date on or after the requested day on which the item applies.
+    /// Equal to the requested day when the row is planned then.
+    #[serde(skip_serializing)]
+    pub next_occurrence: Option<NaiveDate>,
+    /// Display detail ("20 / 30 min · Daily", "3 / 10 · Mon–Fri").
+    #[serde(skip_serializing)]
+    pub detail_text: String,
+    /// Timer snapshot at the projection instant.
+    #[serde(skip_serializing)]
+    pub timer: ItemTimer,
+    /// True when this is an open item carried forward into a later block.
+    #[serde(skip_serializing)]
+    pub carried: bool,
 }
 
 /// What the day looks like from the point of view of a moment in it.
@@ -354,6 +480,10 @@ pub fn day_items(
                 .find(|e| e.is_running_timer())
                 .filter(|e| block_end(e.block).is_none_or(|end| view.now < end))
                 .and_then(|e| e.started_at);
+            let schedule_text = item.schedule_text();
+            let carried = view
+                .current
+                .is_some_and(|current| item.block < current && state == State::Open);
             DayItem {
                 id: item.id.clone(),
                 title: item.title.clone(),
@@ -367,6 +497,16 @@ pub fn day_items(
                 minutes,
                 count,
                 timer_started_at,
+                version: item.version,
+                next_occurrence: item.next_occurrence(view.day),
+                detail_text: item.detail_text(minutes, count),
+                schedule_text,
+                timer: ItemTimer {
+                    running: timer_started_at.is_some(),
+                    started_at: timer_started_at,
+                    minutes_including_running: minutes,
+                },
+                carried,
             }
         })
         .collect();
@@ -559,6 +699,69 @@ mod tests {
         assert!(validate_repeat(Repeat::Weekly, None).is_err());
         assert!(validate_repeat(Repeat::Daily, Some(days)).is_err());
         assert!(validate_repeat(Repeat::Weekly, Some(days)).is_ok());
+    }
+
+    #[test]
+    fn schedule_and_detail_text_are_locale_neutral() {
+        let mut daily = item("d", BoundaryId::Fajr, Repeat::Daily, Measure::Minutes);
+        daily.target = Some(30);
+        assert_eq!(daily.schedule_text(), "Daily");
+        assert_eq!(daily.detail_text(20, 0), "20 / 30 min · Daily");
+
+        let mut weekly = item("w", BoundaryId::Asr, Repeat::Weekly, Measure::Check);
+        weekly.weekdays = Some(Weekdays::WORKWEEK);
+        assert_eq!(weekly.schedule_text(), "Mon–Fri");
+        assert_eq!(weekly.detail_text(0, 0), "Mon–Fri");
+
+        let mut custom = item("c", BoundaryId::Asr, Repeat::Weekly, Measure::Count);
+        custom.weekdays = Some(Weekdays::parse_list("mon,wed,fri").unwrap());
+        custom.target = Some(10);
+        assert_eq!(custom.schedule_text(), "Mon, Wed, Fri");
+        assert_eq!(custom.detail_text(0, 3), "3 / 10 · Mon, Wed, Fri");
+
+        let once = item("o", BoundaryId::Fajr, Repeat::None, Measure::Check);
+        assert_eq!(once.schedule_text(), "Once");
+    }
+
+    #[test]
+    fn next_occurrence_crosses_month_and_year_boundaries() {
+        let mut weekly = item("w", BoundaryId::Fajr, Repeat::Weekly, Measure::Check);
+        weekly.weekdays = Some(Weekdays::parse_list("mon").unwrap());
+        // 2026-12-31 is a Thursday; the next Monday is 2027-01-04.
+        assert_eq!(
+            weekly.next_occurrence(NaiveDate::from_ymd_opt(2026, 12, 31).unwrap()),
+            NaiveDate::from_ymd_opt(2027, 1, 4)
+        );
+        // 2026-11-27 is a Friday; the next Monday is still in November.
+        assert_eq!(
+            weekly.next_occurrence(NaiveDate::from_ymd_opt(2026, 11, 27).unwrap()),
+            NaiveDate::from_ymd_opt(2026, 11, 30)
+        );
+        // From before a daily item's first day, that first day wins.
+        let daily = item("d", BoundaryId::Fajr, Repeat::Daily, Measure::Check);
+        assert_eq!(
+            daily.next_occurrence(NaiveDate::from_ymd_opt(2026, 11, 1).unwrap()),
+            NaiveDate::from_ymd_opt(2026, 11, 20)
+        );
+    }
+
+    #[test]
+    fn carried_and_timer_snapshots_are_projected() {
+        let morning = item("a", BoundaryId::Fajr, Repeat::None, Measure::Minutes);
+        let mut timer = entry("a", BoundaryId::Fajr, EntryKind::Timer);
+        timer.started_at = Some(t(6, 0));
+        let rows = day_items(
+            &[morning],
+            &[timer],
+            view(Some(BoundaryId::Asr), false, t(6, 20)),
+            |_| None,
+        );
+        assert!(rows[0].carried, "an open Fajr item is carried into Asr");
+        assert_eq!(rows[0].version, 1);
+        assert_eq!(rows[0].next_occurrence, Some(d(20)));
+        assert!(rows[0].timer.running);
+        assert_eq!(rows[0].timer.minutes_including_running, 20);
+        assert_eq!(rows[0].timer.started_at, Some(t(6, 0)));
     }
 
     #[test]

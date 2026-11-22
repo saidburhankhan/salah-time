@@ -11,12 +11,16 @@
 //! `changed` notifications.
 
 use crate::XdgConfig;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
+use salah_core::status;
+use salah_domain::day::BoundaryId;
 use salah_domain::runtime::{Clock, FixedClock, SystemClock, UuidV4};
 use salah_protocol::{
-    ChangeScope, ChangedNotification, Context, Dispatcher, Request, Response, RpcError,
+    ChangeScope, ChangedNotification, ClockBoundaryNext, ClockBoundaryNotification,
+    ConfigRepository, Context, Dispatcher, Request, Response, RpcError,
 };
 use salah_store::{Store, default_path};
+use serde::Serialize;
 use serde_json::Value;
 use std::env;
 use std::fs;
@@ -101,6 +105,7 @@ struct Shared {
     subscribers: Mutex<Vec<(u64, mpsc::Sender<Vec<u8>>)>>,
     next_subscriber: AtomicU64,
     last_activity: Mutex<Instant>,
+    boundary: Mutex<Option<ClockBoundaryNotification>>,
 }
 
 impl Shared {
@@ -109,7 +114,16 @@ impl Shared {
             subscribers: Mutex::new(Vec::new()),
             next_subscriber: AtomicU64::new(1),
             last_activity: Mutex::new(Instant::now()),
+            boundary: Mutex::new(None),
         }
+    }
+
+    fn set_boundary(&self, boundary: ClockBoundaryNotification) {
+        *self.boundary.lock().unwrap() = Some(boundary);
+    }
+
+    fn boundary(&self) -> Option<ClockBoundaryNotification> {
+        self.boundary.lock().unwrap().clone()
     }
 
     fn touch(&self) {
@@ -187,6 +201,10 @@ pub fn serve(idle_minutes: u64) -> Result<(), String> {
     let watcher_shared = Arc::clone(&shared);
     let watcher_data = data.clone();
     thread::spawn(move || watcher_loop(watcher_data, watcher_shared));
+
+    let boundary_shared = Arc::clone(&shared);
+    let boundary_config = config.path.clone();
+    thread::spawn(move || boundary_loop(boundary_config, clock, boundary_shared));
 
     let idle = Duration::from_secs(idle_minutes.saturating_mul(60));
     let mut last_transition = Instant::now();
@@ -445,6 +463,66 @@ fn watcher_loop(data: PathBuf, shared: Arc<Shared>) {
     }
 }
 
+/// The current block and next boundary as the daemon sees them.
+fn clock_boundary(
+    clock: &DaemonClock,
+    config: &XdgConfig,
+) -> Result<ClockBoundaryNotification, String> {
+    let settings = config.load().map_err(|error| error.to_string())?;
+    let now = clock.now();
+    let report = status::build(&settings, now).map_err(|error| error.to_string())?;
+    let day = NaiveDate::parse_from_str(&report.day, "%Y-%m-%d")
+        .map_err(|error| format!("status day: {error}"))?;
+    let next = BoundaryId::parse(report.next.id)
+        .ok_or_else(|| format!("unknown next boundary {:?}", report.next.id))?;
+    Ok(ClockBoundaryNotification {
+        day,
+        block: Some(report.current_block.block.start),
+        now,
+        next: ClockBoundaryNext {
+            id: next,
+            name: report.next.name.to_string(),
+            time: report.next.time,
+            at: report.next.at,
+            remaining_seconds: report.next.remaining_seconds,
+        },
+    })
+}
+
+/// Polls the schedule and broadcasts `clock.boundary` when the current block or
+/// next boundary identity changes. `remaining_seconds` inside a notification is
+/// only a snapshot; clients count down from `next.at`.
+fn boundary_loop(config_path: PathBuf, clock: DaemonClock, shared: Arc<Shared>) {
+    let config = XdgConfig { path: config_path };
+    let mut last = shared.boundary();
+    while !SHUTDOWN.load(Ordering::SeqCst) {
+        if let Ok(current) = clock_boundary(&clock, &config) {
+            let changed = last
+                .as_ref()
+                .is_none_or(|previous| boundary_key(previous) != boundary_key(&current));
+            if changed {
+                shared.set_boundary(current.clone());
+                if let Ok(line) = serde_json::to_string(&current.clone().envelope()) {
+                    shared.broadcast(&line);
+                }
+                last = Some(current);
+            }
+        }
+        thread::sleep(Duration::from_secs(1));
+    }
+}
+
+fn boundary_key(
+    boundary: &ClockBoundaryNotification,
+) -> (NaiveDate, Option<BoundaryId>, BoundaryId, DateTime<Utc>) {
+    (
+        boundary.day,
+        boundary.block,
+        boundary.next.id,
+        boundary.next.at,
+    )
+}
+
 fn emit_changed(shared: &Shared, revision: i64, scopes: &[ChangeScope], op_id: &Option<String>) {
     let notification = ChangedNotification {
         revision,
@@ -570,6 +648,18 @@ fn handle_connection(
         // `subscribe` is connection state: dispatch it locally to validate the
         // parameters, then attach this connection's outbound queue.
         if request.method == "subscribe" {
+            let requested: Vec<String> = request
+                .params
+                .get("topics")
+                .and_then(Value::as_array)
+                .map(|topics| {
+                    topics
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
             if !dispatcher.hello_done() {
                 let response = Response::err(
                     request.id.clone(),
@@ -596,6 +686,16 @@ fn handle_connection(
             if ok && !subscribed {
                 shared.subscribe(subscriber_id, out_tx.clone());
                 subscribed = true;
+                let wants_clock = requested.iter().any(|topic| topic == "clock");
+                if wants_clock {
+                    let notification = shared
+                        .boundary()
+                        .map(Ok)
+                        .unwrap_or_else(|| clock_boundary(&clock, &config));
+                    if let Ok(notification) = notification {
+                        let _ = send_notification(&out_tx, &notification.envelope());
+                    }
+                }
             }
             continue;
         }
@@ -650,6 +750,17 @@ fn handle_connection(
 
 fn send_response(sender: &mpsc::Sender<Vec<u8>>, response: &Response) -> bool {
     let Ok(mut line) = response.clone().into_line() else {
+        return false;
+    };
+    line.push('\n');
+    sender.send(line.into_bytes()).is_ok()
+}
+
+fn send_notification<T: Serialize>(
+    sender: &mpsc::Sender<Vec<u8>>,
+    notification: &salah_protocol::Notification<T>,
+) -> bool {
+    let Ok(mut line) = serde_json::to_string(notification) else {
         return false;
     };
     line.push('\n');

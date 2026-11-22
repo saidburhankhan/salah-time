@@ -1,7 +1,8 @@
 //! JSON-RPC 2.0 envelopes, NDJSON framing values, and notification types.
 
 use crate::error::RpcError;
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
+use salah_domain::day::BoundaryId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -122,6 +123,38 @@ pub struct ChangedNotification {
 }
 
 pub const CHANGED_METHOD: &str = "changed";
+pub const CLOCK_BOUNDARY_METHOD: &str = "clock.boundary";
+
+/// The next boundary and the instant it occurs at, so clients never need to
+/// reconstruct boundary maths locally.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClockBoundaryNext {
+    pub id: BoundaryId,
+    pub name: String,
+    pub time: String,
+    pub at: DateTime<Utc>,
+    pub remaining_seconds: i64,
+}
+
+/// Pushed when the current block or next boundary changes. `now` is the
+/// authoritative daemon instant the rest of the payload was derived from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClockBoundaryNotification {
+    pub day: NaiveDate,
+    pub block: Option<BoundaryId>,
+    pub now: DateTime<Utc>,
+    pub next: ClockBoundaryNext,
+}
+
+impl ClockBoundaryNotification {
+    pub fn envelope(self) -> Notification<Self> {
+        Notification {
+            jsonrpc: JSONRPC_VERSION,
+            method: CLOCK_BOUNDARY_METHOD,
+            params: self,
+        }
+    }
+}
 
 /// A JSON-RPC notification envelope (no `id`). S4 emits these; the types are
 /// defined here so both the daemon and clients share the shape.
@@ -145,6 +178,7 @@ impl ChangedNotification {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
     use serde_json::json;
 
     #[test]
@@ -154,6 +188,28 @@ mod tests {
         assert!(Request::parse(json!({"jsonrpc":"1.0","id":1,"method":"hello"})).is_err());
         assert!(Request::parse(json!({"jsonrpc":"2.0","method":"hello"})).is_err());
         assert!(Request::parse(json!(["not", "an", "object"])).is_err());
+    }
+
+    #[test]
+    fn clock_boundary_notification_has_no_id_and_carries_an_instant() {
+        let notification = ClockBoundaryNotification {
+            day: NaiveDate::from_ymd_opt(2031, 5, 14).unwrap(),
+            block: Some(BoundaryId::Fajr),
+            now: Utc.with_ymd_and_hms(2031, 5, 14, 4, 30, 0).unwrap(),
+            next: ClockBoundaryNext {
+                id: BoundaryId::Dhuhr,
+                name: "Dhuhr".into(),
+                time: "12:19".into(),
+                at: Utc.with_ymd_and_hms(2031, 5, 14, 7, 19, 0).unwrap(),
+                remaining_seconds: 10140,
+            },
+        }
+        .envelope();
+        let value = serde_json::to_value(notification).unwrap();
+        assert_eq!(value["method"], "clock.boundary");
+        assert!(value.get("id").is_none());
+        assert_eq!(value["params"]["next"]["id"], "dhuhr");
+        assert!(value["params"]["next"]["at"].is_string());
     }
 
     #[test]

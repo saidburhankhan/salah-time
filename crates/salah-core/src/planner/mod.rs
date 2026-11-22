@@ -5,6 +5,7 @@
 mod entries;
 mod items;
 mod marks;
+mod preview;
 mod stats;
 mod timers;
 mod views;
@@ -18,7 +19,10 @@ pub use items::{
     move_item_with, remove, remove_with,
 };
 pub use marks::{mark, mark_with, unmark, unmark_with};
-pub use stats::{DayStat, DayTotals, ItemStats, PrayerStats, Stats, Totals, stats};
+pub use preview::{Preview, preview};
+pub use stats::{
+    AxisTick, DayStat, DayTotals, ItemStats, PrayerStats, Stats, Totals, stats, time_axis_ticks,
+};
 pub use timers::{
     StartedTimer, close_expired_timers, start_timer, start_timer_with, start_timer_with_stopped,
     stop_item_timer, stop_item_timer_with, stop_timer, stop_timer_with,

@@ -88,6 +88,24 @@ fn offset(config: &Config) -> Result<FixedOffset, Error> {
         .ok_or_else(|| "invalid timezone offset".into())
 }
 
+/// The UTC instant at which `boundary` occurs relative to `date` (the local
+/// civil date the boundary offsets are based on).
+pub fn boundary_at(
+    config: &Config,
+    date: NaiveDate,
+    boundary: &Boundary,
+) -> Result<DateTime<Utc>, Error> {
+    let zone = offset(config)?;
+    let midnight = shift(date, boundary.day_offset)
+        .and_hms_opt(0, 0, 0)
+        .ok_or("invalid date")?;
+    let local = zone
+        .from_local_datetime(&midnight)
+        .single()
+        .ok_or("invalid local time")?;
+    Ok((local + Duration::minutes(boundary.minutes)).with_timezone(&Utc))
+}
+
 fn calculated(config: &Config, date: NaiveDate) -> Result<Vec<PrayerTime>, Error> {
     let selected =
         method(&config.method).ok_or_else(|| format!("unknown method: {}", config.method))?;

@@ -4,7 +4,8 @@
   "result": {
     "capabilities": [
       "timer.v1",
-      "events.v1"
+      "events.v1",
+      "clock.v1"
     ],
     "protocol": 1,
     "revision": 0,

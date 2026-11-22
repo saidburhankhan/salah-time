@@ -23,6 +23,9 @@ pub struct NextPrayer {
     pub date: String,
     pub remaining: String,
     pub remaining_short: String,
+    /// UTC instant of the next boundary; clients derive countdowns from it.
+    #[serde(skip_serializing)]
+    pub at: DateTime<Utc>,
     pub remaining_seconds: i64,
 }
 #[derive(Debug, Serialize)]
@@ -134,6 +137,7 @@ pub fn build(config: &Config, utc_now: DateTime<Utc>) -> Result<Status, Error> {
             date: next_point.date.clone(),
             remaining,
             remaining_short,
+            at: schedule::boundary_at(config, schedule.date, next)?,
             remaining_seconds,
         },
         current_block: CurrentBlock {

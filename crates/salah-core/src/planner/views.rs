@@ -136,6 +136,9 @@ pub struct NextBoundary {
     pub id: BoundaryId,
     pub name: &'static str,
     pub time: String,
+    /// UTC instant of the boundary; clients derive countdowns from this.
+    #[serde(skip_serializing)]
+    pub at: DateTime<Utc>,
     pub remaining_seconds: i64,
 }
 
@@ -251,6 +254,7 @@ pub fn day_plan(
         })
         .collect();
     let next = &schedule.timeline.next;
+    let next_at = schedule::boundary_at(config, schedule.date, next)?;
     Ok(DayPlan {
         day,
         is_today,
@@ -261,6 +265,7 @@ pub fn day_plan(
                 id: next.id,
                 name: next.name(),
                 time: crate::status::format_minutes(next.minutes),
+                at: next_at,
                 remaining_seconds: schedule.timeline.remaining_seconds,
             },
         }),

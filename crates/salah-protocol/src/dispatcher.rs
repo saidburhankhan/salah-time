@@ -49,7 +49,7 @@ pub struct Dispatcher {
 }
 
 impl Dispatcher {
-    pub const CAPABILITIES: [&'static str; 2] = ["timer.v1", "events.v1"];
+    pub const CAPABILITIES: [&'static str; 3] = ["timer.v1", "events.v1", "clock.v1"];
 
     /// Methods that mutate the store or config. The daemon routes exactly
     /// these through its single writer thread; everything else is read-only
@@ -157,6 +157,7 @@ impl Dispatcher {
             "stats.get" => self.stats_get(params, ctx),
             "history.get" => self.history_get(params, ctx),
             "item.parse" => self.item_parse(params, ctx),
+            "item.preview" => self.item_preview(params, ctx),
             "item.add" => self.item_add(params, ctx),
             "item.edit" => self.item_edit(params, ctx),
             "item.move" => self.item_move(params, ctx),
@@ -211,14 +212,19 @@ impl Dispatcher {
         let now = ctx.clock.now();
         let mut report = status::build(&config, now)?;
         report.attach_planner(planner::today(ctx.store, &config, now));
-        to_value(report)
+        to_value(StatusView::from(report))
     }
 
     fn day_get(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
         let params: DayParams = parse_params(params)?;
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
-        to_value(planner::day_plan(ctx.store, &config, now, params.date)?)
+        to_value(DayPlanView::from(planner::day_plan(
+            ctx.store,
+            &config,
+            now,
+            params.date,
+        )?))
     }
 
     fn items_list(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
@@ -260,7 +266,9 @@ impl Dispatcher {
                 );
             }
         };
-        to_value(planner::stats(ctx.store, &config, now, first, last)?)
+        to_value(StatsView::from(planner::stats(
+            ctx.store, &config, now, first, last,
+        )?))
     }
 
     fn history_get(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
@@ -276,6 +284,21 @@ impl Dispatcher {
         let params: ParseParams = parse_params(params)?;
         let _ = ctx;
         to_value(quick::parse(&params.text)?)
+    }
+
+    /// Recurrence preview for the entry form. Read-only: no store access and
+    /// no `op_id`.
+    fn item_preview(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+        let params: PreviewParams = parse_params(params)?;
+        let _ = ctx;
+        to_value(planner::preview(
+            params.block,
+            params.repeat,
+            params.weekdays,
+            params.measure,
+            params.target,
+            params.date,
+        )?)
     }
 
     // -- item mutations ----------------------------------------------------
@@ -835,10 +858,10 @@ impl Dispatcher {
     fn subscribe(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
         let params: SubscribeParams = parse_params(params)?;
         for topic in &params.topics {
-            if topic != "changes" {
+            if topic != "changes" && topic != "clock" {
                 return Err(Error::validation(
                     "topics",
-                    format!("unknown topic {topic:?}; supported: changes"),
+                    format!("unknown topic {topic:?}; supported: changes, clock"),
                 )
                 .into());
             }
@@ -1032,11 +1055,7 @@ fn find_item_rows(
         for block in &plan.blocks {
             for row in &block.items {
                 if wanted.contains(row.id.as_str()) && seen.insert(row.id.clone()) {
-                    let version = store.item(&row.id)?.map_or(1, |item| item.version);
-                    rows.push(ItemRow {
-                        row: row.clone(),
-                        version,
-                    });
+                    rows.push(ItemRow::from(row));
                 }
             }
         }

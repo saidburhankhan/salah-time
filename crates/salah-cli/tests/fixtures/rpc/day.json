@@ -40,6 +40,7 @@
     "now": {
       "block": "fajr",
       "next": {
+        "at": "2031-05-14T07:19:00Z",
         "id": "dhuhr",
         "name": "Dhuhr",
         "remaining_seconds": 10140,

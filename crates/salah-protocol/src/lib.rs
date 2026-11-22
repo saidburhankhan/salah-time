@@ -17,6 +17,7 @@ pub use error::{
     METHOD_NOT_FOUND, PARSE_ERROR, RpcError, code_for_kind,
 };
 pub use message::{
-    CHANGED_METHOD, ChangeScope, ChangedNotification, JSONRPC_VERSION, MAX_LINE_BYTES,
-    Notification, PROTOCOL_VERSION, Request, Response, SERVER_NAME,
+    CHANGED_METHOD, CLOCK_BOUNDARY_METHOD, ChangeScope, ChangedNotification, ClockBoundaryNext,
+    ClockBoundaryNotification, JSONRPC_VERSION, MAX_LINE_BYTES, Notification, PROTOCOL_VERSION,
+    Request, Response, SERVER_NAME,
 };
