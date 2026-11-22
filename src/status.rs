@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::day::{self, Boundary};
+use crate::planner::Today;
 use crate::schedule::{self, BlockKey, Schedule};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Serialize;
@@ -66,6 +67,25 @@ pub struct Status {
     pub current_block: CurrentBlock,
     pub prayers: Vec<DisplayPrayer>,
     pub boundaries: Vec<DisplayBoundary>,
+    /// Items for the widget. `None` with `planner_error` set when the store
+    /// cannot be read, so prayer times still display.
+    pub planner: Option<Today>,
+    pub planner_error: Option<String>,
+}
+
+impl Status {
+    pub fn attach_planner(&mut self, planner: Result<Today, String>) {
+        match planner {
+            Ok(today) => {
+                self.planner = Some(today);
+                self.planner_error = None;
+            }
+            Err(error) => {
+                self.planner = None;
+                self.planner_error = Some(error);
+            }
+        }
+    }
 }
 
 /// Version of the `status --json` shape. Bump it only for breaking changes;
@@ -123,6 +143,8 @@ pub fn build(config: &Config, utc_now: DateTime<Utc>) -> Result<Status, String> 
         },
         prayers: rows,
         boundaries,
+        planner: None,
+        planner_error: None,
     })
 }
 

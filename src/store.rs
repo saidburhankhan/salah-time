@@ -48,8 +48,11 @@ pub fn schema_version() -> i64 {
     MIGRATIONS.len() as i64
 }
 
-/// `${XDG_DATA_HOME:-~/.local/share}/salah/salah.db`
+/// `$SALAH_DATA`, else `${XDG_DATA_HOME:-~/.local/share}/salah/salah.db`.
 pub fn default_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("SALAH_DATA").filter(|value| !value.is_empty()) {
+        return PathBuf::from(path);
+    }
     let base = std::env::var_os("XDG_DATA_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
