@@ -5,8 +5,8 @@ use salah::{
     config::{load, save},
     day::BoundaryId,
     export,
-    item::{Measure, Repeat, State},
-    location, official, planner, schedule, status,
+    item::{Measure, Repeat, State, Weekdays},
+    location, official, planner, quick, schedule, status,
     store::{Store, default_path},
 };
 use std::{fs, path::PathBuf, process::ExitCode};
@@ -45,6 +45,15 @@ enum Command {
         #[command(subcommand)]
         command: ItemCommand,
     },
+    /// Show one day's prayers and items as a timeline
+    Day(DayArgs),
+    /// Mark prayers as prayed
+    Prayer {
+        #[command(subcommand)]
+        command: PrayerCommand,
+    },
+    /// Show per-item and per-prayer statistics
+    Stats(StatsArgs),
     /// Show planner history
     History(HistoryArgs),
     /// Export all planner data
@@ -63,10 +72,14 @@ enum ItemCommand {
     Add(ItemAddArgs),
     /// List today's items
     List(JsonArgs),
+    /// Preview how quick-add text is understood, without saving
+    Parse(ItemParseArgs),
+    /// Move an item to a block and position
+    Move(ItemMoveArgs),
     /// Mark an item done
-    Done(ItemIdArgs),
+    Done(ItemDateArgs),
     /// Undo an item's done state
-    Undo(ItemIdArgs),
+    Undo(ItemDateArgs),
     /// Log minutes or a count
     Log(ItemLogArgs),
     /// Start an item's timer
@@ -96,16 +109,111 @@ struct ItemIdArgs {
 }
 
 #[derive(Args)]
+struct ItemDateArgs {
+    /// Item id or unique id prefix
+    id: String,
+    /// Record on this day (YYYY-MM-DD) instead of now
+    #[arg(long)]
+    date: Option<String>,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct ItemParseArgs {
+    /// Quick-add text, e.g. "read 20m after isha daily"
+    #[arg(required = true, num_args = 1..)]
+    text: Vec<String>,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct ItemMoveArgs {
+    /// Item id or unique id prefix
+    id: String,
+    /// Target prayer block
+    #[arg(long)]
+    block: String,
+    /// Position in the block, starting at 0
+    #[arg(long)]
+    index: usize,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Subcommand)]
+enum PrayerCommand {
+    /// Mark a prayer as prayed
+    Mark(PrayerArgs),
+    /// Remove a prayer's mark
+    Unmark(PrayerArgs),
+}
+
+#[derive(Args)]
+struct PrayerArgs {
+    /// fajr, dhuhr, asr, maghrib, or isha
+    prayer: String,
+    /// Day (YYYY-MM-DD); defaults to the current day
+    #[arg(long)]
+    date: Option<String>,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct DayArgs {
+    /// Day (YYYY-MM-DD); defaults to the current day
+    #[arg(long)]
+    date: Option<String>,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct StatsArgs {
+    /// First day, formatted YYYY-MM-DD
+    #[arg(long, requires = "to", conflicts_with = "days")]
+    from: Option<String>,
+    /// Last day, formatted YYYY-MM-DD
+    #[arg(long, requires = "from")]
+    to: Option<String>,
+    /// Number of days ending today (default 30)
+    #[arg(long)]
+    days: Option<i64>,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
 struct ItemAddArgs {
-    /// Words in the item title
+    /// Words in the item title (or quick-add text with --quick)
     #[arg(required = true, num_args = 1..)]
     title: Vec<String>,
+    /// Understand the title as quick-add text ("read 20m after isha daily")
+    #[arg(long)]
+    quick: bool,
     /// Prayer block
     #[arg(long)]
     block: Option<String>,
-    /// Repeat the item daily
+    /// Repeat: once, daily, weekdays, or weekly (with --days)
+    #[arg(long, conflicts_with = "daily")]
+    repeat: Option<String>,
+    /// Weekdays for a weekly item, e.g. mon,wed,fri
+    #[arg(long)]
+    days: Option<String>,
+    /// Same as --repeat daily
     #[arg(long)]
     daily: bool,
+    /// Day to plan on (YYYY-MM-DD); defaults to today
+    #[arg(long)]
+    date: Option<String>,
     /// How progress is measured
     #[arg(long)]
     measure: Option<String>,
@@ -123,6 +231,9 @@ struct ItemLogArgs {
     id: String,
     /// Minutes or count to record
     value: i64,
+    /// Record on this day (YYYY-MM-DD) instead of now
+    #[arg(long)]
+    date: Option<String>,
     /// Print machine-readable JSON
     #[arg(long)]
     json: bool,
@@ -144,6 +255,15 @@ struct ItemEditArgs {
     /// Remove the progress target
     #[arg(long)]
     no_target: bool,
+    /// Replacement repeat: once, daily, weekdays, or weekly (with --days)
+    #[arg(long)]
+    repeat: Option<String>,
+    /// Weekdays for a weekly item, e.g. mon,wed,fri
+    #[arg(long)]
+    days: Option<String>,
+    /// Replacement measure: check, minutes, or count
+    #[arg(long)]
+    measure: Option<String>,
     /// Print machine-readable JSON
     #[arg(long)]
     json: bool,
@@ -299,6 +419,9 @@ fn run(cli: Cli) -> Result<(), String> {
         Some(Command::Location { command }) => location_command(command),
         Some(Command::Official { command }) => official_command(command),
         Some(Command::Item { command }) => item_command(command),
+        Some(Command::Day(args)) => day_command(args),
+        Some(Command::Prayer { command }) => prayer_command(command),
+        Some(Command::Stats(args)) => stats_command(args),
         Some(Command::History(args)) => history_command(args),
         Some(Command::Export(args)) => export_command(args),
         Some(Command::Import(args)) => import_command(args),
@@ -363,6 +486,31 @@ fn parse_measure(value: Option<String>) -> Result<Option<Measure>, String> {
         .transpose()
 }
 
+/// `--repeat` and `--days` into a repeat rule. `weekdays` is weekly Mon–Fri.
+fn parse_repeat(
+    repeat: Option<&str>,
+    days: Option<&str>,
+) -> Result<(Option<Repeat>, Option<Weekdays>), String> {
+    let days = days.map(Weekdays::parse_list).transpose()?;
+    match (repeat, days) {
+        (None, None) => Ok((None, None)),
+        (None, Some(_)) => Err("--days needs --repeat weekly".into()),
+        (Some("once" | "none"), None) => Ok((Some(Repeat::None), None)),
+        (Some("daily"), None) => Ok((Some(Repeat::Daily), None)),
+        (Some("weekdays"), None) => Ok((Some(Repeat::Weekly), Some(Weekdays::WORKWEEK))),
+        (Some("weekly"), Some(days)) => Ok((Some(Repeat::Weekly), Some(days))),
+        (Some("weekly"), None) => Err("--repeat weekly needs --days, e.g. mon,wed".into()),
+        (Some(other), None) => Err(format!(
+            "unknown repeat {other:?}; use once, daily, weekdays, or weekly"
+        )),
+        (Some(_), Some(_)) => Err("--days needs --repeat weekly".into()),
+    }
+}
+
+fn optional_date(value: Option<&str>) -> Result<Option<NaiveDate>, String> {
+    value.map(parse_date).transpose()
+}
+
 fn json<T: serde::Serialize>(value: &T) -> Result<(), String> {
     println!(
         "{}",
@@ -393,36 +541,79 @@ fn item_command(command: ItemCommand) -> Result<(), String> {
         }
         ItemCommand::Add(args) => {
             planner::close_expired_timers(&mut store, &config, now)?;
-            let item = planner::add(
-                &mut store,
-                &config,
-                now,
+            let text = args.title.join(" ");
+            let mut request = if args.quick {
+                quick::parse(&text)?.into_new_item()
+            } else {
                 planner::NewItem {
-                    title: args.title.join(" "),
-                    block: args.block.as_deref().map(parse_block).transpose()?,
-                    repeat: args.daily.then_some(Repeat::Daily),
-                    measure: parse_measure(args.measure)?,
-                    target: args.target,
-                },
-            )?;
+                    title: text,
+                    ..planner::NewItem::default()
+                }
+            };
+            // Explicit flags override what quick add understood.
+            let repeat = args.repeat.as_deref().or(args.daily.then_some("daily"));
+            let (repeat, weekdays) = parse_repeat(repeat, args.days.as_deref())?;
+            if repeat.is_some() {
+                request.repeat = repeat;
+                request.weekdays = weekdays;
+            }
+            if let Some(block) = args.block.as_deref() {
+                request.block = Some(parse_block(block)?);
+            }
+            if let Some(measure) = parse_measure(args.measure)? {
+                request.measure = Some(measure);
+            }
+            if args.target.is_some() {
+                request.target = args.target;
+            }
+            request.date = optional_date(args.date.as_deref())?;
+            let item = planner::add(&mut store, &config, now, request)?;
             if args.json {
                 json(&item)
             } else {
                 println!(
-                    "Added {} \"{}\" to {:?}",
+                    "Added {} \"{}\" to {}",
                     short(&item.id),
                     item.title,
-                    item.block
+                    item.block.name()
                 );
                 Ok(())
             }
         }
+        ItemCommand::Parse(args) => {
+            let draft = quick::parse(&args.text.join(" "))?;
+            if args.json {
+                json(&draft)
+            } else {
+                println!("{draft:?}");
+                Ok(())
+            }
+        }
+        ItemCommand::Move(args) => {
+            let block = parse_block(&args.block)?;
+            let item = planner::move_item(&mut store, now, &args.id, block, args.index)?;
+            if args.json {
+                json(&item)
+            } else {
+                println!("Moved {} to {}", short(&item.id), item.block.name());
+                Ok(())
+            }
+        }
         ItemCommand::Done(args) => {
-            write_entry(&mut store, &config, now, args, planner::done, "Done")
+            planner::close_expired_timers(&mut store, &config, now)?;
+            let date = optional_date(args.date.as_deref())?;
+            let entry = planner::done(&mut store, &config, now, &args.id, date)?;
+            if args.json {
+                json(&entry)
+            } else {
+                println!("Done {}", short(&entry.item_id));
+                Ok(())
+            }
         }
         ItemCommand::Undo(args) => {
             planner::close_expired_timers(&mut store, &config, now)?;
-            let count = planner::undo(&mut store, &config, now, &args.id)?;
+            let date = optional_date(args.date.as_deref())?;
+            let count = planner::undo(&mut store, &config, now, &args.id, date)?;
             if args.json {
                 json(&serde_json::json!({"undone": count}))
             } else {
@@ -432,7 +623,8 @@ fn item_command(command: ItemCommand) -> Result<(), String> {
         }
         ItemCommand::Log(args) => {
             planner::close_expired_timers(&mut store, &config, now)?;
-            let entry = planner::log(&mut store, &config, now, &args.id, args.value)?;
+            let date = optional_date(args.date.as_deref())?;
+            let entry = planner::log(&mut store, &config, now, &args.id, args.value, date)?;
             if args.json {
                 json(&entry)
             } else {
@@ -465,16 +657,18 @@ fn item_command(command: ItemCommand) -> Result<(), String> {
             } else {
                 args.target.map(Some)
             };
-            let item = planner::edit(
-                &mut store,
-                now,
-                &args.id,
+            let item = planner::edit(&mut store, now, &args.id, {
+                let (repeat, weekdays) =
+                    parse_repeat(args.repeat.as_deref(), args.days.as_deref())?;
                 planner::ItemChanges {
                     title: args.title,
                     block: args.block.as_deref().map(parse_block).transpose()?,
                     target,
-                },
-            )?;
+                    repeat,
+                    weekdays,
+                    measure: parse_measure(args.measure)?,
+                }
+            })?;
             if args.json {
                 json(&item)
             } else {
@@ -516,6 +710,87 @@ fn write_entry(
         println!("{verb} {}", short(&entry.item_id));
         Ok(())
     }
+}
+
+fn day_command(args: DayArgs) -> Result<(), String> {
+    let (mut store, config, now) = open_planner()?;
+    planner::close_expired_timers(&mut store, &config, now)?;
+    let plan = planner::day_plan(&store, &config, now, optional_date(args.date.as_deref())?)?;
+    if args.json {
+        return json(&plan);
+    }
+    println!("{}", plan.day);
+    for (prayer, block) in plan.prayers.iter().zip(&plan.blocks) {
+        let mark = if prayer.marked { "●" } else { "○" };
+        let now = if prayer.current { "  ← now" } else { "" };
+        println!("{mark} {:<8}{}{now}", prayer.name, prayer.time);
+        for item in &block.items {
+            let tick = if item.state == State::Done { "x" } else { " " };
+            println!("    [{tick}] {}  {}", short(&item.id), item.title);
+        }
+    }
+    println!("  Sleep   {}", plan.sleep.time);
+    Ok(())
+}
+
+fn prayer_command(command: PrayerCommand) -> Result<(), String> {
+    let (mut store, config, now) = open_planner()?;
+    let (args, prayed) = match command {
+        PrayerCommand::Mark(args) => (args, true),
+        PrayerCommand::Unmark(args) => (args, false),
+    };
+    let prayer = parse_block(&args.prayer).map_err(|_| {
+        format!(
+            "unknown prayer {:?}; use fajr, dhuhr, asr, maghrib, or isha",
+            args.prayer
+        )
+    })?;
+    let date = optional_date(args.date.as_deref())?;
+    let mark = if prayed {
+        planner::mark(&mut store, &config, now, prayer, date)?
+    } else {
+        planner::unmark(&mut store, &config, now, prayer, date)?
+    };
+    if args.json {
+        json(&mark)
+    } else {
+        let verb = if prayed { "Marked" } else { "Unmarked" };
+        println!("{verb} {} on {}", prayer.name(), mark.day);
+        Ok(())
+    }
+}
+
+fn stats_command(args: StatsArgs) -> Result<(), String> {
+    let (store, config, now) = open_planner()?;
+    let (first, last) = match (args.from.as_deref(), args.to.as_deref()) {
+        (Some(from), Some(to)) => (parse_date(from)?, parse_date(to)?),
+        _ => {
+            let days = args.days.unwrap_or(30);
+            if !(1..=planner::MAX_HISTORY_DAYS).contains(&days) {
+                return Err(format!(
+                    "--days must be between 1 and {}",
+                    planner::MAX_HISTORY_DAYS
+                ));
+            }
+            let last = schedule::resolve(&config, now)?.day();
+            (last - Duration::days(days - 1), last)
+        }
+    };
+    let report = planner::stats(&store, &config, now, first, last)?;
+    if args.json {
+        return json(&report);
+    }
+    println!(
+        "{} to {}: prayers {}/{}",
+        report.from, report.to, report.marked_total, report.prayer_slots
+    );
+    for item in &report.items {
+        println!(
+            "  {}  {}/{} days",
+            item.title, item.done_days, item.planned_days
+        );
+    }
+    Ok(())
 }
 
 fn parse_date(value: &str) -> Result<NaiveDate, String> {

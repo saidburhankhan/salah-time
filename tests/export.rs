@@ -19,8 +19,10 @@ fn item(id: &str, updated_at: DateTime<Utc>) -> Item {
         title: "Read Quran".into(),
         block: BoundaryId::Fajr,
         repeat: Repeat::Daily,
+        weekdays: None,
         measure: Measure::Minutes,
         target: Some(20),
+        position: 0,
         day: day(),
         created_at: time(1),
         updated_at,
@@ -53,6 +55,7 @@ fn data(items: Vec<Item>, entries: Vec<Entry>) -> Export {
         exported_at: time(10),
         items,
         entries,
+        prayer_marks: Vec::new(),
     }
 }
 
@@ -157,4 +160,43 @@ fn parse_rejects_wrong_format_newer_version_and_oversize_input() {
     assert!(error.contains("newer than this salah"));
 
     assert!(export::parse(&vec![b' '; MAX_BYTES + 1]).is_err());
+}
+
+#[test]
+fn version_one_exports_still_import() {
+    // A v1 file has no prayer marks and no item position/weekdays.
+    let v1 = r#"{"format":"salah-export","version":1,"exported_at":"2026-11-20T10:00:00Z",
+        "items":[{"id":"old","title":"Old","block":"fajr","repeat":"daily","measure":"check",
+                  "target":null,"day":"2026-11-20","created_at":"2026-11-20T01:00:00Z",
+                  "updated_at":"2026-11-20T01:00:00Z","deleted_at":null}],
+        "entries":[]}"#;
+    let data = export::parse(v1.as_bytes()).unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    assert_eq!(export::import(&mut store, &data).unwrap().added, 1);
+    let old = store.item("old").unwrap().unwrap();
+    assert_eq!((old.position, old.weekdays), (0, None));
+}
+
+#[test]
+fn prayer_marks_round_trip_and_reject_bad_ids() {
+    use salah::item::PrayerMark;
+    let mark = PrayerMark {
+        id: PrayerMark::id_for(day(), BoundaryId::Asr),
+        day: day(),
+        prayer: BoundaryId::Asr,
+        marked_at: time(5),
+        created_at: time(5),
+        updated_at: time(5),
+        deleted_at: None,
+    };
+    let mut good = data(Vec::new(), Vec::new());
+    good.prayer_marks = vec![mark.clone()];
+    let bytes = serde_json::to_vec(&good).unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    export::import(&mut store, &export::parse(&bytes).unwrap()).unwrap();
+    assert_eq!(store.marks().unwrap(), [mark]);
+
+    let mut bad = good.clone();
+    bad.prayer_marks[0].id = "2026-11-20:fajr".into();
+    assert!(export::validate(&bad).is_err());
 }

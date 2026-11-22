@@ -4,7 +4,7 @@
 //! `planner`. Rows are never physically deleted: `deleted_at` tombstones let
 //! deletions travel through export/import and, later, sync.
 
-use crate::item::{Entry, EntryKind, Item, Measure, Repeat};
+use crate::item::{Entry, EntryKind, Item, Measure, PrayerMark, Repeat, Weekdays};
 use crate::schedule::BlockKey;
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -14,7 +14,8 @@ use std::time::Duration;
 
 /// Each entry upgrades the schema by one version. Never edit a released
 /// migration; append a new one.
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
     CREATE TABLE items (
         id          TEXT PRIMARY KEY,
         title       TEXT NOT NULL,
@@ -42,7 +43,22 @@ const MIGRATIONS: &[&str] = &["
     );
     CREATE INDEX entries_by_day ON entries(day);
     CREATE INDEX entries_by_item ON entries(item_id);
-"];
+",
+    "
+    ALTER TABLE items ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE items ADD COLUMN weekdays INTEGER;
+    CREATE TABLE prayer_marks (
+        id          TEXT PRIMARY KEY,
+        day         TEXT NOT NULL,
+        prayer      TEXT NOT NULL,
+        marked_at   TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL,
+        deleted_at  TEXT
+    );
+    CREATE INDEX prayer_marks_by_day ON prayer_marks(day);
+",
+];
 
 pub fn schema_version() -> i64 {
     MIGRATIONS.len() as i64
@@ -112,9 +128,23 @@ fn item_from(row: &Row) -> rusqlite::Result<Item> {
         title: row.get("title")?,
         block: parse_enum(&row.get::<_, String>("block")?)?,
         repeat: parse_enum::<Repeat>(&row.get::<_, String>("repeat")?)?,
+        weekdays: row.get::<_, Option<u8>>("weekdays")?.map(Weekdays),
         measure: parse_enum::<Measure>(&row.get::<_, String>("measure")?)?,
         target: row.get("target")?,
+        position: row.get("position")?,
         day: parse_day(&row.get::<_, String>("day")?)?,
+        created_at: parse_time(&row.get::<_, String>("created_at")?)?,
+        updated_at: parse_time(&row.get::<_, String>("updated_at")?)?,
+        deleted_at: parse_opt_time(row.get("deleted_at")?)?,
+    })
+}
+
+fn mark_from(row: &Row) -> rusqlite::Result<PrayerMark> {
+    Ok(PrayerMark {
+        id: row.get("id")?,
+        day: parse_day(&row.get::<_, String>("day")?)?,
+        prayer: parse_enum(&row.get::<_, String>("prayer")?)?,
+        marked_at: parse_time(&row.get::<_, String>("marked_at")?)?,
         created_at: parse_time(&row.get::<_, String>("created_at")?)?,
         updated_at: parse_time(&row.get::<_, String>("updated_at")?)?,
         deleted_at: parse_opt_time(row.get("deleted_at")?)?,
@@ -208,12 +238,13 @@ impl Store {
         self.conn
             .execute(
                 "INSERT INTO items (id, title, block, repeat, measure, target, day,
-                                    created_at, updated_at, deleted_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                                    created_at, updated_at, deleted_at, position, weekdays)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                  ON CONFLICT(id) DO UPDATE SET
                     title = excluded.title, block = excluded.block,
                     repeat = excluded.repeat, measure = excluded.measure,
                     target = excluded.target, day = excluded.day,
+                    position = excluded.position, weekdays = excluded.weekdays,
                     created_at = excluded.created_at, updated_at = excluded.updated_at,
                     deleted_at = excluded.deleted_at",
                 params![
@@ -227,6 +258,8 @@ impl Store {
                     time_text(item.created_at),
                     time_text(item.updated_at),
                     item.deleted_at.map(time_text),
+                    item.position,
+                    item.weekdays.map(|w| w.0),
                 ],
             )
             .map(|_| ())
@@ -261,6 +294,62 @@ impl Store {
             )
             .map(|_| ())
             .map_err(err)
+    }
+
+    pub fn put_mark(&self, mark: &PrayerMark) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO prayer_marks (id, day, prayer, marked_at, created_at,
+                                           updated_at, deleted_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(id) DO UPDATE SET
+                    day = excluded.day, prayer = excluded.prayer,
+                    marked_at = excluded.marked_at, created_at = excluded.created_at,
+                    updated_at = excluded.updated_at, deleted_at = excluded.deleted_at",
+                params![
+                    mark.id,
+                    mark.day.format("%Y-%m-%d").to_string(),
+                    enum_text(&mark.prayer),
+                    time_text(mark.marked_at),
+                    time_text(mark.created_at),
+                    time_text(mark.updated_at),
+                    mark.deleted_at.map(time_text),
+                ],
+            )
+            .map(|_| ())
+            .map_err(err)
+    }
+
+    pub fn mark(&self, id: &str) -> Result<Option<PrayerMark>, String> {
+        self.conn
+            .query_row("SELECT * FROM prayer_marks WHERE id = ?1", [id], mark_from)
+            .optional()
+            .map_err(err)
+    }
+
+    /// Every prayer mark, deleted ones included, oldest first.
+    pub fn marks(&self) -> Result<Vec<PrayerMark>, String> {
+        self.query(
+            "SELECT * FROM prayer_marks ORDER BY created_at, id",
+            [],
+            mark_from,
+        )
+    }
+
+    /// Prayer marks for days in the inclusive range.
+    pub fn marks_between(
+        &self,
+        first: NaiveDate,
+        last: NaiveDate,
+    ) -> Result<Vec<PrayerMark>, String> {
+        self.query(
+            "SELECT * FROM prayer_marks WHERE day BETWEEN ?1 AND ?2 ORDER BY day, id",
+            [
+                first.format("%Y-%m-%d").to_string(),
+                last.format("%Y-%m-%d").to_string(),
+            ],
+            mark_from,
+        )
     }
 
     pub fn item(&self, id: &str) -> Result<Option<Item>, String> {
@@ -344,9 +433,11 @@ mod tests {
             id: "item-1".into(),
             title: "Read Quran".into(),
             block: BoundaryId::Fajr,
-            repeat: Repeat::Daily,
+            repeat: Repeat::Weekly,
+            weekdays: Some(Weekdays::WORKWEEK),
             measure: Measure::Minutes,
             target: Some(20),
+            position: 3,
             day: day(),
             created_at: t(1),
             updated_at: t(1),
@@ -391,6 +482,40 @@ mod tests {
         item.updated_at = t(3);
         store.put_item(&item).unwrap();
         assert_eq!(store.items().unwrap(), [item]);
+    }
+
+    #[test]
+    fn prayer_marks_round_trip() {
+        let store = Store::open_in_memory().unwrap();
+        let mark = PrayerMark {
+            id: PrayerMark::id_for(day(), BoundaryId::Asr),
+            day: day(),
+            prayer: BoundaryId::Asr,
+            marked_at: t(10),
+            created_at: t(10),
+            updated_at: t(10),
+            deleted_at: None,
+        };
+        store.put_mark(&mark).unwrap();
+        assert_eq!(store.mark("2026-11-20:asr").unwrap(), Some(mark.clone()));
+        assert_eq!(store.marks_between(day(), day()).unwrap(), [mark]);
+    }
+
+    #[test]
+    fn a_version_one_database_upgrades_in_place() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        conn.execute(
+            "INSERT INTO items VALUES ('old', 'Old', 'fajr', 'daily', 'check', NULL,
+             '2026-11-20', '2026-11-20T01:00:00.000Z', '2026-11-20T01:00:00.000Z', NULL)",
+            [],
+        )
+        .unwrap();
+        let store = Store::init(conn).unwrap();
+        assert_eq!(store.version().unwrap(), schema_version());
+        let old = store.item("old").unwrap().unwrap();
+        assert_eq!((old.position, old.weekdays), (0, None));
     }
 
     #[test]

@@ -1,11 +1,16 @@
-use crate::item::{Entry, EntryKind, Item, validate_block, validate_title};
+use crate::day::BoundaryId;
+use crate::item::{
+    Entry, EntryKind, Item, PrayerMark, validate_block, validate_repeat, validate_title,
+};
 use crate::store::Store;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 pub const FORMAT: &str = "salah-export";
-pub const VERSION: u32 = 1;
+/// Version 2 added prayer marks and item position/weekdays; version 1 files
+/// still import because those fields default.
+pub const VERSION: u32 = 2;
 pub const MAX_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,6 +20,8 @@ pub struct Export {
     pub exported_at: DateTime<Utc>,
     pub items: Vec<Item>,
     pub entries: Vec<Entry>,
+    #[serde(default)]
+    pub prayer_marks: Vec<PrayerMark>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize)]
@@ -31,6 +38,7 @@ pub fn export(store: &Store, now: DateTime<Utc>) -> Result<Export, String> {
         exported_at: now,
         items: store.items()?,
         entries: store.entries()?,
+        prayer_marks: store.marks()?,
     })
 }
 
@@ -67,6 +75,8 @@ pub fn validate(data: &Export) -> Result<(), String> {
             return Err(format!("item {}: title must already be trimmed", item.id));
         }
         validate_block(item.block).map_err(|e| format!("item {}: {e}", item.id))?;
+        validate_repeat(item.repeat, item.weekdays)
+            .map_err(|e| format!("item {}: {e}", item.id))?;
         if item.target.is_some_and(|value| value < 0) {
             return Err(format!("item {}: target must not be negative", item.id));
         }
@@ -92,6 +102,17 @@ pub fn validate(data: &Export) -> Result<(), String> {
         {
             return Err(format!("entry {}: ended_at precedes started_at", entry.id));
         }
+    }
+    let mut mark_ids = HashSet::new();
+    for mark in &data.prayer_marks {
+        if !mark_ids.insert(mark.id.as_str()) {
+            return Err(format!("duplicate prayer mark id {:?}", mark.id));
+        }
+        if mark.prayer == BoundaryId::Sleep || mark.id != PrayerMark::id_for(mark.day, mark.prayer)
+        {
+            return Err(format!("prayer mark {:?} is invalid", mark.id));
+        }
+        validate_times("prayer mark", &mark.id, mark.created_at, mark.updated_at)?;
     }
     Ok(())
 }
@@ -134,6 +155,19 @@ pub fn import(store: &mut Store, data: &Export) -> Result<ImportSummary, String>
                 }
                 Some(current) if entry.updated_at > current.updated_at => {
                     store.put_entry(entry)?;
+                    summary.updated += 1;
+                }
+                Some(_) => summary.unchanged += 1,
+            }
+        }
+        for mark in &data.prayer_marks {
+            match store.mark(&mark.id)? {
+                None => {
+                    store.put_mark(mark)?;
+                    summary.added += 1;
+                }
+                Some(current) if mark.updated_at > current.updated_at => {
+                    store.put_mark(mark)?;
                     summary.updated += 1;
                 }
                 Some(_) => summary.unchanged += 1,
