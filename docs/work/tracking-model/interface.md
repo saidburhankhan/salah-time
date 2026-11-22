@@ -61,7 +61,7 @@ Removed: `entry.done`, `entry.undo`, `entry.log`, `timer.start`, `timer.stop`,
 Changed:
 - `item.add` / `item.edit`: `measure` and `target` are replaced by `project_id?` and
   `planned_minutes?` (`null` clears).
-- `day.get` row: `project` `{id,name,color}|null`, `planned_minutes`,
+- `day.get` row (see Review decisions for fulfilment): `project` `{id,name,color}|null`, `planned_minutes`,
   `actual_minutes`, `sessions: [SessionView]`, `done: bool`. Each block gets
   `capacity_minutes`, `planned_minutes`, `actual_minutes`. The day gets
   `fulfilment {planned_items, done_items, planned_minutes, actual_minutes}`.
@@ -120,3 +120,23 @@ are the source of truth for the frontends.
   It shows KPI tiles (minutes, active days, avg focus, fulfilment), a line chart
   per metric series, minutes per day against capacity, a project breakdown and a
   block breakdown.
+
+## Review decisions (orchestrator, 2026-11-22 22:5x)
+
+- **Day capacity** excludes the Night block (sleep→Fajr). Per-block capacity still lists Night.
+- **Fulfilment** counts only minutes logged against that day's plan lines (`actual_minutes`).
+  Sessions without a plan line are reported separately as `unplanned_minutes` on the day,
+  on each block, and in `stats.days[]`. `fulfilment_ratio` = plan-line minutes / planned minutes,
+  capped at 1, or `null` when nothing was planned.
+- **Snapshots:** a day's plan and blocks are frozen once the day is past. "Written" is
+  marked explicitly, so an empty plan is not the same as a missing one. A past day that was never
+  materialised is built once from the items that existed then (`created_at` ≤ the day's end) and the
+  item's project at that time, then frozen. `day_plan` carries `project_id`. Days ≥ today are
+  computed live from the current config/items, never stored ahead. The prayer times shown for a past day
+  come from its stored `day_blocks`.
+- **Items** cannot start before today (no back-dated plans).
+- **Archived metrics** are no longer required or prompted. Existing values of an archived
+  metric stay valid on `session.edit`; new values for it are rejected.
+- **Timer minutes** are clamped to the end of the session's day (the Sleep boundary), at most 1440.
+- **Stats** count only finished sessions in `sessions` totals.
+- **op_id:** an empty op_id is rejected; a replay with a different method is a `validation` error.
