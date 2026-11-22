@@ -37,7 +37,11 @@ void Backend::enqueue(const QStringList &args, std::function<void(const QJsonDoc
 }
 
 void Backend::startNext() {
-    if (m_running || m_queue.isEmpty()) return;
+    if (m_running) return;
+    if (m_queue.isEmpty()) {
+        if (m_refreshPending) { m_refreshPending = false; reload(); }
+        return;
+    }
     m_current = m_queue.dequeue();
     m_running = true;
     m_process.setProgram(m_program);
@@ -79,7 +83,7 @@ void Backend::finish(bool timedOut) {
     m_running = false;
     emit requestFinished(args, handled);
     emit changed();
-    if (reloadAfter) reload();
+    if (reloadAfter) m_refreshPending = true;
     startNext();
 }
 
@@ -88,38 +92,44 @@ void Backend::dismissError() { m_error.clear(); emit changed(); }
 
 QVariantMap Backend::normalizedObject(const QJsonObject &object) { return object.toVariantMap(); }
 
+bool Backend::setJsonModel(QVariantMap &target, QByteArray &previous, const QJsonDocument &doc) {
+    if (!doc.isObject()) return false;
+    const QByteArray json = doc.toJson(QJsonDocument::Compact);
+    if (json == previous) return false;
+    previous = json;
+    target = normalizedObject(doc.object());
+    return true;
+}
+
 void Backend::reload() {
     QStringList args{"day"};
     if (m_selected.isValid()) args << "--date" << selectedDay();
     args << "--json";
     enqueue(args, [this](const QJsonDocument &doc) {
         if (!doc.isObject()) { fail(tr("Salah returned invalid day data.")); return; }
-        m_dayPlan = normalizedObject(doc.object());
+        const bool modelChanged = setJsonModel(m_dayPlan, m_dayJson, doc);
         const QDate cliDay = QDate::fromString(doc.object().value("day").toString(), Qt::ISODate);
         if (cliDay.isValid()) {
             m_selected = cliDay;
             if (doc.object().value("is_today").toBool()) m_today = cliDay;
         }
-        emit changed();
+        if (modelChanged) { ++m_dayRevision; emit changed(); }
     });
     enqueue({"stats", "--days", "14", "--json"}, [this](const QJsonDocument &doc) {
-        if (doc.isObject()) m_routinesStats = normalizedObject(doc.object());
+        if (doc.isObject()) { if (setJsonModel(m_routinesStats, m_routinesJson, doc)) emit changed(); }
         else fail(tr("Salah returned invalid routine data."));
-        emit changed();
     });
     enqueue({"config", "show"}, [this](const QJsonDocument &doc) {
-        if (doc.isObject()) m_config = normalizedObject(doc.object());
+        if (doc.isObject()) { if (setJsonModel(m_config, m_configJson, doc)) emit changed(); }
         else fail(tr("Salah returned invalid configuration data."));
-        emit changed();
     });
 }
 
 void Backend::loadStats(int days) {
     if (days != 7 && days != 30) days = 30;
     enqueue({"stats", "--days", QString::number(days), "--json"}, [this](const QJsonDocument &doc) {
-        if (doc.isObject()) m_stats = normalizedObject(doc.object());
+        if (doc.isObject()) { if (setJsonModel(m_stats, m_statsJson, doc)) emit changed(); }
         else fail(tr("Salah returned invalid statistics data."));
-        emit changed();
     });
 }
 
@@ -137,14 +147,37 @@ void Backend::parseQuick(const QString &text) {
 }
 
 void Backend::addQuick(const QString &text, const QString &block) {
+    insertPendingItem({{"id",QString("pending-%1").arg(QDateTime::currentMSecsSinceEpoch())},{"title",text},{"block",block.isEmpty()?QString("fajr"):block},{"repeat","none"},{"measure","check"},{"state","open"},{"pending",true}});
     QStringList args{"item", "add", "--json", "--quick"};
     if (!block.isEmpty()) args << "--block" << block;
     if (m_selected.isValid() && m_selected != m_today) args << "--date" << selectedDay();
     args << "--" << text; enqueue(args, {}, true);
 }
 
+void Backend::mutateItem(const QString &id, const std::function<void(QVariantMap &)> &change) {
+    QVariantList blocks = m_dayPlan.value("blocks").toList();
+    bool found = false;
+    for (int b = 0; b < blocks.size(); ++b) {
+        QVariantMap block = blocks.at(b).toMap();
+        QVariantList items = block.value("items").toList();
+        for (int i = 0; i < items.size(); ++i) {
+            QVariantMap item = items.at(i).toMap();
+            if (item.value("id").toString() != id) continue;
+            change(item); items[i] = item; block["items"] = items; blocks[b] = block; found = true; break;
+        }
+        if (found) break;
+    }
+    if (found) { m_dayPlan["blocks"] = blocks; m_dayJson.clear(); ++m_dayRevision; emit changed(); }
+}
+
+void Backend::insertPendingItem(const QVariantMap &source) {
+    QVariantMap item=source; const QString target=item.value("block","fajr").toString(); QVariantList blocks=m_dayPlan.value("blocks").toList();
+    for(int b=0;b<blocks.size();++b){QVariantMap bm=blocks[b].toMap();if(bm.value("start").toString()!=target)continue;QVariantList items=bm.value("items").toList();item["position"]=items.size();items.append(item);bm["items"]=items;blocks[b]=bm;m_dayPlan["blocks"]=blocks;m_dayJson.clear();++m_dayRevision;emit changed();break;}
+}
+
 void Backend::saveItem(const QVariantMap &item) {
     const QString id = item.value("id").toString();
+    if(id.isEmpty()){QVariantMap pending=item;pending["id"]=QString("pending-%1").arg(QDateTime::currentMSecsSinceEpoch());pending["state"]="open";pending["pending"]=true;insertPendingItem(pending);}else mutateItem(id,[item](QVariantMap &x){for(auto i=item.cbegin();i!=item.cend();++i)x[i.key()]=i.value();});
     QStringList args{"item", id.isEmpty() ? "add" : "edit", "--json"};
     if (!id.isEmpty()) args << id << "--title" << item.value("title").toString();
     args << "--block" << item.value("block", "fajr").toString() << "--repeat" << item.value("repeat", "none").toString();
@@ -160,13 +193,26 @@ void Backend::saveItem(const QVariantMap &item) {
     enqueue(args, {}, true);
 }
 
-void Backend::removeItem(const QString &id) { enqueue({"item", "remove", "--json", id}, {}, true); }
-void Backend::moveItem(const QString &id, const QString &block, int index) { enqueue({"item", "move", "--json", id, "--block", block, "--index", QString::number(index)}, {}, true); }
-void Backend::toggleDone(const QString &id, const QString &state) { QStringList args{"item", state == "done" ? "undo" : "done", "--json", id}; args << dateArguments(); enqueue(args, {}, true); }
-void Backend::logOne(const QString &id) { QStringList args{"item", "log", "--json", id, "1"}; args << dateArguments(); enqueue(args, {}, true); }
-void Backend::toggleTimer(const QString &id, bool running) { enqueue({"item", running ? "stop" : "start", "--json", id}, {}, true); }
-void Backend::togglePrayer(const QString &prayer, bool marked) { QStringList args{"prayer", marked ? "unmark" : "mark", "--json", prayer}; args << dateArguments(); enqueue(args, {}, true); }
-void Backend::setSleepTime(const QString &time) { enqueue({"config", "set", "--sleep-time", time}, {}, true, true); }
+void Backend::removeItem(const QString &id) { QVariantList blocks=m_dayPlan.value("blocks").toList();bool removed=false;for(int b=0;b<blocks.size();++b){QVariantMap bm=blocks[b].toMap();QVariantList items=bm.value("items").toList();for(int i=0;i<items.size();++i)if(items[i].toMap().value("id").toString()==id){items.removeAt(i);bm["items"]=items;blocks[b]=bm;removed=true;break;}if(removed)break;}if(removed){m_dayPlan["blocks"]=blocks;m_dayJson.clear();++m_dayRevision;emit changed();}enqueue({"item", "remove", "--json", id}, {}, true); }
+void Backend::moveItem(const QString &id, const QString &block, int index) {
+    const int requestedIndex = index;
+    QVariantList blocks = m_dayPlan.value("blocks").toList(); QVariantMap moved; int sourceBlock = -1;
+    for (int b=0;b<blocks.size();++b) { QVariantMap bm=blocks[b].toMap(); QVariantList items=bm.value("items").toList(); for(int i=0;i<items.size();++i) if(items[i].toMap().value("id").toString()==id){moved=items.takeAt(i).toMap();bm["items"]=items;blocks[b]=bm;sourceBlock=b;break;} if(sourceBlock>=0)break; }
+    for(int b=0;b<blocks.size()&&!moved.isEmpty();++b){QVariantMap bm=blocks[b].toMap();if(bm.value("start").toString()!=block)continue;QVariantList items=bm.value("items").toList();index=qBound(0,index,items.size());moved["block"]=block;items.insert(index,moved);for(int i=0;i<items.size();++i){QVariantMap x=items[i].toMap();x["position"]=i;items[i]=x;}bm["items"]=items;blocks[b]=bm;}
+    if(!moved.isEmpty()){m_dayPlan["blocks"]=blocks;m_dayJson.clear();++m_dayRevision;emit changed();}
+    enqueue({"item", "move", "--json", id, "--block", block, "--index", QString::number(requestedIndex)}, {}, true);
+}
+void Backend::toggleDone(const QString &id, const QString &state) { mutateItem(id,[state](QVariantMap &x){x["state"]=state=="done"?"open":"done";}); QStringList args{"item", state == "done" ? "undo" : "done", "--json", id}; args << dateArguments(); enqueue(args, {}, true); }
+void Backend::logOne(const QString &id) { mutateItem(id,[](QVariantMap &x){x["count"]=x.value("count").toInt()+1;}); QStringList args{"item", "log", "--json", id, "1"}; args << dateArguments(); enqueue(args, {}, true); }
+void Backend::toggleTimer(const QString &id, bool running) { mutateItem(id,[running](QVariantMap &x){x["timer_started_at"]=running?QVariant():QDateTime::currentDateTimeUtc().toString(Qt::ISODate);}); enqueue({"item", running ? "stop" : "start", "--json", id}, {}, true); }
+void Backend::togglePrayer(const QString &prayer, bool marked) { QVariantList prayers=m_dayPlan.value("prayers").toList();for(int i=0;i<prayers.size();++i){QVariantMap p=prayers[i].toMap();if(p.value("id").toString()==prayer){p["marked"]=!marked;prayers[i]=p;m_dayPlan["prayers"]=prayers;m_dayJson.clear();++m_dayRevision;emit changed();break;}} QStringList args{"prayer", marked ? "unmark" : "mark", "--json", prayer}; args << dateArguments(); enqueue(args, {}, true); }
+void Backend::setSleepTime(const QString &time) { m_config["sleep_time"]=time;QVariantMap sleep=m_dayPlan.value("sleep").toMap();sleep["time"]=time;m_dayPlan["sleep"]=sleep;m_configJson.clear();m_dayJson.clear();++m_dayRevision;emit changed();enqueue({"config", "set", "--sleep-time", time}, {}, true, true); }
+
+QVariantMap Backend::moveDestination(const QVariantList &rows, int gapIndex) const {
+    gapIndex = qBound(0, gapIndex, rows.size()); QString block; int index = 0;
+    for (int i=0;i<gapIndex;++i) { const QVariantMap row=rows.at(i).toMap(); const QString kind=row.value("kind").toString(); if(kind=="header"){block=row.value("block").toString();index=0;} else if(kind=="item"&&row.value("block").toString()==block) ++index; }
+    return {{"block",block},{"index",index}};
+}
 
 QString Backend::hijriHeader(const QString &isoDate) const {
     const QDate date = QDate::fromString(isoDate, Qt::ISODate); if (!date.isValid()) return {};

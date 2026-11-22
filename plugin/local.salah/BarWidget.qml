@@ -29,6 +29,8 @@ BarWidget {
   property string actionError: ""
   property var pendingActions: []
   property string quickAddBlock: ""
+  property string lastStatusText: ""
+  property int optimisticOpenDelta: 0
 
   readonly property string nextName: report && report.next
     ? String(report.next.name || "")
@@ -45,12 +47,13 @@ BarWidget {
     ? report.current_block.sleeping === true
     : false
   readonly property var planner: report && report.planner ? report.planner : null
-  readonly property int openCount: planner ? (Number(planner.open) || 0) : 0
+  readonly property int openCount: Math.max(0,
+    (planner ? (Number(planner.open) || 0) : 0) + optimisticOpenDelta)
   readonly property string displayText: localizedNextName !== ""
     ? (sleeping
         ? strings.t("bar.sleeping") + "  " + localizedNextName + " " + remainingShort
         : localizedNextName + "  " + remainingShort + (openCount > 0 ? "  · " + openCount : ""))
-    : (firstLoad ? strings.t("bar.loading") : "☾ —")
+    : (firstLoad ? strings.t("bar.loading") : strings.t("bar.unavailableShort"))
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color mutedForeground: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
   readonly property bool opened: panel.open
@@ -71,12 +74,16 @@ BarWidget {
   }
 
   function refresh() {
+    // Preserve optimistic UI while commands are queued; the last command
+    // schedules the one authoritative refresh for the whole burst.
+    if (actionProcess.running || pendingActions.length > 0) return
     if (!statusProcess.running) statusProcess.running = true
   }
 
   // Planner actions run one at a time, in order, as fixed argument lists.
   // Titles follow `--` so text starting with "-" is never read as a flag.
   function runAction(args) {
+    if (!actionProcess.running && pendingActions.length === 0) actionError = ""
     pendingActions = pendingActions.concat([["salah"].concat(args)])
     runNextAction()
   }
@@ -93,6 +100,9 @@ BarWidget {
     if (text === "") return
     var args = ["item", "add", "--json", "--quick"]
     if (quickAddBlock !== "") args = args.concat(["--block", quickAddBlock])
+    var content = panel.loadedContent
+    if (content) content.addPendingItem(text, quickAddBlock)
+    optimisticOpenDelta++
     runAction(args.concat(["--", text]))
   }
 
@@ -110,6 +120,7 @@ BarWidget {
   }
 
   function prayerName(id, fallback) {
+    if (String(id || "") === "night") return strings.t("block.night")
     var key = "prayer." + String(id || "")
     var translated = strings.t(key)
     return translated === key ? String(fallback || id || "") : translated
@@ -121,8 +132,9 @@ BarWidget {
   }
 
   function togglePrayer(prayer) {
-    var command = isPrayerMarked(prayer.id) ? "unmark" : "mark"
-    runAction(["prayer", command, "--json", String(prayer.id)])
+    var content = panel.loadedContent
+    var marked = content ? content.togglePrayerOptimistic(String(prayer.id)) : !isPrayerMarked(prayer.id)
+    runAction(["prayer", marked ? "mark" : "unmark", "--json", String(prayer.id)])
   }
 
   function itemsForBlock(block, source) {
@@ -142,25 +154,27 @@ BarWidget {
   }
 
   function toggleItem(row) {
-    runAction(["item", row.state === "done" ? "undo" : "done", "--json", String(row.id)])
+    var wasDone = row.state === "done"
+    var content = panel.loadedContent
+    if (content) content.patchItem(String(row.id), { "state": wasDone ? "open" : "done" })
+    optimisticOpenDelta += wasDone ? 1 : -1
+    runAction(["item", wasDone ? "undo" : "done", "--json", String(row.id)])
   }
 
   function toggleTimer(row) {
-    if (row.timer_started_at) runAction(["item", "stop", "--json"])
+    var running = String(row.timer_started_at || "") !== ""
+    var content = panel.loadedContent
+    if (content) content.patchItem(String(row.id), {
+      "timer_started_at": running ? "" : new Date().toISOString()
+    })
+    if (running) runAction(["item", "stop", "--json"])
     else runAction(["item", "start", "--json", String(row.id)])
   }
 
   function logOne(row) {
+    var content = panel.loadedContent
+    if (content) content.patchItem(String(row.id), { "count": (Number(row.count) || 0) + 1 })
     runAction(["item", "log", "--json", String(row.id), "1"])
-  }
-
-  function setSleepTime(value) {
-    var text = String(value || "").trim()
-    if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(text)) {
-      actionError = strings.t("panel.sleepFormat")
-      return
-    }
-    runAction(["config", "set", "--sleep-time", text])
   }
 
   function itemDetail(row) {
@@ -203,10 +217,23 @@ BarWidget {
 
   function parseReport(raw) {
     try {
-      var parsed = JSON.parse(String(raw || "").trim())
+      var text = String(raw || "").trim()
+      if (text === lastStatusText) {
+        firstLoad = false
+        return
+      }
+      var parsed = JSON.parse(text)
       if (!parsed || !parsed.next || !(parsed.prayers instanceof Array))
         throw new Error("missing next/prayers fields")
+      if (actionProcess.running || pendingActions.length > 0) {
+        firstLoad = false
+        return
+      }
       report = parsed
+      lastStatusText = text
+      optimisticOpenDelta = 0
+      var content = panel.loadedContent
+      if (content) content.syncTimeline(parsed)
       remainingSeconds = Math.max(0, Number(parsed.next.remaining_seconds) || 0)
       errorMessage = ""
     } catch (error) {
@@ -318,13 +345,15 @@ BarWidget {
       waitForEnd: true
     }
     onExited: function(exitCode) {
-      if (exitCode === 0) root.actionError = ""
-      else {
+      if (exitCode !== 0) {
         var detail = String(actionStderr.text || "").trim().replace(/[\r\n]+/g, " ")
         root.actionError = detail === "" ? strings.t("panel.commandFailed") : detail.slice(0, 240)
+        // The next status result must reconcile the optimistic edit even when
+        // the backend JSON is byte-for-byte equal to the previous result.
+        root.lastStatusText = ""
       }
-      root.refresh()
       root.runNextAction()
+      if (!actionProcess.running && root.pendingActions.length === 0) root.refresh()
     }
   }
 
@@ -352,7 +381,7 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.vertical ? "☾" : root.displayText
+    text: root.vertical ? strings.t("bar.symbol") : root.displayText
     labelVisible: true
     horizontalMargin: 8.75
     verticalPadding: 8.75
@@ -379,16 +408,239 @@ BarWidget {
     content: PanelKeyCatcher {
       id: keyCatcher
       property alias quickField: quickField
+      property alias timelineModel: timelineModel
+      property alias timelineList: timelineList
+      property string dragKey: ""
+      property var dragSnapshot: []
+      property real dragPointerY: 0
+      property string dragTitle: ""
       anchors.fill: parent
       implicitHeight: Math.min(dayColumn.implicitHeight,
         Math.max(Style.space(240), panel.availableCardHeight - panel.padding * 2))
-      blocked: quickField.activeFocus || sleepField.activeFocus
-      onCloseRequested: root.close()
+      blocked: quickField.activeFocus
+      onCloseRequested: {
+        if (dragKey !== "") cancelDrag()
+        else root.close()
+      }
       onTabRequested: function(direction) {
         if (root.bar && typeof root.bar.switchPanelFrom === "function")
           root.bar.switchPanelFrom(root, direction)
       }
       onActivateRequested: root.refresh()
+
+      function baseRow(type, key, block) {
+        return {
+          "rowType": type, "rowKey": key, "block": block || "", "itemId": "",
+          "title": "", "time": "", "state": "", "measure": "check", "target": 0,
+          "minutes": 0, "count": 0, "repeat": "none", "timer_started_at": "",
+          "current": false, "marked": false, "passed": false, "pending": false
+        }
+      }
+
+      function blockName(block, fallback) {
+        return root.prayerName(block, fallback || block)
+      }
+
+      function desiredRows(status) {
+        var result = []
+        var plan = status && status.planner ? status.planner : null
+        var items = plan && plan.items ? plan.items : []
+        var prayers = status && status.prayers ? status.prayers : []
+        var blocks = ["night", "fajr", "dhuhr", "asr", "maghrib", "isha"]
+        var currentBlock = plan ? String(plan.block || "") : ""
+        if (currentBlock === "" && status && status.current_block && status.current_block.start)
+          currentBlock = String(status.current_block.start.id || "")
+        for (var b = 0; b < blocks.length; b++) {
+          var block = blocks[b]
+          var prayer = null
+          for (var p = 0; p < prayers.length; p++)
+            if (String(prayers[p].id || "") === block) prayer = prayers[p]
+          var header = baseRow("header", "header:" + block, block)
+          header.title = blockName(block, prayer ? prayer.name : block)
+          header.time = block === "night"
+            ? String((plan && (plan.night_start || plan.sleep_time))
+                || status.night_start || status.sleep_time || "")
+            : String(prayer ? prayer.time || "" : "")
+          header.current = currentBlock === block
+          header.marked = block !== "night" && root.isPrayerMarked(block)
+          header.passed = prayer ? prayer.passed === true : false
+          result.push(header)
+
+          var blockItems = root.itemsForBlock(block, items)
+          for (var i = 0; i < blockItems.length; i++) {
+            var source = blockItems[i]
+            var item = baseRow("item", "item:" + String(source.id), block)
+            item.itemId = String(source.id || "")
+            item.title = String(source.title || "")
+            item.state = String(source.state || "open")
+            item.measure = String(source.measure || "check")
+            item.target = Number(source.target) || 0
+            item.minutes = Number(source.minutes) || 0
+            item.count = Number(source.count) || 0
+            item.repeat = String(source.repeat || "none")
+            item.timer_started_at = String(source.timer_started_at || "")
+            result.push(item)
+          }
+          var add = baseRow("add", "add:" + block, block)
+          add.title = strings.t("panel.addTo").arg(header.title)
+          result.push(add)
+          if (block === "fajr" && root.boundary("sunrise")) {
+            var sunrise = baseRow("marker", "marker:sunrise", block)
+            sunrise.title = strings.t("boundary.sunrise")
+            sunrise.time = String(root.boundary("sunrise").time || "")
+            result.push(sunrise)
+          }
+        }
+        var sleep = baseRow("marker", "marker:sleep", "isha")
+        sleep.title = strings.t("boundary.sleep")
+        var sleepBoundary = root.boundary("sleep")
+        sleep.time = String(sleepBoundary ? sleepBoundary.time || "" : status.sleep_time || "")
+        result.push(sleep)
+        return result
+      }
+
+      function indexOfKey(key) {
+        for (var i = 0; i < timelineModel.count; i++)
+          if (timelineModel.get(i).rowKey === key) return i
+        return -1
+      }
+
+      function syncTimeline(status) {
+        var desired = desiredRows(status)
+        for (var i = 0; i < desired.length; i++) {
+          var found = indexOfKey(desired[i].rowKey)
+          if (found < 0) timelineModel.insert(i, desired[i])
+          else {
+            if (found !== i) timelineModel.move(found, i, 1)
+            var row = desired[i]
+            for (var role in row)
+              if (timelineModel.get(i)[role] !== row[role]) timelineModel.setProperty(i, role, row[role])
+          }
+        }
+        for (var tail = timelineModel.count - 1; tail >= desired.length; tail--)
+          timelineModel.remove(tail)
+      }
+
+      function patchItem(id, changes) {
+        var index = indexOfKey("item:" + id)
+        if (index < 0) return
+        for (var role in changes) timelineModel.setProperty(index, role, changes[role])
+      }
+
+      function togglePrayerOptimistic(id) {
+        var index = indexOfKey("header:" + id)
+        if (index < 0) return false
+        var marked = !timelineModel.get(index).marked
+        timelineModel.setProperty(index, "marked", marked)
+        return marked
+      }
+
+      function addPendingItem(title, requestedBlock) {
+        var block = String(requestedBlock || "")
+        if (block === "") block = root.planner ? String(root.planner.block || "") : ""
+        if (["night", "fajr", "dhuhr", "asr", "maghrib", "isha"].indexOf(block) < 0)
+          block = "fajr"
+        var addIndex = indexOfKey("add:" + block)
+        if (addIndex < 0) return
+        var pending = baseRow("item", "pending:" + Date.now(), block)
+        pending.title = title
+        pending.itemId = pending.rowKey
+        pending.pending = true
+        timelineModel.insert(addIndex, pending)
+      }
+
+      function beginDrag(key, title, pointerY) {
+        if (dragKey !== "" || key.indexOf("item:") !== 0) return
+        dragSnapshot = []
+        for (var i = 0; i < timelineModel.count; i++) dragSnapshot.push(timelineModel.get(i).rowKey)
+        dragKey = key
+        dragTitle = title
+        dragPointerY = pointerY
+        timelineList.forceActiveFocus()
+      }
+
+      function moveDrag(pointerY) {
+        if (dragKey === "") return
+        dragPointerY = Math.max(0, Math.min(timelineList.contentHeight, pointerY))
+        var from = indexOfKey(dragKey)
+        var hit = timelineList.indexAt(Style.space(10), dragPointerY)
+        if (from < 0 || hit < 0) return
+        var hitRow = timelineModel.get(hit)
+        var slot = hit
+        var delegate = timelineList.itemAtIndex(hit)
+        if (hitRow.rowType === "header") slot = hit + 1
+        else if (hitRow.rowType === "item" && delegate && dragPointerY > delegate.y + delegate.height / 2) slot = hit + 1
+        else if (hitRow.rowType === "marker") {
+          while (slot > 0 && timelineModel.get(slot).rowType === "marker") slot--
+        }
+        var target = slot > from ? slot - 1 : slot
+        if (target !== from && target >= 0 && target < timelineModel.count)
+          timelineModel.move(from, target, 1)
+      }
+
+      function restoreDragOrder() {
+        for (var i = 0; i < dragSnapshot.length; i++) {
+          var found = indexOfKey(dragSnapshot[i])
+          if (found >= 0 && found !== i) timelineModel.move(found, i, 1)
+        }
+      }
+
+      function cancelDrag() {
+        if (dragKey === "") return
+        restoreDragOrder()
+        dragKey = ""
+        dragSnapshot = []
+      }
+
+      function finishDrag(inside) {
+        if (dragKey === "") return
+        if (!inside) {
+          cancelDrag()
+          return
+        }
+        var itemIndex = indexOfKey(dragKey)
+        var block = ""
+        var blockIndex = 0
+        for (var i = itemIndex - 1; i >= 0; i--) {
+          var row = timelineModel.get(i)
+          if (row.rowType === "header") { block = row.block; break }
+          if (row.rowType === "item") blockIndex++
+        }
+        if (block === "") { cancelDrag(); return }
+        var id = timelineModel.get(itemIndex).itemId
+        timelineModel.setProperty(itemIndex, "block", block)
+        dragKey = ""
+        dragSnapshot = []
+        root.runAction(["item", "move", "--json", id, "--block", block, "--index", String(blockIndex)])
+      }
+
+      ListModel {
+        id: timelineModel
+        dynamicRoles: true
+      }
+
+      Timer {
+        interval: 16
+        repeat: true
+        running: keyCatcher.dragKey !== ""
+        onTriggered: {
+          var edge = Style.space(40)
+          var viewportY = flatTimeline.y + keyCatcher.dragPointerY - dayScroll.contentY
+          var delta = 0
+          if (viewportY < edge) delta = -Math.min(Style.space(8), edge - viewportY)
+          else if (viewportY > dayScroll.height - edge)
+            delta = Math.min(Style.space(8), viewportY - (dayScroll.height - edge))
+          var nextY = Math.max(0, Math.min(dayScroll.contentHeight - dayScroll.height,
+            dayScroll.contentY + delta))
+          var applied = nextY - dayScroll.contentY
+          if (applied !== 0) {
+            dayScroll.contentY = nextY
+            keyCatcher.moveDrag(keyCatcher.dragPointerY + applied)
+          }
+        }
+      }
+
+      Component.onCompleted: if (root.report) syncTimeline(root.report)
 
       Flickable {
         id: dayScroll
@@ -427,7 +679,8 @@ BarWidget {
               Text {
                 width: parent.width
                 textFormat: Text.PlainText
-                text: root.prayerName(root.report && root.report.next ? root.report.next.id : "", root.nextName) || "—"
+                text: root.prayerName(root.report && root.report.next ? root.report.next.id : "", root.nextName)
+                  || strings.t("panel.noTimeSymbol")
                 color: root.foreground
                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                 font.pixelSize: Style.font.display
@@ -450,7 +703,7 @@ BarWidget {
               anchors.right: parent.right
               anchors.verticalCenter: heroColumn.verticalCenter
               textFormat: Text.PlainText
-              text: root.nextTime || "—"
+              text: root.nextTime || strings.t("panel.noTimeSymbol")
               color: root.foreground
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.displayLarge
@@ -511,60 +764,105 @@ BarWidget {
             foreground: root.foreground
           }
 
-          Column {
-            id: timeline
+          Item {
+            id: flatTimeline
             visible: root.report !== null
             width: parent.width
-            spacing: 0
+            height: timelineList.contentHeight
 
-            Repeater {
-              model: root.report ? (root.report.prayers || []).filter(function(row) {
-                return ["fajr", "dhuhr", "asr", "maghrib", "isha"].indexOf(String(row.id || "")) >= 0
-              }) : []
+            ListView {
+              id: timelineList
+              anchors.fill: parent
+              interactive: false
+              model: timelineModel
+              clip: false
+              focus: keyCatcher.dragKey !== ""
 
-              Column {
-                id: prayerBlock
-                required property var modelData
-                readonly property bool current: !root.sleeping && root.report
-                  && root.report.current_block
-                  && String(root.report.current_block.start.id || "") === String(modelData.id || "")
-                readonly property bool marked: root.isPrayerMarked(modelData.id)
-                readonly property var blockRows: root.itemsForBlock(modelData.id)
-                width: timeline.width
-                spacing: Style.space(2)
-                opacity: root.sleeping || (modelData.passed && !current) ? 0.58 : 1
+              move: Transition {
+                NumberAnimation {
+                  properties: "y"
+                  duration: Style.duration(120)
+                  easing.type: Easing.OutCubic
+                }
+              }
+              displaced: Transition {
+                NumberAnimation {
+                  properties: "y"
+                  duration: Style.duration(120)
+                  easing.type: Easing.OutCubic
+                }
+              }
+
+              Keys.onEscapePressed: function(event) {
+                if (keyCatcher.dragKey !== "") {
+                  keyCatcher.cancelDrag()
+                  event.accepted = true
+                }
+              }
+
+              delegate: Item {
+                id: flatRow
+                required property int index
+                required property string rowType
+                required property string rowKey
+                required property string block
+                required property string itemId
+                required property string title
+                required property string time
+                required property string state
+                required property string measure
+                required property int target
+                required property int minutes
+                required property int count
+                required property string repeat
+                required property string timer_started_at
+                required property bool current
+                required property bool marked
+                required property bool passed
+                required property bool pending
+                readonly property bool dragging: keyCatcher.dragKey === rowKey
+                readonly property bool done: state === "done"
+                readonly property var itemData: ({
+                  "id": itemId, "title": title, "block": block, "state": state,
+                  "measure": measure, "target": target, "minutes": minutes,
+                  "count": count, "repeat": repeat, "timer_started_at": timer_started_at
+                })
+                width: ListView.view.width
+                height: rowType === "header" ? Style.space(40)
+                  : (rowType === "item" ? Style.space(38)
+                    : (rowType === "marker" ? Style.space(24) : Style.space(27)))
+                opacity: dragging ? 0 : (pending ? 0.5 : (passed && !current ? 0.58 : 1))
 
                 Rectangle {
-                  width: parent.width
-                  height: Style.space(40)
+                  visible: flatRow.rowType === "header"
+                  anchors.fill: parent
                   radius: Style.cornerRadius
-                  color: prayerBlock.current
+                  color: flatRow.current
                     ? Style.selectedFillFor(root.foreground, Commons.Color.accent)
-                    : (prayerHover.containsMouse
+                    : (headerHover.containsMouse
                         ? Style.hoverFillFor(root.foreground, Commons.Color.accent)
                         : "transparent")
 
                   Rectangle {
                     id: prayerCircle
+                    visible: flatRow.block !== "night"
                     anchors.left: parent.left
                     anchors.leftMargin: Style.space(8)
                     anchors.verticalCenter: parent.verticalCenter
                     width: Style.space(18)
                     height: width
                     radius: width / 2
-                    color: prayerBlock.marked
-                      ? Style.selectedStateColor(root.foreground, Commons.Color.accent)
-                      : "transparent"
+                    color: flatRow.marked
+                      ? Style.selectedStateColor(root.foreground, Commons.Color.accent) : "transparent"
                     border.width: Style.spacing.hairline
-                    border.color: prayerBlock.marked
-                      ? Style.selectedStateColor(root.foreground, Commons.Color.accent)
-                      : root.foreground
+                    border.color: flatRow.marked
+                      ? Style.selectedStateColor(root.foreground, Commons.Color.accent) : root.foreground
 
                     Text {
-                      visible: prayerBlock.marked
+                      visible: flatRow.marked
                       anchors.centerIn: parent
                       textFormat: Text.PlainText
-                      text: "✓"
+                      text: strings.t("panel.checkSymbol")
                       color: Commons.Color.background
                       font.family: root.bar ? root.bar.fontFamily : Style.font.family
                       font.pixelSize: Style.font.caption
@@ -575,14 +873,14 @@ BarWidget {
                       anchors.fill: parent
                       anchors.margins: -Style.space(6)
                       cursorShape: Qt.PointingHandCursor
-                      onClicked: root.togglePrayer(prayerBlock.modelData)
+                      onClicked: root.togglePrayer({ "id": flatRow.block })
                     }
                   }
 
                   MouseArea {
-                    id: prayerHover
-                    anchors.left: prayerCircle.right
-                    anchors.right: addBlockButton.left
+                    id: headerHover
+                    anchors.left: flatRow.block === "night" ? parent.left : prayerCircle.right
+                    anchors.right: parent.right
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     hoverEnabled: true
@@ -590,15 +888,15 @@ BarWidget {
                   }
 
                   Text {
-                    anchors.left: prayerCircle.right
-                    anchors.leftMargin: Style.space(10)
+                    anchors.left: parent.left
+                    anchors.leftMargin: flatRow.block === "night" ? Style.space(8) : Style.space(36)
                     anchors.verticalCenter: parent.verticalCenter
                     textFormat: Text.PlainText
-                    text: root.prayerName(prayerBlock.modelData.id, prayerBlock.modelData.name)
+                    text: root.prayerName(flatRow.block, flatRow.title)
                     color: root.foreground
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.body
-                    font.bold: prayerBlock.current
+                    font.bold: flatRow.current
                   }
 
                   Text {
@@ -606,7 +904,7 @@ BarWidget {
                     anchors.rightMargin: Style.space(8)
                     anchors.verticalCenter: parent.verticalCenter
                     textFormat: Text.PlainText
-                    text: String(prayerBlock.modelData.time || "—")
+                    text: flatRow.time || strings.t("panel.noTimeSymbol")
                     color: root.mutedForeground
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.bodySmall
@@ -614,9 +912,9 @@ BarWidget {
 
                   Rectangle {
                     id: nowTag
-                    visible: prayerBlock.current
-                    anchors.right: addBlockButton.left
-                    anchors.rightMargin: Style.space(5)
+                    visible: flatRow.current
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.space(6)
                     anchors.verticalCenter: parent.verticalCenter
                     width: visible ? nowText.implicitWidth + Style.space(12) : 0
                     height: Style.space(22)
@@ -634,187 +932,203 @@ BarWidget {
                       font.bold: true
                     }
                   }
+                }
+
+                Rectangle {
+                  visible: flatRow.rowType === "item"
+                  anchors.fill: parent
+                  anchors.leftMargin: Style.space(28)
+                  radius: Style.cornerRadius
+                  color: itemMouse.containsMouse
+                    ? Style.hoverFillFor(root.foreground, Commons.Color.accent) : "transparent"
+
+                  Text {
+                    id: dragGlyph
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.space(4)
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: strings.t("panel.dragHandle")
+                    color: root.mutedForeground
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.bodySmall
+                  }
+
+                  MouseArea {
+                    id: handleMouse
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    width: Style.space(28)
+                    cursorShape: Qt.SizeVerCursor
+                    preventStealing: true
+                    property bool activeDrag: false
+                    onPressed: function(mouse) {
+                      activeDrag = true
+                      var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
+                      keyCatcher.beginDrag(flatRow.rowKey, flatRow.title, point.y)
+                    }
+                    onPositionChanged: function(mouse) {
+                      if (!activeDrag) return
+                      var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
+                      keyCatcher.moveDrag(point.y)
+                    }
+                    onReleased: function(mouse) {
+                      var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
+                      var inside = point.x >= 0 && point.x <= timelineList.width
+                        && point.y >= 0 && point.y <= timelineList.contentHeight
+                      activeDrag = false
+                      keyCatcher.finishDrag(inside)
+                    }
+                    onCanceled: { activeDrag = false; keyCatcher.cancelDrag() }
+                  }
+
+                  Rectangle {
+                    id: itemCheck
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.space(30)
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(15)
+                    height: width
+                    radius: Math.min(Style.cornerRadius, Style.space(3))
+                    color: flatRow.done
+                      ? Style.selectedStateColor(root.foreground, Commons.Color.accent) : "transparent"
+                    border.width: Style.spacing.hairline
+                    border.color: flatRow.done
+                      ? Style.selectedStateColor(root.foreground, Commons.Color.accent) : root.mutedForeground
+
+                    Text {
+                      visible: flatRow.done
+                      anchors.centerIn: parent
+                      textFormat: Text.PlainText
+                      text: strings.t("panel.checkSymbol")
+                      color: Commons.Color.background
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+                  }
+
+                  MouseArea {
+                    id: itemMouse
+                    anchors.left: itemCheck.left
+                    anchors.right: itemAction.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    pressAndHoldInterval: 250
+                    property bool draggedThisPress: false
+                    onPressed: draggedThisPress = false
+                    onPressAndHold: function(mouse) {
+                      draggedThisPress = true
+                      var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
+                      keyCatcher.beginDrag(flatRow.rowKey, flatRow.title, point.y)
+                    }
+                    onPositionChanged: function(mouse) {
+                      if (!draggedThisPress) return
+                      var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
+                      keyCatcher.moveDrag(point.y)
+                    }
+                    onReleased: function(mouse) {
+                      if (!draggedThisPress) return
+                      var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
+                      var inside = point.x >= 0 && point.x <= timelineList.width
+                        && point.y >= 0 && point.y <= timelineList.contentHeight
+                      keyCatcher.finishDrag(inside)
+                    }
+                    onCanceled: if (draggedThisPress) keyCatcher.cancelDrag()
+                    onClicked: if (!draggedThisPress && !flatRow.pending) root.toggleItem(flatRow.itemData)
+                  }
+
+                  Column {
+                    anchors.left: itemCheck.right
+                    anchors.leftMargin: Style.space(9)
+                    anchors.right: itemAction.left
+                    anchors.rightMargin: Style.space(6)
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 0
+
+                    Text {
+                      width: parent.width
+                      textFormat: Text.PlainText
+                      text: flatRow.title
+                      color: flatRow.done || flatRow.pending ? root.mutedForeground : root.foreground
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.bodySmall
+                      font.strikeout: flatRow.done
+                      elide: Text.ElideRight
+                    }
+
+                    Text {
+                      visible: text !== ""
+                      width: parent.width
+                      textFormat: Text.PlainText
+                      text: flatRow.pending ? strings.t("panel.pending") : root.itemDetail(flatRow.itemData)
+                      color: root.mutedForeground
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.caption
+                      elide: Text.ElideRight
+                    }
+                  }
 
                   Button {
-                    id: addBlockButton
+                    id: itemAction
+                    visible: !flatRow.pending && flatRow.measure !== "check"
                     anchors.right: parent.right
+                    anchors.rightMargin: Style.space(3)
                     anchors.verticalCenter: parent.verticalCenter
-                    width: Style.space(34)
-                    height: Style.space(30)
-                    text: strings.t("panel.addSymbol")
-                    tooltipText: strings.t("panel.addTo").arg(root.prayerName(prayerBlock.modelData.id, prayerBlock.modelData.name))
+                    width: visible ? Style.space(40) : 0
+                    height: Style.space(28)
+                    text: flatRow.measure === "count" ? strings.t("panel.logOne")
+                      : (flatRow.timer_started_at !== "" ? strings.t("panel.stop") : strings.t("panel.start"))
+                    tooltipText: flatRow.measure === "count" ? strings.t("panel.logOneHint")
+                      : (flatRow.timer_started_at !== "" ? strings.t("panel.stopTimer") : strings.t("panel.startTimer"))
                     foreground: root.foreground
                     fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                    horizontalPadding: Style.space(6)
+                    horizontalPadding: Style.space(5)
                     verticalPadding: Style.space(2)
-                    onClicked: root.presetQuickAdd(prayerBlock.modelData.id)
+                    bordered: true
+                    onClicked: flatRow.measure === "count"
+                      ? root.logOne(flatRow.itemData) : root.toggleTimer(flatRow.itemData)
                   }
                 }
 
-                Repeater {
-                  model: prayerBlock.blockRows
-
-                  Item {
-                    id: itemRow
-                    required property var modelData
-                    readonly property bool done: modelData.state === "done"
-                    width: prayerBlock.width
-                    height: Style.space(38)
-
-                    Rectangle {
-                      anchors.fill: parent
-                      anchors.leftMargin: Style.space(28)
-                      radius: Style.cornerRadius
-                      color: itemMouse.containsMouse
-                        ? Style.hoverFillFor(root.foreground, Commons.Color.accent)
-                        : "transparent"
-                    }
-
-                    Rectangle {
-                      id: itemCheck
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.space(38)
-                      anchors.verticalCenter: parent.verticalCenter
-                      width: Style.space(15)
-                      height: width
-                      radius: Math.min(Style.cornerRadius, Style.space(3))
-                      color: itemRow.done
-                        ? Style.selectedStateColor(root.foreground, Commons.Color.accent)
-                        : "transparent"
-                      border.width: Style.spacing.hairline
-                      border.color: itemRow.done
-                        ? Style.selectedStateColor(root.foreground, Commons.Color.accent)
-                        : root.mutedForeground
-
-                      Text {
-                        visible: itemRow.done
-                        anchors.centerIn: parent
-                        textFormat: Text.PlainText
-                        text: "✓"
-                        color: Commons.Color.background
-                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                        font.pixelSize: Style.font.caption
-                      }
-                    }
-
-                    MouseArea {
-                      id: itemMouse
-                      anchors.left: parent.left
-                      anchors.right: itemAction.left
-                      anchors.top: parent.top
-                      anchors.bottom: parent.bottom
-                      hoverEnabled: true
-                      cursorShape: Qt.PointingHandCursor
-                      onClicked: root.toggleItem(itemRow.modelData)
-                    }
-
-                    Column {
-                      anchors.left: itemCheck.right
-                      anchors.leftMargin: Style.space(9)
-                      anchors.right: itemAction.left
-                      anchors.rightMargin: Style.space(6)
-                      anchors.verticalCenter: parent.verticalCenter
-                      spacing: 0
-
-                      Text {
-                        width: parent.width
-                        textFormat: Text.PlainText
-                        text: String(itemRow.modelData.title || "")
-                        color: itemRow.done ? root.mutedForeground : root.foreground
-                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                        font.pixelSize: Style.font.bodySmall
-                        font.strikeout: itemRow.done
-                        elide: Text.ElideRight
-                      }
-
-                      Text {
-                        visible: text !== ""
-                        width: parent.width
-                        textFormat: Text.PlainText
-                        text: root.itemDetail(itemRow.modelData)
-                        color: root.mutedForeground
-                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                        font.pixelSize: Style.font.caption
-                        elide: Text.ElideRight
-                      }
-                    }
-
-                    Button {
-                      id: itemAction
-                      visible: itemRow.modelData.measure !== "check"
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.space(3)
-                      anchors.verticalCenter: parent.verticalCenter
-                      width: visible ? Style.space(40) : 0
-                      height: Style.space(28)
-                      text: itemRow.modelData.measure === "count"
-                        ? strings.t("panel.logOne")
-                        : (itemRow.modelData.timer_started_at ? strings.t("panel.stop") : strings.t("panel.start"))
-                      tooltipText: itemRow.modelData.measure === "count"
-                        ? strings.t("panel.logOneHint")
-                        : (itemRow.modelData.timer_started_at ? strings.t("panel.stopTimer") : strings.t("panel.startTimer"))
-                      foreground: root.foreground
-                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                      horizontalPadding: Style.space(5)
-                      verticalPadding: Style.space(2)
-                      bordered: true
-                      onClicked: itemRow.modelData.measure === "count"
-                        ? root.logOne(itemRow.modelData)
-                        : root.toggleTimer(itemRow.modelData)
-                    }
-                  }
+                Button {
+                  visible: flatRow.rowType === "add"
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(34)
+                  anchors.verticalCenter: parent.verticalCenter
+                  height: Style.space(25)
+                  text: strings.t("panel.addRow").arg(root.prayerName(flatRow.block, flatRow.block))
+                  tooltipText: strings.t("panel.addTo").arg(root.prayerName(flatRow.block, flatRow.block))
+                  foreground: root.mutedForeground
+                  fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                  horizontalPadding: Style.space(5)
+                  verticalPadding: Style.space(1)
+                  onClicked: root.presetQuickAdd(flatRow.block)
                 }
 
                 Item {
-                  visible: String(prayerBlock.modelData.id || "") === "fajr" && root.boundary("sunrise") !== null
-                  width: parent.width
-                  height: visible ? Style.space(24) : 0
+                  visible: flatRow.rowType === "marker"
+                  anchors.fill: parent
 
                   Text {
                     anchors.left: parent.left
                     anchors.leftMargin: Style.space(38)
                     anchors.verticalCenter: parent.verticalCenter
                     textFormat: Text.PlainText
-                    text: strings.t("boundary.sunrise")
+                    text: flatRow.rowKey === "marker:sunrise"
+                      ? strings.t("boundary.sunrise") : strings.t("boundary.sleep")
                     color: root.mutedForeground
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.caption
                   }
-
                   Text {
                     anchors.right: parent.right
                     anchors.rightMargin: Style.space(10)
                     anchors.verticalCenter: parent.verticalCenter
                     textFormat: Text.PlainText
-                    text: root.boundary("sunrise") ? String(root.boundary("sunrise").time || "—") : ""
-                    color: root.mutedForeground
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.caption
-                  }
-                }
-
-                Item {
-                  visible: String(prayerBlock.modelData.id || "") === "isha" && root.boundary("sleep") !== null
-                  width: parent.width
-                  height: visible ? Style.space(24) : 0
-
-                  Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: Style.space(38)
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
-                    text: strings.t("boundary.sleep")
-                    color: root.mutedForeground
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.caption
-                  }
-
-                  Text {
-                    anchors.right: parent.right
-                    anchors.rightMargin: Style.space(10)
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
-                    text: root.boundary("sleep") ? String(root.boundary("sleep").time || "—") : ""
+                    text: flatRow.time
                     color: root.mutedForeground
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.caption
@@ -823,69 +1137,45 @@ BarWidget {
               }
             }
 
-            Text {
-              visible: root.report && root.report.planner_error
-              width: parent.width
-              textFormat: Text.PlainText
-              text: strings.t("panel.plannerUnavailable")
-              color: root.mutedForeground
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
+            Rectangle {
+              visible: keyCatcher.dragKey !== ""
+              x: Style.space(28)
+              y: Math.max(0, Math.min(flatTimeline.height - height,
+                keyCatcher.dragPointerY - height / 2))
+              width: flatTimeline.width - Style.space(28)
+              height: Style.space(38)
+              z: 20
+              radius: Style.cornerRadius
+              color: Commons.Color.background
+              border.width: Style.spacing.hairline
+              border.color: Style.selectedStateColor(root.foreground, Commons.Color.accent)
+              scale: 1.02
+
+              Text {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: Style.space(12)
+                anchors.rightMargin: Style.space(12)
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                text: keyCatcher.dragTitle
+                color: root.foreground
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+              }
             }
           }
 
-          Column {
-            visible: root.sleeping && root.planner !== null
+          Text {
+            visible: root.report && root.report.planner_error
             width: parent.width
-            spacing: Style.space(3)
-
-            PanelSeparator {
-              foreground: root.foreground
-            }
-
-            PanelSectionHeader {
-              text: strings.t("panel.tomorrow")
-              foreground: root.foreground
-              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-            }
-
-            Repeater {
-              model: root.planner ? (root.planner.upcoming || []) : []
-
-              Item {
-                id: upcomingRow
-                required property var modelData
-                width: parent.width
-                height: Style.space(34)
-
-                Text {
-                  anchors.left: parent.left
-                  anchors.leftMargin: Style.space(8)
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: Style.space(68)
-                  textFormat: Text.PlainText
-                  text: root.prayerName(upcomingRow.modelData.block, upcomingRow.modelData.block)
-                  color: root.mutedForeground
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                }
-
-                Text {
-                  anchors.left: parent.left
-                  anchors.leftMargin: Style.space(84)
-                  anchors.right: parent.right
-                  anchors.verticalCenter: parent.verticalCenter
-                  textFormat: Text.PlainText
-                  text: String(upcomingRow.modelData.title || "")
-                  color: root.foreground
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.bodySmall
-                  elide: Text.ElideRight
-                }
-              }
-            }
+            textFormat: Text.PlainText
+            text: strings.t("panel.plannerUnavailable")
+            color: root.mutedForeground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
           }
 
           Column {
@@ -930,48 +1220,6 @@ BarWidget {
 
           PanelSeparator {
             foreground: root.foreground
-          }
-
-          Item {
-            visible: root.report !== null
-            width: parent.width
-            implicitHeight: sleepField.implicitHeight
-
-            Text {
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-              textFormat: Text.PlainText
-              text: strings.t("panel.sleepTime")
-              color: root.mutedForeground
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.caption
-            }
-
-            TextField {
-              id: sleepField
-              anchors.right: parent.right
-              width: Style.space(72)
-              horizontalAlignment: TextInput.AlignHCenter
-              maximumLength: 5
-              inputMethodHints: Qt.ImhDigitsOnly
-              foreground: root.foreground
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-
-              function showSaved() {
-                if (!activeFocus) text = String(root.report ? root.report.sleep_time || "" : "")
-              }
-
-              Component.onCompleted: showSaved()
-              onActiveFocusChanged: showSaved()
-              Connections {
-                target: root
-                function onReportChanged() { sleepField.showSaved() }
-              }
-              onAccepted: {
-                root.setSleepTime(text)
-                focus = false
-              }
-            }
           }
 
           Text {

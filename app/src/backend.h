@@ -20,6 +20,7 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantMap parseDraft READ parseDraft NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
+    Q_PROPERTY(int dayRevision READ dayRevision NOTIFY changed)
 public:
     explicit Backend(QObject *parent = nullptr, const QString &program = {}, int timeoutMs = 10000);
     ~Backend() override;
@@ -32,6 +33,7 @@ public:
     QVariantMap parseDraft() const { return m_parseDraft; }
     QString error() const { return m_error; }
     bool busy() const { return m_running || !m_queue.isEmpty(); }
+    int dayRevision() const { return m_dayRevision; }
 
     Q_INVOKABLE void reload();
     Q_INVOKABLE void loadStats(int days);
@@ -49,6 +51,7 @@ public:
     Q_INVOKABLE void toggleTimer(const QString &id, bool running);
     Q_INVOKABLE void togglePrayer(const QString &prayer, bool marked);
     Q_INVOKABLE void setSleepTime(const QString &time);
+    Q_INVOKABLE QVariantMap moveDestination(const QVariantList &rows, int gapIndex) const;
     Q_INVOKABLE QString hijriHeader(const QString &isoDate) const;
     Q_INVOKABLE QString gregorianHeader(const QString &isoDate) const;
 
@@ -70,16 +73,22 @@ private:
     void fail(const QString &message);
     QStringList dateArguments() const;
     static QVariantMap normalizedObject(const QJsonObject &object);
+    bool setJsonModel(QVariantMap &target, QByteArray &previous, const QJsonDocument &doc);
+    void mutateItem(const QString &id, const std::function<void(QVariantMap &)> &change);
+    void insertPendingItem(const QVariantMap &item);
 
     QString m_program;
     int m_timeoutMs;
     QDate m_today = QDate::currentDate();
     QDate m_selected;
     QVariantMap m_dayPlan, m_stats, m_routinesStats, m_config, m_parseDraft;
+    QByteArray m_dayJson, m_statsJson, m_routinesJson, m_configJson;
     QString m_error;
     QQueue<Request> m_queue;
     Request m_current;
     QProcess m_process;
     QTimer m_timeout;
     bool m_running = false;
+    bool m_refreshPending = false;
+    int m_dayRevision = 0;
 };

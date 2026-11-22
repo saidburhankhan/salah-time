@@ -19,7 +19,8 @@ ApplicationWindow {
     property int statsRange: 7
     property int countdown: backend.dayPlan.now && backend.dayPlan.now.next ? backend.dayPlan.now.next.remaining_seconds : 0
     property var prayerIds: ["fajr", "dhuhr", "asr", "maghrib", "isha"]
-    property var prayerNames: [qsTr("Fajr"), qsTr("Dhuhr"), qsTr("Asr"), qsTr("Maghrib"), qsTr("Isha")]
+    property var blockIds: ["night", "fajr", "dhuhr", "asr", "maghrib", "isha"]
+    property var blockNames: [qsTr("Before Fajr"), qsTr("Fajr"), qsTr("Dhuhr"), qsTr("Asr"), qsTr("Maghrib"), qsTr("Isha")]
     readonly property color panel: "#1b1a17"
     readonly property color card: "#201f1b"
     readonly property color border: "#34312a"
@@ -52,7 +53,7 @@ ApplicationWindow {
     }
     function joinedDetail(block, schedule) {
         var parts=[]
-        if(block) parts.push(capitalized(block))
+        if(block) parts.push(block==="night"?qsTr("Before Fajr"):capitalized(block))
         if(schedule) parts.push(schedule)
         return parts.join("  ·  ")
     }
@@ -63,6 +64,66 @@ ApplicationWindow {
     }
     function iso(d) { return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0") }
     function isTyping() { var f=win.activeFocusItem; return f && f.inputMethodHints !== undefined }
+    ListModel { id: timelineModel }
+    property bool timelineSyncing: false
+    property int timelineRevision: -1
+    function desiredTimelineRows() {
+        var rows=[], blocks=backend.dayPlan.blocks||[], prayers=backend.dayPlan.prayers||[]
+        for (var b=0;b<blockIds.length;b++) {
+            var id=blockIds[b], prayer=b>0?(prayers[b-1]||{}):({})
+            rows.push({key:"header:"+id,kind:"header",block:id,payload:{name:blockNames[b],time:b===0?(backend.dayPlan.night_start||"--:--"):(prayer.time||"--:--"),marked:!!prayer.marked,current:id===(backend.dayPlan.now||{}).block}})
+            var items=[]; for(var x=0;x<blocks.length;x++) if(blocks[x].start===id) { items=blocks[x].items||[]; break }
+            for(var i=0;i<items.length;i++) rows.push({key:"item:"+items[i].id,kind:"item",block:id,payload:items[i]})
+            rows.push({key:"add:"+id,kind:"add",block:id,payload:{}})
+            if(id==="fajr") rows.push({key:"marker:sunrise",kind:"marker",block:id,payload:{name:qsTr("Sunrise"),time:backend.dayPlan.sunrise||"--:--"}})
+            if(id==="isha") rows.push({key:"marker:sleep",kind:"marker",block:id,payload:{name:qsTr("Sleep"),time:(backend.dayPlan.sleep||{}).time||"--:--"}})
+        }
+        return rows
+    }
+    function syncTimeline() {
+        if(dragging||timelineRevision===backend.dayRevision) return
+        timelineRevision=backend.dayRevision
+        timelineSyncing=true; var wanted=desiredTimelineRows()
+        for(var i=0;i<wanted.length;i++) {
+            var found=-1; for(var j=i;j<timelineModel.count;j++) if(timelineModel.get(j).key===wanted[i].key){found=j;break}
+            if(found<0) timelineModel.insert(i,wanted[i]); else { if(found!==i) timelineModel.move(found,i,1); timelineModel.set(i,wanted[i]) }
+        }
+        while(timelineModel.count>wanted.length) timelineModel.remove(timelineModel.count-1)
+        timelineSyncing=false
+    }
+    property bool dragging: false
+    property string dragId: ""
+    property int dragOriginalIndex: -1
+    property real dragPointerY: 0
+    property var dragPayload: ({})
+    function beginDrag(rowIndex, id, globalY) { dragging=true;dragId=id;dragOriginalIndex=rowIndex;dragPointerY=globalY;dragPayload=timelineModel.get(rowIndex).payload||({}) }
+    function updateDrag(globalY) {
+        if(!dragging)return; dragPointerY=globalY
+        var p=todayList.mapFromItem(win,0,globalY), idx=todayList.indexAt(10,p.y+todayList.contentY)
+        if(idx<0) idx=p.y<0?0:timelineModel.count-1
+        var k=timelineModel.get(idx).kind; if(k==="header") idx++; else if(k==="marker") return
+        var from=-1;for(var i=0;i<timelineModel.count;i++)if(timelineModel.get(i).key==="item:"+dragId){from=i;break}
+        if(from>=0&&idx!==from) timelineModel.move(from,Math.max(0,Math.min(idx,timelineModel.count-1)),1)
+    }
+    function finishDrag(cancelled) {
+        if(!dragging)return
+        var from=-1;for(var i=0;i<timelineModel.count;i++)if(timelineModel.get(i).key==="item:"+dragId){from=i;break}
+        if(cancelled||from<0){if(from>=0&&dragOriginalIndex>=0)timelineModel.move(from,dragOriginalIndex,1)} else {
+            var rows=[];for(var r=0;r<timelineModel.count;r++)if(r!==from)rows.push(timelineModel.get(r))
+            var destination=backend.moveDestination(rows,from); if(destination.block) backend.moveItem(dragId,destination.block,destination.index)
+        }
+        dragging=false;dragId="";dragOriginalIndex=-1;syncTimeline()
+    }
+    Rectangle { visible:dragging; z:1000; x:248; width:Math.max(360,win.width-248-375); height:72; y:Math.max(76,Math.min(win.height-height-8,dragPointerY-height/2)); radius:theme.radius; color:"#292722"; border.color:"#70695d"; scale:1.02
+        RowLayout { anchors.fill:parent; anchors.leftMargin:14; anchors.rightMargin:16; spacing:12
+            Label { text:"⠿";color:win.muted;font.pixelSize:19 }
+            Rectangle { width:24;height:24;radius:Math.min(5,theme.radius);color:dragPayload.state==="done"?theme.accent:"transparent";border.color:"#777168" }
+            ColumnLayout { Layout.fillWidth:true;spacing:4
+                Label { text:dragPayload.title||"";color:win.text;font.pixelSize:15;font.weight:Font.Medium;Layout.fillWidth:true;elide:Text.ElideRight;textFormat:Text.PlainText }
+                Label { text:detail(dragPayload);color:win.muted;font.family:win.mono;font.pixelSize:12 }
+            }
+        }
+    }
 
     component AppButton: Button {
         property bool primary: false
@@ -105,7 +166,8 @@ ApplicationWindow {
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: !isTyping(); onActivated: Qt.quit() }
     Timer { interval:1000; running:true; repeat:true; onTriggered: if(countdown>0) countdown-- }
     Timer { interval:60000; running:true; repeat:true; onTriggered: backend.reload() }
-    Connections { target:backend; function onChanged(){ if(backend.dayPlan.now&&backend.dayPlan.now.next) countdown=backend.dayPlan.now.next.remaining_seconds||0 } }
+    Connections { target:backend; function onChanged(){ if(backend.dayPlan.now&&backend.dayPlan.now.next) countdown=backend.dayPlan.now.next.remaining_seconds||0; syncTimeline() } }
+    Shortcut { sequence:"Escape"; context:Qt.ApplicationShortcut; enabled:dragging; onActivated:finishDrag(true) }
     onActiveChanged: if(active) backend.reload()
 
     RowLayout {
@@ -173,57 +235,54 @@ ApplicationWindow {
 
                 // Today
                 RowLayout { visible:page===0; Layout.fillWidth:true; Layout.fillHeight:true; spacing:26; Layout.margins:28
-                    ScrollView { id:todayScroll; Layout.fillWidth:true; Layout.fillHeight:true; Layout.minimumWidth:360; clip:true
-                        Column { width:todayScroll.availableWidth; spacing:10
-                            Repeater { model:win.prayerIds
-                                Column {
-                                    id:blockColumn; required property string modelData; required property int index
-                                    width:parent.width; spacing:8
-                                    property var prayer:(backend.dayPlan.prayers||[])[index]||({})
-                                    Rectangle { width:parent.width; height:60; radius:theme.radius; color:win.card; border.color:win.border
+                    ListView { id:todayList; Layout.fillWidth:true; Layout.fillHeight:true; Layout.minimumWidth:360; clip:true; spacing:8; model:timelineModel
+                        move: Transition { NumberAnimation { properties:"y"; duration:120; easing.type:Easing.OutCubic } }
+                        displaced: Transition { NumberAnimation { properties:"y"; duration:120; easing.type:Easing.OutCubic } }
+                        delegate: Item { id:rowDelegate; required property int index; required property string kind; required property string block; required property var payload; required property string key
+                            width:todayList.width; height:kind==="header"?60:kind==="item"?72:kind==="add"?32:26
+                            Rectangle { visible:kind==="header"; anchors.fill:parent; radius:theme.radius; color:win.card; border.color:win.border
                                         RowLayout { anchors.fill:parent; anchors.leftMargin:18; anchors.rightMargin:16; spacing:14
-                                            Rectangle { width:28;height:28;radius:14;color:blockColumn.prayer.marked?theme.accent:"transparent";border.width:2;border.color:blockColumn.prayer.marked?theme.accent:win.text
-                                                Label { anchors.centerIn:parent; visible:!!blockColumn.prayer.marked; text:"✓"; color:theme.accentForeground; font.weight:Font.Bold }
-                                                MouseArea { anchors.fill:parent; onClicked:backend.togglePrayer(blockColumn.modelData,blockColumn.prayer.marked||false) }
+                                            Rectangle { visible:block!=="night"; width:28;height:28;radius:14;color:payload.marked?theme.accent:"transparent";border.width:2;border.color:payload.marked?theme.accent:win.text
+                                                Label { anchors.centerIn:parent; visible:!!payload.marked; text:"✓"; color:theme.accentForeground; font.weight:Font.Bold }
+                                                MouseArea { anchors.fill:parent; onClicked:backend.togglePrayer(block,payload.marked||false) }
                                             }
-                                            Label { text:blockColumn.prayer.name||win.prayerNames[blockColumn.index]; color:win.text; font.pixelSize:17; font.weight:Font.Medium; Layout.fillWidth:true }
-                                            Label { text:blockColumn.prayer.time||"--:--"; color:"#d8d4cc"; font.family:win.mono; font.pixelSize:17 }
-                                            Rectangle { visible:blockColumn.prayer.current||false; width:62;height:28;radius:14;color:"#4a2d26"
+                                            Label { text:payload.name||""; color:win.text; font.pixelSize:17; font.weight:Font.Medium; Layout.fillWidth:true }
+                                            Label { text:payload.time||"--:--"; color:"#d8d4cc"; font.family:win.mono; font.pixelSize:17 }
+                                            Rectangle { visible:payload.current||false; width:62;height:28;radius:14;color:"#4a2d26"
                                                 Label { anchors.centerIn:parent;text:qsTr("● NOW");color:"#ef8068";font.family:win.mono;font.pixelSize:11 }
                                             }
                                         }
-                                    }
-                                    Repeater { model:blockItems(blockColumn.modelData)
-                                        Rectangle { id:itemCard; required property var modelData; required property int index; width:parent.width; height:72; radius:theme.radius; color:"#1c1b18"; border.color:win.border
-                                            Drag.active:drag.active; Drag.hotSpot.x:width/2; Drag.hotSpot.y:height/2; Drag.mimeData:{"text/item-id":modelData.id}
-                                            DragHandler { id:drag }
+                            }
+                            Rectangle { id:itemCard; visible:kind==="item"; anchors.fill:parent; radius:theme.radius; color:"#1c1b18"; border.color:win.border; opacity:win.dragging&&win.dragId===payload.id?0.18:(payload.pending?0.55:1)
                                             RowLayout { anchors.fill:parent; anchors.leftMargin:12; anchors.rightMargin:14; spacing:12
-                                                Label { text:"⠿"; color:win.muted; font.pixelSize:19 }
-                                                Rectangle { width:24;height:24;radius:Math.min(5,theme.radius);color:modelData.state==="done"?theme.accent:"transparent";border.color:modelData.state==="done"?theme.accent:"#625e55"
-                                                    Label { anchors.centerIn:parent;text:"✓";visible:modelData.state==="done";color:theme.accentForeground }
-                                                    MouseArea { anchors.fill:parent;onClicked:backend.toggleDone(modelData.id,modelData.state) }
+                                                Label { id:handle; text:"⠿"; color:win.muted; font.pixelSize:19
+                                                    MouseArea { anchors.fill:parent; anchors.margins:-8; preventStealing:true
+                                                        onPressed:function(mouse){var p=mapToItem(win,mouse.x,mouse.y);win.beginDrag(rowDelegate.index,payload.id,p.y)}
+                                                        onPositionChanged:function(mouse){if(pressed){var p=mapToItem(win,mouse.x,mouse.y);win.updateDrag(p.y)}}
+                                                        onReleased:function(mouse){var p=mapToItem(todayList,mouse.x,mouse.y);win.finishDrag(p.y<0||p.y>todayList.height)}
+                                                        onCanceled:win.finishDrag(true)
+                                                    }
+                                                }
+                                                Rectangle { width:24;height:24;radius:Math.min(5,theme.radius);color:payload.state==="done"?theme.accent:"transparent";border.color:payload.state==="done"?theme.accent:"#625e55"
+                                                    Label { anchors.centerIn:parent;text:"✓";visible:payload.state==="done";color:theme.accentForeground }
+                                                    MouseArea { anchors.fill:parent;onClicked:backend.toggleDone(payload.id,payload.state) }
                                                 }
                                                 ColumnLayout { Layout.fillWidth:true;spacing:4
-                                                    Label { text:modelData.title;color:modelData.state==="done"?win.muted:win.text;font.pixelSize:15;font.weight:Font.Medium;Layout.fillWidth:true;elide:Text.ElideRight;textFormat:Text.PlainText }
-                                                    Label { text:detail(modelData);color:win.muted;font.family:win.mono;font.pixelSize:12 }
+                                                    Label { text:payload.title||"";color:payload.state==="done"?win.muted:win.text;font.pixelSize:15;font.weight:Font.Medium;Layout.fillWidth:true;elide:Text.ElideRight;textFormat:Text.PlainText }
+                                                    Label { text:detail(payload);color:win.muted;font.family:win.mono;font.pixelSize:12 }
                                                 }
-                                                ToolButton { visible:modelData.measure==="minutes"&&backend.selectedDay===backend.todayDay;text:modelData.timer_started_at?"■":"▶";onClicked:backend.toggleTimer(modelData.id,!!modelData.timer_started_at) }
-                                                ToolButton { visible:modelData.measure==="count";text:"+1";onClicked:backend.logOne(modelData.id) }
+                                                ToolButton { visible:payload.measure==="minutes"&&backend.selectedDay===backend.todayDay;text:payload.timer_started_at?"■":"▶";onClicked:backend.toggleTimer(payload.id,!!payload.timer_started_at) }
+                                                ToolButton { visible:payload.measure==="count";text:"+1";onClicked:backend.logOne(payload.id) }
                                             }
-                                            MouseArea { anchors.fill:parent; acceptedButtons:Qt.LeftButton; onDoubleClicked:openEntry(modelData); z:-1 }
-                                            DropArea { anchors.fill:parent; onDropped:function(drop){backend.moveItem(drop.getDataAsString("text/item-id"),blockColumn.modelData,index)} }
-                                        }
-                                    }
-                                    Rectangle { width:parent.width;height:32;color:"transparent"
+                                            MouseArea { anchors.fill:parent; acceptedButtons:Qt.LeftButton; onDoubleClicked:openEntry(payload); z:-1 }
+                            }
+                            Rectangle { visible:kind==="add"; anchors.fill:parent;color:"transparent"
                                         Label { anchors.left:parent.left;anchors.leftMargin:56;anchors.verticalCenter:parent.verticalCenter;text:qsTr("+  add");color:"#777269";font.pixelSize:13 }
-                                        MouseArea { anchors.fill:parent;onClicked:openQuick(blockColumn.modelData) }
-                                        DropArea { anchors.fill:parent; onDropped:function(drop){backend.moveItem(drop.getDataAsString("text/item-id"),blockColumn.modelData,blockItems(blockColumn.modelData).length)} }
-                                    }
-                                    Row { visible:blockColumn.index===0||blockColumn.index===4; height:26; spacing:12; leftPadding:18
+                                        MouseArea { anchors.fill:parent;onClicked:openQuick(block) }
+                            }
+                            Row { visible:kind==="marker"; height:26; spacing:12; leftPadding:18
                                         Rectangle { width:8;height:8;radius:4;color:"#555148";anchors.verticalCenter:parent.verticalCenter }
-                                        Label { text:blockColumn.index===0?qsTr("Sunrise  %1").arg(backend.dayPlan.sunrise||"--:--"):qsTr("Sleep  %1").arg((backend.dayPlan.sleep||{}).time||"--:--");color:win.muted;font.family:win.mono;font.pixelSize:12;anchors.verticalCenter:parent.verticalCenter }
-                                    }
-                                }
+                                        Label { text:(payload.name||"")+"  "+(payload.time||"--:--");color:win.muted;font.family:win.mono;font.pixelSize:12;anchors.verticalCenter:parent.verticalCenter }
                             }
                         }
                     }
@@ -414,8 +473,8 @@ ApplicationWindow {
                             ColumnLayout { anchors.fill:parent;anchors.margins:22;spacing:16
                                 Label { text:qsTr("When");color:win.text;font.pixelSize:17;font.weight:Font.DemiBold }
                                 RowLayout { spacing:8
-                                    Repeater { model:win.prayerIds
-                                        ChoiceChip { required property string modelData;required property int index;text:win.prayerNames[index];selected:entryPopup.block===modelData;onClicked:entryPopup.block=modelData }
+                                    Repeater { model:win.blockIds
+                                        ChoiceChip { required property string modelData;required property int index;text:win.blockNames[index];selected:entryPopup.block===modelData;onClicked:entryPopup.block=modelData }
                                     }
                                 }
                             }
