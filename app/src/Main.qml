@@ -99,17 +99,25 @@ ApplicationWindow {
     function beginDrag(rowIndex, id, globalY) { dragging=true;dragId=id;dragOriginalIndex=rowIndex;dragPointerY=globalY;dragPayload=timelineModel.get(rowIndex).payload||({}) }
     function updateDrag(globalY) {
         if(!dragging)return; dragPointerY=globalY
-        var p=todayList.mapFromItem(win,0,globalY), idx=todayList.indexAt(10,p.y+todayList.contentY)
+        var p=todayList.mapFromItem(win.contentItem,0,globalY), idx=todayList.indexAt(10,p.y+todayList.contentY)
         if(idx<0) idx=p.y<0?0:timelineModel.count-1
-        var k=timelineModel.get(idx).kind; if(k==="header") idx++; else if(k==="marker") return
         var from=-1;for(var i=0;i<timelineModel.count;i++)if(timelineModel.get(i).key==="item:"+dragId){from=i;break}
+        // The gap belongs between a block's header and its "+ add" row: over a
+        // header it goes just below it, over "+ add" just above it, and markers
+        // (Sunrise, Sleep) never take it. Moving down, ListModel.move puts the
+        // row after the target row; moving up, before it.
+        var k=timelineModel.get(idx).kind
+        if(k==="marker") return
+        if(k==="header"&&from>idx) idx++
+        if(k==="add"&&from<idx) idx--
         if(from>=0&&idx!==from) timelineModel.move(from,Math.max(0,Math.min(idx,timelineModel.count-1)),1)
     }
     function finishDrag(cancelled) {
         if(!dragging)return
         var from=-1;for(var i=0;i<timelineModel.count;i++)if(timelineModel.get(i).key==="item:"+dragId){from=i;break}
         if(cancelled||from<0){if(from>=0&&dragOriginalIndex>=0)timelineModel.move(from,dragOriginalIndex,1)} else {
-            var rows=[];for(var r=0;r<timelineModel.count;r++)if(r!==from)rows.push(timelineModel.get(r))
+            // ListModel rows reach C++ as empty maps, so pass plain objects.
+            var rows=[];for(var r=0;r<timelineModel.count;r++)if(r!==from){var e=timelineModel.get(r);rows.push({kind:e.kind,block:e.block})}
             var destination=backend.moveDestination(rows,from); if(destination.block) backend.moveItem(dragId,destination.block,destination.index)
         }
         dragging=false;dragId="";dragOriginalIndex=-1;syncTimeline()
@@ -253,12 +261,12 @@ ApplicationWindow {
                                             }
                                         }
                             }
-                            Rectangle { id:itemCard; visible:kind==="item"; anchors.fill:parent; radius:theme.radius; color:"#1c1b18"; border.color:win.border; opacity:win.dragging&&win.dragId===payload.id?0.18:(payload.pending?0.55:1)
-                                            RowLayout { anchors.fill:parent; anchors.leftMargin:12; anchors.rightMargin:14; spacing:12
+                            Rectangle { id:itemCard; visible:kind==="item"; anchors.fill:parent; radius:theme.radius; color:win.dragging&&win.dragId===payload.id?"transparent":"#1c1b18"; border.color:win.dragging&&win.dragId===payload.id?"#4a463e":win.border; opacity:payload.pending?0.55:1
+                                            RowLayout { anchors.fill:parent; anchors.leftMargin:12; anchors.rightMargin:14; spacing:12; opacity:win.dragging&&win.dragId===payload.id?0:1
                                                 Label { id:handle; text:"⠿"; color:win.muted; font.pixelSize:19
                                                     MouseArea { anchors.fill:parent; anchors.margins:-8; preventStealing:true
-                                                        onPressed:function(mouse){var p=mapToItem(win,mouse.x,mouse.y);win.beginDrag(rowDelegate.index,payload.id,p.y)}
-                                                        onPositionChanged:function(mouse){if(pressed){var p=mapToItem(win,mouse.x,mouse.y);win.updateDrag(p.y)}}
+                                                        onPressed:function(mouse){var p=mapToItem(win.contentItem,mouse.x,mouse.y);win.beginDrag(rowDelegate.index,payload.id,p.y)}
+                                                        onPositionChanged:function(mouse){if(pressed){var p=mapToItem(win.contentItem,mouse.x,mouse.y);win.updateDrag(p.y)}}
                                                         onReleased:function(mouse){var p=mapToItem(todayList,mouse.x,mouse.y);win.finishDrag(p.y<0||p.y>todayList.height)}
                                                         onCanceled:win.finishDrag(true)
                                                     }
@@ -291,11 +299,11 @@ ApplicationWindow {
                             ColumnLayout { anchors.fill:parent;anchors.margins:22;spacing:8
                                 RowLayout { Layout.fillWidth:true
                                     Label { text:qsTr("Now");color:win.text;font.pixelSize:18;font.weight:Font.DemiBold }
-                                    Label { Layout.fillWidth:true;text:(backend.dayPlan.now||{}).block?String(backend.dayPlan.now.block).toUpperCase():"";color:win.muted;font.family:win.mono;horizontalAlignment:Text.AlignRight }
+                                    Label { Layout.fillWidth:true;text:(backend.dayPlan.now||{}).block==="night"?qsTr("Before Fajr"):((backend.dayPlan.now||{}).block?capitalized((backend.dayPlan.now||{}).block):"");color:win.muted;font.family:win.mono;horizontalAlignment:Text.AlignRight }
                                 }
                                 Rectangle { Layout.fillWidth:true;height:1;color:win.border;Layout.topMargin:6;Layout.bottomMargin:18 }
-                                Label { Layout.alignment:Qt.AlignHCenter;text:(backend.dayPlan.now||{}).sleeping?qsTr("RESTING"):qsTr("NEXT · %1").arg(((backend.dayPlan.now||{}).next||{}).name||"—");color:win.muted;font.family:win.mono;font.pixelSize:13;font.letterSpacing:1 }
-                                Label { Layout.alignment:Qt.AlignHCenter;text:(backend.dayPlan.now||{}).sleeping?qsTr("Sleeping"):Math.floor(countdown/3600)+"h "+String(Math.floor((countdown%3600)/60)).padStart(2,"0")+"m";color:win.text;font.pixelSize:34;font.weight:Font.Medium }
+                                Label { Layout.alignment:Qt.AlignHCenter;text:qsTr("NEXT · %1").arg(((backend.dayPlan.now||{}).next||{}).name||"—");color:win.muted;font.family:win.mono;font.pixelSize:13;font.letterSpacing:1 }
+                                Label { Layout.alignment:Qt.AlignHCenter;text:Math.floor(countdown/3600)+"h "+String(Math.floor((countdown%3600)/60)).padStart(2,"0")+"m";color:win.text;font.pixelSize:34;font.weight:Font.Medium }
                                 Label { Layout.alignment:Qt.AlignHCenter;text:qsTr("at %1").arg(((backend.dayPlan.now||{}).next||{}).time||"--:--");color:win.muted;font.family:win.mono;font.pixelSize:14 }
                             }
                         }

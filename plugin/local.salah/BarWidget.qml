@@ -43,16 +43,11 @@ BarWidget {
     : ""
   readonly property string remainingLong: formatRemaining(remainingSeconds, false)
   readonly property string remainingShort: formatRemaining(remainingSeconds, true)
-  readonly property bool sleeping: report && report.current_block
-    ? report.current_block.sleeping === true
-    : false
   readonly property var planner: report && report.planner ? report.planner : null
   readonly property int openCount: Math.max(0,
     (planner ? (Number(planner.open) || 0) : 0) + optimisticOpenDelta)
   readonly property string displayText: localizedNextName !== ""
-    ? (sleeping
-        ? strings.t("bar.sleeping") + "  " + localizedNextName + " " + remainingShort
-        : localizedNextName + "  " + remainingShort + (openCount > 0 ? "  · " + openCount : ""))
+    ? localizedNextName + "  " + remainingShort + (openCount > 0 ? "  · " + openCount : "")
     : (firstLoad ? strings.t("bar.loading") : strings.t("bar.unavailableShort"))
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color mutedForeground: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
@@ -669,9 +664,7 @@ BarWidget {
 
               PanelSectionHeader {
                 width: parent.width
-                text: root.sleeping
-                  ? strings.t("panel.sleepingNext")
-                  : strings.t("panel.next")
+                text: strings.t("panel.next")
                 foreground: root.foreground
                 fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
               }
