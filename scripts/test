@@ -11,6 +11,8 @@ jq empty "$plugin_source/manifest.json" "$plugin_source/i18n/en.json"
 omarchy plugin validate "$plugin_source"
 
 test_home=$(mktemp -d)
+# The scripts must never change the user's live bar while testing.
+export SALAH_NO_SHELL=1
 cleanup() { rm -rf -- "$test_home"; }
 trap cleanup EXIT
 
@@ -20,8 +22,16 @@ test -f "$test_home/.config/omarchy/plugins/local.salah/manifest.json"
 HOME="$test_home" "$test_home/.local/bin/salah" status --json \
   | jq -e '.next.name and (.next.remaining_seconds | numbers) and (.prayers | length == 6)' >/dev/null
 
-# Reinstallation must accept an unchanged installation owned by this checkout.
+# Reinstallation must accept an unchanged installation owned by this checkout,
+# update it without the plugin directory being replaced (the running shell
+# would drop a plugin that disappears), and remove files no longer shipped.
+plugin_inode=$(stat -c %i "$test_home/.config/omarchy/plugins/local.salah")
+: > "$test_home/.config/omarchy/plugins/local.salah/stale.qml"
+HOME="$test_home" "$project_dir/scripts/install" 2>/dev/null && exit 1 # modified: refused
+rm -- "$test_home/.config/omarchy/plugins/local.salah/stale.qml"
 HOME="$test_home" "$project_dir/scripts/install"
+test "$(stat -c %i "$test_home/.config/omarchy/plugins/local.salah")" = "$plugin_inode"
+cmp -s "$plugin_source/BarWidget.qml" "$test_home/.config/omarchy/plugins/local.salah/BarWidget.qml"
 HOME="$test_home" "$project_dir/scripts/uninstall"
 test ! -e "$test_home/.local/bin/salah"
 test ! -e "$test_home/.config/omarchy/plugins/local.salah"

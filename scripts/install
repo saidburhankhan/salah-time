@@ -46,38 +46,79 @@ mkdir -p -- "$(dirname -- "$binary_target")" "$(dirname -- "$plugin_target")" "$
 install -m 0755 -- "$binary_source" "$binary_target"
 sha256sum -- "$binary_target" | awk '{ print $1 }' > "$binary_digest"
 
-plugin_parent=$(dirname -- "$plugin_target")
-staging_dir=$(mktemp -d --tmpdir="$plugin_parent" .local.salah.install.XXXXXX)
-backup_dir=""
-cleanup() {
-  [[ ! -d "$staging_dir" ]] || rm -rf -- "$staging_dir"
-  [[ -z "$backup_dir" || ! -e "$backup_dir" ]] || rm -rf -- "$backup_dir"
+# Replace the plugin without the directory ever disappearing. A running
+# Omarchy shell that sees the plugin vanish, even briefly, drops it from the
+# bar layout, so an owned installation is updated file by file: each file is
+# renamed over its predecessor, then files no longer shipped are removed.
+update_in_place() {
+  local source="$1" target="$2" relative staged
+  while IFS= read -r -d '' relative; do
+    relative=${relative#./}
+    mkdir -p -- "$target/$(dirname -- "$relative")"
+    staged=$(mktemp --tmpdir="$target/$(dirname -- "$relative")" .salah.XXXXXX)
+    cp -- "$source/$relative" "$staged"
+    chmod --reference="$source/$relative" -- "$staged"
+    mv -f -- "$staged" "$target/$relative"
+  done < <(cd -- "$source" && find . -type f -print0)
+  while IFS= read -r -d '' relative; do
+    relative=${relative#./}
+    [[ -e "$source/$relative" ]] || rm -f -- "$target/$relative"
+  done < <(cd -- "$target" && find . -type f -print0)
+  find "$target" -mindepth 1 -type d -empty -delete
 }
-trap cleanup EXIT
-cp -a -- "$plugin_source/." "$staging_dir/"
 
-if [[ -e "$plugin_target" || -L "$plugin_target" ]]; then
-  backup_dir=$(mktemp -d --tmpdir="$plugin_parent" .local.salah.backup.XXXXXX)
-  rmdir -- "$backup_dir"
-  mv -- "$plugin_target" "$backup_dir"
+# The running shell can drop a reloaded third-party widget from the bar
+# layout. Remember where Salah sits so it can be put back in the same place.
+shell_config="$HOME/.config/omarchy/shell.json"
+bar_place=""
+if [[ -f "$shell_config" ]] && command -v jq >/dev/null; then
+  bar_place=$(jq -r '.bar.layout // {} | to_entries[] | .key as $section
+    | .value | to_entries[] | select(.value.id == "local.salah")
+    | "\($section) \(.key)"' "$shell_config" 2>/dev/null | head -n 1) || bar_place=""
 fi
 
-if ! mv -- "$staging_dir" "$plugin_target"; then
-  if [[ -n "$backup_dir" && -e "$backup_dir" ]]; then
-    mv -- "$backup_dir" "$plugin_target"
-    backup_dir=""
-  fi
-  exit 1
+plugin_parent=$(dirname -- "$plugin_target")
+if [[ -d "$plugin_target" && ! -L "$plugin_target" ]]; then
+  update_in_place "$plugin_source" "$plugin_target"
+else
+  # First install, or migrating an early development symlink: stage the copy
+  # and move it into place in one step.
+  staging_dir=$(mktemp -d --tmpdir="$plugin_parent" .local.salah.install.XXXXXX)
+  cleanup() { [[ ! -d "$staging_dir" ]] || rm -rf -- "$staging_dir"; }
+  trap cleanup EXIT
+  cp -a -- "$plugin_source/." "$staging_dir/"
+  [[ ! -L "$plugin_target" ]] || rm -- "$plugin_target"
+  mv -- "$staging_dir" "$plugin_target"
+  staging_dir=""
 fi
-staging_dir=""
-[[ -z "$backup_dir" ]] || rm -rf -- "$backup_dir"
-backup_dir=""
 
 printf '%s\n' "$project_dir" > "$install_marker"
 plugin_digest "$plugin_target" > "$plugin_digest_file"
 
+restore_bar_place() {
+  # As in uninstall: `omarchy plugin` acts on the live shell whatever HOME is.
+  local real_home
+  real_home=$(getent passwd "$(id -u)" | cut -d: -f6)
+  [[ -n "$bar_place" && -z "${SALAH_NO_SHELL:-}" && "$HOME" == "$real_home" ]] \
+    && command -v omarchy >/dev/null || return 0
+  local section=${bar_place% *} index=${bar_place#* } attempt
+  # The shell reloads the plugin about a second after its files change.
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    sleep 0.5
+    if ! jq -e '[.bar.layout // {} | .[][]? | .id] | index("local.salah")' \
+        "$shell_config" >/dev/null 2>&1; then
+      omarchy plugin enable local.salah --section "$section" --index "$index" >/dev/null \
+        && printf 'Restored Salah to the bar (%s, position %s)\n' "$section" "$index"
+      return 0
+    fi
+  done
+}
+restore_bar_place
+
 printf 'Installed %s\n' "$binary_target"
 printf 'Installed plugin in %s\n' "$plugin_target"
-printf '\nEnable the bar widget with:\n'
-printf '  omarchy plugin enable local.salah --after omarchy.clock\n'
+if [[ -z "$bar_place" ]]; then
+  printf '\nEnable the bar widget with:\n'
+  printf '  omarchy plugin enable local.salah --after omarchy.clock\n'
+fi
 

@@ -14,6 +14,14 @@ plugin_digest() {
     -cf - -C "$1" . | sha256sum | awk '{ print $1 }'
 }
 
+# `omarchy plugin` talks to the running desktop shell no matter what HOME is,
+# so only touch the shell for the real home (never for the test suite's
+# temporary one) and never when SALAH_NO_SHELL is set.
+real_home=$(getent passwd "$(id -u)" | cut -d: -f6)
+touch_shell() {
+  [[ -z "${SALAH_NO_SHELL:-}" && "$HOME" == "$real_home" ]] && command -v omarchy >/dev/null
+}
+
 if [[ ! -f "$install_marker" || "$(<"$install_marker")" != "$project_dir" ]]; then
   printf 'Refusing to uninstall: this checkout does not own the active installation.\n' >&2
   exit 1
@@ -21,7 +29,7 @@ fi
 
 if [[ -d "$plugin_target" && ! -L "$plugin_target" && -f "$plugin_digest_file" \
     && "$(plugin_digest "$plugin_target")" == "$(<"$plugin_digest_file")" ]]; then
-  omarchy plugin disable local.salah >/dev/null 2>&1 || true
+  if touch_shell; then omarchy plugin disable local.salah >/dev/null 2>&1 || true; fi
   rm -rf -- "$plugin_target"
 elif [[ -e "$plugin_target" || -L "$plugin_target" ]]; then
   printf 'Leaving modified or unrelated plugin path untouched: %s\n' "$plugin_target" >&2
