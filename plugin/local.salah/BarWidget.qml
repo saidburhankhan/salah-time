@@ -14,6 +14,7 @@ BarWidget {
     directory: Qt.resolvedUrl("i18n")
   }
 
+  readonly property var tr: strings
   property var report: null
   property int remainingSeconds: report && report.next
     ? Math.max(0, Number(report.next.remaining_seconds) || 0)
@@ -27,12 +28,9 @@ BarWidget {
   property bool firstLoad: true
   property bool popoutSwitchClosing: false
   property string actionError: ""
-  property var pendingActions: []
   property string quickAddBlock: ""
-  property string lastStatusText: ""
-  property int optimisticOpenDelta: 0
   property int minuteTick: 0
-  property var activeAction: null
+  property var pendingOps: ({})
   property var optimisticTimer: undefined
   property double timerSnapshotMs: Date.now()
 
@@ -88,39 +86,37 @@ BarWidget {
   }
 
   function refresh() {
-    // Preserve optimistic UI while commands are queued; the last command
-    // schedules the one authoritative refresh for the whole burst.
-    if (actionProcess.running || pendingActions.length > 0) return
-    if (!statusProcess.running) statusProcess.running = true
+    client.refreshStatus()
   }
 
-  // Planner actions run one at a time, in order, as fixed argument lists.
-  // Titles follow `--` so text starting with "-" is never read as a flag.
-  function runAction(args, kind) {
-    if (!actionProcess.running && pendingActions.length === 0) actionError = ""
-    pendingActions = pendingActions.concat([{
-      "command": ["salah"].concat(args), "kind": String(kind || "")
-    }])
-    runNextAction()
+  function beginOp(kind, rowKey, tempKey) {
+    actionError = ""
+    var opId = client.newOpId()
+    var entry = { "kind": String(kind || ""), "rowKey": String(rowKey || "") }
+    if (tempKey) entry.tempKey = String(tempKey)
+    pendingOps[opId] = entry
+    return opId
   }
 
-  function runNextAction() {
-    if (actionProcess.running || pendingActions.length === 0) return
-    activeAction = pendingActions[0]
-    actionProcess.command = activeAction.command
-    pendingActions = pendingActions.slice(1)
-    actionProcess.running = true
+  function clearPending(opId) {
+    var pending = pendingOps[opId]
+    if (!pending) return
+    delete pendingOps[opId]
+    var content = panel.loadedContent
+    if (content && pending.rowKey) content.setRowPending(pending.rowKey, false)
+    if (content && pending.tempKey) content.removeItem(pending.tempKey)
   }
 
   function addItem(title) {
     var text = String(title || "").trim()
     if (text === "") return
-    var args = ["item", "add", "--json", "--quick"]
-    if (quickAddBlock !== "") args = args.concat(["--block", quickAddBlock])
     var content = panel.loadedContent
-    if (content) content.addPendingItem(text, quickAddBlock)
-    optimisticOpenDelta++
-    runAction(args.concat(["--", text]), "add")
+    var opId = beginOp("add", "")
+    var tempKey = "pending:" + opId
+    pendingOps[opId].rowKey = tempKey
+    pendingOps[opId].tempKey = tempKey
+    if (content) content.addPendingItem(text, quickAddBlock, tempKey)
+    client.addItem(opId, text, quickAddBlock)
   }
 
   function presetQuickAdd(block) {
@@ -149,9 +145,11 @@ BarWidget {
   }
 
   function togglePrayer(prayer) {
+    var id = String(prayer.id)
     var content = panel.loadedContent
-    var marked = content ? content.togglePrayerOptimistic(String(prayer.id)) : !isPrayerMarked(prayer.id)
-    runAction(["prayer", marked ? "mark" : "unmark", "--json", String(prayer.id)])
+    var marked = content ? content.togglePrayerOptimistic(id) : !isPrayerMarked(id)
+    var opId = beginOp("prayer", "header:" + id)
+    client.markPrayer(opId, id, marked)
   }
 
   function itemsForBlock(block, source) {
@@ -173,22 +171,28 @@ BarWidget {
   function toggleItem(row) {
     var wasDone = row.state === "done"
     var content = panel.loadedContent
-    if (content) content.patchItem(String(row.id), { "state": wasDone ? "open" : "done" })
-    optimisticOpenDelta += wasDone ? 1 : -1
-    runAction(["item", wasDone ? "undo" : "done", "--json", String(row.id)])
+    if (content) content.patchItem(String(row.id), {
+      "itemState": wasDone ? "open" : "done", "pending": true
+    })
+    var opId = beginOp("done", "item:" + String(row.id))
+    client.setDone(opId, String(row.id), !wasDone)
   }
 
   function toggleTimer(row) {
     var running = String(row.timer_started_at || "") !== ""
     var content = panel.loadedContent
-    if (content) content.setRunningTimer(running ? "" : String(row.id))
+    if (content) {
+      content.setRunningTimer(running ? "" : String(row.id))
+      content.patchItem(String(row.id), { "pending": true })
+    }
     optimisticTimer = running ? null : {
       "item_id": String(row.id), "title": String(row.title || ""),
       "started_at": new Date().toISOString(), "minutes": Number(row.minutes) || 0
     }
     timerSnapshotMs = Date.now()
-    if (running) runAction(["item", "stop", "--json", String(row.id)])
-    else runAction(["item", "start", "--json", String(row.id)])
+    var opId = beginOp(running ? "stopTimer" : "startTimer", "item:" + String(row.id))
+    if (running) client.stopTimer(opId, String(row.id))
+    else client.startTimer(opId, String(row.id))
   }
 
   function adjustCount(row, delta) {
@@ -196,37 +200,40 @@ BarWidget {
     var current = Math.max(0, Number(row.count) || 0)
     var next = Math.max(0, current + amount)
     var content = panel.loadedContent
-    if (content) content.patchItem(String(row.id), { "count": next })
-    runAction(["item", "log", "--json", String(row.id), String(amount)])
+    if (content) content.patchItem(String(row.id), { "count": next, "pending": true })
+    var opId = beginOp("logCount", "item:" + String(row.id))
+    client.logCount(opId, String(row.id), amount)
   }
 
   function correctMinutes(row, amount) {
     var current = Math.max(0, Number(row.minutes) || 0)
     var next = Math.max(0, current + amount)
     var content = panel.loadedContent
-    if (content) content.patchItem(String(row.id), { "minutes": next })
+    if (content) content.patchItem(String(row.id), { "minutes": next, "pending": true })
     if (runningTimer && String(runningTimer.item_id || "") === String(row.id)) {
       optimisticTimer = {
         "item_id": String(row.id), "title": String(runningTimer.title || row.title || ""),
         "started_at": String(runningTimer.started_at || row.timer_started_at || ""), "minutes": next
       }
     }
-    runAction(["item", "log", "--json", "--minutes", String(row.id), String(amount)])
+    var opId = beginOp("logMinutes", "item:" + String(row.id))
+    client.logMinutes(opId, String(row.id), amount)
   }
 
   function editItem(row, title) {
     var text = String(title || "").trim()
     if (text === "" || text === String(row.title || "")) return
     var content = panel.loadedContent
-    if (content) content.patchItem(String(row.id), { "title": text })
-    runAction(["item", "edit", "--json", String(row.id), "--title=" + text])
+    if (content) content.patchItem(String(row.id), { "title": text, "pending": true })
+    var opId = beginOp("edit", "item:" + String(row.id))
+    client.editItem(opId, String(row.id), text)
   }
 
   function removeItem(row) {
     var content = panel.loadedContent
     if (content) content.removeItem(String(row.id))
-    if (row.state !== "done") optimisticOpenDelta--
-    runAction(["item", "remove", "--json", String(row.id)])
+    var opId = beginOp("remove", "item:" + String(row.id))
+    client.removeItem(opId, String(row.id))
   }
 
   function itemDetail(row) {
@@ -269,28 +276,22 @@ BarWidget {
     Qt.callLater(function() { root.popoutSwitchClosing = false })
   }
 
-  function parseReport(raw) {
+  function acceptReport(status) {
     try {
-      var text = String(raw || "").trim()
-      if (text === lastStatusText) {
-        firstLoad = false
-        return
-      }
-      var parsed = JSON.parse(text)
-      if (!parsed || !parsed.next || !(parsed.prayers instanceof Array))
+      if (!status || !status.next || !(status.prayers instanceof Array))
         throw new Error("missing next/prayers fields")
-      if (actionProcess.running || pendingActions.length > 0) {
-        firstLoad = false
-        return
-      }
-      report = parsed
+      report = status
       optimisticTimer = undefined
       timerSnapshotMs = Date.now()
-      lastStatusText = text
-      optimisticOpenDelta = 0
       var content = panel.loadedContent
-      if (content) content.syncTimeline(parsed)
-      remainingSeconds = Math.max(0, Number(parsed.next.remaining_seconds) || 0)
+      if (content) content.syncTimeline(status)
+      remainingSeconds = Math.max(0, Number(status.next.remaining_seconds) || 0)
+      if (remainingSeconds > 0) {
+        boundaryTimer.interval = remainingSeconds * 1000
+        boundaryTimer.restart()
+      } else {
+        boundaryTimer.stop()
+      }
       errorMessage = ""
     } catch (error) {
       errorMessage = String(error)
@@ -302,6 +303,84 @@ BarWidget {
     var detail = String(raw || "").trim().replace(/[\r\n]+/g, " ")
     errorMessage = detail === "" ? strings.t("panel.commandFailed") : detail.slice(0, 240)
     firstLoad = false
+  }
+
+  function applyChanged(changed) {
+    if (!report || !report.planner || !changed) return
+    var plan = report.planner
+    var rows = (plan.items || []).slice()
+    var items = changed.items || []
+    for (var i = 0; i < items.length; i++) {
+      var source = items[i]
+      var found = -1
+      for (var j = 0; j < rows.length; j++)
+        if (String(rows[j].id || "") === String(source.id || "")) { found = j; break }
+      if (found >= 0) rows[found] = source
+      else rows.push(source)
+    }
+    var deleted = changed.deleted || []
+    for (var d = 0; d < deleted.length; d++) {
+      var id = String(deleted[d])
+      rows = rows.filter(function(item) { return String(item.id || "") !== id })
+    }
+    var marks = (plan.prayer_marks || []).slice()
+    var changedMarks = changed.marks || []
+    for (var m = 0; m < changedMarks.length; m++) {
+      var mark = changedMarks[m]
+      var prayer = String(mark.prayer || "")
+      var at = marks.indexOf(prayer)
+      if (mark.deleted_at) {
+        if (at >= 0) marks.splice(at, 1)
+      } else if (at < 0) {
+        marks.push(prayer)
+      }
+    }
+    plan.items = rows
+    plan.prayer_marks = marks
+    plan.timer = null
+    for (var t = 0; t < rows.length; t++) {
+      if (rows[t].timer_started_at) {
+        plan.timer = {
+          "item_id": String(rows[t].id || ""), "title": String(rows[t].title || ""),
+          "started_at": String(rows[t].timer_started_at),
+          "minutes": Number(rows[t].minutes) || 0
+        }
+        break
+      }
+    }
+    report = Object.assign({}, report, { "planner": plan })
+    optimisticTimer = undefined
+    timerSnapshotMs = Date.now()
+    var content = panel.loadedContent
+    if (content) content.syncTimeline(report)
+  }
+
+  function handleMutationSuccess(opId, kind, result) {
+    if (result && result.fallback) {
+      clearPending(opId)
+      if (kind === "add" && result.raw) {
+        var content = panel.loadedContent
+        if (content) content.showNextOccurrence(result.raw)
+      }
+      client.refreshStatus()
+      return
+    }
+    if (result && result.changed) applyChanged(result.changed)
+    if (kind === "add" && result && result.changed && result.changed.items
+        && result.changed.items.length > 0) {
+      var hint = Object.assign({}, result.changed.items[0])
+      if (!hint.day && report && report.planner) hint.day = String(report.planner.day || "")
+      var target = panel.loadedContent
+      if (target) target.showNextOccurrence(JSON.stringify(hint))
+    }
+    clearPending(opId)
+  }
+
+  function handleMutationFailure(opId, kind, message) {
+    clearPending(opId)
+    var detail = String(message || "").trim().replace(/[\r\n]+/g, " ")
+    actionError = detail === "" ? strings.t("panel.commandFailed") : detail.slice(0, 240)
+    client.refreshStatus()
   }
 
   function parseLocationConfig(raw) {
@@ -323,14 +402,16 @@ BarWidget {
     interval: 1000
     running: true
     repeat: true
-    onTriggered: {
-      if (root.remainingSeconds > 0) {
-        root.remainingSeconds--
-        // Refresh exactly once at the boundary. The periodic timer handles a
-        // transient failure instead of spawning one process every second.
-        if (root.remainingSeconds === 0) root.refresh()
-      }
-    }
+    onTriggered: if (root.remainingSeconds > 0) root.remainingSeconds--
+  }
+
+  Timer {
+    // The daemon does not emit a clock boundary yet, so take one snapshot
+    // when the local countdown expires. This is a one-shot, not a poll.
+    id: boundaryTimer
+    repeat: false
+    running: false
+    onTriggered: root.refresh()
   }
 
   Timer {
@@ -342,8 +423,9 @@ BarWidget {
   }
 
   Timer {
+    // Only the CLI fallback needs polling; a connected socket pushes changes.
     interval: 30000
-    running: true
+    running: !client.socketActive
     repeat: true
     triggeredOnStart: false
     onTriggered: root.refresh()
@@ -357,6 +439,15 @@ BarWidget {
     repeat: true
     triggeredOnStart: false
     onTriggered: root.syncLocation(false)
+  }
+
+  SalahClient {
+    id: client
+    onStatusLoaded: function(status) { root.acceptReport(status) }
+    onStatusFailed: function(message) { root.reportFailure(message) }
+    onMutationSucceeded: function(opId, kind, result) { root.handleMutationSuccess(opId, kind, result) }
+    onMutationFailed: function(opId, kind, message) { root.handleMutationFailure(opId, kind, message) }
+    onTransportChanged: function(active) { if (!active) root.refresh() }
   }
 
   Process {
@@ -402,47 +493,6 @@ BarWidget {
     }
   }
 
-  Process {
-    id: actionProcess
-    stdout: StdioCollector { id: actionStdout; waitForEnd: true }
-    stderr: StdioCollector {
-      id: actionStderr
-      waitForEnd: true
-    }
-    onExited: function(exitCode) {
-      if (exitCode !== 0) {
-        var detail = String(actionStderr.text || "").trim().replace(/[\r\n]+/g, " ")
-        root.actionError = detail === "" ? strings.t("panel.commandFailed") : detail.slice(0, 240)
-        // The next status result must reconcile the optimistic edit even when
-        // the backend JSON is byte-for-byte equal to the previous result.
-        root.lastStatusText = ""
-      } else if (root.activeAction && root.activeAction.kind === "add") {
-        var content = panel.loadedContent
-        if (content) content.showNextOccurrence(actionStdout.text)
-      }
-      root.activeAction = null
-      root.runNextAction()
-      if (!actionProcess.running && root.pendingActions.length === 0) root.refresh()
-    }
-  }
-
-  Process {
-    id: statusProcess
-    command: ["salah", "status", "--json"]
-    stdout: StdioCollector {
-      id: statusStdout
-      waitForEnd: true
-    }
-    stderr: StdioCollector {
-      id: statusStderr
-      waitForEnd: true
-    }
-    onExited: function(exitCode) {
-      if (exitCode === 0) root.parseReport(statusStdout.text)
-      else root.reportFailure(statusStderr.text)
-    }
-  }
-
   implicitWidth: root.vertical ? button.implicitWidth
     : Style.space(root.runningTimer ? 250 : 180)
   implicitHeight: button.implicitHeight
@@ -479,7 +529,7 @@ BarWidget {
 
     content: PanelKeyCatcher {
       id: keyCatcher
-      property alias quickField: quickField
+      property alias quickField: quickAdd.quickField
       property alias timelineModel: timelineModel
       property alias timelineList: timelineList
       property string dragKey: ""
@@ -527,7 +577,7 @@ BarWidget {
       function baseRow(type, key, block) {
         return {
           "rowType": type, "rowKey": key, "block": block || "", "itemId": "",
-          "title": "", "time": "", "state": "", "measure": "check", "target": 0,
+          "title": "", "time": "", "itemState": "", "measure": "check", "target": 0,
           "minutes": 0, "count": 0, "repeat": "none", "timer_started_at": "",
           "current": false, "marked": false, "passed": false, "pending": false
         }
@@ -568,7 +618,7 @@ BarWidget {
             var item = baseRow("item", "item:" + String(source.id), block)
             item.itemId = String(source.id || "")
             item.title = String(source.title || "")
-            item.state = String(source.state || "open")
+            item.itemState = String(source.state || "open")
             item.measure = String(source.measure || "check")
             item.target = Number(source.target) || 0
             item.minutes = Number(source.minutes) || 0
@@ -603,6 +653,13 @@ BarWidget {
 
       function syncTimeline(status) {
         var desired = desiredRows(status)
+        var desiredKeys = ({})
+        for (var k = 0; k < desired.length; k++) desiredKeys[desired[k].rowKey] = true
+        for (var extra = timelineModel.count - 1; extra >= 0; extra--) {
+          var key = timelineModel.get(extra).rowKey
+          if (!desiredKeys[key] && String(key).indexOf("pending:") !== 0)
+            timelineModel.remove(extra)
+        }
         for (var i = 0; i < desired.length; i++) {
           var found = indexOfKey(desired[i].rowKey)
           if (found < 0) timelineModel.insert(i, desired[i])
@@ -613,10 +670,33 @@ BarWidget {
               if (timelineModel.get(i)[role] !== row[role]) timelineModel.setProperty(i, role, row[role])
           }
         }
-        for (var tail = timelineModel.count - 1; tail >= desired.length; tail--)
-          timelineModel.remove(tail)
+        reapplyPending()
         if (expandedItemId !== "" && indexOfKey("item:" + expandedItemId) < 0)
           collapseExpanded()
+      }
+
+      function setRowPending(key, value) {
+        var index = indexOfKey(key)
+        if (index >= 0) timelineModel.setProperty(index, "pending", value)
+      }
+
+      function reapplyPending() {
+        for (var opId in root.pendingOps) {
+          var pending = root.pendingOps[opId]
+          if (!pending) continue
+          if (pending.rowKey) setRowPending(pending.rowKey, true)
+          if (pending.tempKey) {
+            var temp = indexOfKey(pending.tempKey)
+            if (temp >= 0) {
+              var block = timelineModel.get(temp).block
+              var addIndex = indexOfKey("add:" + block)
+              if (addIndex >= 0) {
+                var target = temp < addIndex ? addIndex - 1 : addIndex
+                if (temp !== target) timelineModel.move(temp, target, 1)
+              }
+            }
+          }
+        }
       }
 
       function patchItem(id, changes) {
@@ -685,14 +765,14 @@ BarWidget {
         return marked
       }
 
-      function addPendingItem(title, requestedBlock) {
+      function addPendingItem(title, requestedBlock, key) {
         var block = String(requestedBlock || "")
         if (block === "") block = root.planner ? String(root.planner.block || "") : ""
         if (["night", "fajr", "dhuhr", "asr", "maghrib", "isha"].indexOf(block) < 0)
           block = "fajr"
         var addIndex = indexOfKey("add:" + block)
         if (addIndex < 0) return
-        var pending = baseRow("item", "pending:" + Date.now(), block)
+        var pending = baseRow("item", key || ("pending:" + Date.now()), block)
         pending.title = title
         pending.itemId = pending.rowKey
         pending.pending = true
@@ -759,9 +839,11 @@ BarWidget {
         if (block === "") { cancelDrag(); return }
         var id = timelineModel.get(itemIndex).itemId
         timelineModel.setProperty(itemIndex, "block", block)
+        timelineModel.setProperty(itemIndex, "pending", true)
         dragKey = ""
         dragSnapshot = []
-        root.runAction(["item", "move", "--json", id, "--block", block, "--index", String(blockIndex)])
+        var opId = root.beginOp("move", "item:" + id)
+        client.moveItem(opId, id, block, blockIndex)
       }
 
       ListModel {
@@ -789,7 +871,6 @@ BarWidget {
           }
         }
       }
-
 
       Timer {
         id: occurrenceHintTimer
@@ -866,66 +947,15 @@ BarWidget {
             }
           }
 
-          Column {
-            width: parent.width
-            spacing: Style.space(3)
-
-            TextField {
-              id: quickField
-              width: parent.width
-              placeholderText: strings.t("panel.quickAddPlaceholder")
-              foreground: root.foreground
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              maximumLength: 200
-
-              onAccepted: {
-                root.addItem(text)
-                text = ""
-              }
-
-              Keys.onEscapePressed: function(event) {
-                root.clearQuickAddPreset()
-                text = ""
-                focus = false
-                event.accepted = true
-              }
-            }
-
-            Text {
-              visible: root.quickAddBlock !== ""
-              width: parent.width
-              textFormat: Text.PlainText
-              text: strings.t("panel.addingTo").arg(root.prayerName(root.quickAddBlock, root.quickAddBlock))
-              color: root.mutedForeground
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideRight
-            }
-
-
-            Text {
-              visible: keyCatcher.occurrenceHint !== ""
-              width: parent.width
-              textFormat: Text.PlainText
-              text: keyCatcher.occurrenceHint
-              color: root.mutedForeground
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideRight
-            }
-
-            Text {
-              visible: root.actionError !== ""
-              width: parent.width
-              textFormat: Text.PlainText
-              text: root.actionError
-              color: root.mutedForeground
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WrapAnywhere
-              maximumLineCount: 2
-              elide: Text.ElideRight
-            }
+          QuickAdd {
+            id: quickAdd
+            strings: root.tr
+            host: root
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            foreground: root.foreground
+            mutedForeground: root.mutedForeground
+            occurrenceHint: keyCatcher.occurrenceHint
+            actionError: root.actionError
           }
 
           PanelSeparator {
@@ -969,670 +999,14 @@ BarWidget {
                 }
               }
 
-              delegate: Item {
-                id: flatRow
-                required property int index
-                required property string rowType
-                required property string rowKey
-                required property string block
-                required property string itemId
-                required property string title
-                required property string time
-                required property string state
-                required property string measure
-                required property int target
-                required property int minutes
-                required property int count
-                required property string repeat
-                required property string timer_started_at
-                required property bool current
-                required property bool marked
-                required property bool passed
-                required property bool pending
-                readonly property bool dragging: keyCatcher.dragKey === rowKey
-                readonly property bool done: state === "done"
-                readonly property bool expanded: rowType === "item"
-                  && keyCatcher.expandedItemId === itemId
-                property bool editing: false
-                property bool confirmingDelete: false
-                property string editText: title
-                property string correctionError: ""
-                onExpandedChanged: if (!expanded) {
-                  editing = false
-                  confirmingDelete = false
-                  correctionError = ""
-                }
-                function focusTimeField() {
-                  if (!expanded) return
-                  correctionField.forceActiveFocus()
-                  correctionField.selectAll()
-                }
-                function selectRow() {
-                  timelineList.currentIndex = index
-                  if (keyCatcher.expandedItemId !== ""
-                      && keyCatcher.expandedItemId !== itemId)
-                    keyCatcher.collapseExpanded()
-                }
-                function beginTitleEdit() {
-                  if (repeat !== "none") return
-                  editing = true
-                  confirmingDelete = false
-                  editText = title
-                  keyCatcher.editingKey = rowKey
-                  titleEditor.forceActiveFocus()
-                  titleEditor.selectAll()
-                }
-                readonly property int elapsedMinutes: {
-                  root.minuteTick
-                  var started = Date.parse(timer_started_at)
-                  if (isNaN(started)) return Math.max(0, minutes)
-                  var thenMinutes = Math.max(0, Math.floor((root.timerSnapshotMs - started) / 60000))
-                  var nowMinutes = Math.max(0, Math.floor((Date.now() - started) / 60000))
-                  return Math.max(0, minutes + nowMinutes - thenMinutes)
-                }
-                readonly property var itemData: ({
-                  "id": itemId, "title": title, "block": block, "state": state,
-                  "measure": measure, "target": target, "minutes": minutes,
-                  "count": count, "repeat": repeat, "timer_started_at": timer_started_at
-                })
-                width: ListView.view.width
-                height: rowType === "header" ? Style.space(40)
-                  : (rowType === "item" ? Style.space(expanded
-                      ? (correctionError !== "" ? 102 : 84) : 42)
-                    : (rowType === "marker" ? Style.space(24) : Style.space(27)))
-                Behavior on height {
-                  NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic }
-                }
-                opacity: dragging ? 0 : (pending ? 0.5 : (passed && !current ? 0.58 : 1))
-
-                Rectangle {
-                  visible: flatRow.rowType === "item" && flatRow.expanded
-                  anchors.fill: parent
-                  anchors.leftMargin: Style.space(28)
-                  radius: Style.cornerRadius
-                  color: Style.hoverFillFor(root.foreground, Commons.Color.accent)
-                }
-
-                Rectangle {
-                  visible: flatRow.rowType === "header"
-                  anchors.fill: parent
-                  radius: Style.cornerRadius
-                  color: flatRow.current
-                    ? Style.selectedFillFor(root.foreground, Commons.Color.accent)
-                    : (headerHover.containsMouse
-                        ? Style.hoverFillFor(root.foreground, Commons.Color.accent)
-                        : "transparent")
-
-                  Rectangle {
-                    id: prayerCircle
-                    visible: flatRow.block !== "night"
-                    anchors.left: parent.left
-                    anchors.leftMargin: Style.space(8)
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Style.space(18)
-                    height: width
-                    radius: width / 2
-                    color: flatRow.marked
-                      ? Style.selectedStateColor(root.foreground, Commons.Color.accent) : "transparent"
-                    border.width: Style.spacing.hairline
-                    border.color: flatRow.marked
-                      ? Style.selectedStateColor(root.foreground, Commons.Color.accent) : root.foreground
-
-                    Text {
-                      visible: flatRow.marked
-                      anchors.centerIn: parent
-                      textFormat: Text.PlainText
-                      text: strings.t("panel.checkSymbol")
-                      color: Commons.Color.background
-                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.bold: true
-                    }
-
-                    MouseArea {
-                      anchors.fill: parent
-                      anchors.margins: -Style.space(6)
-                      cursorShape: Qt.PointingHandCursor
-                      onClicked: root.togglePrayer({ "id": flatRow.block })
-                    }
-                  }
-
-                  MouseArea {
-                    id: headerHover
-                    anchors.left: flatRow.block === "night" ? parent.left : prayerCircle.right
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    hoverEnabled: true
-                    acceptedButtons: Qt.NoButton
-                  }
-
-                  Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: flatRow.block === "night" ? Style.space(8) : Style.space(36)
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
-                    text: root.prayerName(flatRow.block, flatRow.title)
-                    color: root.foreground
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.body
-                    font.bold: flatRow.current
-                  }
-
-                  Text {
-                    anchors.right: nowTag.left
-                    anchors.rightMargin: Style.space(8)
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
-                    text: flatRow.time || strings.t("panel.noTimeSymbol")
-                    color: root.mutedForeground
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.bodySmall
-                  }
-
-                  Rectangle {
-                    id: nowTag
-                    visible: flatRow.current
-                    anchors.right: parent.right
-                    anchors.rightMargin: Style.space(6)
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: visible ? nowText.implicitWidth + Style.space(12) : 0
-                    height: Style.space(22)
-                    radius: Style.cornerRadius
-                    color: Style.selectedFillFor(root.foreground, Commons.Color.accent)
-
-                    Text {
-                      id: nowText
-                      anchors.centerIn: parent
-                      textFormat: Text.PlainText
-                      text: strings.t("panel.now")
-                      color: Style.selectedStateColor(root.foreground, Commons.Color.accent)
-                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.bold: true
-                    }
-                  }
-                }
-
-                Rectangle {
-                  visible: flatRow.rowType === "item"
-                  anchors.top: parent.top
-                  anchors.left: parent.left
-                  anchors.right: parent.right
-                  anchors.leftMargin: Style.space(28)
-                  height: Style.space(42)
-                  radius: Style.cornerRadius
-                  color: rowHover.containsMouse && !flatRow.expanded
-                    ? Style.hoverFillFor(root.foreground, Commons.Color.accent) : "transparent"
-
-                  MouseArea {
-                    id: rowHover
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    acceptedButtons: Qt.NoButton
-                  }
-
-                  Text {
-                    id: dragGlyph
-                    anchors.left: parent.left
-                    anchors.leftMargin: Style.space(4)
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
-                    text: strings.t("panel.dragHandle")
-                    color: root.mutedForeground
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.bodySmall
-                  }
-
-                  MouseArea {
-                    id: handleMouse
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    width: Style.space(28)
-                    cursorShape: Qt.SizeVerCursor
-                    preventStealing: true
-                    property bool activeDrag: false
-                    onPressed: function(mouse) {
-                      activeDrag = true
-                      flatRow.selectRow()
-                      var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
-                      keyCatcher.beginDrag(flatRow.rowKey, flatRow.title, point.y)
-                    }
-                    onPositionChanged: function(mouse) {
-                      if (!activeDrag) return
-                      var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
-                      keyCatcher.moveDrag(point.y)
-                    }
-                    onReleased: function(mouse) {
-                      var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
-                      var inside = point.x >= 0 && point.x <= timelineList.width
-                        && point.y >= 0 && point.y <= timelineList.contentHeight
-                      activeDrag = false
-                      keyCatcher.finishDrag(inside)
-                    }
-                    onCanceled: { activeDrag = false; keyCatcher.cancelDrag() }
-                  }
-
-                  Rectangle {
-                    id: itemCheck
-                    anchors.left: parent.left
-                    anchors.leftMargin: Style.space(30)
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Style.space(15)
-                    height: width
-                    radius: Math.min(Style.cornerRadius, Style.space(3))
-                    color: flatRow.done
-                      ? Style.selectedStateColor(root.foreground, Commons.Color.accent) : "transparent"
-                    border.width: Style.spacing.hairline
-                    border.color: flatRow.done
-                      ? Style.selectedStateColor(root.foreground, Commons.Color.accent) : root.mutedForeground
-
-                    Text {
-                      visible: flatRow.done
-                      anchors.centerIn: parent
-                      textFormat: Text.PlainText
-                      text: strings.t("panel.checkSymbol")
-                      color: Commons.Color.background
-                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-                  }
-
-                  MouseArea {
-                    id: itemMouse
-                    anchors.left: itemCheck.left
-                    anchors.right: controlRow.left
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    pressAndHoldInterval: 250
-                    property bool draggedThisPress: false
-                    onPressed: {
-                      draggedThisPress = false
-                      timelineList.currentIndex = flatRow.index
-                      flatRow.forceActiveFocus()
-                      if (keyCatcher.expandedItemId !== ""
-                          && keyCatcher.expandedItemId !== flatRow.itemId)
-                        keyCatcher.collapseExpanded()
-                    }
-                    onPressAndHold: function(mouse) {
-                      draggedThisPress = true
-                      var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
-                      keyCatcher.beginDrag(flatRow.rowKey, flatRow.title, point.y)
-                    }
-                    onPositionChanged: function(mouse) {
-                      if (!draggedThisPress) return
-                      var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
-                      keyCatcher.moveDrag(point.y)
-                    }
-                    onReleased: function(mouse) {
-                      if (!draggedThisPress) return
-                      var point = mapToItem(timelineList.contentItem, mouse.x, mouse.y)
-                      var inside = point.x >= 0 && point.x <= timelineList.width
-                        && point.y >= 0 && point.y <= timelineList.contentHeight
-                      keyCatcher.finishDrag(inside)
-                    }
-                    onCanceled: if (draggedThisPress) keyCatcher.cancelDrag()
-                    onClicked: if (!draggedThisPress && !flatRow.pending) root.toggleItem(flatRow.itemData)
-                  }
-
-                  Column {
-                    anchors.left: itemCheck.right
-                    anchors.leftMargin: Style.space(9)
-                    anchors.right: controlRow.left
-                    anchors.rightMargin: Style.space(6)
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 0
-
-                    Text {
-                      visible: !flatRow.editing
-                      width: parent.width
-                      textFormat: Text.PlainText
-                      text: flatRow.title
-                      color: flatRow.done || flatRow.pending ? root.mutedForeground : root.foreground
-                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                      font.pixelSize: Style.font.bodySmall
-                      font.strikeout: flatRow.done
-                      elide: Text.ElideRight
-                    }
-
-                    TextField {
-                      id: titleEditor
-                      visible: flatRow.editing
-                      width: parent.width
-                      height: Style.space(26)
-                      foreground: root.foreground
-                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                      font.pixelSize: Style.font.bodySmall
-                      horizontalPadding: Style.space(4)
-                      verticalPadding: 0
-                      maximumLength: 200
-                      text: flatRow.editText
-                      onAccepted: {
-                        root.editItem(flatRow.itemData, text)
-                        flatRow.editing = false
-                        keyCatcher.editingKey = ""
-                        keyCatcher.forceActiveFocus()
-                      }
-                      Keys.onEscapePressed: function(event) {
-                        flatRow.editing = false
-                        keyCatcher.editingKey = ""
-                        keyCatcher.forceActiveFocus()
-                        event.accepted = true
-                      }
-                    }
-
-                    Text {
-                      visible: !flatRow.editing && text !== ""
-                      width: parent.width
-                      textFormat: Text.PlainText
-                      text: flatRow.pending ? strings.t("panel.pending")
-                        : root.itemDetail(flatRow.itemData)
-                      color: root.mutedForeground
-                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                      font.pixelSize: Style.font.caption
-                      elide: Text.ElideRight
-                    }
-                  }
-
-                  Row {
-                    id: controlRow
-                    visible: !flatRow.pending && !flatRow.editing
-                    anchors.right: parent.right
-                    anchors.rightMargin: Style.space(3)
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: Style.space(1)
-
-                    Row {
-                      visible: flatRow.measure === "count"
-                      height: Style.space(26)
-                      spacing: 0
-
-                      Button {
-                        width: Style.space(24)
-                        height: parent.height
-                        text: strings.t("panel.decrease")
-                        tooltipText: strings.t("panel.decreaseCount")
-                        foreground: root.mutedForeground
-                        fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                        horizontalPadding: 0
-                        verticalPadding: 0
-                        onClicked: {
-                          flatRow.selectRow()
-                          root.adjustCount(flatRow.itemData, -1)
-                        }
-                      }
-                      Row {
-                        width: flatRow.target > 0 ? Style.space(54) : Style.space(32)
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: Style.space(2)
-
-                        Text {
-                          anchors.verticalCenter: parent.verticalCenter
-                          textFormat: Text.PlainText
-                          text: String(flatRow.count)
-                          color: root.foreground
-                          font.family: "monospace"
-                          font.pixelSize: Style.font.caption
-                        }
-                        Text {
-                          visible: flatRow.target > 0
-                          anchors.verticalCenter: parent.verticalCenter
-                          textFormat: Text.PlainText
-                          text: strings.t("panel.countGoal").arg(flatRow.target)
-                          color: root.mutedForeground
-                          font.family: "monospace"
-                          font.pixelSize: Style.font.caption
-                        }
-                      }
-                      Button {
-                        width: Style.space(24)
-                        height: parent.height
-                        text: strings.t("panel.increase")
-                        tooltipText: strings.t("panel.increaseCount")
-                        foreground: root.mutedForeground
-                        fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                        horizontalPadding: 0
-                        verticalPadding: 0
-                        onClicked: {
-                          flatRow.selectRow()
-                          root.adjustCount(flatRow.itemData, 1)
-                        }
-                      }
-                    }
-                    Button {
-                      width: Style.space(68)
-                      height: Style.space(26)
-                      text: (flatRow.timer_started_at !== ""
-                          ? strings.t("panel.pauseWithTime") : strings.t("panel.startWithTime"))
-                        .arg(root.formatMinutes(flatRow.elapsedMinutes))
-                      tooltipText: flatRow.timer_started_at !== ""
-                        ? strings.t("panel.pauseTimer") : strings.t("panel.startTimer")
-                      foreground: root.foreground
-                      fontFamily: "monospace"
-                      horizontalPadding: 0
-                      verticalPadding: 0
-                      bordered: true
-                      onClicked: {
-                        flatRow.selectRow()
-                        root.toggleTimer(flatRow.itemData)
-                      }
-                    }
-                    Button {
-                      width: Style.space(30)
-                      height: Style.space(28)
-                      text: strings.t("panel.moreSymbol")
-                      tooltipText: strings.t("panel.moreActions")
-                      foreground: root.mutedForeground
-                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                      horizontalPadding: 0
-                      verticalPadding: 0
-                      onClicked: {
-                        timelineList.currentIndex = flatRow.index
-                        keyCatcher.toggleExpanded(flatRow.itemId)
-                      }
-                    }
-                  }
-                }
-
-                Item {
-                  visible: flatRow.rowType === "item" && flatRow.expanded
-                  anchors.left: parent.left
-                  anchors.leftMargin: Style.space(58)
-                  anchors.right: parent.right
-                  anchors.rightMargin: Style.space(3)
-                  anchors.top: parent.top
-                  anchors.topMargin: Style.space(44)
-                  height: Style.space(38)
-
-                  Row {
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: Style.space(4)
-
-                    Text {
-                      anchors.verticalCenter: parent.verticalCenter
-                      textFormat: Text.PlainText
-                      text: strings.t("panel.time")
-                      color: root.mutedForeground
-                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-                    TextField {
-                      id: correctionField
-                      width: Style.space(78)
-                      height: Style.space(28)
-                      placeholderText: strings.t("panel.correctionPlaceholder")
-                      foreground: root.foreground
-                      font.family: "monospace"
-                      font.pixelSize: Style.font.caption
-                      horizontalPadding: Style.space(5)
-                      verticalPadding: 0
-                      maximumLength: 5
-                      onActiveFocusChanged: {
-                        if (activeFocus) keyCatcher.editingKey = flatRow.rowKey
-                        else if (keyCatcher.editingKey === flatRow.rowKey && !titleEditor.activeFocus)
-                          keyCatcher.editingKey = ""
-                      }
-                      onAccepted: {
-                        var raw = String(text).trim()
-                        var value = Number(raw)
-                        if (!/^[+-]?\d+$/.test(raw) || value === 0 || value < -1440 || value > 1440) {
-                          flatRow.correctionError = strings.t("panel.correctionError")
-                          return
-                        }
-                        root.correctMinutes(flatRow.itemData, value)
-                        text = ""
-                        flatRow.correctionError = ""
-                      }
-                      Keys.onEscapePressed: function(event) {
-                        text = ""
-                        flatRow.correctionError = ""
-                        keyCatcher.collapseExpanded()
-                        keyCatcher.forceActiveFocus()
-                        event.accepted = true
-                      }
-                    }
-                    Repeater {
-                      model: [
-                        { "amount": -5, "key": "panel.minusFive" },
-                        { "amount": 5, "key": "panel.plusFive" },
-                        { "amount": 15, "key": "panel.plusFifteen" }
-                      ]
-                      Button {
-                        required property var modelData
-                        width: Style.space(34)
-                        height: Style.space(28)
-                        text: strings.t(modelData.key)
-                        foreground: root.mutedForeground
-                        fontFamily: "monospace"
-                        horizontalPadding: 0
-                        verticalPadding: 0
-                        onClicked: root.correctMinutes(flatRow.itemData, modelData.amount)
-                      }
-                    }
-                    Button {
-                      visible: flatRow.repeat === "none" && !flatRow.confirmingDelete
-                      width: Style.space(42)
-                      height: Style.space(28)
-                      text: strings.t("panel.edit")
-                      foreground: root.mutedForeground
-                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                      horizontalPadding: Style.space(3)
-                      verticalPadding: 0
-                      onClicked: flatRow.beginTitleEdit()
-                    }
-                    Button {
-                      visible: flatRow.repeat === "none" && !flatRow.confirmingDelete
-                      width: Style.space(52)
-                      height: Style.space(28)
-                      text: strings.t("panel.delete")
-                      foreground: root.mutedForeground
-                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                      horizontalPadding: Style.space(3)
-                      verticalPadding: 0
-                      onClicked: flatRow.confirmingDelete = true
-                    }
-                    Text {
-                      visible: flatRow.repeat !== "none"
-                      anchors.verticalCenter: parent.verticalCenter
-                      textFormat: Text.PlainText
-                      text: strings.t("panel.editRoutinesInApp")
-                      color: root.mutedForeground
-                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-                    Text {
-                      visible: flatRow.confirmingDelete
-                      anchors.verticalCenter: parent.verticalCenter
-                      textFormat: Text.PlainText
-                      text: strings.t("panel.confirmDelete")
-                      color: root.mutedForeground
-                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-                    Button {
-                      visible: flatRow.confirmingDelete
-                      width: Style.space(32)
-                      height: Style.space(28)
-                      text: strings.t("panel.yes")
-                      foreground: root.foreground
-                      horizontalPadding: 0
-                      verticalPadding: 0
-                      onClicked: {
-                        keyCatcher.collapseExpanded()
-                        root.removeItem(flatRow.itemData)
-                      }
-                    }
-                    Button {
-                      visible: flatRow.confirmingDelete
-                      width: Style.space(32)
-                      height: Style.space(28)
-                      text: strings.t("panel.no")
-                      foreground: root.foreground
-                      horizontalPadding: 0
-                      verticalPadding: 0
-                      onClicked: flatRow.confirmingDelete = false
-                    }
-                  }
-
-                  Text {
-                    visible: flatRow.correctionError !== ""
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.bottom
-                    textFormat: Text.PlainText
-                    text: flatRow.correctionError
-                    color: root.mutedForeground
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.caption
-                    elide: Text.ElideRight
-                  }
-                }
-
-                Button {
-                  visible: flatRow.rowType === "add"
-                  anchors.left: parent.left
-                  anchors.leftMargin: Style.space(34)
-                  anchors.verticalCenter: parent.verticalCenter
-                  height: Style.space(25)
-                  text: strings.t("panel.addRow").arg(root.prayerName(flatRow.block, flatRow.block))
-                  tooltipText: strings.t("panel.addTo").arg(root.prayerName(flatRow.block, flatRow.block))
-                  foreground: root.mutedForeground
-                  fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                  horizontalPadding: Style.space(5)
-                  verticalPadding: Style.space(1)
-                  onClicked: root.presetQuickAdd(flatRow.block)
-                }
-
-                Item {
-                  visible: flatRow.rowType === "marker"
-                  anchors.fill: parent
-
-                  Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: Style.space(38)
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
-                    text: flatRow.rowKey === "marker:sunrise"
-                      ? strings.t("boundary.sunrise") : strings.t("boundary.sleep")
-                    color: root.mutedForeground
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.caption
-                  }
-                  Text {
-                    anchors.right: parent.right
-                    anchors.rightMargin: Style.space(10)
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
-                    text: flatRow.time
-                    color: root.mutedForeground
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.caption
-                  }
-                }
+              delegate: TimelineRow {
+                host: root
+                controller: keyCatcher
+                timeline: timelineList
+                strings: root.tr
+                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                foreground: root.foreground
+                mutedForeground: root.mutedForeground
               }
             }
 
