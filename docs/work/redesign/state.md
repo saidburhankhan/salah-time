@@ -3,24 +3,22 @@
 ## Repository
 
 - Branch: `items-mvp`
-- In progress (uncommitted while workers run): `app/**` (Codex polish
-  round A2), `README.md` (DeepSeek)
+- Uncommitted: none
 
 ## Now
 
-C1/C2 committed (d4afad2): weekly repeat, item position + move, prayer
-marks, quick-add parser, day plan, stats, export v2, store migration 2,
-CLI per `contract.md`. A1/W1 committed (8efcff4): redesigned app and widget.
-App verified offscreen against the real CLI with seeded data; widget passes
-validation but has not been seen live yet.
+Core, CLI, app (three polish rounds), widget, and README are committed and
+installed (6389169). The app was verified offscreen against the real CLI.
+The live widget still runs a cached old component (labels showed raw i18n
+keys); it needs `omarchy restart shell` before it can be checked.
 
 ## Next
 
-1. Review the A2 polish diff and screenshots; commit.
-2. Review the README update; commit.
-3. `./scripts/install`, then ask the user for `omarchy restart shell`;
-   screenshot the widget popup (`omarchy-shell shell summon local.salah ""`,
-   `grim`) and check the journal.
+1. After the user restarts the shell: screenshot the widget popup
+   (`omarchy-shell shell summon local.salah ""`, `grim`), check the journal,
+   and try quick add, a prayer mark, and an item tick live.
+2. Test drag and drop by pointer in the installed app.
+3. Merge `sleep-boundary` and `items-mvp` into `main` once accepted.
 
 ## Interfaces
 

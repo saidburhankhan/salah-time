@@ -41,11 +41,11 @@ Hours view, prayer ring visualisation (may follow).
 
 ## Slices
 
-- [ ] C1 — core: weekly repeat, item position, prayer marks, quick-add
+- [x] C1 — core: weekly repeat, item position, prayer marks, quick-add
       parser, day plan, stats, export v2 (lead; `src/`)
-- [ ] C2 — CLI for the contract (lead or worker; `src/main.rs`, tests)
-- [ ] A1 — app redesign (Codex; `app/**`)
-- [ ] W1 — widget redesign (Codex; `plugin/**`)
+- [x] C2 — CLI for the contract (lead or worker; `src/main.rs`, tests)
+- [x] A1 — app redesign (Codex; `app/**`)
+- [x] W1 — widget redesign (Codex; `plugin/**`)
 - [ ] I1 — integration against the real CLI, install, live check
 
 ## Acceptance checks
