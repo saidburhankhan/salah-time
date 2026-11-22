@@ -28,9 +28,13 @@ BarWidget {
   property bool popoutSwitchClosing: false
   property string actionError: ""
   property var pendingActions: []
+  property string quickAddBlock: ""
 
   readonly property string nextName: report && report.next
     ? String(report.next.name || "")
+    : ""
+  readonly property string localizedNextName: report && report.next
+    ? prayerName(report.next.id, nextName)
     : ""
   readonly property string nextTime: report && report.next
     ? String(report.next.time || "")
@@ -42,17 +46,10 @@ BarWidget {
     : false
   readonly property var planner: report && report.planner ? report.planner : null
   readonly property int openCount: planner ? (Number(planner.open) || 0) : 0
-  // While sleeping the list shows what is planned for the coming Fajr block.
-  readonly property var blockItems: planner
-    ? (sleeping ? (planner.upcoming || []) : (planner.current || []))
-    : []
-  readonly property string blockName: report && report.current_block && !sleeping
-    ? String(report.current_block.start.name || "")
-    : strings.t("panel.fajrTomorrow")
-  readonly property string displayText: nextName !== ""
+  readonly property string displayText: localizedNextName !== ""
     ? (sleeping
-        ? strings.t("bar.sleeping") + "  " + nextName + " " + remainingShort
-        : nextName + "  " + remainingShort + (openCount > 0 ? "  · " + openCount : ""))
+        ? strings.t("bar.sleeping") + "  " + localizedNextName + " " + remainingShort
+        : localizedNextName + "  " + remainingShort + (openCount > 0 ? "  · " + openCount : ""))
     : (firstLoad ? strings.t("bar.loading") : "☾ —")
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color mutedForeground: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
@@ -66,9 +63,9 @@ BarWidget {
     var secs = seconds % 60
     function pad(value) { return value < 10 ? "0" + value : String(value) }
     if (compact) {
-      if (hours > 0) return hours + "h " + pad(minutes) + "m"
-      if (minutes > 0) return minutes + "m"
-      return secs + "s"
+      if (hours > 0) return strings.t("unit.hoursMinutesShort").arg(hours).arg(pad(minutes))
+      if (minutes > 0) return strings.t("unit.minutesShort").arg(minutes)
+      return strings.t("unit.secondsShort").arg(secs)
     }
     return pad(hours) + ":" + pad(minutes) + ":" + pad(secs)
   }
@@ -94,7 +91,54 @@ BarWidget {
   function addItem(title) {
     var text = String(title || "").trim()
     if (text === "") return
-    runAction(["item", "add", "--json", "--", text])
+    var args = ["item", "add", "--json", "--quick"]
+    if (quickAddBlock !== "") args = args.concat(["--block", quickAddBlock])
+    runAction(args.concat(["--", text]))
+  }
+
+  function presetQuickAdd(block) {
+    quickAddBlock = String(block || "")
+    var content = panel.loadedContent
+    if (content && content.quickField) {
+      content.quickField.forceActiveFocus()
+      content.quickField.cursorPosition = content.quickField.text.length
+    }
+  }
+
+  function clearQuickAddPreset() {
+    quickAddBlock = ""
+  }
+
+  function prayerName(id, fallback) {
+    var key = "prayer." + String(id || "")
+    var translated = strings.t(key)
+    return translated === key ? String(fallback || id || "") : translated
+  }
+
+  function isPrayerMarked(id) {
+    var marks = planner && planner.prayer_marks ? planner.prayer_marks : []
+    return marks.indexOf(String(id || "")) >= 0
+  }
+
+  function togglePrayer(prayer) {
+    var command = isPrayerMarked(prayer.id) ? "unmark" : "mark"
+    runAction(["prayer", command, "--json", String(prayer.id)])
+  }
+
+  function itemsForBlock(block, source) {
+    var rows = source || (planner ? (planner.items || []) : [])
+    var result = []
+    for (var i = 0; i < rows.length; i++)
+      if (String(rows[i].block || "") === String(block || "")) result.push(rows[i])
+    result.sort(function(a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0) })
+    return result
+  }
+
+  function boundary(id) {
+    var rows = report ? (report.boundaries || []) : []
+    for (var i = 0; i < rows.length; i++)
+      if (String(rows[i].id || "") === id) return rows[i]
+    return null
   }
 
   function toggleItem(row) {
@@ -122,11 +166,11 @@ BarWidget {
   function itemDetail(row) {
     var parts = []
     if (row.measure === "minutes")
-      parts.push(row.minutes + (row.target ? " / " + row.target : "") + " " + strings.t("panel.minutesShort"))
+      parts.push(row.minutes + (row.target ? "/" + row.target : "") + " " + strings.t("panel.minutesShort"))
     else if (row.measure === "count")
-      parts.push(row.count + (row.target ? " / " + row.target : ""))
-    if (row.block && report && report.current_block && row.block !== report.current_block.start.id)
-      parts.push(strings.t("panel.carried"))
+      parts.push(row.count + (row.target ? "/" + row.target : ""))
+    if (row.repeat === "daily") parts.push(strings.t("repeat.daily"))
+    else if (row.repeat === "weekly") parts.push(strings.t("repeat.weekly"))
     return parts.join(" · ")
   }
 
@@ -312,8 +356,8 @@ BarWidget {
     labelVisible: true
     horizontalMargin: 8.75
     verticalPadding: 8.75
-    tooltipText: root.nextName !== ""
-      ? root.nextName + " · " + root.nextTime + " · " + root.remainingLong
+    tooltipText: root.localizedNextName !== ""
+      ? root.localizedNextName + " · " + root.nextTime + " · " + root.remainingLong
       : strings.t("bar.unavailable")
     pressFeedbackButtons: Qt.NoButton
     onPressed: function(mouseButton) {
@@ -329,15 +373,16 @@ BarWidget {
     bar: root.bar
     open: false
     focusTarget: loadedContent
-    contentWidth: fittedContentWidth(Style.space(360))
+    contentWidth: fittedContentWidth(Style.space(400))
     contentHeight: fittedContentHeight(loadedContentHeight)
 
     content: PanelKeyCatcher {
       id: keyCatcher
+      property alias quickField: quickField
       anchors.fill: parent
-      // Let the inline editors receive keys while they have focus.
-      blocked: addField.activeFocus || sleepField.activeFocus
-      implicitHeight: contentColumn.implicitHeight
+      implicitHeight: Math.min(dayColumn.implicitHeight,
+        Math.max(Style.space(240), panel.availableCardHeight - panel.padding * 2))
+      blocked: quickField.activeFocus || sleepField.activeFocus
       onCloseRequested: root.close()
       onTabRequested: function(direction) {
         if (root.bar && typeof root.bar.switchPanelFrom === "function")
@@ -345,438 +390,657 @@ BarWidget {
       }
       onActivateRequested: root.refresh()
 
-      Column {
-        id: contentColumn
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        spacing: Style.space(14)
+      Flickable {
+        id: dayScroll
+        anchors.fill: parent
+        contentWidth: width
+        contentHeight: dayColumn.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        interactive: contentHeight > height
 
-        Item {
-          width: parent.width
-          implicitHeight: heroColumn.implicitHeight
+        Column {
+          id: dayColumn
+          width: dayScroll.width
+          spacing: Style.space(10)
 
-          Column {
-            id: heroColumn
-            anchors.left: parent.left
-            anchors.right: heroTime.left
-            anchors.rightMargin: Style.space(12)
-            spacing: Style.space(3)
+          Item {
+            width: parent.width
+            implicitHeight: heroColumn.implicitHeight
 
-            Text {
-              width: parent.width
-              textFormat: Text.PlainText
-              text: root.sleeping
-                ? strings.t("panel.sleepingNext")
-                : strings.t("panel.nextBoundary")
-              color: root.mutedForeground
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.caption
-              font.bold: true
-              font.letterSpacing: 1.2
+            Column {
+              id: heroColumn
+              anchors.left: parent.left
+              anchors.right: heroTime.left
+              anchors.rightMargin: Style.space(12)
+              spacing: Style.space(2)
+
+              PanelSectionHeader {
+                width: parent.width
+                text: root.sleeping
+                  ? strings.t("panel.sleepingNext")
+                  : strings.t("panel.next")
+                foreground: root.foreground
+                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+              }
+
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: root.prayerName(root.report && root.report.next ? root.report.next.id : "", root.nextName) || "—"
+                color: root.foreground
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.display
+                font.bold: true
+                elide: Text.ElideRight
+              }
+
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: strings.t("panel.beginsIn").arg(root.remainingLong)
+                color: root.mutedForeground
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
             }
 
             Text {
-              width: parent.width
+              id: heroTime
+              anchors.right: parent.right
+              anchors.verticalCenter: heroColumn.verticalCenter
               textFormat: Text.PlainText
-              text: root.nextName || "—"
+              text: root.nextTime || "—"
               color: root.foreground
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
-              font.pixelSize: Style.font.display
+              font.pixelSize: Style.font.displayLarge
               font.bold: true
+            }
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.space(3)
+
+            TextField {
+              id: quickField
+              width: parent.width
+              placeholderText: strings.t("panel.quickAddPlaceholder")
+              foreground: root.foreground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              maximumLength: 200
+
+              onAccepted: {
+                root.addItem(text)
+                text = ""
+              }
+
+              Keys.onEscapePressed: function(event) {
+                root.clearQuickAddPreset()
+                event.accepted = true
+              }
+            }
+
+            Text {
+              visible: root.quickAddBlock !== ""
+              width: parent.width
+              textFormat: Text.PlainText
+              text: strings.t("panel.addingTo").arg(root.prayerName(root.quickAddBlock, root.quickAddBlock))
+              color: root.mutedForeground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+
+            Text {
+              visible: root.actionError !== ""
+              width: parent.width
+              textFormat: Text.PlainText
+              text: root.actionError
+              color: root.mutedForeground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WrapAnywhere
+              maximumLineCount: 2
+              elide: Text.ElideRight
+            }
+          }
+
+          PanelSeparator {
+            visible: root.report !== null
+            foreground: root.foreground
+          }
+
+          Column {
+            id: timeline
+            visible: root.report !== null
+            width: parent.width
+            spacing: 0
+
+            Repeater {
+              model: root.report ? (root.report.prayers || []).filter(function(row) {
+                return ["fajr", "dhuhr", "asr", "maghrib", "isha"].indexOf(String(row.id || "")) >= 0
+              }) : []
+
+              Column {
+                id: prayerBlock
+                required property var modelData
+                readonly property bool current: !root.sleeping && root.report
+                  && root.report.current_block
+                  && String(root.report.current_block.start.id || "") === String(modelData.id || "")
+                readonly property bool marked: root.isPrayerMarked(modelData.id)
+                readonly property var blockRows: root.itemsForBlock(modelData.id)
+                width: timeline.width
+                spacing: Style.space(2)
+                opacity: root.sleeping || (modelData.passed && !current) ? 0.58 : 1
+
+                Rectangle {
+                  width: parent.width
+                  height: Style.space(40)
+                  radius: Style.cornerRadius
+                  color: prayerBlock.current
+                    ? Style.selectedFillFor(root.foreground, Commons.Color.accent)
+                    : (prayerHover.containsMouse
+                        ? Style.hoverFillFor(root.foreground, Commons.Color.accent)
+                        : "transparent")
+
+                  Rectangle {
+                    id: prayerCircle
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.space(8)
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(18)
+                    height: width
+                    radius: width / 2
+                    color: prayerBlock.marked
+                      ? Style.selectedStateColor(root.foreground, Commons.Color.accent)
+                      : "transparent"
+                    border.width: Style.spacing.hairline
+                    border.color: prayerBlock.marked
+                      ? Style.selectedStateColor(root.foreground, Commons.Color.accent)
+                      : root.foreground
+
+                    Text {
+                      visible: prayerBlock.marked
+                      anchors.centerIn: parent
+                      textFormat: Text.PlainText
+                      text: "✓"
+                      color: Commons.Color.background
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.bold: true
+                    }
+
+                    MouseArea {
+                      anchors.fill: parent
+                      anchors.margins: -Style.space(6)
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.togglePrayer(prayerBlock.modelData)
+                    }
+                  }
+
+                  MouseArea {
+                    id: prayerHover
+                    anchors.left: prayerCircle.right
+                    anchors.right: addBlockButton.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
+                  }
+
+                  Text {
+                    anchors.left: prayerCircle.right
+                    anchors.leftMargin: Style.space(10)
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: root.prayerName(prayerBlock.modelData.id, prayerBlock.modelData.name)
+                    color: root.foreground
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.body
+                    font.bold: prayerBlock.current
+                  }
+
+                  Text {
+                    anchors.right: nowTag.left
+                    anchors.rightMargin: Style.space(8)
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: String(prayerBlock.modelData.time || "—")
+                    color: root.mutedForeground
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.bodySmall
+                  }
+
+                  Rectangle {
+                    id: nowTag
+                    visible: prayerBlock.current
+                    anchors.right: addBlockButton.left
+                    anchors.rightMargin: Style.space(5)
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: visible ? nowText.implicitWidth + Style.space(12) : 0
+                    height: Style.space(22)
+                    radius: Style.cornerRadius
+                    color: Style.selectedFillFor(root.foreground, Commons.Color.accent)
+
+                    Text {
+                      id: nowText
+                      anchors.centerIn: parent
+                      textFormat: Text.PlainText
+                      text: strings.t("panel.now")
+                      color: Style.selectedStateColor(root.foreground, Commons.Color.accent)
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.bold: true
+                    }
+                  }
+
+                  Button {
+                    id: addBlockButton
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(34)
+                    height: Style.space(30)
+                    text: strings.t("panel.addSymbol")
+                    tooltipText: strings.t("panel.addTo").arg(root.prayerName(prayerBlock.modelData.id, prayerBlock.modelData.name))
+                    foreground: root.foreground
+                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                    horizontalPadding: Style.space(6)
+                    verticalPadding: Style.space(2)
+                    onClicked: root.presetQuickAdd(prayerBlock.modelData.id)
+                  }
+                }
+
+                Repeater {
+                  model: prayerBlock.blockRows
+
+                  Item {
+                    id: itemRow
+                    required property var modelData
+                    readonly property bool done: modelData.state === "done"
+                    width: prayerBlock.width
+                    height: Style.space(38)
+
+                    Rectangle {
+                      anchors.fill: parent
+                      anchors.leftMargin: Style.space(28)
+                      radius: Style.cornerRadius
+                      color: itemMouse.containsMouse
+                        ? Style.hoverFillFor(root.foreground, Commons.Color.accent)
+                        : "transparent"
+                    }
+
+                    Rectangle {
+                      id: itemCheck
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.space(38)
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: Style.space(15)
+                      height: width
+                      radius: Math.min(Style.cornerRadius, Style.space(3))
+                      color: itemRow.done
+                        ? Style.selectedStateColor(root.foreground, Commons.Color.accent)
+                        : "transparent"
+                      border.width: Style.spacing.hairline
+                      border.color: itemRow.done
+                        ? Style.selectedStateColor(root.foreground, Commons.Color.accent)
+                        : root.mutedForeground
+
+                      Text {
+                        visible: itemRow.done
+                        anchors.centerIn: parent
+                        textFormat: Text.PlainText
+                        text: "✓"
+                        color: Commons.Color.background
+                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                        font.pixelSize: Style.font.caption
+                      }
+                    }
+
+                    MouseArea {
+                      id: itemMouse
+                      anchors.left: parent.left
+                      anchors.right: itemAction.left
+                      anchors.top: parent.top
+                      anchors.bottom: parent.bottom
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.toggleItem(itemRow.modelData)
+                    }
+
+                    Column {
+                      anchors.left: itemCheck.right
+                      anchors.leftMargin: Style.space(9)
+                      anchors.right: itemAction.left
+                      anchors.rightMargin: Style.space(6)
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: 0
+
+                      Text {
+                        width: parent.width
+                        textFormat: Text.PlainText
+                        text: String(itemRow.modelData.title || "")
+                        color: itemRow.done ? root.mutedForeground : root.foreground
+                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                        font.pixelSize: Style.font.bodySmall
+                        font.strikeout: itemRow.done
+                        elide: Text.ElideRight
+                      }
+
+                      Text {
+                        visible: text !== ""
+                        width: parent.width
+                        textFormat: Text.PlainText
+                        text: root.itemDetail(itemRow.modelData)
+                        color: root.mutedForeground
+                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                        font.pixelSize: Style.font.caption
+                        elide: Text.ElideRight
+                      }
+                    }
+
+                    Button {
+                      id: itemAction
+                      visible: itemRow.modelData.measure !== "check"
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.space(3)
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: visible ? Style.space(40) : 0
+                      height: Style.space(28)
+                      text: itemRow.modelData.measure === "count"
+                        ? strings.t("panel.logOne")
+                        : (itemRow.modelData.timer_started_at ? strings.t("panel.stop") : strings.t("panel.start"))
+                      tooltipText: itemRow.modelData.measure === "count"
+                        ? strings.t("panel.logOneHint")
+                        : (itemRow.modelData.timer_started_at ? strings.t("panel.stopTimer") : strings.t("panel.startTimer"))
+                      foreground: root.foreground
+                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                      horizontalPadding: Style.space(5)
+                      verticalPadding: Style.space(2)
+                      bordered: true
+                      onClicked: itemRow.modelData.measure === "count"
+                        ? root.logOne(itemRow.modelData)
+                        : root.toggleTimer(itemRow.modelData)
+                    }
+                  }
+                }
+
+                Item {
+                  visible: String(prayerBlock.modelData.id || "") === "fajr" && root.boundary("sunrise") !== null
+                  width: parent.width
+                  height: visible ? Style.space(24) : 0
+
+                  Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.space(38)
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: strings.t("boundary.sunrise")
+                    color: root.mutedForeground
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+
+                  Text {
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.space(10)
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: root.boundary("sunrise") ? String(root.boundary("sunrise").time || "—") : ""
+                    color: root.mutedForeground
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+
+                Item {
+                  visible: String(prayerBlock.modelData.id || "") === "isha" && root.boundary("sleep") !== null
+                  width: parent.width
+                  height: visible ? Style.space(24) : 0
+
+                  Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.space(38)
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: strings.t("boundary.sleep")
+                    color: root.mutedForeground
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+
+                  Text {
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.space(10)
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: root.boundary("sleep") ? String(root.boundary("sleep").time || "—") : ""
+                    color: root.mutedForeground
+                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+              }
+            }
+
+            Text {
+              visible: root.report && root.report.planner_error
+              width: parent.width
+              textFormat: Text.PlainText
+              text: strings.t("panel.plannerUnavailable")
+              color: root.mutedForeground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+          }
+
+          Column {
+            visible: root.sleeping && root.planner !== null
+            width: parent.width
+            spacing: Style.space(3)
+
+            PanelSeparator {
+              foreground: root.foreground
+            }
+
+            PanelSectionHeader {
+              text: strings.t("panel.tomorrow")
+              foreground: root.foreground
+              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            }
+
+            Repeater {
+              model: root.planner ? (root.planner.upcoming || []) : []
+
+              Item {
+                id: upcomingRow
+                required property var modelData
+                width: parent.width
+                height: Style.space(34)
+
+                Text {
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(68)
+                  textFormat: Text.PlainText
+                  text: root.prayerName(upcomingRow.modelData.block, upcomingRow.modelData.block)
+                  color: root.mutedForeground
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(84)
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  textFormat: Text.PlainText
+                  text: String(upcomingRow.modelData.title || "")
+                  color: root.foreground
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                  elide: Text.ElideRight
+                }
+              }
+            }
+          }
+
+          Column {
+            visible: root.report === null
+            width: parent.width
+            spacing: Style.space(5)
+
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              text: strings.t("panel.noData")
+              color: root.foreground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.body
+              font.bold: true
+              wrapMode: Text.WordWrap
+            }
+
+            Text {
+              visible: root.errorMessage !== ""
+              width: parent.width
+              textFormat: Text.PlainText
+              text: root.errorMessage
+              color: root.mutedForeground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WrapAnywhere
+              maximumLineCount: 3
               elide: Text.ElideRight
             }
 
             Text {
               width: parent.width
               textFormat: Text.PlainText
-              text: strings.t("panel.beginsIn").arg(root.remainingLong)
+              text: strings.t("panel.retryHint")
               color: root.mutedForeground
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+          }
+
+          PanelSeparator {
+            foreground: root.foreground
+          }
+
+          Item {
+            visible: root.report !== null
+            width: parent.width
+            implicitHeight: sleepField.implicitHeight
+
+            Text {
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: strings.t("panel.sleepTime")
+              color: root.mutedForeground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            TextField {
+              id: sleepField
+              anchors.right: parent.right
+              width: Style.space(72)
+              horizontalAlignment: TextInput.AlignHCenter
+              maximumLength: 5
+              inputMethodHints: Qt.ImhDigitsOnly
+              foreground: root.foreground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+
+              function showSaved() {
+                if (!activeFocus) text = String(root.report ? root.report.sleep_time || "" : "")
+              }
+
+              Component.onCompleted: showSaved()
+              onActiveFocusChanged: showSaved()
+              Connections {
+                target: root
+                function onReportChanged() { sleepField.showSaved() }
+              }
+              onAccepted: {
+                root.setSleepTime(text)
+                focus = false
+              }
             }
           }
 
           Text {
-            id: heroTime
-            anchors.right: parent.right
-            anchors.verticalCenter: heroColumn.verticalCenter
-            textFormat: Text.PlainText
-            text: root.nextTime || "—"
-            color: root.foreground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.displayLarge
-            font.bold: true
-          }
-        }
-
-        Button {
-          width: parent.width
-          text: strings.t("panel.refreshNow")
-          foreground: root.foreground
-          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-          bordered: true
-          onClicked: root.syncLocation(true)
-        }
-
-        PanelSeparator {
-          visible: root.report !== null
-          foreground: root.foreground
-        }
-
-        Column {
-          id: blockSection
-          visible: root.report !== null
-          width: parent.width
-          spacing: Style.space(4)
-
-          Text {
+            visible: root.locationWarning !== ""
+              || (root.officialWarning !== "" && root.report && root.report.source !== "official")
             width: parent.width
             textFormat: Text.PlainText
-            text: strings.t("panel.thisBlock").arg(root.blockName)
+            text: root.locationWarning !== ""
+              ? strings.t("panel.usingSavedLocation").arg(root.locationWarning)
+              : strings.t("panel.usingCalculatedTimes").arg(root.officialWarning)
             color: root.mutedForeground
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.caption
-            font.bold: true
-            font.letterSpacing: 1.2
+            wrapMode: Text.WrapAnywhere
+            maximumLineCount: 2
             elide: Text.ElideRight
           }
 
-          Repeater {
-            model: root.blockItems
+          Item {
+            visible: root.report !== null
+            width: parent.width
+            implicitHeight: Math.max(locationLine.implicitHeight, refreshButton.implicitHeight)
 
-            Item {
-              id: itemRow
-              required property var modelData
-              readonly property bool done: modelData.state === "done"
-              width: blockSection.width
-              height: Style.space(34)
-
-              Rectangle {
-                anchors.fill: parent
-                radius: Math.min(Style.cornerRadius, Style.space(6))
-                color: rowMouse.containsMouse
-                  ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
-                  : "transparent"
-              }
+            Text {
+              id: locationLine
+              anchors.left: parent.left
+              anchors.right: refreshButton.left
+              anchors.rightMargin: Style.space(6)
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: root.report
+                ? strings.t("panel.locationSource")
+                    .arg(String(root.report.location || ""))
+                    .arg(String(root.report.source_name || root.report.method_name || root.report.method || ""))
+                : ""
+              color: root.mutedForeground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
 
               MouseArea {
-                id: rowMouse
+                id: locationHover
                 anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.toggleItem(itemRow.modelData)
+                hoverEnabled: root.autoLocation
+                acceptedButtons: Qt.NoButton
               }
 
-              Text {
-                id: tick
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                textFormat: Text.PlainText
-                text: itemRow.done ? "☑" : "☐"
-                color: itemRow.done ? root.mutedForeground : root.foreground
-                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                font.pixelSize: Style.font.body
-              }
-
-              Column {
-                anchors.left: tick.right
-                anchors.leftMargin: Style.space(8)
-                anchors.right: actionButton.left
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-
-                Text {
-                  width: parent.width
-                  textFormat: Text.PlainText
-                  text: String(itemRow.modelData.title || "")
-                  color: itemRow.done ? root.mutedForeground : root.foreground
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.body
-                  font.strikeout: itemRow.done
-                  elide: Text.ElideRight
-                }
-
-                Text {
-                  visible: text !== ""
-                  width: parent.width
-                  textFormat: Text.PlainText
-                  text: root.itemDetail(itemRow.modelData)
-                  color: root.mutedForeground
-                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                }
-              }
-
-              Button {
-                id: actionButton
-                visible: itemRow.modelData.measure !== "check" && !root.sleeping
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                width: visible ? Style.space(44) : 0
-                text: itemRow.modelData.measure === "count"
-                  ? "+1"
-                  : (itemRow.modelData.timer_started_at ? "■" : "▶")
-                foreground: root.foreground
+              PanelToolTip {
+                visible: root.autoLocation && locationHover.containsMouse
+                text: strings.t("panel.networkLocationNotice")
                 fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                bordered: true
-                onClicked: itemRow.modelData.measure === "count"
-                  ? root.logOne(itemRow.modelData)
-                  : root.toggleTimer(itemRow.modelData)
               }
             }
-          }
 
-          Text {
-            visible: root.blockItems.length === 0
-            width: parent.width
-            textFormat: Text.PlainText
-            text: root.report && root.report.planner_error
-              ? strings.t("panel.plannerUnavailable")
-              : strings.t("panel.nothingPlanned")
-            color: root.mutedForeground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
-          }
-
-          TextField {
-            id: addField
-            width: parent.width
-            placeholderText: strings.t("panel.addPlaceholder").arg(root.blockName)
-            foreground: root.foreground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            maximumLength: 200
-            onAccepted: {
-              root.addItem(text)
-              text = ""
+            Button {
+              id: refreshButton
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(32)
+              height: Style.space(28)
+              iconText: strings.t("panel.refreshSymbol")
+              tooltipText: strings.t("panel.refreshNow")
+              foreground: root.foreground
+              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+              horizontalPadding: Style.space(5)
+              verticalPadding: Style.space(2)
+              onClicked: root.syncLocation(true)
             }
           }
-
-          Text {
-            visible: root.actionError !== ""
-            width: parent.width
-            textFormat: Text.PlainText
-            text: root.actionError
-            color: root.mutedForeground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-            wrapMode: Text.WrapAnywhere
-            maximumLineCount: 3
-            elide: Text.ElideRight
-          }
-        }
-
-        PanelSeparator {
-          visible: root.report !== null
-          foreground: root.foreground
-        }
-
-        Column {
-          visible: root.report !== null
-          width: parent.width
-          spacing: Style.space(2)
-
-          Repeater {
-            model: root.report
-              ? (root.report.boundaries || root.report.prayers || [])
-              : []
-
-            Item {
-              required property var modelData
-              width: contentColumn.width
-              height: Style.space(36)
-
-              Rectangle {
-                anchors.fill: parent
-                radius: Math.min(Style.cornerRadius, Style.space(6))
-                color: modelData.is_next
-                  ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
-                  : "transparent"
-              }
-
-              Text {
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(10)
-                anchors.verticalCenter: parent.verticalCenter
-                textFormat: Text.PlainText
-                text: String(modelData.name || "")
-                color: modelData.passed ? root.mutedForeground : root.foreground
-                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                font.pixelSize: Style.font.body
-                font.bold: modelData.is_next === true
-              }
-
-              Text {
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(10)
-                anchors.verticalCenter: parent.verticalCenter
-                textFormat: Text.PlainText
-                text: String(modelData.time || "—")
-                color: modelData.passed ? root.mutedForeground : root.foreground
-                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                font.pixelSize: Style.font.body
-                font.bold: modelData.is_next === true
-              }
-            }
-          }
-        }
-
-        Column {
-          visible: root.report === null
-          width: parent.width
-          spacing: Style.space(6)
-
-          Text {
-            width: parent.width
-            textFormat: Text.PlainText
-            text: strings.t("panel.noData")
-            color: root.foreground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.body
-            font.bold: true
-            wrapMode: Text.WordWrap
-          }
-
-          Text {
-            visible: root.errorMessage !== ""
-            width: parent.width
-            textFormat: Text.PlainText
-            text: root.errorMessage
-            color: root.mutedForeground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-            wrapMode: Text.WrapAnywhere
-            maximumLineCount: 3
-            elide: Text.ElideRight
-          }
-
-          Text {
-            width: parent.width
-            textFormat: Text.PlainText
-            text: strings.t("panel.retryHint")
-            color: root.mutedForeground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
-          }
-        }
-
-        PanelSeparator {
-          foreground: root.foreground
-        }
-
-        Item {
-          visible: root.report !== null
-          width: parent.width
-          implicitHeight: sleepField.implicitHeight
-
-          Text {
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: strings.t("panel.sleepTime")
-            color: root.mutedForeground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-          }
-
-          TextField {
-            id: sleepField
-            anchors.right: parent.right
-            width: Style.space(72)
-            horizontalAlignment: TextInput.AlignHCenter
-            maximumLength: 5
-            inputMethodHints: Qt.ImhDigitsOnly
-            foreground: root.foreground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            // Show the saved sleep time unless the user is editing it.
-            function showSaved() {
-              if (!activeFocus) text = String(root.report ? root.report.sleep_time || "" : "")
-            }
-            Component.onCompleted: showSaved()
-            onActiveFocusChanged: showSaved()
-            Connections {
-              target: root
-              function onReportChanged() { sleepField.showSaved() }
-            }
-            onAccepted: {
-              root.setSleepTime(text)
-              focus = false
-            }
-          }
-        }
-
-        Text {
-          visible: root.locationWarning !== ""
-          width: parent.width
-          textFormat: Text.PlainText
-          text: strings.t("panel.usingSavedLocation").arg(root.locationWarning)
-          color: root.mutedForeground
-          font.family: root.bar ? root.bar.fontFamily : Style.font.family
-          font.pixelSize: Style.font.caption
-          wrapMode: Text.WrapAnywhere
-          maximumLineCount: 3
-          elide: Text.ElideRight
-        }
-
-        Text {
-          visible: root.officialWarning !== "" && root.report && root.report.source !== "official"
-          width: parent.width
-          textFormat: Text.PlainText
-          text: strings.t("panel.usingCalculatedTimes").arg(root.officialWarning)
-          color: root.mutedForeground
-          font.family: root.bar ? root.bar.fontFamily : Style.font.family
-          font.pixelSize: Style.font.caption
-          wrapMode: Text.WrapAnywhere
-          maximumLineCount: 3
-          elide: Text.ElideRight
-        }
-
-        Item {
-          width: parent.width
-          implicitHeight: Math.max(locationLabel.implicitHeight, methodLabel.implicitHeight)
-
-          Text {
-            id: locationLabel
-            anchors.left: parent.left
-            anchors.right: methodLabel.left
-            anchors.rightMargin: Style.space(10)
-            textFormat: Text.PlainText
-            text: root.report
-              ? (root.autoLocation
-                  ? strings.t("panel.autoLocation").arg(String(root.report.location || ""))
-                  : String(root.report.location || ""))
-              : ""
-            color: root.mutedForeground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
-          }
-
-          Text {
-            id: methodLabel
-            anchors.right: parent.right
-            textFormat: Text.PlainText
-            text: root.report ? String(root.report.source_name || root.report.method_name || root.report.method || "") : ""
-            color: root.mutedForeground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
-          }
-        }
-
-        Text {
-          visible: root.autoLocation && root.report !== null
-          width: parent.width
-          textFormat: Text.PlainText
-          text: strings.t("panel.networkLocationNotice")
-          color: root.mutedForeground
-          font.family: root.bar ? root.bar.fontFamily : Style.font.family
-          font.pixelSize: Style.font.caption
-          wrapMode: Text.WordWrap
         }
       }
     }

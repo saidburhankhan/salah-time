@@ -1,5 +1,6 @@
 #include <QDir>
 #include <QFile>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
 #include "backend.h"
@@ -8,44 +9,46 @@
 
 class SalahAppTests : public QObject {
     Q_OBJECT
-private:
-    static void write(const QString &path, const QByteArray &data) {
-        QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly)); QCOMPARE(f.write(data), data.size()); f.close();
-    }
-    static QString fake(QTemporaryDir &dir, bool failing = false) {
+    static void write(const QString &path, const QByteArray &data) { QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly)); QCOMPARE(f.write(data), data.size()); }
+    static QString fake(QTemporaryDir &dir) {
         const QString path=dir.filePath("salah"), log=dir.filePath("args");
         QByteArray script = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '"+log.toUtf8()+"'\n";
-        if (failing) script += "echo 'fixture failure' >&2\nexit 7\n";
-        else script += R"SH(
-if [ "$1 $2 $3" = "item list --json" ]; then
-  printf '%s\n' '{"day":"2026-11-22","block":"dhuhr","planning_block":{"day":"2026-11-22","start":"asr"},"current":[],"open":0,"items":[],"upcoming":[]}'
-elif [ "$1" = "history" ]; then
-  printf '%s\n' '[{"day":"2026-11-22","items":[{"id":"a1","title":"Read","block":"fajr","repeat":"daily","measure":"minutes","target":20,"state":"done","minutes":15,"count":0,"timer_started_at":null}]}]'
-else
-  printf '%s\n' '{}'
-fi
+        script += R"SH(
+if [ "$5" = "slow" ]; then sleep 2; printf '{}\n'; exit 0; fi
+if [ "$1" = "day" ]; then
+ printf '%s\n' '{"day":"2026-11-22","is_today":true,"now":{"block":"dhuhr","sleeping":false,"next":{"id":"asr","name":"Asr","time":"15:18","remaining_seconds":7200}},"prayers":[{"id":"fajr","name":"Fajr","time":"05:58","marked":true},{"id":"dhuhr","name":"Dhuhr","time":"12:11","current":true},{"id":"asr","name":"Asr","time":"15:18"},{"id":"maghrib","name":"Maghrib","time":"17:00"},{"id":"isha","name":"Isha","time":"18:20"}],"sunrise":"07:16","sleep":{"time":"23:00"},"blocks":[{"start":"fajr","items":[{"id":"a1","title":"Read","block":"fajr","repeat":"daily","weekdays":null,"measure":"minutes","target":20,"position":0,"state":"done","minutes":15,"count":0,"timer_started_at":null}]}],"open":0}'
+elif [ "$1" = "stats" ]; then
+ printf '%s\n' '{"from":"2026-11-09","to":"2026-11-22","days":14,"items":[{"id":"a1","title":"Read","block":"fajr","repeat":"daily","weekdays":null,"measure":"minutes","target":20,"planned_days":14,"done_days":9,"minutes":180,"count":0,"series":[]}],"prayers":[{"prayer":"fajr","marked_days":10,"days":14}],"marked_total":10,"prayer_slots":70}'
+elif [ "$1 $2" = "config show" ]; then printf '%s\n' '{"location_name":"Tashkent","method":"uzbekistan","sleep_time":"23:00"}'
+elif [ "$1 $2" = "item parse" ]; then printf '%s\n' '{"title":"Read","block":"isha","repeat":"daily","weekdays":null,"measure":"minutes","target":20}'
+else printf '%s\n' '{}'; fi
 )SH";
         write(path,script); QFile::setPermissions(path,QFile::ReadOwner|QFile::WriteOwner|QFile::ExeOwner); return path;
     }
+    static QStringList logLines(QTemporaryDir &dir) { QFile f(dir.filePath("args")); if (!f.open(QIODevice::ReadOnly)) return {}; return QString::fromUtf8(f.readAll()).split('\n',Qt::SkipEmptyParts); }
 private slots:
-    void parsesTodayAndHistory() {
-        QTemporaryDir dir; Backend b(nullptr,fake(dir)); b.reload();
-        QCOMPARE(b.todayDay(),QString("2026-11-22")); QCOMPARE(b.planningBlock(),QString("asr"));
-        QCOMPARE(b.selectedItems().size(),1); QCOMPARE(b.selectedItems().first().toMap().value("title").toString(),QString("Read"));
-        QCOMPARE(b.routines().size(),1);
+    void asyncQueueAndModels() {
+        QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
+        b.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(),3,3000);
+        QCOMPARE(b.todayDay(),QString("2026-11-22")); QCOMPARE(b.dayPlan().value("prayers").toList().size(),5);
+        QCOMPARE(b.routinesStats().value("items").toList().first().toMap().value("title").toString(),QString("Read"));
+        QCOMPARE(logLines(dir).mid(0,3),QStringList({"day --json","stats --days 14 --json","config show"}));
     }
-    void cliFailureSurfaces() {
-        QTemporaryDir dir; Backend b(nullptr,fake(dir,true)); b.reload(); QCOMPARE(b.error(),QString("fixture failure"));
+    void timeoutReportsAndQueueContinues() {
+        QTemporaryDir dir; Backend b(nullptr,fake(dir),100); QSignalSpy spy(&b,&Backend::requestFinished);
+        b.parseQuick("slow"); b.reload(); QTRY_VERIFY_WITH_TIMEOUT(spy.size()>=4,3000); QVERIFY(b.error().contains("timed out"));
     }
-    void addBuildsExactArguments() {
-        QTemporaryDir dir; Backend b(nullptr,fake(dir)); b.addItem("Read Quran","asr",true,"minutes",30);
-        QFile f(dir.filePath("args")); QVERIFY(f.open(QIODevice::ReadOnly));
-        QCOMPARE(QString::fromUtf8(f.readLine()).trimmed(),QString("item add --json --block asr --daily --measure minutes --target 30 -- Read Quran"));
+    void exactWriteArguments() {
+        QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
+        b.reload(); QTRY_COMPARE(spy.size(),3); b.addQuick("Read Quran after Isha","asr");
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item add --json --quick --block asr -- Read Quran after Isha"),2000);
+        b.moveItem("a1","isha",2); b.togglePrayer("fajr",false);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item move --json a1 --block isha --index 2"),3000);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("prayer mark --json fajr --date 2026-11-22"),3000);
     }
-    void doneBuildsExactArguments() {
-        QTemporaryDir dir; Backend b(nullptr,fake(dir)); b.reload(); b.toggleDone("a1","open");
-        QFile f(dir.filePath("args")); QVERIFY(f.open(QIODevice::ReadOnly)); QStringList lines=QString::fromUtf8(f.readAll()).split('\n',Qt::SkipEmptyParts);
-        QVERIFY(lines.contains("item done --json a1"));
+    void hijriHeaderFormatting() {
+        QTemporaryDir dir; Backend b(nullptr,fake(dir)); const QString h=b.hijriHeader("2026-11-22");
+        QVERIFY(h.startsWith("Sunday ")); QVERIFY(h.contains("Jumada")); QCOMPARE(b.gregorianHeader("2026-11-22"),QString("November 22, 2026"));
     }
     void themeFallbackAndAccent() {
         QTemporaryDir dir; Theme fallback(dir.path()); QCOMPARE(fallback.accent(),QString("#FFD60A")); QCOMPARE(fallback.accentForeground(),QString("black"));

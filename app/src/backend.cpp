@@ -1,116 +1,179 @@
 #include "backend.h"
 
+#include <QCalendar>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
-#include <QProcess>
+#include <QLocale>
 
-Backend::Backend(QObject *parent, const QString &program) : QObject(parent) {
-    m_program = program.isEmpty() ? qEnvironmentVariable("SALAH_BIN", "salah") : program;
-    m_today = QDate::currentDate();
+Backend::Backend(QObject *parent, const QString &program, int timeoutMs)
+    : QObject(parent), m_program(program.isEmpty() ? qEnvironmentVariable("SALAH_BIN", "salah") : program),
+      m_timeoutMs(timeoutMs) {
+    m_timeout.setSingleShot(true);
+    connect(&m_timeout, &QTimer::timeout, this, [this] { finish(true); });
+    connect(&m_process, &QProcess::finished, this, [this](int, QProcess::ExitStatus) {
+        if (m_running) finish(); else startNext();
+    });
+    connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) finish();
+    });
 }
 
-QByteArray Backend::run(const QStringList &arguments, bool *ok) {
-    QProcess process;
-    process.start(m_program, arguments);
-    if (!process.waitForStarted(3000) || !process.waitForFinished(10000)) {
-        process.kill();
-        m_error = tr("Could not run Salah: %1").arg(process.errorString());
-        if (ok) *ok = false;
-        return {};
+Backend::~Backend() {
+    m_timeout.stop();
+    m_queue.clear();
+    m_running = false;
+    m_process.disconnect(this);
+    if (m_process.state() != QProcess::NotRunning) {
+        m_process.kill();
+        m_process.waitForFinished(500);
     }
-    const bool success = process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+}
+
+void Backend::enqueue(const QStringList &args, std::function<void(const QJsonDocument &)> success,
+                      bool reloadAfter, bool plainJson) {
+    m_queue.enqueue({args, std::move(success), reloadAfter, plainJson});
+    emit changed();
+    startNext();
+}
+
+void Backend::startNext() {
+    if (m_running || m_queue.isEmpty()) return;
+    m_current = m_queue.dequeue();
+    m_running = true;
+    m_process.setProgram(m_program);
+    m_process.setArguments(m_current.args);
+    m_process.start();
+    m_timeout.start(m_timeoutMs);
+    emit changed();
+}
+
+void Backend::finish(bool timedOut) {
+    if (!m_running) return;
+    m_timeout.stop();
+    if (timedOut) {
+        const auto args = m_current.args;
+        m_running = false;
+        m_process.kill();
+        fail(tr("Salah command timed out."));
+        emit requestFinished(args, false);
+        emit changed();
+        return;
+    }
+    const bool success = !timedOut && m_process.exitStatus() == QProcess::NormalExit && m_process.exitCode() == 0;
+    bool handled = success;
     if (!success) {
-        const QString detail = QString::fromUtf8(process.readAllStandardError()).trimmed();
-        m_error = detail.isEmpty() ? tr("Salah command failed (exit %1)").arg(process.exitCode()) : detail;
+        QString detail = timedOut ? tr("Salah command timed out.")
+                                  : QString::fromUtf8(m_process.readAllStandardError()).trimmed();
+        if (detail.isEmpty()) detail = tr("Could not run Salah: %1").arg(m_process.errorString());
+        fail(detail);
+    } else {
+        const QByteArray bytes = m_process.readAllStandardOutput();
+        QJsonParseError parse;
+        const QJsonDocument doc = QJsonDocument::fromJson(bytes, &parse);
+        if (parse.error != QJsonParseError::NoError && !m_current.plainJson) {
+            fail(tr("Salah returned invalid JSON: %1").arg(parse.errorString())); handled = false;
+        } else if (m_current.success) m_current.success(doc);
     }
-    if (ok) *ok = success;
-    return process.readAllStandardOutput();
+    const auto args = m_current.args;
+    const bool reloadAfter = handled && m_current.reloadAfter;
+    m_running = false;
+    emit requestFinished(args, handled);
+    emit changed();
+    if (reloadAfter) reload();
+    startNext();
 }
+
+void Backend::fail(const QString &message) { m_error = message; }
+void Backend::dismissError() { m_error.clear(); emit changed(); }
+
+QVariantMap Backend::normalizedObject(const QJsonObject &object) { return object.toVariantMap(); }
 
 void Backend::reload() {
-    m_busy = true; m_error.clear(); emit changed();
-    bool ok = false;
-    const auto todayBytes = run({"item", "list", "--json"}, &ok);
-    if (!ok) { m_busy = false; emit changed(); return; }
-    QJsonParseError parse;
-    const auto todayDoc = QJsonDocument::fromJson(todayBytes, &parse);
-    if (parse.error != QJsonParseError::NoError || !todayDoc.isObject()) {
-        m_error = tr("Salah returned invalid day data: %1").arg(parse.errorString());
-        m_busy = false; emit changed(); return;
-    }
-    const auto today = todayDoc.object();
-    const QDate cliToday = QDate::fromString(today.value("day").toString(), Qt::ISODate);
-    if (cliToday.isValid()) m_today = cliToday;
-    if (!m_selected.isValid()) m_selected = m_today;
-    m_planningBlock = today.value("planning_block").toObject().value("start").toString("fajr");
-    const QDate from = m_selected.addDays(-13);
-    const auto historyBytes = run({"history", "--from", from.toString(Qt::ISODate), "--to",
-                                   m_selected.toString(Qt::ISODate), "--json"}, &ok);
-    if (!ok) { m_busy = false; emit changed(); return; }
-    const auto historyDoc = QJsonDocument::fromJson(historyBytes, &parse);
-    if (parse.error != QJsonParseError::NoError || !historyDoc.isArray()) {
-        m_error = tr("Salah returned invalid history data: %1").arg(parse.errorString());
-        m_busy = false; emit changed(); return;
-    }
-    rebuild(historyDoc.array());
-    m_busy = false; emit changed();
-}
-
-static QVariantMap itemMap(const QJsonObject &o) {
-    QVariantMap m = o.toVariantMap();
-    m["target"] = o.value("target").isNull() ? 0 : o.value("target").toInt();
-    return m;
-}
-
-void Backend::rebuild(const QJsonArray &reports) {
-    m_days.clear(); m_selectedItems.clear(); m_routines.clear();
-    QMap<QString, QVariantMap> daily;
-    for (const auto &rv : reports) {
-        const auto report = rv.toObject();
-        const QString day = report.value("day").toString();
-        int done = 0;
-        QVariantList items;
-        for (const auto &iv : report.value("items").toArray()) {
-            const auto io = iv.toObject();
-            auto im = itemMap(io); items << im;
-            if (io.value("state").toString() == "done") ++done;
-            if (io.value("repeat").toString() == "daily") {
-                auto r = daily.value(io.value("id").toString());
-                if (r.isEmpty()) {
-                    r = im; r["values"] = QVariantList(); r["states"] = QVariantList(); r["total"] = 0;
-                }
-                auto values = r["values"].toList(); auto states = r["states"].toList();
-                const QString measure = io.value("measure").toString();
-                const int value = measure == "minutes" ? io.value("minutes").toInt() :
-                                  measure == "count" ? io.value("count").toInt() :
-                                  (io.value("state").toString() == "done" ? 1 : 0);
-                values << value; states << io.value("state").toString();
-                r["values"] = values; r["states"] = states; r["total"] = r["total"].toInt() + value;
-                daily[io.value("id").toString()] = r;
-            }
+    QStringList args{"day"};
+    if (m_selected.isValid()) args << "--date" << selectedDay();
+    args << "--json";
+    enqueue(args, [this](const QJsonDocument &doc) {
+        if (!doc.isObject()) { fail(tr("Salah returned invalid day data.")); return; }
+        m_dayPlan = normalizedObject(doc.object());
+        const QDate cliDay = QDate::fromString(doc.object().value("day").toString(), Qt::ISODate);
+        if (cliDay.isValid()) {
+            m_selected = cliDay;
+            if (doc.object().value("is_today").toBool()) m_today = cliDay;
         }
-        m_days << QVariantMap{{"day", day}, {"done", done}, {"planned", items.size()}};
-        if (day == selectedDay()) m_selectedItems = items;
-    }
-    for (auto it = daily.cbegin(); it != daily.cend(); ++it) m_routines << it.value();
+        emit changed();
+    });
+    enqueue({"stats", "--days", "14", "--json"}, [this](const QJsonDocument &doc) {
+        if (doc.isObject()) m_routinesStats = normalizedObject(doc.object());
+        else fail(tr("Salah returned invalid routine data."));
+        emit changed();
+    });
+    enqueue({"config", "show"}, [this](const QJsonDocument &doc) {
+        if (doc.isObject()) m_config = normalizedObject(doc.object());
+        else fail(tr("Salah returned invalid configuration data."));
+        emit changed();
+    });
 }
 
-void Backend::moveDay(int amount) { m_selected = m_selected.addDays(amount); reload(); }
-void Backend::selectDay(const QString &day) { const auto d = QDate::fromString(day, Qt::ISODate); if (d.isValid()) { m_selected = d; reload(); } }
+void Backend::loadStats(int days) {
+    if (days != 7 && days != 30) days = 30;
+    enqueue({"stats", "--days", QString::number(days), "--json"}, [this](const QJsonDocument &doc) {
+        if (doc.isObject()) m_stats = normalizedObject(doc.object());
+        else fail(tr("Salah returned invalid statistics data."));
+        emit changed();
+    });
+}
+
+void Backend::moveDay(int amount) { if (!m_selected.isValid()) m_selected = m_today; m_selected = m_selected.addDays(amount); reload(); }
+void Backend::selectDay(const QString &day) { const QDate parsed = QDate::fromString(day, Qt::ISODate); if (parsed.isValid() && parsed != m_selected) { m_selected = parsed; reload(); } }
 void Backend::jumpToday() { m_selected = m_today; reload(); }
+QStringList Backend::dateArguments() const { return {"--date", selectedDay()}; }
 
-void Backend::addItem(const QString &title, const QString &block, bool daily, const QString &measure, int target) {
-    QStringList args{"item", "add", "--json", "--block", block};
-    if (daily) args << "--daily";
-    args << "--measure" << measure;
-    if (measure != "check" && target > 0) args << "--target" << QString::number(target);
-    args << "--" << title;
-    bool ok = false; run(args, &ok); if (ok) reload(); else emit changed();
+void Backend::parseQuick(const QString &text) {
+    if (text.trimmed().isEmpty()) { m_parseDraft.clear(); emit changed(); return; }
+    enqueue({"item", "parse", "--json", "--", text}, [this](const QJsonDocument &doc) {
+        if (doc.isObject()) m_parseDraft = normalizedObject(doc.object());
+        emit changed();
+    });
 }
 
-void Backend::toggleDone(const QString &id, const QString &state) {
-    if (m_selected != m_today) { m_error = tr("Only today's items can be changed here."); emit changed(); return; }
-    bool ok = false; run({"item", state == "done" ? "undo" : "done", "--json", id}, &ok);
-    if (ok) reload(); else emit changed();
+void Backend::addQuick(const QString &text, const QString &block) {
+    QStringList args{"item", "add", "--json", "--quick"};
+    if (!block.isEmpty()) args << "--block" << block;
+    if (m_selected.isValid() && m_selected != m_today) args << "--date" << selectedDay();
+    args << "--" << text; enqueue(args, {}, true);
 }
+
+void Backend::saveItem(const QVariantMap &item) {
+    const QString id = item.value("id").toString();
+    QStringList args{"item", id.isEmpty() ? "add" : "edit", "--json"};
+    if (!id.isEmpty()) args << id << "--title" << item.value("title").toString();
+    args << "--block" << item.value("block", "fajr").toString() << "--repeat" << item.value("repeat", "none").toString();
+    const QStringList days = item.value("weekdays").toStringList();
+    if (!days.isEmpty()) args << "--days" << days.join(',');
+    args << "--measure" << item.value("measure", "check").toString();
+    if (item.value("measure").toString() != "check") args << "--target" << QString::number(item.value("target", 1).toInt());
+    else if (!id.isEmpty()) args << "--no-target";
+    if (id.isEmpty()) {
+        if (item.value("repeat").toString() == "none" && m_selected != m_today) args << "--date" << selectedDay();
+        args << "--" << item.value("title").toString();
+    }
+    enqueue(args, {}, true);
+}
+
+void Backend::removeItem(const QString &id) { enqueue({"item", "remove", "--json", id}, {}, true); }
+void Backend::moveItem(const QString &id, const QString &block, int index) { enqueue({"item", "move", "--json", id, "--block", block, "--index", QString::number(index)}, {}, true); }
+void Backend::toggleDone(const QString &id, const QString &state) { QStringList args{"item", state == "done" ? "undo" : "done", "--json", id}; args << dateArguments(); enqueue(args, {}, true); }
+void Backend::logOne(const QString &id) { QStringList args{"item", "log", "--json", id, "1"}; args << dateArguments(); enqueue(args, {}, true); }
+void Backend::toggleTimer(const QString &id, bool running) { enqueue({"item", running ? "stop" : "start", "--json", id}, {}, true); }
+void Backend::togglePrayer(const QString &prayer, bool marked) { QStringList args{"prayer", marked ? "unmark" : "mark", "--json", prayer}; args << dateArguments(); enqueue(args, {}, true); }
+void Backend::setSleepTime(const QString &time) { enqueue({"config", "set", "--sleep-time", time}, {}, true, true); }
+
+QString Backend::hijriHeader(const QString &isoDate) const {
+    const QDate date = QDate::fromString(isoDate, Qt::ISODate); if (!date.isValid()) return {};
+    const QCalendar calendar(QCalendar::System::IslamicCivil); const auto parts = calendar.partsFromDate(date);
+    static const QStringList months{tr("Muharram"), tr("Safar"), tr("Rabi al-Awwal"), tr("Rabi al-Thani"), tr("Jumada al-Awwal"), tr("Jumada al-Thani"), tr("Rajab"), tr("Sha'ban"), tr("Ramadan"), tr("Shawwal"), tr("Dhu al-Qadah"), tr("Dhu al-Hijjah")};
+    const QString month = parts.month >= 1 && parts.month <= months.size() ? months.at(parts.month - 1) : QString();
+    return tr("%1 %2 %3").arg(QLocale::c().dayName(date.dayOfWeek(), QLocale::LongFormat), QString::number(parts.day), month);
+}
+
+QString Backend::gregorianHeader(const QString &isoDate) const { const QDate date = QDate::fromString(isoDate, Qt::ISODate); return date.isValid() ? QLocale::c().toString(date, "MMMM d, yyyy") : QString(); }

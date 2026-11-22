@@ -1,44 +1,85 @@
 #pragma once
 
 #include <QDate>
+#include <QJsonDocument>
 #include <QObject>
-#include <QVariantList>
+#include <QProcess>
+#include <QQueue>
+#include <QTimer>
+#include <QVariantMap>
+#include <functional>
 
 class Backend : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString selectedDay READ selectedDay NOTIFY changed)
     Q_PROPERTY(QString todayDay READ todayDay NOTIFY changed)
-    Q_PROPERTY(QString planningBlock READ planningBlock NOTIFY changed)
-    Q_PROPERTY(QVariantList days READ days NOTIFY changed)
-    Q_PROPERTY(QVariantList selectedItems READ selectedItems NOTIFY changed)
-    Q_PROPERTY(QVariantList routines READ routines NOTIFY changed)
+    Q_PROPERTY(QVariantMap dayPlan READ dayPlan NOTIFY changed)
+    Q_PROPERTY(QVariantMap stats READ stats NOTIFY changed)
+    Q_PROPERTY(QVariantMap routinesStats READ routinesStats NOTIFY changed)
+    Q_PROPERTY(QVariantMap config READ config NOTIFY changed)
+    Q_PROPERTY(QVariantMap parseDraft READ parseDraft NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
 public:
-    explicit Backend(QObject *parent = nullptr, const QString &program = {});
+    explicit Backend(QObject *parent = nullptr, const QString &program = {}, int timeoutMs = 10000);
+    ~Backend() override;
     QString selectedDay() const { return m_selected.toString(Qt::ISODate); }
     QString todayDay() const { return m_today.toString(Qt::ISODate); }
-    QString planningBlock() const { return m_planningBlock; }
-    QVariantList days() const { return m_days; }
-    QVariantList selectedItems() const { return m_selectedItems; }
-    QVariantList routines() const { return m_routines; }
+    QVariantMap dayPlan() const { return m_dayPlan; }
+    QVariantMap stats() const { return m_stats; }
+    QVariantMap routinesStats() const { return m_routinesStats; }
+    QVariantMap config() const { return m_config; }
+    QVariantMap parseDraft() const { return m_parseDraft; }
     QString error() const { return m_error; }
-    bool busy() const { return m_busy; }
+    bool busy() const { return m_running || !m_queue.isEmpty(); }
+
     Q_INVOKABLE void reload();
+    Q_INVOKABLE void loadStats(int days);
     Q_INVOKABLE void moveDay(int amount);
     Q_INVOKABLE void selectDay(const QString &day);
     Q_INVOKABLE void jumpToday();
-    Q_INVOKABLE void addItem(const QString &title, const QString &block, bool daily,
-                             const QString &measure, int target);
+    Q_INVOKABLE void dismissError();
+    Q_INVOKABLE void parseQuick(const QString &text);
+    Q_INVOKABLE void addQuick(const QString &text, const QString &block = {});
+    Q_INVOKABLE void saveItem(const QVariantMap &item);
+    Q_INVOKABLE void removeItem(const QString &id);
+    Q_INVOKABLE void moveItem(const QString &id, const QString &block, int index);
     Q_INVOKABLE void toggleDone(const QString &id, const QString &state);
+    Q_INVOKABLE void logOne(const QString &id);
+    Q_INVOKABLE void toggleTimer(const QString &id, bool running);
+    Q_INVOKABLE void togglePrayer(const QString &prayer, bool marked);
+    Q_INVOKABLE void setSleepTime(const QString &time);
+    Q_INVOKABLE QString hijriHeader(const QString &isoDate) const;
+    Q_INVOKABLE QString gregorianHeader(const QString &isoDate) const;
+
 signals:
     void changed();
+    void requestFinished(QStringList arguments, bool success);
+
 private:
-    QByteArray run(const QStringList &arguments, bool *ok = nullptr);
-    void rebuild(const QJsonArray &reports);
+    struct Request {
+        QStringList args;
+        std::function<void(const QJsonDocument &)> success;
+        bool reloadAfter = false;
+        bool plainJson = false;
+    };
+    void enqueue(const QStringList &args, std::function<void(const QJsonDocument &)> success = {},
+                 bool reloadAfter = false, bool plainJson = false);
+    void startNext();
+    void finish(bool timedOut = false);
+    void fail(const QString &message);
+    QStringList dateArguments() const;
+    static QVariantMap normalizedObject(const QJsonObject &object);
+
     QString m_program;
-    QDate m_today, m_selected;
-    QString m_planningBlock = "fajr", m_error;
-    QVariantList m_days, m_selectedItems, m_routines;
-    bool m_busy = false;
+    int m_timeoutMs;
+    QDate m_today = QDate::currentDate();
+    QDate m_selected;
+    QVariantMap m_dayPlan, m_stats, m_routinesStats, m_config, m_parseDraft;
+    QString m_error;
+    QQueue<Request> m_queue;
+    Request m_current;
+    QProcess m_process;
+    QTimer m_timeout;
+    bool m_running = false;
 };
