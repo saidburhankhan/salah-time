@@ -3,8 +3,8 @@
 This is the golden contract the desktop app and the bar widget consume today:
 the unwrapped JSON printed by the `salah` CLI. `tests/contract.rs` runs the real
 binary against an isolated `SALAH_CONFIG`/`SALAH_DATA`, seeds state through the
-CLI, normalises clock- and id-dependent values, and compares the result with
-`tests/fixtures/contract/<name>.json`.
+CLI, freezes the clock with the `SALAH_NOW` test hook, normalises random ids, and
+compares the result with `tests/fixtures/contract/<name>.json`.
 
 Regenerate fixtures deliberately, from the current binary:
 
@@ -19,7 +19,7 @@ cargo test --offline --test contract
 |---|---|
 | `salah status --json` | `status` |
 | `salah item list --json` | `item_list` |
-| `salah day --json --date D` | `day` |
+| `salah day --json` (default date) | `day` |
 | `salah stats --json --from D --to D` | `stats_range` |
 | `salah stats --json --days N` | `stats_days` |
 | `salah item parse --json -- TEXT` | `item_parse`, `item_parse_weekdays` |
@@ -58,31 +58,24 @@ cargo test --offline --test contract
 Every error fixture stores the exact stderr string, including the `salah: `
 prefix. A failed command must exit non-zero and must not change planner state.
 
+## Test clock hook
+
+`SALAH_NOW` is a test-only hook read only by the `salah` binary. When set to an
+RFC 3339 instant, the CLI uses that instant instead of the system clock for the
+whole invocation; when unset, normal CLI behaviour is unchanged. The contract
+tests set it to `2031-05-14T09:30:00+05:00`, so the `status`, `item list`,
+default-date `day`, timer, stats, and export fixtures contain concrete times,
+dates, and instants rather than clock placeholders.
+
+`SALAH_NOW` is not a user-facing setting and callers must not rely on it outside
+tests. Invalid values fail the command rather than silently falling back.
+
 ## Normalisation
 
-Fixture values that the real clock or random ids make volatile are replaced
-before comparison. Structure, field names, JSON types, enum values, ordering,
-and null-ness are otherwise compared exactly.
-
-- UUIDs become `<id:N>`, numbered by first appearance in each fixture.
-- RFC 3339 instants become `<instant>`.
-- Only dates equal to today, yesterday, or tomorrow become `<today>`,
-  `<today-1>`, or `<today+1>`. Explicit far dates stay literal.
-- `stats --days` dates become `<to>`, `<to-N>`, … relative to the response's
-  `to`, so a rolling window is stable.
-- Clock strings (`HH:MM`) become `<HH:MM>`.
-- `remaining_seconds` becomes `0` (a number, keeping the field type);
-  countdown strings (`remaining`, `remaining_short`, `label`) become
-  `<duration>`.
-- Time-of-day-dependent `status` fields (`next`, `current_block`, `passed`,
-  `is_next`, `current`, `sleeping`, `planner.block`, `planning_block.start`,
-  `label`) use structural placeholders (`<boundary>`, `<name>`, `<kind>`).
-  `item list` normalises its current `block` and `planning_block.start`.
-  Timer entries normalise the current `block` day and start.
-
-These last two groups cannot be frozen literally without injecting a clock:
-the current CLI calls `Utc::now()` directly. The fixtures freeze their shape,
-types, and ordering, not which boundary happens to be next when the test runs.
+Random UUIDs become `<id:N>`, numbered by first appearance in each fixture.
+Everything else, including RFC 3339 instants, dates, clock strings, countdowns,
+block boundaries, and booleans, is compared literally: the frozen clock makes
+those values deterministic.
 
 ## Evolution rules
 

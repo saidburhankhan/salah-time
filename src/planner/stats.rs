@@ -180,7 +180,7 @@ pub fn stats(
 mod tests {
     use super::*;
     use crate::planner::NewItem;
-    use crate::planner::test_support::{at, config, date, titled};
+    use crate::planner::test_support::{at, config, date, ids, titled};
     use crate::planner::{add, log, mark};
 
     #[test]
@@ -193,11 +193,12 @@ mod tests {
             date: Some(date(16)),
             ..titled("Read")
         };
-        let read = add(&mut store, &config(), at(20, 13, 0), read).unwrap();
+        let read = add(&mut store, &config(), at(20, 13, 0), ids(), read).unwrap();
         log(
             &mut store,
             &config(),
             at(20, 13, 0),
+            ids(),
             &read.id,
             25,
             Some(date(17)),
@@ -240,8 +241,8 @@ mod tests {
             weekdays: Some(Weekdays::parse_list("mon,wed").unwrap()),
             ..titled("Gym")
         };
-        add(&mut store, &config(), at(22, 13, 0), gym).unwrap();
-        add(&mut store, &config(), at(22, 13, 0), titled("Once")).unwrap();
+        add(&mut store, &config(), at(22, 13, 0), ids(), gym).unwrap();
+        add(&mut store, &config(), at(22, 13, 0), ids(), titled("Once")).unwrap();
         let report = stats(&store, &config(), at(22, 13, 0), date(22), date(22)).unwrap();
         let titles: Vec<_> = report
             .items

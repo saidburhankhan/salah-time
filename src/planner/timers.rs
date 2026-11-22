@@ -4,6 +4,7 @@ use super::{BlockEnds, stamp};
 use crate::config::Config;
 use crate::error::Error;
 use crate::item::{Entry, EntryKind};
+use crate::runtime::IdGenerator;
 use crate::schedule;
 use crate::store::Store;
 use chrono::{DateTime, Utc};
@@ -39,13 +40,14 @@ pub fn start_timer(
     store: &mut Store,
     config: &Config,
     now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
     id: &str,
 ) -> Result<Entry, Error> {
     let now = stamp(now);
     let item = find_item(store, id)?;
     let schedule = schedule::resolve(config, now)?;
     close_expired_timers(store, config, now)?;
-    let mut timer = new_entry(&item, schedule.current_block(), EntryKind::Timer, now);
+    let mut timer = new_entry(&item, schedule.current_block(), EntryKind::Timer, now, ids);
     timer.started_at = Some(now);
     store.transaction(|store| {
         stop_running(store, now)?;
@@ -107,7 +109,7 @@ mod tests {
     use crate::day::BoundaryId;
     use crate::item::{Measure, Repeat, State};
     use crate::planner::NewItem;
-    use crate::planner::test_support::{at, config, date, titled};
+    use crate::planner::test_support::{at, config, date, ids, titled};
     use crate::planner::{add, log, today};
 
     #[test]
@@ -117,6 +119,7 @@ mod tests {
             &mut store,
             &config(),
             at(20, 6, 30),
+            ids(),
             NewItem {
                 title: "Quran".into(),
                 block: Some(BoundaryId::Fajr),
@@ -127,7 +130,7 @@ mod tests {
             },
         )
         .unwrap();
-        start_timer(&mut store, &config(), at(20, 11, 0), &quran.id).unwrap();
+        start_timer(&mut store, &config(), at(20, 11, 0), ids(), &quran.id).unwrap();
         // Well after Dhuhr, the Fajr block's timer has ended on its own.
         assert_eq!(
             close_expired_timers(&mut store, &config(), at(20, 15, 0)).unwrap(),
@@ -150,10 +153,10 @@ mod tests {
             measure: Some(Measure::Minutes),
             ..NewItem::default()
         };
-        let a = add(&mut store, &config(), at(20, 13, 0), minutes("A")).unwrap();
-        let b = add(&mut store, &config(), at(20, 13, 0), minutes("B")).unwrap();
-        start_timer(&mut store, &config(), at(20, 13, 0), &a.id).unwrap();
-        start_timer(&mut store, &config(), at(20, 13, 20), &b.id).unwrap();
+        let a = add(&mut store, &config(), at(20, 13, 0), ids(), minutes("A")).unwrap();
+        let b = add(&mut store, &config(), at(20, 13, 0), ids(), minutes("B")).unwrap();
+        start_timer(&mut store, &config(), at(20, 13, 0), ids(), &a.id).unwrap();
+        start_timer(&mut store, &config(), at(20, 13, 20), ids(), &b.id).unwrap();
         let running = store.running_timers().unwrap();
         assert_eq!(running.len(), 1);
         assert_eq!(running[0].item_id, b.id);
@@ -165,8 +168,8 @@ mod tests {
     #[test]
     fn any_item_can_be_timed_and_adjusted_without_going_below_zero() {
         let mut store = Store::open_in_memory().unwrap();
-        let email = add(&mut store, &config(), at(20, 13, 0), titled("Email")).unwrap();
-        start_timer(&mut store, &config(), at(20, 13, 0), &email.id).unwrap();
+        let email = add(&mut store, &config(), at(20, 13, 0), ids(), titled("Email")).unwrap();
+        start_timer(&mut store, &config(), at(20, 13, 0), ids(), &email.id).unwrap();
         let view = today(&store, &config(), at(20, 13, 12)).unwrap();
         let timer = view.timer.unwrap();
         assert_eq!(
@@ -175,14 +178,41 @@ mod tests {
         );
         stop_timer(&mut store, &config(), at(20, 13, 12)).unwrap();
         // Pause, then continue: the minutes add up.
-        start_timer(&mut store, &config(), at(20, 13, 30), &email.id).unwrap();
+        start_timer(&mut store, &config(), at(20, 13, 30), ids(), &email.id).unwrap();
         stop_timer(&mut store, &config(), at(20, 13, 38)).unwrap();
-        log(&mut store, &config(), at(20, 13, 40), &email.id, 5, None).unwrap();
-        log(&mut store, &config(), at(20, 13, 41), &email.id, -10, None).unwrap();
+        log(
+            &mut store,
+            &config(),
+            at(20, 13, 40),
+            ids(),
+            &email.id,
+            5,
+            None,
+        )
+        .unwrap();
+        log(
+            &mut store,
+            &config(),
+            at(20, 13, 41),
+            ids(),
+            &email.id,
+            -10,
+            None,
+        )
+        .unwrap();
         let view = today(&store, &config(), at(20, 13, 42)).unwrap();
         assert!(view.timer.is_none());
         assert_eq!(view.items[0].minutes, 12 + 8 + 5 - 10);
-        log(&mut store, &config(), at(20, 13, 43), &email.id, -100, None).unwrap();
+        log(
+            &mut store,
+            &config(),
+            at(20, 13, 43),
+            ids(),
+            &email.id,
+            -100,
+            None,
+        )
+        .unwrap();
         let view = today(&store, &config(), at(20, 13, 44)).unwrap();
         assert_eq!(view.items[0].minutes, 0, "clamped at zero");
         assert_eq!(
@@ -195,9 +225,27 @@ mod tests {
             measure: Some(Measure::Count),
             ..titled("Pushups")
         };
-        let pushups = add(&mut store, &config(), at(20, 13, 0), pushups).unwrap();
-        log(&mut store, &config(), at(20, 13, 50), &pushups.id, 3, None).unwrap();
-        log(&mut store, &config(), at(20, 13, 51), &pushups.id, -1, None).unwrap();
+        let pushups = add(&mut store, &config(), at(20, 13, 0), ids(), pushups).unwrap();
+        log(
+            &mut store,
+            &config(),
+            at(20, 13, 50),
+            ids(),
+            &pushups.id,
+            3,
+            None,
+        )
+        .unwrap();
+        log(
+            &mut store,
+            &config(),
+            at(20, 13, 51),
+            ids(),
+            &pushups.id,
+            -1,
+            None,
+        )
+        .unwrap();
         let view = today(&store, &config(), at(20, 13, 52)).unwrap();
         let row = view.items.iter().find(|r| r.id == pushups.id).unwrap();
         assert_eq!((row.count, row.minutes), (2, 0));

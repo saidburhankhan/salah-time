@@ -2,7 +2,7 @@
   "daily": [
     {
       "count": 0,
-      "day": "<to-6>",
+      "day": "2031-05-08",
       "done": 0,
       "minutes": 0,
       "planned": 0,
@@ -10,7 +10,7 @@
     },
     {
       "count": 0,
-      "day": "<to-5>",
+      "day": "2031-05-09",
       "done": 0,
       "minutes": 0,
       "planned": 0,
@@ -18,7 +18,7 @@
     },
     {
       "count": 0,
-      "day": "<to-4>",
+      "day": "2031-05-10",
       "done": 0,
       "minutes": 0,
       "planned": 1,
@@ -26,7 +26,7 @@
     },
     {
       "count": 0,
-      "day": "<to-3>",
+      "day": "2031-05-11",
       "done": 0,
       "minutes": 0,
       "planned": 1,
@@ -34,7 +34,7 @@
     },
     {
       "count": 0,
-      "day": "<to-2>",
+      "day": "2031-05-12",
       "done": 0,
       "minutes": 15,
       "planned": 1,
@@ -42,7 +42,7 @@
     },
     {
       "count": 0,
-      "day": "<to-1>",
+      "day": "2031-05-13",
       "done": 1,
       "minutes": 0,
       "planned": 1,
@@ -50,7 +50,7 @@
     },
     {
       "count": 0,
-      "day": "<to>",
+      "day": "2031-05-14",
       "done": 0,
       "minutes": 0,
       "planned": 1,
@@ -58,7 +58,7 @@
     }
   ],
   "days": 7,
-  "from": "<to-6>",
+  "from": "2031-05-08",
   "items": [
     {
       "block": "fajr",
@@ -72,49 +72,49 @@
       "series": [
         {
           "count": 0,
-          "day": "<to-6>",
+          "day": "2031-05-08",
           "done": false,
           "minutes": 0,
           "planned": false
         },
         {
           "count": 0,
-          "day": "<to-5>",
+          "day": "2031-05-09",
           "done": false,
           "minutes": 0,
           "planned": false
         },
         {
           "count": 0,
-          "day": "<to-4>",
+          "day": "2031-05-10",
           "done": false,
           "minutes": 0,
           "planned": true
         },
         {
           "count": 0,
-          "day": "<to-3>",
+          "day": "2031-05-11",
           "done": false,
           "minutes": 0,
           "planned": true
         },
         {
           "count": 0,
-          "day": "<to-2>",
+          "day": "2031-05-12",
           "done": false,
           "minutes": 15,
           "planned": true
         },
         {
           "count": 0,
-          "day": "<to-1>",
+          "day": "2031-05-13",
           "done": true,
           "minutes": 0,
           "planned": true
         },
         {
           "count": 0,
-          "day": "<to>",
+          "day": "2031-05-14",
           "done": false,
           "minutes": 0,
           "planned": true
@@ -154,7 +154,7 @@
       "prayer": "isha"
     }
   ],
-  "to": "<to>",
+  "to": "2031-05-14",
   "totals": {
     "active_days": 2,
     "count": 0,

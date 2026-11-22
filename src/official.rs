@@ -57,7 +57,11 @@ fn visible_words(html: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn parse_html(html: &[u8], date: NaiveDate) -> Result<OfficialSchedule, Error> {
+pub fn parse_html(
+    html: &[u8],
+    date: NaiveDate,
+    fetched_at: DateTime<Utc>,
+) -> Result<OfficialSchedule, Error> {
     if html.is_empty() || html.len() > MAX_RESPONSE_BYTES {
         return Err("official timetable response has an invalid size".into());
     }
@@ -89,12 +93,12 @@ pub fn parse_html(html: &[u8], date: NaiveDate) -> Result<OfficialSchedule, Erro
     Ok(OfficialSchedule {
         date,
         location: "Tashkent".into(),
-        fetched_at: Utc::now(),
+        fetched_at,
         times,
     })
 }
 
-pub fn fetch(date: NaiveDate) -> Result<OfficialSchedule, Error> {
+pub fn fetch(date: NaiveDate, now: DateTime<Utc>) -> Result<OfficialSchedule, Error> {
     let output = Command::new("curl")
         .args([
             "--fail",
@@ -121,7 +125,7 @@ pub fn fetch(date: NaiveDate) -> Result<OfficialSchedule, Error> {
             String::from_utf8_lossy(&output.stderr).trim()
         )));
     }
-    parse_html(&output.stdout, date)
+    parse_html(&output.stdout, date, now)
 }
 
 fn save_to(schedule: &OfficialSchedule, path: &Path) -> Result<(), Error> {
@@ -143,8 +147,8 @@ fn save_to(schedule: &OfficialSchedule, path: &Path) -> Result<(), Error> {
     fs::rename(&temp, path).map_err(|e| Error::Storage(e.to_string()))
 }
 
-pub fn sync(date: NaiveDate) -> Result<OfficialSchedule, Error> {
-    let schedule = fetch(date)?;
+pub fn sync(date: NaiveDate, now: DateTime<Utc>) -> Result<OfficialSchedule, Error> {
+    let schedule = fetch(date, now)?;
     save_to(&schedule, &cache_path())?;
     Ok(schedule)
 }
@@ -180,17 +184,24 @@ mod tests {
     fn parses_board_page_shape() {
         let html = br#"<div>Tashkent city</div><b>Fajr</b><span>05:54</span><b>Sunrise</b>07:12
         <b>Dhuhr</b>12:14 <b>Asr</b>15:18 <b>Maghrib</b>17:03 <b>Isha</b>18:19"#;
-        let result = parse_html(html, NaiveDate::from_ymd_opt(2026, 11, 20).unwrap()).unwrap();
+        let now = DateTime::parse_from_rfc3339("2026-11-20T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let result = parse_html(html, NaiveDate::from_ymd_opt(2026, 11, 20).unwrap(), now).unwrap();
         assert_eq!(result.times, [354, 432, 734, 918, 1023, 1099]);
     }
     #[test]
     fn rejects_missing_or_unordered_page() {
         let date = NaiveDate::from_ymd_opt(2026, 11, 20).unwrap();
-        assert!(parse_html(b"not a timetable", date).is_err());
+        let now = DateTime::parse_from_rfc3339("2026-11-20T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert!(parse_html(b"not a timetable", date, now).is_err());
         assert!(
             parse_html(
                 b"Fajr 10:00 Sunrise 09:00 Dhuhr 12:00 Asr 13:00 Maghrib 14:00 Isha 15:00",
-                date
+                date,
+                now
             )
             .is_err()
         );

@@ -1,6 +1,6 @@
 {
   "block": "isha",
-  "created_at": "<instant>",
+  "created_at": "2031-05-14T04:30:00Z",
   "day": "2031-05-12",
   "deleted_at": null,
   "id": "<id:1>",
@@ -9,7 +9,7 @@
   "repeat": "weekly",
   "target": null,
   "title": "Weekly task",
-  "updated_at": "<instant>",
+  "updated_at": "2031-05-14T04:30:00Z",
   "weekdays": [
     "mon",
     "wed",

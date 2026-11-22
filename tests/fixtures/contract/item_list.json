@@ -1,12 +1,12 @@
 {
-  "block": "<boundary>",
+  "block": "fajr",
   "current": [],
-  "day": "<today>",
+  "day": "2031-05-14",
   "items": [],
   "open": 0,
   "planning_block": {
-    "day": "<today>",
-    "start": "<boundary>"
+    "day": "2031-05-14",
+    "start": "fajr"
   },
   "prayer_marks": [],
   "timer": null,

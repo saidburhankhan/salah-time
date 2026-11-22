@@ -8,6 +8,7 @@ pub mod location;
 pub mod official;
 pub mod planner;
 pub mod quick;
+pub mod runtime;
 pub mod schedule;
 pub mod status;
 pub mod store;

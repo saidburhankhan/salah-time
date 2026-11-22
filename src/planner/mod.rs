@@ -35,10 +35,6 @@ fn stamp(now: DateTime<Utc>) -> DateTime<Utc> {
     now.trunc_subsecs(3)
 }
 
-fn new_id() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
 /// Caches the end instant of each block, computing a day's blocks once.
 struct BlockEnds<'a> {
     config: &'a Config,
@@ -132,5 +128,11 @@ mod test_support {
             title: title.into(),
             ..NewItem::default()
         }
+    }
+
+    /// A deterministic id source shared by planner tests.
+    pub(super) fn ids() -> &'static crate::runtime::SequenceIds {
+        static IDS: crate::runtime::SequenceIds = crate::runtime::SequenceIds::new();
+        &IDS
     }
 }

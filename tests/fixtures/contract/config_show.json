@@ -7,6 +7,6 @@
   "location": "Tashkent",
   "longitude": 69.2401,
   "method": "mwl",
-  "sleep_time": "<HH:MM>",
+  "sleep_time": "23:00",
   "timezone_offset": 5.0
 }

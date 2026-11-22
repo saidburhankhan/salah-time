@@ -1,6 +1,6 @@
 use crate::config::{self, Config};
 use crate::error::Error;
-use chrono::{DateTime, Duration, Local, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -214,11 +214,11 @@ fn omarchy_weather_location() -> Option<FetchedLocation> {
     })
 }
 
-pub fn current_timezone_offset() -> f64 {
-    f64::from(Local::now().offset().local_minus_utc()) / 3600.0
-}
-
-pub fn sync(current: &Config) -> Result<(Config, &'static str), Error> {
+pub fn sync(
+    current: &Config,
+    now: DateTime<Utc>,
+    local_timezone_offset: f64,
+) -> Result<(Config, &'static str), Error> {
     // A location explicitly selected in Omarchy Weather is more precise and
     // more private than IP geolocation. Fall back to the online providers
     // only when Weather has no valid saved coordinates.
@@ -227,10 +227,8 @@ pub fn sync(current: &Config) -> Result<(Config, &'static str), Error> {
     let config = apply_detected(
         current,
         fetched.location,
-        fetched
-            .timezone_offset
-            .unwrap_or_else(current_timezone_offset),
-        Utc::now().to_rfc3339(),
+        fetched.timezone_offset.unwrap_or(local_timezone_offset),
+        now.to_rfc3339(),
         provider,
     )?;
     Ok((config, provider))
@@ -291,7 +289,11 @@ fn acquire_sync_lock() -> Result<SyncLock, Error> {
     Err(Error::Busy("another location sync is still running".into()))
 }
 
-pub fn sync_saved(if_needed: bool) -> Result<SyncOutcome, Error> {
+pub fn sync_saved(
+    if_needed: bool,
+    now: DateTime<Utc>,
+    local_timezone_offset: f64,
+) -> Result<SyncOutcome, Error> {
     let _lock = acquire_sync_lock()?;
     // Reload only after taking the lock: another bar instance may have just
     // completed the same startup sync.
@@ -305,7 +307,7 @@ pub fn sync_saved(if_needed: bool) -> Result<SyncOutcome, Error> {
             provider,
         });
     }
-    if if_needed && is_fresh(&current, Utc::now()) {
+    if if_needed && is_fresh(&current, now) {
         let provider = current.last_location_provider.clone();
         return Ok(SyncOutcome {
             config: current,
@@ -314,7 +316,7 @@ pub fn sync_saved(if_needed: bool) -> Result<SyncOutcome, Error> {
             provider,
         });
     }
-    let (updated, provider) = sync(&current)?;
+    let (updated, provider) = sync(&current, now, local_timezone_offset)?;
     config::save(&updated)?;
     Ok(SyncOutcome {
         config: updated,

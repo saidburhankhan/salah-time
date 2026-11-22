@@ -280,12 +280,12 @@ pub fn day_plan(
 mod tests {
     use super::*;
     use crate::planner::add;
-    use crate::planner::test_support::{at, config, date, titled};
+    use crate::planner::test_support::{at, config, date, ids, titled};
 
     #[test]
     fn open_items_carry_forward_and_are_missed_once_the_day_ends() {
         let mut store = Store::open_in_memory().unwrap();
-        let morning = add(&mut store, &config(), at(20, 9, 0), titled("Email")).unwrap();
+        let morning = add(&mut store, &config(), at(20, 9, 0), ids(), titled("Email")).unwrap();
         let later = today(&store, &config(), at(20, 16, 0)).unwrap();
         assert_eq!(later.current[0].id, morning.id, "carried into Asr");
         let past = history(&store, &config(), at(21, 9, 0), date(20), date(20)).unwrap();
@@ -295,7 +295,7 @@ mod tests {
     #[test]
     fn day_plan_describes_the_timeline() {
         let mut store = Store::open_in_memory().unwrap();
-        add(&mut store, &config(), at(20, 13, 0), titled("Email")).unwrap();
+        add(&mut store, &config(), at(20, 13, 0), ids(), titled("Email")).unwrap();
         let plan = day_plan(&store, &config(), at(20, 13, 0), None).unwrap();
         assert!(plan.is_today);
         let now = plan.now.as_ref().unwrap();

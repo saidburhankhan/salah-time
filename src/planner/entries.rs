@@ -1,8 +1,9 @@
 use super::items::find_item;
-use super::{new_id, recorded_block, stamp};
+use super::{recorded_block, stamp};
 use crate::config::Config;
 use crate::error::Error;
 use crate::item::{Entry, EntryKind, Item, Measure};
+use crate::runtime::IdGenerator;
 use crate::schedule::{self, BlockKey};
 use crate::store::Store;
 use chrono::{DateTime, NaiveDate, Utc};
@@ -12,9 +13,10 @@ pub(super) fn new_entry(
     block: BlockKey,
     kind: EntryKind,
     now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
 ) -> Entry {
     Entry {
-        id: new_id(),
+        id: ids.new_id(),
         item_id: item.id.clone(),
         block,
         kind,
@@ -32,6 +34,7 @@ pub fn done(
     store: &mut Store,
     config: &Config,
     now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
     id: &str,
     date: Option<NaiveDate>,
 ) -> Result<Entry, Error> {
@@ -39,7 +42,7 @@ pub fn done(
     let item = find_item(store, id)?;
     let schedule = schedule::resolve(config, now)?;
     let block = recorded_block(&schedule, &item, date);
-    let entry = new_entry(&item, block, EntryKind::Done, now);
+    let entry = new_entry(&item, block, EntryKind::Done, now, ids);
     store.put_entry(&entry)?;
     Ok(entry)
 }
@@ -76,6 +79,7 @@ pub fn log(
     store: &mut Store,
     config: &Config,
     now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
     id: &str,
     value: i64,
     date: Option<NaiveDate>,
@@ -86,7 +90,7 @@ pub fn log(
         Measure::Count => EntryKind::Count,
         Measure::Check | Measure::Minutes => EntryKind::Minutes,
     };
-    record(store, config, now, &item, kind, value, date)
+    record(store, config, now, ids, &item, (kind, value), date)
 }
 
 /// Adds (or, when negative, subtracts) minutes of time spent on any item,
@@ -95,21 +99,30 @@ pub fn adjust_time(
     store: &mut Store,
     config: &Config,
     now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
     id: &str,
     value: i64,
     date: Option<NaiveDate>,
 ) -> Result<Entry, Error> {
     let item = find_item(store, id)?;
-    record(store, config, now, &item, EntryKind::Minutes, value, date)
+    record(
+        store,
+        config,
+        now,
+        ids,
+        &item,
+        (EntryKind::Minutes, value),
+        date,
+    )
 }
 
 fn record(
     store: &mut Store,
     config: &Config,
     now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
     item: &Item,
-    kind: EntryKind,
-    value: i64,
+    (kind, value): (EntryKind, i64),
     date: Option<NaiveDate>,
 ) -> Result<Entry, Error> {
     let now = stamp(now);
@@ -118,7 +131,7 @@ fn record(
         return Err("value must be between -1440 and 1440, and not 0".into());
     }
     let schedule = schedule::resolve(config, now)?;
-    let mut entry = new_entry(item, recorded_block(&schedule, item, date), kind, now);
+    let mut entry = new_entry(item, recorded_block(&schedule, item, date), kind, now, ids);
     entry.value = Some(value);
     store.put_entry(&entry)?;
     Ok(entry)
@@ -130,14 +143,22 @@ mod tests {
     use crate::day::BoundaryId;
     use crate::item::{Repeat, State};
     use crate::planner::NewItem;
-    use crate::planner::test_support::{at, config, date, titled};
+    use crate::planner::test_support::{at, config, date, ids, titled};
     use crate::planner::{add, history, today};
 
     #[test]
     fn done_and_undo_toggle_the_tick() {
         let mut store = Store::open_in_memory().unwrap();
-        let item = add(&mut store, &config(), at(20, 9, 0), titled("Email")).unwrap();
-        done(&mut store, &config(), at(20, 9, 30), &item.id[..8], None).unwrap();
+        let item = add(&mut store, &config(), at(20, 9, 0), ids(), titled("Email")).unwrap();
+        done(
+            &mut store,
+            &config(),
+            at(20, 9, 30),
+            ids(),
+            &item.id[..8],
+            None,
+        )
+        .unwrap();
         let view = today(&store, &config(), at(20, 9, 31)).unwrap();
         assert_eq!(view.items[0].state, State::Done);
         assert_eq!(view.open, 0);
@@ -157,12 +178,13 @@ mod tests {
             date: Some(date(18)),
             ..titled("Walk")
         };
-        let walk = add(&mut store, &config(), at(20, 13, 0), walk).unwrap();
+        let walk = add(&mut store, &config(), at(20, 13, 0), ids(), walk).unwrap();
         assert_eq!((walk.day, walk.block), (date(18), BoundaryId::Fajr));
         done(
             &mut store,
             &config(),
             at(20, 13, 0),
+            ids(),
             &walk.id,
             Some(date(19)),
         )

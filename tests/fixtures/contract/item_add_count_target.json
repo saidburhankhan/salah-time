@@ -1,6 +1,6 @@
 {
   "block": "fajr",
-  "created_at": "<instant>",
+  "created_at": "2031-05-14T04:30:00Z",
   "day": "2031-05-14",
   "deleted_at": null,
   "id": "<id:1>",
@@ -9,6 +9,6 @@
   "repeat": "none",
   "target": 10,
   "title": "Count task",
-  "updated_at": "<instant>",
+  "updated_at": "2031-05-14T04:30:00Z",
   "weekdays": null
 }

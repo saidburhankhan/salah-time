@@ -1,10 +1,11 @@
-use super::{new_id, stamp};
+use super::stamp;
 use crate::config::Config;
 use crate::day::BoundaryId;
 use crate::error::Error;
 use crate::item::{
     Item, Measure, Repeat, Weekdays, validate_block, validate_repeat, validate_title,
 };
+use crate::runtime::IdGenerator;
 use crate::schedule;
 use crate::store::Store;
 use chrono::{DateTime, NaiveDate, Utc};
@@ -67,6 +68,7 @@ pub fn add(
     store: &mut Store,
     config: &Config,
     now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
     request: NewItem,
 ) -> Result<Item, Error> {
     let now = stamp(now);
@@ -92,7 +94,7 @@ pub fn add(
     };
     let block = validate_block(request.block.unwrap_or(default_block))?;
     let item = Item {
-        id: new_id(),
+        id: ids.new_id(),
         title: validate_title(&request.title)?,
         block,
         repeat,
@@ -215,7 +217,7 @@ pub fn remove(store: &mut Store, now: DateTime<Utc>, id: &str) -> Result<Item, E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planner::test_support::{at, config, date, titled};
+    use crate::planner::test_support::{at, config, date, ids, titled};
     use crate::planner::{day_plan, log, mark, start_timer, today};
 
     #[test]
@@ -225,6 +227,7 @@ mod tests {
             &mut store,
             &config(),
             at(20, 13, 0),
+            ids(),
             titled("Call the bank"),
         )
         .unwrap();
@@ -239,7 +242,14 @@ mod tests {
     fn the_night_before_fajr_is_a_plannable_block_of_the_coming_day() {
         let mut store = Store::open_in_memory().unwrap();
         // 23:30 on the 20th is after the default 23:00 sleep: the 21st's night.
-        let item = add(&mut store, &config(), at(20, 23, 30), titled("Tahajjud")).unwrap();
+        let item = add(
+            &mut store,
+            &config(),
+            at(20, 23, 30),
+            ids(),
+            titled("Tahajjud"),
+        )
+        .unwrap();
         assert_eq!((item.day, item.block), (date(21), BoundaryId::Night));
         let view = today(&store, &config(), at(21, 2, 0)).unwrap();
         assert_eq!((view.day, view.block), (date(21), Some(BoundaryId::Night)));
@@ -249,8 +259,8 @@ mod tests {
             measure: Some(Measure::Minutes),
             ..titled("Study")
         };
-        let study = add(&mut store, &config(), at(21, 3, 0), timer).unwrap();
-        start_timer(&mut store, &config(), at(21, 3, 0), &study.id).unwrap();
+        let study = add(&mut store, &config(), at(21, 3, 0), ids(), timer).unwrap();
+        start_timer(&mut store, &config(), at(21, 3, 0), ids(), &study.id).unwrap();
         let plan = day_plan(&store, &config(), at(21, 3, 30), None).unwrap();
         assert_eq!(plan.blocks[0].start, BoundaryId::Night);
         assert_eq!(plan.blocks[0].items.len(), 2);
@@ -265,27 +275,56 @@ mod tests {
             ..config()
         };
         let mut store = Store::open_in_memory().unwrap();
-        let item = add(&mut store, &late, at(21, 0, 10), titled("Review the day")).unwrap();
+        let item = add(
+            &mut store,
+            &late,
+            at(21, 0, 10),
+            ids(),
+            titled("Review the day"),
+        )
+        .unwrap();
         assert_eq!((item.day, item.block), (date(20), BoundaryId::Isha));
     }
 
     #[test]
     fn invalid_requests_change_nothing() {
         let mut store = Store::open_in_memory().unwrap();
-        let tick = add(&mut store, &config(), at(20, 13, 0), titled("Tick")).unwrap();
-        assert!(add(&mut store, &config(), at(20, 13, 0), titled("  ")).is_err());
+        let tick = add(&mut store, &config(), at(20, 13, 0), ids(), titled("Tick")).unwrap();
+        assert!(add(&mut store, &config(), at(20, 13, 0), ids(), titled("  ")).is_err());
         let sleep = NewItem {
             block: Some(BoundaryId::Sleep),
             ..titled("Nap")
         };
-        assert!(add(&mut store, &config(), at(20, 13, 0), sleep).is_err());
+        assert!(add(&mut store, &config(), at(20, 13, 0), ids(), sleep).is_err());
         let target = NewItem {
             target: Some(5),
             ..titled("Target")
         };
-        assert!(add(&mut store, &config(), at(20, 13, 0), target).is_err());
-        assert!(log(&mut store, &config(), at(20, 13, 0), &tick.id, 0, None).is_err());
-        assert!(log(&mut store, &config(), at(20, 13, 0), &tick.id, 1441, None).is_err());
+        assert!(add(&mut store, &config(), at(20, 13, 0), ids(), target).is_err());
+        assert!(
+            log(
+                &mut store,
+                &config(),
+                at(20, 13, 0),
+                ids(),
+                &tick.id,
+                0,
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            log(
+                &mut store,
+                &config(),
+                at(20, 13, 0),
+                ids(),
+                &tick.id,
+                1441,
+                None
+            )
+            .is_err()
+        );
         assert!(find_item(&store, "abc").is_err());
         assert_eq!(store.items().unwrap().len(), 1);
         assert!(store.entries().unwrap().is_empty());
@@ -294,7 +333,7 @@ mod tests {
     #[test]
     fn ids_match_by_unique_prefix_only() {
         let mut store = Store::open_in_memory().unwrap();
-        let mut item = add(&mut store, &config(), at(20, 13, 0), titled("One")).unwrap();
+        let mut item = add(&mut store, &config(), at(20, 13, 0), ids(), titled("One")).unwrap();
         item.id = "abcd1111".into();
         store.put_item(&item).unwrap();
         item.id = "abcd2222".into();
@@ -315,6 +354,7 @@ mod tests {
             &mut store,
             &config(),
             at(20, 13, 0),
+            ids(),
             in_block("A", BoundaryId::Asr),
         )
         .unwrap();
@@ -322,6 +362,7 @@ mod tests {
             &mut store,
             &config(),
             at(20, 13, 0),
+            ids(),
             in_block("B", BoundaryId::Asr),
         )
         .unwrap();
@@ -329,6 +370,7 @@ mod tests {
             &mut store,
             &config(),
             at(20, 13, 0),
+            ids(),
             in_block("C", BoundaryId::Isha),
         )
         .unwrap();
@@ -348,7 +390,7 @@ mod tests {
     #[test]
     fn removed_items_disappear_but_keep_a_tombstone() {
         let mut store = Store::open_in_memory().unwrap();
-        let item = add(&mut store, &config(), at(20, 13, 0), titled("Gone")).unwrap();
+        let item = add(&mut store, &config(), at(20, 13, 0), ids(), titled("Gone")).unwrap();
         remove(&mut store, at(20, 13, 1), &item.id).unwrap();
         assert!(
             today(&store, &config(), at(20, 13, 2))

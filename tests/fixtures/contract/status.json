@@ -1,115 +1,108 @@
 {
   "boundaries": [
     {
-      "current": false,
       "id": "fajr",
       "is_next": false,
       "kind": "prayer",
       "name": "Fajr",
-      "passed": false,
-      "time": "<HH:MM>"
+      "passed": true,
+      "time": "03:12"
     },
     {
-      "current": false,
       "id": "sunrise",
       "is_next": false,
       "kind": "sunrise",
       "name": "Sunrise",
-      "passed": false,
-      "time": "<HH:MM>"
+      "passed": true,
+      "time": "05:06"
     },
     {
-      "current": false,
       "id": "dhuhr",
-      "is_next": false,
+      "is_next": true,
       "kind": "prayer",
       "name": "Dhuhr",
       "passed": false,
-      "time": "<HH:MM>"
+      "time": "12:19"
     },
     {
-      "current": false,
       "id": "asr",
       "is_next": false,
       "kind": "prayer",
       "name": "Asr",
       "passed": false,
-      "time": "<HH:MM>"
+      "time": "17:24"
     },
     {
-      "current": false,
       "id": "maghrib",
       "is_next": false,
       "kind": "prayer",
       "name": "Maghrib",
       "passed": false,
-      "time": "<HH:MM>"
+      "time": "19:33"
     },
     {
-      "current": false,
       "id": "isha",
       "is_next": false,
       "kind": "prayer",
       "name": "Isha",
       "passed": false,
-      "time": "<HH:MM>"
+      "time": "21:20"
     },
     {
-      "current": false,
       "id": "sleep",
       "is_next": false,
       "kind": "sleep",
       "name": "Sleep",
       "passed": false,
-      "time": "<HH:MM>"
+      "time": "23:00"
     }
   ],
   "current_block": {
     "block": {
-      "day": "<today>",
-      "start": "<boundary>"
+      "day": "2031-05-14",
+      "start": "fajr"
     },
     "end": {
-      "date": "<today>",
-      "id": "<boundary>",
-      "kind": "<kind>",
-      "name": "<name>",
-      "time": "<HH:MM>"
+      "date": "2031-05-14",
+      "id": "dhuhr",
+      "kind": "prayer",
+      "name": "Dhuhr",
+      "time": "12:19"
     },
     "sleeping": false,
     "start": {
-      "date": "<today>",
-      "id": "<boundary>",
-      "kind": "<kind>",
-      "name": "<name>",
-      "time": "<HH:MM>"
+      "date": "2031-05-14",
+      "id": "fajr",
+      "kind": "prayer",
+      "name": "Fajr",
+      "time": "03:12"
     }
   },
-  "date": "<today>",
-  "day": "<today>",
-  "label": "<duration>",
+  "date": "2031-05-14",
+  "day": "2031-05-14",
+  "label": "☾ Dhuhr 2h 49m",
   "location": "Tashkent",
   "method": "mwl",
   "method_name": "Muslim World League",
   "next": {
-    "date": "<today>",
-    "id": "<boundary>",
-    "kind": "<kind>",
-    "name": "<name>",
-    "remaining": "<duration>",
-    "remaining_seconds": 0,
-    "remaining_short": "<duration>",
-    "time": "<HH:MM>"
+    "date": "2031-05-14",
+    "id": "dhuhr",
+    "kind": "prayer",
+    "name": "Dhuhr",
+    "remaining": "02:49:00",
+    "remaining_seconds": 10140,
+    "remaining_short": "2h 49m",
+    "time": "12:19"
   },
   "planner": {
-    "block": "<boundary>",
+    "block": "fajr",
     "current": [],
-    "day": "<today>",
+    "day": "2031-05-14",
     "items": [],
     "open": 0,
     "planning_block": {
-      "day": "<today>",
-      "start": "<boundary>"
+      "day": "2031-05-14",
+      "start": "fajr"
     },
     "prayer_marks": [],
     "timer": null,
@@ -118,56 +111,50 @@
   "planner_error": null,
   "prayers": [
     {
-      "current": false,
       "id": "fajr",
       "is_next": false,
       "name": "Fajr",
-      "passed": false,
-      "time": "<HH:MM>"
+      "passed": true,
+      "time": "03:12"
     },
     {
-      "current": false,
       "id": "sunrise",
       "is_next": false,
       "name": "Sunrise",
-      "passed": false,
-      "time": "<HH:MM>"
+      "passed": true,
+      "time": "05:06"
     },
     {
-      "current": false,
       "id": "dhuhr",
-      "is_next": false,
+      "is_next": true,
       "name": "Dhuhr",
       "passed": false,
-      "time": "<HH:MM>"
+      "time": "12:19"
     },
     {
-      "current": false,
       "id": "asr",
       "is_next": false,
       "name": "Asr",
       "passed": false,
-      "time": "<HH:MM>"
+      "time": "17:24"
     },
     {
-      "current": false,
       "id": "maghrib",
       "is_next": false,
       "name": "Maghrib",
       "passed": false,
-      "time": "<HH:MM>"
+      "time": "19:33"
     },
     {
-      "current": false,
       "id": "isha",
       "is_next": false,
       "name": "Isha",
       "passed": false,
-      "time": "<HH:MM>"
+      "time": "21:20"
     }
   ],
   "schema_version": 1,
-  "sleep_time": "<HH:MM>",
+  "sleep_time": "23:00",
   "source": "calculated",
   "source_name": "Muslim World League",
   "source_updated": null

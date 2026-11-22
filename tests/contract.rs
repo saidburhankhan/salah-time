@@ -1,14 +1,14 @@
 //! Golden CLI contract fixtures for the desktop app and the bar widget.
 //!
 //! Each test runs the real `salah` binary against an isolated temporary
-//! `SALAH_CONFIG` and `SALAH_DATA`. Values the real clock or random ids make
-//! volatile are replaced with stable placeholders before the JSON is compared
-//! with `tests/fixtures/contract/<name>.json`.
+//! `SALAH_CONFIG` and `SALAH_DATA`, with `SALAH_NOW` freezing the clock.
+//! Random ids are replaced with stable placeholders before the JSON is
+//! compared with `tests/fixtures/contract/<name>.json`.
 //!
 //! Run with `UPDATE_FIXTURES=1 cargo test --offline --test contract` to
 //! regenerate the fixtures from the current binary.
 
-use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
+use chrono::{Duration, NaiveDate};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
@@ -19,20 +19,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/contract");
-const CONTRACT_TZ_HOURS: i32 = 5;
 const DATE: &str = "2031-05-14";
-
-#[derive(Clone, Copy, Default)]
-struct Norm {
-    /// `status --json` embeds values that depend on the current time of day.
-    status_timing: bool,
-    /// `item list --json` reports the current block.
-    list_timing: bool,
-    /// Timer entries are recorded in whichever block is current.
-    timer_block: bool,
-    /// `stats --days` dates are relative to its `to` day, not a fixed date.
-    stats_days: bool,
-}
+/// Local time in Tashkent (UTC+5) on the contract fixture day.
+const NOW: &str = "2031-05-14T09:30:00+05:00";
 
 struct Harness {
     root: PathBuf,
@@ -68,6 +57,7 @@ impl Harness {
             .env("XDG_CONFIG_HOME", self.root.join("xdg-config"))
             .env("XDG_DATA_HOME", self.root.join("xdg-data"))
             .env("XDG_CACHE_HOME", self.root.join("xdg-cache"))
+            .env("SALAH_NOW", NOW)
             .args(args)
             .output()
             .unwrap()
@@ -85,15 +75,15 @@ impl Harness {
         })
     }
 
-    fn snapshot(&self, name: &str, args: &[&str], norm: Norm) -> Value {
+    fn snapshot(&self, name: &str, args: &[&str]) -> Value {
         let value = self.json(args);
-        self.record(name, &value, norm);
+        self.record(name, &value);
         value
     }
 
-    fn record(&self, name: &str, value: &Value, norm: Norm) {
+    fn record(&self, name: &str, value: &Value) {
         let mut normalised = value.clone();
-        normalise_root(&mut normalised, norm);
+        normalise_root(&mut normalised);
         compare_fixture(name, &normalised);
     }
 
@@ -155,38 +145,15 @@ fn compare_fixture(name: &str, value: &Value) {
     );
 }
 
-fn contract_today() -> NaiveDate {
-    let offset = FixedOffset::east_opt(CONTRACT_TZ_HOURS * 3600).unwrap();
-    Utc::now().with_timezone(&offset).date_naive()
-}
-
 struct Context {
-    today: NaiveDate,
-    /// When set, every date is written relative to this day (`<to-3>`).
-    anchor: Option<NaiveDate>,
     ids: HashMap<String, String>,
 }
 
-fn normalise_root(value: &mut Value, norm: Norm) {
-    let anchor = norm
-        .stats_days
-        .then(|| value.get("to").and_then(Value::as_str).and_then(parse_date))
-        .flatten();
+fn normalise_root(value: &mut Value) {
     let mut context = Context {
-        today: contract_today(),
-        anchor,
         ids: HashMap::new(),
     };
     normalise_value(value, &mut context);
-    if norm.status_timing {
-        normalise_status_timing(value);
-    }
-    if norm.list_timing {
-        normalise_list_timing(value);
-    }
-    if norm.timer_block {
-        normalise_timer_block(value);
-    }
 }
 
 fn normalise_value(value: &mut Value, context: &mut Context) {
@@ -221,21 +188,6 @@ fn normalise_string(text: &str, context: &mut Context) -> Option<String> {
                 .clone(),
         );
     }
-    if DateTime::parse_from_rfc3339(text).is_ok() {
-        return Some("<instant>".into());
-    }
-    if let Some(date) = parse_date(text) {
-        return Some(date_placeholder(date, text, context));
-    }
-    if text.len() == 5
-        && text.as_bytes()[2] == b':'
-        && text
-            .bytes()
-            .enumerate()
-            .all(|(index, byte)| index == 2 || byte.is_ascii_digit())
-    {
-        return Some("<HH:MM>".into());
-    }
     None
 }
 
@@ -244,111 +196,6 @@ fn parse_date(text: &str) -> Option<NaiveDate> {
         NaiveDate::parse_from_str(text, "%Y-%m-%d").ok()
     } else {
         None
-    }
-}
-
-fn date_placeholder(date: NaiveDate, text: &str, context: &Context) -> String {
-    if let Some(anchor) = context.anchor {
-        return relative_placeholder("to", date.signed_duration_since(anchor).num_days());
-    }
-    let offset = date.signed_duration_since(context.today).num_days();
-    // Explicit fixture dates stay literal; only the clock-relative near days
-    // are replaced.
-    if (-1..=1).contains(&offset) {
-        relative_placeholder("today", offset)
-    } else {
-        text.to_string()
-    }
-}
-
-fn relative_placeholder(base: &str, offset: i64) -> String {
-    if offset == 0 {
-        format!("<{base}>")
-    } else {
-        format!("<{base}{offset:+}>")
-    }
-}
-
-fn normalise_status_timing(value: &mut Value) {
-    let Some(status) = value.as_object_mut() else {
-        return;
-    };
-    status.insert("label".into(), json!("<duration>"));
-    if let Some(next) = status.get_mut("next").and_then(Value::as_object_mut) {
-        next.insert("id".into(), json!("<boundary>"));
-        next.insert("name".into(), json!("<name>"));
-        next.insert("kind".into(), json!("<kind>"));
-        next.insert("time".into(), json!("<HH:MM>"));
-        next.insert("remaining".into(), json!("<duration>"));
-        next.insert("remaining_short".into(), json!("<duration>"));
-        next.insert("remaining_seconds".into(), json!(0));
-    }
-    if let Some(block) = status
-        .get_mut("current_block")
-        .and_then(Value::as_object_mut)
-    {
-        block.insert("sleeping".into(), json!(false));
-        if let Some(key) = block.get_mut("block").and_then(Value::as_object_mut) {
-            key.insert("start".into(), json!("<boundary>"));
-        }
-        for point in ["start", "end"] {
-            if let Some(point) = block.get_mut(point).and_then(Value::as_object_mut) {
-                point.insert("id".into(), json!("<boundary>"));
-                point.insert("name".into(), json!("<name>"));
-                point.insert("kind".into(), json!("<kind>"));
-                point.insert("time".into(), json!("<HH:MM>"));
-            }
-        }
-    }
-    if let Some(planner) = status.get_mut("planner").and_then(Value::as_object_mut) {
-        planner.insert("block".into(), json!("<boundary>"));
-        if let Some(planning) = planner
-            .get_mut("planning_block")
-            .and_then(Value::as_object_mut)
-        {
-            planning.insert("start".into(), json!("<boundary>"));
-        }
-    }
-    for key in ["prayers", "boundaries"] {
-        if let Some(rows) = status.get_mut(key).and_then(Value::as_array_mut) {
-            for row in rows {
-                if let Some(row) = row.as_object_mut() {
-                    row.insert("passed".into(), json!(false));
-                    row.insert("is_next".into(), json!(false));
-                    row.insert("current".into(), json!(false));
-                }
-            }
-        }
-    }
-}
-
-fn normalise_list_timing(value: &mut Value) {
-    let Some(list) = value.as_object_mut() else {
-        return;
-    };
-    list.insert("block".into(), json!("<boundary>"));
-    if let Some(planning) = list
-        .get_mut("planning_block")
-        .and_then(Value::as_object_mut)
-    {
-        planning.insert("start".into(), json!("<boundary>"));
-    }
-}
-
-fn normalise_timer_block(value: &mut Value) {
-    match value {
-        Value::Array(items) => {
-            for item in items {
-                normalise_timer_block(item);
-            }
-        }
-        Value::Object(map) => {
-            if let Some(block) = map.get_mut("block").and_then(Value::as_object_mut) {
-                block.insert("day".into(), json!("<today>"));
-                block.insert("start".into(), json!("<boundary>"));
-            }
-        }
-        _ => {}
     }
 }
 
@@ -371,28 +218,14 @@ fn day_text(day: NaiveDate) -> String {
 #[test]
 fn status_and_today_list_shapes() {
     let harness = Harness::new("status");
-    harness.snapshot(
-        "status",
-        &["status", "--json"],
-        Norm {
-            status_timing: true,
-            ..Norm::default()
-        },
-    );
-    harness.snapshot(
-        "item_list",
-        &["item", "list", "--json"],
-        Norm {
-            list_timing: true,
-            ..Norm::default()
-        },
-    );
+    harness.snapshot("status", &["status", "--json"]);
+    harness.snapshot("item_list", &["item", "list", "--json"]);
 }
 
 #[test]
 fn config_show_shape() {
     let harness = Harness::new("config");
-    harness.snapshot("config_show", &["config", "show"], Norm::default());
+    harness.snapshot("config_show", &["config", "show"]);
 }
 
 #[test]
@@ -438,7 +271,7 @@ fn day_plan_with_items_and_marks() {
         "No target task",
     );
     harness.json(&["prayer", "mark", "fajr", "--date", DATE, "--json"]);
-    harness.snapshot("day", &["day", "--date", DATE, "--json"], Norm::default());
+    harness.snapshot("day", &["day", "--json"]);
 }
 
 #[test]
@@ -447,7 +280,6 @@ fn item_add_variants() {
     harness.record(
         "item_add_plain",
         &item_add(&harness, &["--date", DATE, "--block", "fajr"], "Plain task"),
-        Norm::default(),
     );
     harness.record(
         "item_add_quick",
@@ -456,12 +288,10 @@ fn item_add_variants() {
             &["--quick", "--date", DATE],
             "read 20m after isha daily",
         ),
-        Norm::default(),
     );
     harness.record(
         "item_add_block",
         &item_add(&harness, &["--date", DATE, "--block", "asr"], "Block task"),
-        Norm::default(),
     );
     harness.record(
         "item_add_daily",
@@ -470,7 +300,6 @@ fn item_add_variants() {
             &["--date", DATE, "--block", "dhuhr", "--repeat", "daily"],
             "Daily task",
         ),
-        Norm::default(),
     );
     harness.record(
         "item_add_weekdays",
@@ -486,7 +315,6 @@ fn item_add_variants() {
             ],
             "Weekday task",
         ),
-        Norm::default(),
     );
     harness.record(
         "item_add_weekly_days",
@@ -504,7 +332,6 @@ fn item_add_variants() {
             ],
             "Weekly task",
         ),
-        Norm::default(),
     );
     harness.record(
         "item_add_count_target",
@@ -522,7 +349,6 @@ fn item_add_variants() {
             ],
             "Count task",
         ),
-        Norm::default(),
     );
     harness.record(
         "item_add_date",
@@ -531,7 +357,6 @@ fn item_add_variants() {
             &["--date", "2031-06-01", "--block", "fajr"],
             "Dated task",
         ),
-        Norm::default(),
     );
 }
 
@@ -541,7 +366,6 @@ fn item_parse_variants() {
     harness.snapshot(
         "item_parse",
         &["item", "parse", "--json", "--", "read 20m after isha daily"],
-        Norm::default(),
     );
     harness.snapshot(
         "item_parse_weekdays",
@@ -552,7 +376,6 @@ fn item_parse_variants() {
             "--",
             "pushups 30 times every mon, wed and fri",
         ],
-        Norm::default(),
     );
 }
 
@@ -578,29 +401,24 @@ fn item_edit_variants() {
     harness.snapshot(
         "item_edit_title",
         &["item", "edit", "--json", &id, "--title=Renamed task"],
-        Norm::default(),
     );
     harness.snapshot(
         "item_edit_block",
         &["item", "edit", "--json", &id, "--block", "maghrib"],
-        Norm::default(),
     );
     harness.snapshot(
         "item_edit_repeat",
         &[
             "item", "edit", "--json", &id, "--repeat", "weekly", "--days", "mon,wed",
         ],
-        Norm::default(),
     );
     harness.snapshot(
         "item_edit_target",
         &["item", "edit", "--json", &id, "--target", "45"],
-        Norm::default(),
     );
     harness.snapshot(
         "item_edit_no_target",
         &["item", "edit", "--json", &id, "--no-target"],
-        Norm::default(),
     );
 }
 
@@ -619,7 +437,6 @@ fn item_move_changes_block_and_position() {
         &[
             "item", "move", "--json", &id, "--block", "asr", "--index", "0",
         ],
-        Norm::default(),
     );
 }
 
@@ -631,12 +448,10 @@ fn item_done_and_undo() {
     harness.snapshot(
         "item_done",
         &["item", "done", "--json", &id, "--date", DATE],
-        Norm::default(),
     );
     harness.snapshot(
         "item_undo",
         &["item", "undo", "--json", &id, "--date", DATE],
-        Norm::default(),
     );
 }
 
@@ -652,12 +467,10 @@ fn item_log_positive_negative_and_minutes() {
     harness.snapshot(
         "item_log_positive",
         &["item", "log", "--json", &timed_id, "20", "--date", DATE],
-        Norm::default(),
     );
     harness.snapshot(
         "item_log_negative",
         &["item", "log", "--json", &timed_id, "-5", "--date", DATE],
-        Norm::default(),
     );
 
     let counted = item_add(
@@ -669,7 +482,6 @@ fn item_log_positive_negative_and_minutes() {
     harness.snapshot(
         "item_log_count",
         &["item", "log", "--json", &counted_id, "3", "--date", DATE],
-        Norm::default(),
     );
     harness.snapshot(
         "item_log_minutes_positive",
@@ -683,7 +495,6 @@ fn item_log_positive_negative_and_minutes() {
             "--date",
             DATE,
         ],
-        Norm::default(),
     );
     harness.snapshot(
         "item_log_minutes_negative",
@@ -697,7 +508,6 @@ fn item_log_positive_negative_and_minutes() {
             "--date",
             DATE,
         ],
-        Norm::default(),
     );
 }
 
@@ -706,14 +516,10 @@ fn item_start_and_stop() {
     let harness = Harness::new("timer");
     let item = item_add(&harness, &["--date", DATE], "Timer task");
     let id = id(&item).to_string();
-    let timer = Norm {
-        timer_block: true,
-        ..Norm::default()
-    };
-    harness.snapshot("item_start", &["item", "start", "--json", &id], timer);
-    harness.snapshot("item_stop_id", &["item", "stop", "--json", &id], timer);
+    harness.snapshot("item_start", &["item", "start", "--json", &id]);
+    harness.snapshot("item_stop_id", &["item", "stop", "--json", &id]);
     harness.json(&["item", "start", "--json", &id]);
-    harness.snapshot("item_stop", &["item", "stop", "--json"], timer);
+    harness.snapshot("item_stop", &["item", "stop", "--json"]);
 }
 
 #[test]
@@ -721,11 +527,7 @@ fn item_remove_returns_tombstone() {
     let harness = Harness::new("remove");
     let item = item_add(&harness, &["--date", DATE], "Remove me");
     let id = id(&item).to_string();
-    harness.snapshot(
-        "item_remove",
-        &["item", "remove", "--json", &id],
-        Norm::default(),
-    );
+    harness.snapshot("item_remove", &["item", "remove", "--json", &id]);
 }
 
 #[test]
@@ -734,12 +536,10 @@ fn prayer_mark_and_unmark() {
     harness.snapshot(
         "prayer_mark",
         &["prayer", "mark", "--json", "fajr", "--date", DATE],
-        Norm::default(),
     );
     harness.snapshot(
         "prayer_unmark",
         &["prayer", "unmark", "--json", "fajr", "--date", DATE],
-        Norm::default(),
     );
 }
 
@@ -822,7 +622,6 @@ fn stats_over_an_explicit_range() {
             "2020-01-12",
             "--json",
         ],
-        Norm::default(),
     );
 }
 
@@ -856,14 +655,7 @@ fn stats_for_days_ending_today() {
     harness.json(&["item", "done", "--json", &daily_id, "--date", &at(-1)]);
     harness.json(&["prayer", "mark", "--json", "fajr", "--date", &at(-3)]);
 
-    harness.snapshot(
-        "stats_days",
-        &["stats", "--days", "7", "--json"],
-        Norm {
-            stats_days: true,
-            ..Norm::default()
-        },
-    );
+    harness.snapshot("stats_days", &["stats", "--days", "7", "--json"]);
 }
 
 #[test]
@@ -890,23 +682,15 @@ fn export_and_import() {
     let output = source.run(&["export"]);
     assert_success(&output);
     let exported: Value = serde_json::from_slice(&output.stdout).unwrap();
-    source.record("export", &exported, Norm::default());
+    source.record("export", &exported);
 
     let export_path = source.root.join("export.json");
     fs::write(&export_path, &output.stdout).unwrap();
     let export_path = export_path.to_str().unwrap();
 
     let target = Harness::new("import");
-    target.snapshot(
-        "import",
-        &["import", export_path, "--json"],
-        Norm::default(),
-    );
-    target.snapshot(
-        "import_again",
-        &["import", export_path, "--json"],
-        Norm::default(),
-    );
+    target.snapshot("import", &["import", export_path, "--json"]);
+    target.snapshot("import_again", &["import", export_path, "--json"]);
 }
 
 #[test]

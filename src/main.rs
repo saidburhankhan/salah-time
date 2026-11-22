@@ -1,4 +1,4 @@
-use chrono::{Duration, FixedOffset, NaiveDate, Utc};
+use chrono::{DateTime, Duration, FixedOffset, Local, NaiveDate, Utc};
 use clap::{Args, Parser, Subcommand};
 use salah::{
     calculation::METHODS,
@@ -6,7 +6,9 @@ use salah::{
     day::BoundaryId,
     export,
     item::{Measure, Repeat, State, Weekdays},
-    location, official, planner, quick, schedule, status,
+    location, official, planner, quick,
+    runtime::{Clock, FixedClock, IdGenerator, SystemClock, UuidV4},
+    schedule, status,
     store::{Store, default_path},
 };
 use std::{fs, path::PathBuf, process::ExitCode};
@@ -425,21 +427,38 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<(), String> {
+    let clock = clock_from_env()?;
+    let ids = UuidV4;
+    let now = clock.now();
     match cli.command {
-        None => status_command(false),
-        Some(Command::Status(args)) => status_command(args.json),
+        None => status_command(false, now),
+        Some(Command::Status(args)) => status_command(args.json, now),
         Some(Command::Config { command }) => config_command(command),
-        Some(Command::Location { command }) => location_command(command),
-        Some(Command::Official { command }) => official_command(command),
-        Some(Command::Item { command }) => item_command(command),
-        Some(Command::Day(args)) => day_command(args),
-        Some(Command::Prayer { command }) => prayer_command(command),
-        Some(Command::Stats(args)) => stats_command(args),
-        Some(Command::History(args)) => history_command(args),
-        Some(Command::Export(args)) => export_command(args),
-        Some(Command::Import(args)) => import_command(args),
+        Some(Command::Location { command }) => location_command(command, now),
+        Some(Command::Official { command }) => official_command(command, now),
+        Some(Command::Item { command }) => item_command(command, now, &ids),
+        Some(Command::Day(args)) => day_command(args, now),
+        Some(Command::Prayer { command }) => prayer_command(command, now),
+        Some(Command::Stats(args)) => stats_command(args, now),
+        Some(Command::History(args)) => history_command(args, now),
+        Some(Command::Export(args)) => export_command(args, now),
+        Some(Command::Import(args)) => import_command(args, now),
         Some(Command::Methods) => methods_command(),
         Some(Command::Open) => open_command(),
+    }
+}
+
+/// Reads the test-only `SALAH_NOW` hook, falling back to the system clock.
+fn clock_from_env() -> Result<Box<dyn Clock>, String> {
+    match std::env::var("SALAH_NOW") {
+        Ok(value) => {
+            let now = DateTime::parse_from_rfc3339(&value)
+                .map_err(|_| format!("invalid SALAH_NOW {value:?}; use RFC 3339"))?
+                .with_timezone(&Utc);
+            Ok(Box::new(FixedClock::new(now)))
+        }
+        Err(std::env::VarError::NotPresent) => Ok(Box::new(SystemClock)),
+        Err(error) => Err(format!("invalid SALAH_NOW: {error}")),
     }
 }
 
@@ -460,9 +479,8 @@ fn open_command() -> Result<(), String> {
         .map_err(|e| format!("cannot start the Salah app ({}): {e}", program.display()))
 }
 
-fn status_command(json: bool) -> Result<(), String> {
+fn status_command(json: bool, now: DateTime<Utc>) -> Result<(), String> {
     let config = load()?;
-    let now = Utc::now();
     let mut report = status::build(&config, now)?;
     let planner =
         Store::open(&default_path()).and_then(|store| planner::today(&store, &config, now));
@@ -478,8 +496,8 @@ fn status_command(json: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn open_planner() -> Result<(Store, salah::config::Config, chrono::DateTime<Utc>), String> {
-    Ok((Store::open(&default_path())?, load()?, Utc::now()))
+fn open_planner() -> Result<(Store, salah::config::Config), String> {
+    Ok((Store::open(&default_path())?, load()?))
 }
 
 fn parse_block(value: &str) -> Result<BoundaryId, String> {
@@ -536,8 +554,12 @@ fn short(id: &str) -> &str {
     &id[..id.len().min(8)]
 }
 
-fn item_command(command: ItemCommand) -> Result<(), String> {
-    let (mut store, config, now) = open_planner()?;
+fn item_command(
+    command: ItemCommand,
+    now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
+) -> Result<(), String> {
+    let (mut store, config) = open_planner()?;
     match command {
         ItemCommand::List(args) => {
             let today = planner::today(&store, &config, now)?;
@@ -580,7 +602,7 @@ fn item_command(command: ItemCommand) -> Result<(), String> {
                 request.target = args.target;
             }
             request.date = optional_date(args.date.as_deref())?;
-            let item = planner::add(&mut store, &config, now, request)?;
+            let item = planner::add(&mut store, &config, now, ids, request)?;
             if args.json {
                 json(&item)
             } else {
@@ -615,7 +637,7 @@ fn item_command(command: ItemCommand) -> Result<(), String> {
         ItemCommand::Done(args) => {
             planner::close_expired_timers(&mut store, &config, now)?;
             let date = optional_date(args.date.as_deref())?;
-            let entry = planner::done(&mut store, &config, now, &args.id, date)?;
+            let entry = planner::done(&mut store, &config, now, ids, &args.id, date)?;
             if args.json {
                 json(&entry)
             } else {
@@ -638,9 +660,9 @@ fn item_command(command: ItemCommand) -> Result<(), String> {
             planner::close_expired_timers(&mut store, &config, now)?;
             let date = optional_date(args.date.as_deref())?;
             let entry = if args.minutes {
-                planner::adjust_time(&mut store, &config, now, &args.id, args.value, date)?
+                planner::adjust_time(&mut store, &config, now, ids, &args.id, args.value, date)?
             } else {
-                planner::log(&mut store, &config, now, &args.id, args.value, date)?
+                planner::log(&mut store, &config, now, ids, &args.id, args.value, date)?
             };
             if args.json {
                 json(&entry)
@@ -653,6 +675,7 @@ fn item_command(command: ItemCommand) -> Result<(), String> {
             &mut store,
             &config,
             now,
+            ids,
             args,
             planner::start_timer,
             "Started",
@@ -709,21 +732,25 @@ fn item_command(command: ItemCommand) -> Result<(), String> {
     }
 }
 
+type EntryOperation = fn(
+    &mut Store,
+    &salah::config::Config,
+    DateTime<Utc>,
+    &dyn IdGenerator,
+    &str,
+) -> Result<salah::item::Entry, salah::error::Error>;
+
 fn write_entry(
     store: &mut Store,
     config: &salah::config::Config,
-    now: chrono::DateTime<Utc>,
+    now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
     args: ItemIdArgs,
-    operation: fn(
-        &mut Store,
-        &salah::config::Config,
-        chrono::DateTime<Utc>,
-        &str,
-    ) -> Result<salah::item::Entry, salah::error::Error>,
+    operation: EntryOperation,
     verb: &str,
 ) -> Result<(), String> {
     planner::close_expired_timers(store, config, now)?;
-    let entry = operation(store, config, now, &args.id)?;
+    let entry = operation(store, config, now, ids, &args.id)?;
     if args.json {
         json(&entry)
     } else {
@@ -732,8 +759,8 @@ fn write_entry(
     }
 }
 
-fn day_command(args: DayArgs) -> Result<(), String> {
-    let (mut store, config, now) = open_planner()?;
+fn day_command(args: DayArgs, now: DateTime<Utc>) -> Result<(), String> {
+    let (mut store, config) = open_planner()?;
     planner::close_expired_timers(&mut store, &config, now)?;
     let plan = planner::day_plan(&store, &config, now, optional_date(args.date.as_deref())?)?;
     if args.json {
@@ -763,8 +790,8 @@ fn day_command(args: DayArgs) -> Result<(), String> {
     Ok(())
 }
 
-fn prayer_command(command: PrayerCommand) -> Result<(), String> {
-    let (mut store, config, now) = open_planner()?;
+fn prayer_command(command: PrayerCommand, now: DateTime<Utc>) -> Result<(), String> {
+    let (mut store, config) = open_planner()?;
     let (args, prayed) = match command {
         PrayerCommand::Mark(args) => (args, true),
         PrayerCommand::Unmark(args) => (args, false),
@@ -790,8 +817,8 @@ fn prayer_command(command: PrayerCommand) -> Result<(), String> {
     }
 }
 
-fn stats_command(args: StatsArgs) -> Result<(), String> {
-    let (store, config, now) = open_planner()?;
+fn stats_command(args: StatsArgs, now: DateTime<Utc>) -> Result<(), String> {
+    let (store, config) = open_planner()?;
     let (first, last) = match (args.from.as_deref(), args.to.as_deref()) {
         (Some(from), Some(to)) => (parse_date(from)?, parse_date(to)?),
         _ => {
@@ -828,8 +855,8 @@ fn parse_date(value: &str) -> Result<NaiveDate, String> {
         .map_err(|_| format!("invalid date {value:?}; use YYYY-MM-DD"))
 }
 
-fn history_command(args: HistoryArgs) -> Result<(), String> {
-    let (store, config, now) = open_planner()?;
+fn history_command(args: HistoryArgs, now: DateTime<Utc>) -> Result<(), String> {
+    let (store, config) = open_planner()?;
     let day = schedule::resolve(&config, now)?.day();
     let last = args
         .to
@@ -852,8 +879,8 @@ fn history_command(args: HistoryArgs) -> Result<(), String> {
     }
 }
 
-fn export_command(args: ExportArgs) -> Result<(), String> {
-    let (store, _, now) = open_planner()?;
+fn export_command(args: ExportArgs, now: DateTime<Utc>) -> Result<(), String> {
+    let (store, _) = open_planner()?;
     let bytes = serde_json::to_vec(&export::export(&store, now)?).map_err(|e| e.to_string())?;
     if let Some(path) = args.output {
         atomic_write(&path, &bytes, args.force)?;
@@ -887,7 +914,7 @@ fn atomic_write(path: &std::path::Path, bytes: &[u8], force: bool) -> Result<(),
     result
 }
 
-fn import_command(args: ImportArgs) -> Result<(), String> {
+fn import_command(args: ImportArgs, now: DateTime<Utc>) -> Result<(), String> {
     let metadata =
         fs::metadata(&args.file).map_err(|e| format!("read {}: {e}", args.file.display()))?;
     if metadata.len() > export::MAX_BYTES as u64 {
@@ -898,7 +925,7 @@ fn import_command(args: ImportArgs) -> Result<(), String> {
     }
     let bytes = fs::read(&args.file).map_err(|e| format!("read {}: {e}", args.file.display()))?;
     let data = export::parse(&bytes)?;
-    let (mut store, config, now) = open_planner()?;
+    let (mut store, config) = open_planner()?;
     planner::close_expired_timers(&mut store, &config, now)?;
     let summary = export::import(&mut store, &data)?;
     if args.json {
@@ -983,15 +1010,16 @@ fn set_config(args: ConfigSetArgs) -> Result<(), String> {
     Ok(())
 }
 
-fn location_command(command: LocationCommand) -> Result<(), String> {
+fn location_command(command: LocationCommand, now: DateTime<Utc>) -> Result<(), String> {
     match command {
         LocationCommand::Show => show_config(),
-        LocationCommand::Sync(args) => sync_location(args.if_needed, args.json),
+        LocationCommand::Sync(args) => sync_location(args.if_needed, args.json, now),
     }
 }
 
-fn sync_location(if_needed: bool, json: bool) -> Result<(), String> {
-    let outcome = location::sync_saved(if_needed)?;
+fn sync_location(if_needed: bool, json: bool, now: DateTime<Utc>) -> Result<(), String> {
+    let local_timezone_offset = f64::from(Local::now().offset().local_minus_utc()) / 3600.0;
+    let outcome = location::sync_saved(if_needed, now, local_timezone_offset)?;
     if json {
         println!(
             "{}",
@@ -1010,13 +1038,13 @@ fn sync_location(if_needed: bool, json: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn official_command(command: OfficialCommand) -> Result<(), String> {
+fn official_command(command: OfficialCommand, now: DateTime<Utc>) -> Result<(), String> {
     match command {
-        OfficialCommand::Sync(args) => sync_official(args.json),
+        OfficialCommand::Sync(args) => sync_official(args.json, now),
     }
 }
 
-fn sync_official(json: bool) -> Result<(), String> {
+fn sync_official(json: bool, now: DateTime<Utc>) -> Result<(), String> {
     let config = load()?;
     if config.method != "uzbekistan" || !config.location.to_ascii_lowercase().contains("tashkent") {
         return Err(
@@ -1026,7 +1054,7 @@ fn sync_official(json: bool) -> Result<(), String> {
     }
     let offset = FixedOffset::east_opt((config.timezone_offset * 3600.0).round() as i32)
         .ok_or("invalid timezone offset")?;
-    let schedule = official::sync(Utc::now().with_timezone(&offset).date_naive())?;
+    let schedule = official::sync(now.with_timezone(&offset).date_naive(), now)?;
     if json {
         println!(
             "{}",
