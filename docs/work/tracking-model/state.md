@@ -13,7 +13,7 @@ resumes it after a limit cutoff.
 
 ## Next
 
-- W1 is running as `salah-codex-w1` (Codex, started 19:39; Codex 5h window resets 22:39). Log: `~/.cache/salah-agents/w1.log`.
+- W1 is running as `salah-codex-w1` (Codex, started 19:39; Codex 5h window resets 00:39). Log: `~/.cache/salah-agents/w1.log`.
 - At :17/:57 each hour (recurring cron): check limits and progress; dispatch W2 once W1
   has committed S2 and Codex 5h usage is below 60%; re-dispatch a dead worker; integrate
   and verify when both are done.
