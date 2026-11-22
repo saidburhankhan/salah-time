@@ -1,0 +1,98 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import "."
+
+Rectangle {
+    id: sidebar
+    property var win
+    Layout.preferredWidth: 220
+    Layout.fillHeight: true
+    color: "#1c1b18"
+    border.color: sidebar.win.border
+    border.width: 0
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 18
+        spacing: 8
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 64
+            spacing: 12
+            Item {
+                width: 28
+                height: 28
+                Rectangle {
+                    width: 24
+                    height: 24
+                    radius: 12
+                    color: sidebar.win.text
+                    anchors.centerIn: parent
+                }
+                Rectangle {
+                    width: 20
+                    height: 20
+                    radius: 10
+                    color: "#1c1b18"
+                    x: 10
+                    y: 0
+                }
+            }
+            Label {
+                text: "Salah"
+                color: sidebar.win.text
+                font.pixelSize: 21
+                font.weight: Font.DemiBold
+            }
+        }
+        Repeater {
+            model: [qsTr("Today"), qsTr("Routines"), qsTr("Statistics")]
+            SidebarItem {
+                required property string modelData
+                required property int index
+                appWindow: sidebar.win
+                pageIndex: index
+                label: modelData
+                iconKind: index === 0 ? "today" : index === 1 ? "routines" : "statistics"
+                loadStatsOnClick: index === 2
+            }
+        }
+        Rectangle {
+            Layout.fillWidth: true
+            height: 1
+            color: sidebar.win.border
+            Layout.topMargin: 8
+            Layout.bottomMargin: 8
+        }
+        SidebarItem {
+            appWindow: sidebar.win
+            pageIndex: 3
+            label: qsTr("Settings")
+            iconKind: "settings"
+        }
+        Item { Layout.fillHeight: true }
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 48
+            LineIcon {
+                win: sidebar.win
+                kind: "location"
+                iconColor: sidebar.win.muted
+                Layout.leftMargin: 12
+            }
+            Label {
+                text: sidebar.win.locationName()
+                color: "#c4c0b8"
+                font.pixelSize: 15
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+            }
+        }
+    }
+    Rectangle {
+        anchors.right: parent.right
+        width: 1
+        height: parent.height
+        color: sidebar.win.border
+    }
+}

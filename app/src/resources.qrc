@@ -1,1 +1,41 @@
-<RCC><qresource prefix="/"><file alias="Main.qml">Main.qml</file><file alias="i18n/en.json">i18n/en.json</file></qresource></RCC>
+<RCC>
+    <qresource prefix="/">
+        <file alias="qml/Main.qml">qml/Main.qml</file>
+        <file alias="qml/pages/TodayPage.qml">qml/pages/TodayPage.qml</file>
+        <file alias="qml/pages/RoutinesPage.qml">qml/pages/RoutinesPage.qml</file>
+        <file alias="qml/pages/StatisticsPage.qml">qml/pages/StatisticsPage.qml</file>
+        <file alias="qml/pages/SettingsPage.qml">qml/pages/SettingsPage.qml</file>
+        <file alias="qml/today/Timeline.qml">qml/today/Timeline.qml</file>
+        <file alias="qml/today/PrayerHeader.qml">qml/today/PrayerHeader.qml</file>
+        <file alias="qml/today/ItemCard.qml">qml/today/ItemCard.qml</file>
+        <file alias="qml/today/CounterStepper.qml">qml/today/CounterStepper.qml</file>
+        <file alias="qml/today/CorrectionBox.qml">qml/today/CorrectionBox.qml</file>
+        <file alias="qml/today/AddRow.qml">qml/today/AddRow.qml</file>
+        <file alias="qml/today/MarkerRow.qml">qml/today/MarkerRow.qml</file>
+        <file alias="qml/today/NowCard.qml">qml/today/NowCard.qml</file>
+        <file alias="qml/today/MonthCalendar.qml">qml/today/MonthCalendar.qml</file>
+        <file alias="qml/today/DragGhost.qml">qml/today/DragGhost.qml</file>
+        <file alias="qml/statistics/RangeBar.qml">qml/statistics/RangeBar.qml</file>
+        <file alias="qml/statistics/SummaryTile.qml">qml/statistics/SummaryTile.qml</file>
+        <file alias="qml/statistics/DayColumnChart.qml">qml/statistics/DayColumnChart.qml</file>
+        <file alias="qml/statistics/PrayerDayChart.qml">qml/statistics/PrayerDayChart.qml</file>
+        <file alias="qml/statistics/DayTable.qml">qml/statistics/DayTable.qml</file>
+        <file alias="qml/statistics/TaskBreakdown.qml">qml/statistics/TaskBreakdown.qml</file>
+        <file alias="qml/statistics/RangeDialog.qml">qml/statistics/RangeDialog.qml</file>
+        <file alias="qml/overlays/QuickAdd.qml">qml/overlays/QuickAdd.qml</file>
+        <file alias="qml/overlays/EntryForm.qml">qml/overlays/EntryForm.qml</file>
+        <file alias="qml/overlays/EntryFields.qml">qml/overlays/EntryFields.qml</file>
+        <file alias="qml/overlays/ShortcutHelp.qml">qml/overlays/ShortcutHelp.qml</file>
+        <file alias="qml/overlays/Toast.qml">qml/overlays/Toast.qml</file>
+        <file alias="qml/overlays/ErrorBanner.qml">qml/overlays/ErrorBanner.qml</file>
+        <file alias="qml/controls/AppButton.qml">qml/controls/AppButton.qml</file>
+        <file alias="qml/controls/ChoiceChip.qml">qml/controls/ChoiceChip.qml</file>
+        <file alias="qml/controls/SidebarItem.qml">qml/controls/SidebarItem.qml</file>
+        <file alias="qml/controls/LineIcon.qml">qml/controls/LineIcon.qml</file>
+        <file alias="qml/controls/Card.qml">qml/controls/Card.qml</file>
+        <file alias="qml/controls/Sidebar.qml">qml/controls/Sidebar.qml</file>
+        <file alias="qml/controls/AppHeader.qml">qml/controls/AppHeader.qml</file>
+        <file alias="qml/controls/GlobalShortcuts.qml">qml/controls/GlobalShortcuts.qml</file>
+        <file alias="i18n/en.json">i18n/en.json</file>
+    </qresource>
+</RCC>
