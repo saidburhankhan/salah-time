@@ -76,7 +76,7 @@ Rectangle {
                 textFormat: Text.PlainText
             }
             Label {
-                text: itemCard.win.detail(itemCard.safePayload)
+                text: itemCard.safePayload.detail_text || ""
                 color: itemCard.win.muted
                 font.family: itemCard.win.mono
                 font.pixelSize: 12
@@ -89,11 +89,11 @@ Rectangle {
         }
         Button {
             flat: true
-            text: itemCard.safePayload.timer_started_at
-                ? qsTr("❚❚ %1m").arg(itemCard.win.runningMinutes(itemCard.safePayload))
-                : qsTr("▶︎ %1m").arg(itemCard.win.runningMinutes(itemCard.safePayload))
+            text: itemCard.win.timerRunning(itemCard.safePayload)
+                ? qsTr("❚❚ %1m").arg(itemCard.win.timerMinutes(itemCard.safePayload))
+                : qsTr("▶︎ %1m").arg(itemCard.win.timerMinutes(itemCard.safePayload))
             font.family: itemCard.win.mono
-            onClicked: backend.toggleTimer(itemCard.safePayload.id, !!itemCard.safePayload.timer_started_at)
+            onClicked: backend.toggleTimer(itemCard.safePayload.id, itemCard.win.timerRunning(itemCard.safePayload))
         }
         CorrectionBox {
             win: itemCard.win

@@ -45,7 +45,7 @@ Rectangle {
                 textFormat: Text.PlainText
             }
             Label {
-                text: ghost.win.detail(ghost.win.dragPayload)
+                text: ghost.win.dragPayload.detail_text || ""
                 color: ghost.win.muted
                 font.family: ghost.win.mono
                 font.pixelSize: 12

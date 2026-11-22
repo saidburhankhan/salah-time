@@ -37,8 +37,7 @@ Item {
     Connections {
         target: backend
         function onChanged() {
-            if (backend.dayPlan.now && backend.dayPlan.now.next)
-                shortcuts.win.countdown = backend.dayPlan.now.next.remaining_seconds || 0
+            shortcuts.win.countdown = shortcuts.win.countdownFromNext()
             shortcuts.win.syncTimeline()
         }
     }

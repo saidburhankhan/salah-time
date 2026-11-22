@@ -9,13 +9,27 @@ Rectangle {
     property var win
     property var tip
     property var rows: []
-    property var axis: ({ lines: 3, step: 1, maximum: 3 })
+    property var ticks: []
+    property int axisLines: 3
     property real maximum: 3
     function refreshRows() {
         rows = win ? win.selectedDaily() : []
-        axis = win ? win.niceAxis(chartData ? chartData[1] : "done")
-            : ({ lines: 3, step: 1, maximum: 3 })
-        maximum = axis.maximum
+        var field = chartData ? chartData[1] : "done"
+        var coreTicks = backend.stats.time_ticks || []
+        if (field === "minutes" && coreTicks.length > 0) {
+            ticks = coreTicks
+            axisLines = Math.max(1, ticks.length - 1)
+            maximum = Math.max(1, ticks[ticks.length - 1].minutes)
+        } else {
+            // The core ships duration ticks; the tasks-done chart only has to
+            // scale its bars to the largest count in the rendered rows.
+            ticks = []
+            axisLines = 3
+            var maxValue = 1
+            for (var i = 0; i < rows.length; i++)
+                maxValue = Math.max(maxValue, Number(rows[i].planned || 0), Number(rows[i].done || 0))
+            maximum = Math.max(1, Math.ceil(maxValue))
+        }
     }
     Component.onCompleted: refreshRows()
     onWinChanged: refreshRows()
@@ -52,12 +66,12 @@ Rectangle {
         anchors.topMargin: 48
         anchors.bottomMargin: 34
         Repeater {
-            model: chart.axis.lines + 1
+            model: chart.axisLines + 1
             Item {
                 required property int index
                 width: plot.width
                 height: 1
-                y: index * (plot.height - 1) / chart.axis.lines
+                y: index * (plot.height - 1) / chart.axisLines
                 Rectangle {
                     width: parent.width
                     height: 1
@@ -71,8 +85,9 @@ Rectangle {
                     color: chart.win.muted
                     font.family: chart.win.mono
                     font.pixelSize: 10
-                    text: chart.win.axisLabel(chart.chartData[1],
-                        (chart.axis.lines - index) * chart.axis.step)
+                    text: chart.chartData[1] === "minutes" && chart.ticks.length
+                        ? chart.ticks[chart.ticks.length - 1 - index].label
+                        : String(Math.round((chart.axisLines - index) * chart.maximum / chart.axisLines))
                 }
             }
         }
@@ -143,7 +158,7 @@ Rectangle {
                         anchors.rightMargin: -2
                         hoverEnabled: true
                         onEntered: {
-                            chart.tip.text = chart.win.tooltipTextAt(taskChartDay.index)
+                            chart.tip.text = (chart.rows[taskChartDay.index] || {}).tooltip || ""
                             chart.tip.visible = true
                             var p = mapToItem(chart.win.contentItem, width / 2, 0)
                             chart.tip.x = Math.max(230, Math.min(chart.win.width - chart.tip.width - 10,

@@ -52,7 +52,8 @@ public:
     void itemAdd(const ItemFields &fields, Callback callback = {});
     void itemEdit(const QString &id, const ItemFields &fields, Callback callback = {}, qint64 expectedVersion = -1);
     void itemRemove(const QString &id, Callback callback = {}, qint64 expectedVersion = -1);
-    void itemMove(const QString &id, const QString &block, int index, Callback callback = {}, qint64 expectedVersion = -1);
+    void itemMove(const QString &id, const QString &block, int index, Callback callback = {}, qint64 expectedVersion = -1,
+                  const QString &afterId = {}, const QString &beforeId = {});
     void itemDone(const QString &id, const QDate &date, Callback callback = {});
     void itemUndo(const QString &id, const QDate &date, Callback callback = {});
     void itemLog(const QString &id, int value, bool minutes, const QDate &date = {}, Callback callback = {});
@@ -61,6 +62,8 @@ public:
     void prayerMark(const QString &prayer, const QDate &date, Callback callback = {}, qint64 expectedVersion = -1);
     void prayerUnmark(const QString &prayer, const QDate &date, Callback callback = {}, qint64 expectedVersion = -1);
     void parse(const QString &text, Callback callback);
+    // Read-only draft validation/preview; served by the daemon only.
+    void preview(const ItemFields &fields, Callback callback);
     void configShow(Callback callback);
     void configSetSleepTime(const QString &time, Callback callback = {});
 
@@ -83,6 +86,7 @@ private:
         bool read = false;
         bool mutation = false;
         bool expectJson = true;
+        bool socketOnly = false;
         QString opId;
         std::function<Dto::AnyDecoded(const QJsonValue &)> decoder;
         std::function<Dto::AnyDecoded(const QJsonValue &)> cliDecoder;
@@ -92,7 +96,9 @@ private:
     void configureTransport(const QString &socketPath);
     void enqueue(const QStringList &args, QJsonObject params, const QString &method, Callback callback,
                  bool read, bool mutation, std::function<Dto::AnyDecoded(const QJsonValue &)> decoder,
-                 std::function<Dto::AnyDecoded(const QJsonValue &)> cliDecoder, const QString &opId = {});
+                 std::function<Dto::AnyDecoded(const QJsonValue &)> cliDecoder, const QString &opId = {},
+                 bool socketOnly = false);
+    void finishWithError(const QString &message);
     void startNext();
     void startSocket(Request request);
     void startProcess(Request request);

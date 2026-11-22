@@ -28,7 +28,7 @@ Rectangle {
                 elide: Text.ElideRight
             }
             Label {
-                text: taskStatsRow.win.joinedDetail(taskStatsRow.taskData.block, taskStatsRow.taskData.repeat)
+                text: taskStatsRow.win.joinedDetail(taskStatsRow.taskData.block, taskStatsRow.taskData.schedule_text || "")
                 color: taskStatsRow.win.muted
                 font.family: taskStatsRow.win.mono
                 font.pixelSize: 11

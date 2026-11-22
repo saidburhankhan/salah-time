@@ -106,16 +106,19 @@ Item {
             if (from >= 0 && dragOriginalIndex >= 0)
                 listModel.move(from, dragOriginalIndex, 1)
         } else {
-            // ListModel rows reach C++ as empty maps, so pass plain objects.
-            var rows = []
-            for (var r = 0; r < listModel.count; r++)
-                if (r !== from) {
-                    var e = listModel.get(r)
-                    rows.push({ kind: e.kind, block: e.block })
-                }
-            var destination = backend.moveDestination(rows, from)
-            if (destination.block)
-                backend.moveItem(dragId, destination.block, destination.index)
+            var block = listModel.get(from).block
+            var afterId = "", beforeId = ""
+            for (var p = from - 1; p >= 0; p--) {
+                var previous = listModel.get(p)
+                if (previous.block !== block) break
+                if (previous.kind === "item") { afterId = previous.payload.id; break }
+            }
+            for (var n = from + 1; n < listModel.count; n++) {
+                var following = listModel.get(n)
+                if (following.block !== block) break
+                if (following.kind === "item") { beforeId = following.payload.id; break }
+            }
+            backend.moveItem(dragId, block, afterId, beforeId)
         }
         dragging = false
         dragId = ""

@@ -17,6 +17,8 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantMap routinesStats READ routinesStats NOTIFY changed)
     Q_PROPERTY(QVariantMap config READ config NOTIFY changed)
     Q_PROPERTY(QVariantMap parseDraft READ parseDraft NOTIFY changed)
+    Q_PROPERTY(QVariantMap preview READ preview NOTIFY previewChanged)
+    Q_PROPERTY(qint64 dayPlanFetchedAt READ dayPlanFetchedAt NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(bool offlineMode READ offlineMode NOTIFY changed)
@@ -32,6 +34,8 @@ public:
     QVariantMap routinesStats() const { return m_routinesStats; }
     QVariantMap config() const { return m_config; }
     QVariantMap parseDraft() const { return m_parseDraft; }
+    QVariantMap preview() const { return m_preview; }
+    qint64 dayPlanFetchedAt() const { return m_dayPlanFetchedAt; }
     QString error() const { return m_error; }
     bool busy() const { return m_client.busy(); }
     bool offlineMode() const { return m_client.offline(); }
@@ -45,22 +49,24 @@ public:
     Q_INVOKABLE void jumpToday();
     Q_INVOKABLE void dismissError();
     Q_INVOKABLE void parseQuick(const QString &text);
+    Q_INVOKABLE void previewItem(const QVariantMap &item);
     Q_INVOKABLE void addQuick(const QString &text, const QString &block = {});
     Q_INVOKABLE void saveItem(const QVariantMap &item);
     Q_INVOKABLE void removeItem(const QString &id);
-    Q_INVOKABLE void moveItem(const QString &id, const QString &block, int index);
+    Q_INVOKABLE void moveItem(const QString &id, const QString &block,
+                              const QString &afterId = {}, const QString &beforeId = {});
     Q_INVOKABLE void toggleDone(const QString &id, const QString &state);
     Q_INVOKABLE void adjustMinutes(const QString &id, int amount);
     Q_INVOKABLE void adjustCount(const QString &id, int amount);
     Q_INVOKABLE void toggleTimer(const QString &id, bool running);
     Q_INVOKABLE void togglePrayer(const QString &prayer, bool marked);
     Q_INVOKABLE void setSleepTime(const QString &time);
-    Q_INVOKABLE QVariantMap moveDestination(const QVariantList &rows, int gapIndex) const;
     Q_INVOKABLE QString hijriHeader(const QString &isoDate) const;
     Q_INVOKABLE QString gregorianHeader(const QString &isoDate) const;
 
 signals:
     void changed();
+    void previewChanged();
     void requestFinished(QStringList arguments, bool success);
 
 private:
@@ -77,12 +83,14 @@ private:
     void applyPendingFlags();
     qint64 versionFor(const QString &id) const;
     bool removeItemFromModel(const QString &id);
+    int legacyMoveIndex(const QString &id, const QString &block, const QString &afterId, const QString &beforeId) const;
     void reloadFromNotification(qint64 revision);
 
     CoreClient m_client;
     QDate m_today = QDate::currentDate();
     QDate m_selected;
-    QVariantMap m_dayPlan, m_stats, m_routinesStats, m_config, m_parseDraft;
+    QVariantMap m_dayPlan, m_stats, m_routinesStats, m_config, m_parseDraft, m_preview;
+    qint64 m_dayPlanFetchedAt = 0;
     QByteArray m_dayJson, m_statsJson, m_routinesJson, m_configJson;
     QString m_error;
     bool m_refreshPending = false;

@@ -111,7 +111,7 @@ Rectangle {
                         anchors.fill: parent
                         hoverEnabled: true
                         onEntered: {
-                            chart.tip.text = chart.win.tooltipTextAt(parent.index)
+                            chart.tip.text = (chart.rows[parent.index] || {}).tooltip || ""
                             chart.tip.visible = true
                             var p = mapToItem(chart.win.contentItem, width / 2, 0)
                             chart.tip.x = Math.max(230, Math.min(chart.win.width - chart.tip.width - 10,

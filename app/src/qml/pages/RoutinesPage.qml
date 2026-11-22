@@ -42,15 +42,14 @@ ScrollView {
                         Label {
                             text: routinesScroll.win.joinedDetail(
                                 modelData.block,
-                                routinesScroll.win.weekdayText(modelData.weekdays, modelData.repeat))
+                                modelData.schedule_text || "")
                             color: routinesScroll.win.muted
                             font.family: routinesScroll.win.mono
                             font.pixelSize: 12
                         }
                         Label {
-                            text: modelData.planned_days === 0
-                                ? qsTr("Starts %1").arg(routinesScroll.win.shortDate(
-                                    routinesScroll.win.nextOccurrence(modelData, backend.todayDay)))
+                            text: modelData.planned_days === 0 && modelData.next_occurrence
+                                ? qsTr("Starts %1").arg(routinesScroll.win.shortDate(modelData.next_occurrence))
                                 : qsTr("%1 of %2 days").arg(modelData.done_days).arg(modelData.planned_days)
                             color: "#c7c2b9"
                             font.pixelSize: 13

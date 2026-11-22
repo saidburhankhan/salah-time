@@ -1,6 +1,7 @@
 #include "backend.h"
 
 #include <QCalendar>
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLocale>
@@ -112,6 +113,7 @@ bool Backend::setJsonModel(QVariantMap &target, QByteArray &previous, const QJso
 void Backend::reload() {
     m_client.day(m_selected, response([this](const QJsonObject &object) {
         const bool modelChanged = setJsonModel(m_dayPlan, m_dayJson, object);
+        m_dayPlanFetchedAt = QDateTime::currentMSecsSinceEpoch();
         const QDate cliDay = QDate::fromString(object.value("day").toString(), Qt::ISODate);
         if (cliDay.isValid()) {
             m_selected = cliDay;
@@ -167,6 +169,30 @@ void Backend::parseQuick(const QString &text) {
         m_parseDraft = normalizedObject(object);
         emit changed();
     }));
+}
+
+void Backend::previewItem(const QVariantMap &item) {
+    const QString repeat = item.value("repeat", "none").toString();
+    QStringList weekdays = item.value("weekdays").toStringList();
+    if (repeat == "weekly" && weekdays.isEmpty()) {
+        m_preview.clear();
+        emit previewChanged();
+        return;
+    }
+    CoreClient::ItemFields fields;
+    fields.block = item.value("block", "fajr").toString();
+    if (fields.block.isEmpty() || fields.block == "sleep") fields.block = "fajr";
+    fields.repeat = repeat;
+    fields.weekdays = weekdays;
+    fields.measure = item.value("measure", "check").toString();
+    const int target = item.value("target").toInt();
+    fields.hasTarget = fields.measure != "check" && target > 0;
+    fields.target = target;
+    fields.date = m_selected.isValid() ? m_selected : m_today;
+    m_client.preview(fields, [this](const CoreClient::Result &result) {
+        m_preview = result.ok ? normalizedObject(Dto::jsonObject(result.value)) : QVariantMap{};
+        emit previewChanged();
+    });
 }
 
 void Backend::addQuick(const QString &text, const QString &block) {
@@ -316,6 +342,7 @@ void Backend::applyMutation(const Dto::MutationResult &mutation) {
             break;
         }
     }
+    m_dayPlanFetchedAt = QDateTime::currentMSecsSinceEpoch();
     m_dayJson.clear();
     ++m_dayRevision;
 }
@@ -397,9 +424,31 @@ void Backend::removeItem(const QString &id) {
     setItemPending(id, true);
     m_client.itemRemove(id, mutationResponse(id), versionFor(id));
 }
-void Backend::moveItem(const QString &id, const QString &block, int index) {
+int Backend::legacyMoveIndex(const QString &id, const QString &block, const QString &afterId, const QString &beforeId) const {
+    // The socket protocol resolves anchors in the write transaction; the
+    // legacy CLI only accepts an index, so derive it from the rendered model.
+    QVariantList peers;
+    for (const QVariant &entry : m_dayPlan.value("blocks").toList()) {
+        const QVariantMap target = entry.toMap();
+        if (target.value("start").toString() != block) continue;
+        for (const QVariant &row : target.value("items").toList()) {
+            const QVariantMap map = row.toMap();
+            if (map.value("id").toString() != id) peers.append(map);
+        }
+        break;
+    }
+    for (int i = 0; i < peers.size(); ++i) {
+        const QString peer = peers.at(i).toMap().value("id").toString();
+        if (!afterId.isEmpty() && peer == afterId) return i + 1;
+        if (!beforeId.isEmpty() && peer == beforeId) return i;
+    }
+    return 0;
+}
+
+void Backend::moveItem(const QString &id, const QString &block, const QString &afterId, const QString &beforeId) {
     setItemPending(id, true);
-    m_client.itemMove(id, block, index, mutationResponse(id), versionFor(id));
+    const int index = legacyMoveIndex(id, block, afterId, beforeId);
+    m_client.itemMove(id, block, index, mutationResponse(id), versionFor(id), afterId, beforeId);
 }
 void Backend::toggleDone(const QString &id, const QString &state) {
     setItemPending(id, true);
@@ -429,12 +478,6 @@ void Backend::togglePrayer(const QString &prayer, bool marked) {
 }
 void Backend::setSleepTime(const QString &time) {
     m_client.configSetSleepTime(time, response({}, true));
-}
-
-QVariantMap Backend::moveDestination(const QVariantList &rows, int gapIndex) const {
-    gapIndex = qBound(0, gapIndex, rows.size()); QString block; int index = 0;
-    for (int i=0;i<gapIndex;++i) { const QVariantMap row=rows.at(i).toMap(); const QString kind=row.value("kind").toString(); if(kind=="header"){block=row.value("block").toString();index=0;} else if(kind=="item"&&row.value("block").toString()==block) ++index; }
-    return {{"block",block},{"index",index}};
 }
 
 QString Backend::hijriHeader(const QString &isoDate) const {

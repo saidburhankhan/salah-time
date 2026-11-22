@@ -174,6 +174,11 @@ esac
         if (!file.open(QIODevice::ReadOnly)) return {};
         return QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts);
     }
+    static bool hasLabelText(QObject *root, const QString &text) {
+        for (QObject *object : root->findChildren<QObject *>())
+            if (object->property("text").toString() == text) return true;
+        return false;
+    }
 
     static QJsonObject fixture(const QString &name) {
         return readJson(QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/contract/") + name + ".json").object();
@@ -638,24 +643,40 @@ private slots:
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
         b.reload(); QTRY_COMPARE(spy.size(),3); b.addQuick("Read Quran after Isha","asr");
         QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item add --json --quick --block asr -- Read Quran after Isha"),2000);
-        b.moveItem("a1","isha",2); b.togglePrayer("fajr",false);
-        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item move --json a1 --block isha --index 2"),3000);
+        b.moveItem("a1","isha"); b.togglePrayer("fajr",false);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item move --json a1 --block isha --index 0"),3000);
         QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("prayer mark --json fajr --date 2026-11-22"),3000);
     }
-    void rowMoveDestinationAcrossAndEmptyBlocks() {
-        QTemporaryDir dir; Backend b(nullptr,fake(dir));
-        QVariantList rows{
-            QVariantMap{{"kind","header"},{"block","night"}},
-            QVariantMap{{"kind","item"},{"block","night"}},
-            QVariantMap{{"kind","add"},{"block","night"}},
-            QVariantMap{{"kind","header"},{"block","fajr"}},
-            QVariantMap{{"kind","item"},{"block","fajr"}},
-            QVariantMap{{"kind","item"},{"block","fajr"}},
-            QVariantMap{{"kind","add"},{"block","fajr"}},
-            QVariantMap{{"kind","header"},{"block","dhuhr"}},
-            QVariantMap{{"kind","add"},{"block","dhuhr"}}};
-        QCOMPARE(b.moveDestination(rows,6),QVariantMap({{"block","fajr"},{"index",2}}));
-        QCOMPARE(b.moveDestination(rows,8),QVariantMap({{"block","dhuhr"},{"index",0}}));
+    void socketMoveSendsNeighbourAnchors() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        auto reads = readHandler(fixture("day"));
+        daemon.setHandler([reads](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            if (request.value("method").toString() == "item.move") {
+                server->respond(socket, request, QJsonObject{{"revision", 101},
+                    {"op_id", request.value("params").toObject().value("op_id")},
+                    {"changed", QJsonObject{{"items", QJsonArray{}}, {"entries", QJsonArray{}},
+                                            {"marks", QJsonArray{}}, {"deleted", QJsonArray{}}}}});
+                return;
+            }
+            reads(request, socket, server);
+        });
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
+        backend.moveItem("<id:1>", "asr", "<id:2>", {});
+        auto moveSent = [&] {
+            for (const QJsonObject &request : std::as_const(daemon.requests))
+                if (request.value("method").toString() == "item.move") return true;
+            return false;
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(moveSent(), 3000);
+        QJsonObject moveParams;
+        for (const QJsonObject &request : std::as_const(daemon.requests))
+            if (request.value("method").toString() == "item.move") moveParams = request.value("params").toObject();
+        QCOMPARE(moveParams.value("block").toString(), QString("asr"));
+        QCOMPARE(moveParams.value("after_id").toString(), QString("<id:2>"));
+        QVERIFY(!moveParams.contains("before_id"));
+        QVERIFY(!moveParams.contains("index"));
     }
     void unchangedJsonDoesNotResetDayModel() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
@@ -748,11 +769,6 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(root.data(),"stepStats",Q_ARG(QVariant,-1))); QCOMPARE(root->property("statsAnchor").toDateTime().date(),QDate(2026,11,15));
         root->setProperty("statsMode","custom"); root->setProperty("customFrom",QDateTime(QDate(2026,11,29),QTime())); root->setProperty("customTo",QDateTime(QDate(2026,12,2),QTime()));
         QVERIFY(QMetaObject::invokeMethod(root.data(),"stepStats",Q_ARG(QVariant,1))); QCOMPARE(root->property("customFrom").toDateTime().date(),QDate(2026,12,3)); QCOMPARE(root->property("customTo").toDateTime().date(),QDate(2026,12,6));
-        QVariant tip; QVariantMap day{{"day","2026-11-18"},{"done",3},{"planned",4},{"minutes",95},{"count",30},{"prayers",4}};
-        QVERIFY(QMetaObject::invokeMethod(root.data(),"tooltipText",Q_RETURN_ARG(QVariant,tip),Q_ARG(QVariant,day)));
-        QCOMPARE(tip.toString(),QString("Wed 18 Nov · 3 / 4 done · 95 min · 30 counts · 4 prayers"));
-        QVERIFY(QMetaObject::invokeMethod(root.data(),"tooltipTextAt",Q_RETURN_ARG(QVariant,tip),Q_ARG(QVariant,0)));
-        QCOMPARE(tip.toString(),QString("Sun 22 Nov · 1 / 1 done · 25 min · 0 counts · 4 prayers"));
         QVariant stepped;
         QVERIFY(QMetaObject::invokeMethod(root.data(),"monthStep",Q_RETURN_ARG(QVariant,stepped),Q_ARG(QVariant,QDateTime(QDate(2024,1,31),QTime())),Q_ARG(QVariant,1)));
         QCOMPARE(stepped.toDateTime().date(),QDate(2024,2,29));
@@ -762,6 +778,126 @@ private slots:
         QCOMPARE(stepped.toDateTime().date(),QDate(2027,1,15));
         QVERIFY(QMetaObject::invokeMethod(root.data(),"monthStep",Q_RETURN_ARG(QVariant,stepped),Q_ARG(QVariant,QDateTime(QDate(2026,1,15),QTime())),Q_ARG(QVariant,-1)));
         QCOMPARE(stepped.toDateTime().date(),QDate(2025,12,15));
+    }
+    void coreProjectionTextDrivesApp() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        QJsonObject day = fixture("day");
+        QJsonObject now = day.value("now").toObject();
+        QJsonObject next = now.value("next").toObject();
+        next["at"] = "2031-05-14T07:19:00Z";
+        now["next"] = next; day["now"] = now;
+        QJsonArray blocks = day.value("blocks").toArray();
+        for (int b = 0; b < blocks.size(); ++b) {
+            QJsonObject block = blocks[b].toObject();
+            QJsonArray items = block.value("items").toArray();
+            for (int i = 0; i < items.size(); ++i) {
+                QJsonObject row = items[i].toObject();
+                if (row.value("id").toString() == "<id:1>") {
+                    row["schedule_text"] = "CORE Daily";
+                    row["detail_text"] = "CORE 0 / 30 min · CORE Daily";
+                    row["next_occurrence"] = "2031-05-14";
+                    row["carried"] = true;
+                    row["timer"] = QJsonObject{{"running", false}, {"started_at", QJsonValue::Null},
+                                               {"minutes_including_running", 0}};
+                } else {
+                    row["schedule_text"] = "CORE Mon, Wed";
+                    row["detail_text"] = "CORE Mon, Wed";
+                    row["next_occurrence"] = "2031-05-19";
+                    row["carried"] = false;
+                    row["timer"] = QJsonObject{{"running", false}, {"started_at", QJsonValue::Null},
+                                               {"minutes_including_running", 0}};
+                }
+                items[i] = row;
+            }
+            block["items"] = items; blocks[b] = block;
+        }
+        day["blocks"] = blocks;
+        QJsonObject stats = fixture("stats_days");
+        QJsonArray daily = stats.value("daily").toArray();
+        QJsonObject dailyRow = daily.last().toObject();
+        dailyRow["tooltip"] = "CORE TOOLTIP";
+        daily[daily.size() - 1] = dailyRow; stats["daily"] = daily;
+        stats["time_ticks"] = QJsonArray{
+            QJsonObject{{"minutes", 0}, {"label", "0"}},
+            QJsonObject{{"minutes", 30}, {"label", "30m"}},
+            QJsonObject{{"minutes", 60}, {"label", "1h"}},
+            QJsonObject{{"minutes", 90}, {"label", "1h30"}}};
+        QJsonArray items = stats.value("items").toArray();
+        QJsonObject statsItem = items.first().toObject();
+        statsItem["schedule_text"] = "CORE ROUTINE";
+        statsItem["next_occurrence"] = "2031-05-19";
+        items[0] = statsItem; stats["items"] = items;
+        daemon.setHandler([day, stats](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            const QString method = request.value("method").toString();
+            if (method == "day.get") server->respond(socket, request, day);
+            else if (method == "stats.get") server->respond(socket, request, stats);
+            else if (method == "config.get") server->respond(socket, request, QJsonValue(fixture("config_show")));
+            else if (method == "item.preview") server->respond(socket, request, QJsonObject{
+                {"next_occurrence", "2031-05-19"}, {"occurrences_this_month", 7},
+                {"schedule_text", "CORE PREVIEW"}});
+            else server->respond(socket, request, QJsonObject{});
+        });
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
+        QVariantMap row;
+        for (const QVariant &block : backend.dayPlan().value("blocks").toList())
+            for (const QVariant &item : block.toMap().value("items").toList())
+                if (item.toMap().value("id").toString() == "<id:1>") row = item.toMap();
+        QCOMPARE(row.value("detail_text").toString(), QString("CORE 0 / 30 min · CORE Daily"));
+        QCOMPARE(row.value("next_occurrence").toString(), QString("2031-05-14"));
+        QCOMPARE((row.value("timer").toMap()).value("minutes_including_running").toInt(), 0);
+        QCOMPARE(backend.routinesStats().value("time_ticks").toList().size(), 4);
+        QCOMPARE(backend.routinesStats().value("daily").toList().last().toMap().value("tooltip").toString(), QString("CORE TOOLTIP"));
+        backend.loadStatsRange("2031-05-08", "2031-05-14");
+        QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 4, 3000);
+        QCOMPARE(backend.stats().value("time_ticks").toList().size(), 4);
+
+        auto decodedDay = Dto::decode<Dto::DayPlan>(day);
+        QVERIFY(decodedDay);
+        QCOMPARE(decodedDay.value->blocks[1].items[0].schedule_text, QString("CORE Daily"));
+        QCOMPARE(decodedDay.value->blocks[1].items[0].timer_minutes_including_running, qint64(0));
+        QCOMPARE(decodedDay.value->now->next_at, QString("2031-05-14T07:19:00Z"));
+        auto decodedStats = Dto::decode<Dto::Stats>(stats);
+        QVERIFY(decodedStats);
+        QCOMPARE(decodedStats.value->time_ticks.size(), size_t(4));
+        QCOMPARE(decodedStats.value->daily.back().tooltip, QString("CORE TOOLTIP"));
+        auto decodedPreview = Dto::decode<Dto::Preview>(QJsonObject{
+            {"next_occurrence", "2031-05-19"}, {"occurrences_this_month", 7},
+            {"schedule_text", "CORE PREVIEW"}});
+        QVERIFY(decodedPreview);
+        QCOMPARE(decodedPreview.value->occurrences_this_month, 7);
+
+        Theme theme(dir.path());
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create()); QVERIFY2(root, qPrintable(component.errorString()));
+        root->setProperty("visible", true);
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "syncTimeline"));
+        QTest::qWait(150);
+        QStringList labels;
+        for (QObject *object : root->findChildren<QObject *>())
+            if (object->property("text").isValid()) labels << object->property("text").toString();
+        backend.reload();
+        QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 7, 3000);
+        QTest::qWait(200);
+
+        QQmlComponent cardComponent(&engine, QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/qml/today/ItemCard.qml")));
+        QScopedPointer<QObject> card(cardComponent.createWithInitialProperties(
+            {{"win", QVariant::fromValue(root.data())}, {"payload", row}}));
+        QVERIFY2(card, qPrintable(cardComponent.errorString()));
+        QTest::qWait(50);
+        QVERIFY(hasLabelText(card.data(), "CORE 0 / 30 min · CORE Daily"));
+
+        backend.previewItem(QVariantMap{{"block", "asr"}, {"repeat", "weekly"},
+            {"weekdays", QVariantList{"mon", "wed", "fri"}}, {"measure", "check"}, {"target", 0}});
+        QTRY_COMPARE_WITH_TIMEOUT(backend.preview().value("schedule_text").toString(), QString("CORE PREVIEW"), 3000);
+        QObject *entry = root->findChild<QObject *>("entryPopup"); QVERIFY(entry);
+        root->setProperty("entryVisible", true); entry->setProperty("visible", true);
+        QTRY_VERIFY_WITH_TIMEOUT(hasLabelText(root.data(), "CORE PREVIEW"), 3000);
+        QVERIFY(hasLabelText(root.data(), "May 19, 2031"));
+        root->setProperty("visible", false);
     }
     void themeFallbackAndAccent() {
         QTemporaryDir dir; Theme fallback(dir.path()); QCOMPARE(fallback.accent(),QString("#FFD60A")); QCOMPARE(fallback.accentForeground(),QString("black"));

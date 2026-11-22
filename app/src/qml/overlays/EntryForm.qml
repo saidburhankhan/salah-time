@@ -14,6 +14,7 @@ Popup {
     property var days: item.weekdays || []
     property bool confirming: false
     readonly property bool weeklyValid: repeat !== "weekly" || days.length > 0
+    readonly property var preview: backend.preview || ({})
     visible: win ? win.entryVisible : false
     modal: true
     focus: true
@@ -31,6 +32,24 @@ Popup {
         days = item.weekdays || []
         confirming = false
         entryFields.initialize(item.title || "", item.target ? String(item.target) : "")
+        refreshPreview()
+    }
+    function refreshPreview() {
+        if (!weeklyValid) return
+        backend.previewItem(draft())
+    }
+    onBlockChanged: previewTimer.restart()
+    onKindChanged: previewTimer.restart()
+    onRepeatChanged: previewTimer.restart()
+    onDaysChanged: previewTimer.restart()
+    Timer {
+        id: previewTimer
+        interval: 180
+        onTriggered: entryPopup.refreshPreview()
+    }
+    Connections {
+        target: entryFields
+        function onGoalTextChanged() { entryPopup.previewTimer.restart() }
     }
     function draft() {
         var goal = Number(entryFields.goalText)
@@ -185,7 +204,9 @@ Popup {
                                 Layout.fillWidth: true
                             }
                             Label {
-                                text: backend.gregorianHeader(backend.selectedDay)
+                                text: entryPopup.preview.next_occurrence
+                                    ? backend.gregorianHeader(entryPopup.preview.next_occurrence)
+                                    : "—"
                                 color: entryPopup.win.text
                                 font.family: entryPopup.win.mono
                             }
@@ -198,11 +219,9 @@ Popup {
                                 Layout.fillWidth: true
                             }
                             Label {
-                                text: entryPopup.repeat === "daily"
-                                    ? 30
-                                    : entryPopup.repeat === "weekly"
-                                        ? Math.max(1, entryPopup.days.length * 4)
-                                        : 1
+                                text: entryPopup.preview.occurrences_this_month !== undefined
+                                    ? entryPopup.preview.occurrences_this_month
+                                    : "—"
                                 color: entryPopup.win.text
                                 font.family: entryPopup.win.mono
                             }
@@ -215,7 +234,7 @@ Popup {
                                 Layout.fillWidth: true
                             }
                             Label {
-                                text: entryPopup.win.weekdayText(entryPopup.days, entryPopup.repeat)
+                                text: entryPopup.preview.schedule_text || "—"
                                 color: entryPopup.win.text
                                 font.family: entryPopup.win.mono
                             }

@@ -36,7 +36,8 @@ ApplicationWindow {
     property bool customRangeVisible: false
     property bool statsTableVisible: false
     property string selectedStatsItem: ""
-    property int countdown: backend.dayPlan.now && backend.dayPlan.now.next ? backend.dayPlan.now.next.remaining_seconds : 0
+    property int countdown: countdownFromNext()
+    property var pendingToast: null
     property var prayerIds: ["fajr", "dhuhr", "asr", "maghrib", "isha"]
     property var blockIds: ["night", "fajr", "dhuhr", "asr", "maghrib", "isha"]
     property var blockNames: [qsTr("Before Fajr"), qsTr("Fajr"), qsTr("Dhuhr"), qsTr("Asr"), qsTr("Maghrib"), qsTr("Isha")]
@@ -65,12 +66,6 @@ ApplicationWindow {
         quickPopup.reset()
     }
     function openEntry(item) { editItem = item || ({}); entryVisible = true }
-    function blockItems(id) {
-        var out = [], blocks = backend.dayPlan.blocks || []
-        for (var i = 0; i < blocks.length; i++)
-            if (blocks[i].start === id) return blocks[i].items || []
-        return out
-    }
     function locationName() {
         var c = backend.config || {}
         return c.location_name || c.name
@@ -79,42 +74,37 @@ ApplicationWindow {
     }
     function methodName() { var c = backend.config || {}; return c.method_name || c.method || "—" }
     function capitalized(s) { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1) }
-    function weekdayText(days, repeat) {
-        if (repeat === "daily") return qsTr("Daily")
-        var a = days || [], key = a.join(",")
-        if (key === "mon,tue,wed,thu,fri") return qsTr("Mon–Fri")
-        if (key === "mon,tue,wed,thu,fri,sat,sun") return qsTr("Daily")
-        var names = { mon: qsTr("Mon"), tue: qsTr("Tue"), wed: qsTr("Wed"), thu: qsTr("Thu"), fri: qsTr("Fri"), sat: qsTr("Sat"), sun: qsTr("Sun") }
-        return a.map(function(d) { return names[d] || capitalized(d) }).join(", ")
+    function weekdayId(d) { return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][d.getDay()] }
+    function shortDate(value) {
+        var d = value instanceof Date ? value : Date.fromLocaleString(Qt.locale(), String(value || ""), "yyyy-MM-dd")
+        return Qt.locale("en_US").toString(d, "ddd d MMM")
     }
-    function detail(x) {
-        var value = x.measure === "minutes" ? qsTr("%1 / %2 min").arg(runningMinutes(x)).arg(x.target || 0) : ""
-        var repeat = x.repeat === "weekly" ? weekdayText(x.weekdays, x.repeat) : x.repeat === "daily" ? qsTr("Daily") : qsTr("Once")
-        return value ? value + "  ·  " + repeat : repeat
+    function countdownFromNext() {
+        var next = (backend.dayPlan.now || {}).next
+        if (!next) return 0
+        var at = Date.parse(String(next.at || ""))
+        if (!isNaN(at)) return Math.max(0, Math.floor((at - Date.now()) / 1000))
+        return Number(next.remaining_seconds || 0)
     }
-    function runningMinutes(x) {
-        var total = Number(x.minutes || 0), started = String(x.timer_started_at || "")
-        if (started) { var ms = Date.parse(started); if (!isNaN(ms)) total += Math.max(0, Math.floor((timerNow - ms) / 60000)) }
+    function timerRunning(x) {
+        var snapshot = x.timer || {}
+        return snapshot.running !== undefined ? !!snapshot.running : !!x.timer_started_at
+    }
+    function timerMinutes(x) {
+        var snapshot = x.timer || {}
+        var projected = snapshot.minutes_including_running !== undefined
+        var total = Number(projected ? snapshot.minutes_including_running : (x.minutes || 0))
+        var started = String(snapshot.started_at || x.timer_started_at || "")
+        if (timerRunning(x) && started) {
+            var ms = Date.parse(started)
+            var since = projected ? backend.dayPlanFetchedAt : ms
+            if (!isNaN(ms) && since) total += Math.max(0, Math.floor((timerNow - since) / 60000))
+        }
         return total
     }
-    function weekdayId(d) { return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][d.getDay()] }
-    function nextOccurrence(item, fromIso) {
-        var d = Date.fromLocaleString(Qt.locale(), fromIso, "yyyy-MM-dd"), repeat = item.repeat || "none", days = item.weekdays || []
-        if (repeat === "none" || repeat === "daily") return d
-        for (var i = 0; i < 14; i++) { if (days.indexOf(weekdayId(d)) >= 0) return d; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1) }
-        return d
-    }
-    function occursOn(item, dayIso) {
-        if ((item.repeat || "none") === "none" || (item.repeat || "none") === "daily") return true
-        var d = Date.fromLocaleString(Qt.locale(), dayIso, "yyyy-MM-dd")
-        return (item.weekdays || []).indexOf(weekdayId(d)) >= 0
-    }
-    function shortDate(d) { return Qt.locale("en_US").toString(d, "ddd d MMM") }
     function maybeToast(item) {
-        if (occursOn(item, backend.selectedDay)) return
-        var start = Date.fromLocaleString(Qt.locale(), backend.selectedDay, "yyyy-MM-dd")
-        start = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1)
-        toast.show(String(item.title || qsTr("Item")) + qsTr(" — next %1").arg(shortDate(nextOccurrence(item, iso(start)))))
+        pendingToast = item || ({})
+        backend.previewItem(item || ({}))
     }
     function closeTopOverlay() {
         if (entryVisible && entryPopup.confirming) { entryPopup.confirming = false; return true }
@@ -168,20 +158,19 @@ ApplicationWindow {
         if (b.first.getMonth() === b.last.getMonth()) return l.toString(b.first, "d") + "–" + l.toString(b.last, "d MMM yyyy")
         return l.toString(b.first, "d MMM") + " – " + l.toString(b.last, "d MMM yyyy")
     }
-    function tooltipText(day) {
-        var d = Date.fromLocaleString(Qt.locale(), day.day, "yyyy-MM-dd")
-        return Qt.locale("en_US").toString(d, "ddd d MMM") + " · " + (day.done || 0) + " / " + (day.planned || 0)
-            + " done · " + (day.minutes || 0) + " min · " + (day.count || 0) + " counts · " + (day.prayers || 0) + " prayers"
-    }
-    function tooltipTextAt(index) { var rows = selectedDaily(); return index >= 0 && index < rows.length ? tooltipText(rows[index]) : "" }
     function formatMinutes(n) { n = Number(n || 0); return n >= 60 ? Math.floor(n / 60) + " h " + (n % 60) + " m" : n + " m" }
     function selectedDaily() {
         if (!selectedStatsItem) return backend.stats.daily || []
-        var items = backend.stats.items || []
+        var items = backend.stats.items || [], daily = backend.stats.daily || []
         for (var i = 0; i < items.length; i++)
             if (items[i].id === selectedStatsItem) {
                 var out = [], s = items[i].series || []
-                for (var j = 0; j < s.length; j++) out.push({ day: s[j].day, planned: s[j].planned ? 1 : 0, done: s[j].done ? 1 : 0, minutes: s[j].minutes || 0, count: s[j].count || 0, prayers: 0 })
+                for (var j = 0; j < s.length; j++) {
+                    var tooltip = ""
+                    for (var k = 0; k < daily.length; k++)
+                        if (daily[k].day === s[j].day) { tooltip = daily[k].tooltip || ""; break }
+                    out.push({ day: s[j].day, planned: s[j].planned ? 1 : 0, done: s[j].done ? 1 : 0, minutes: s[j].minutes || 0, count: s[j].count || 0, prayers: 0, tooltip: tooltip })
+                }
                 return out
             }
         return []
@@ -193,24 +182,6 @@ ApplicationWindow {
         for (var i = 0; i < rows.length; i++) { t.done += Number(rows[i].done || 0); t.planned += Number(rows[i].planned || 0); t.minutes += Number(rows[i].minutes || 0); t.count += Number(rows[i].count || 0); t.prayers += Number(rows[i].prayers || 0) }
         return t
     }
-    function maxDaily(field) { var a = selectedDaily(), m = 0; for (var i = 0; i < a.length; i++) m = Math.max(m, Number(a[i][field] || 0)); return Math.max(1, m) }
-    function niceAxis(field) {
-        var maximum = field === "done" ? Math.max(maxDaily("planned"), maxDaily("done")) : maxDaily("minutes")
-        var steps = field === "done" ? [1, 2, 5, 10, 20, 50, 100] : [5, 10, 15, 30, 60, 120, 180, 240]
-        var step = steps[steps.length - 1]
-        for (var i = 0; i < steps.length; i++) {
-            var lines = Math.ceil(maximum / steps[i])
-            if (lines >= 3 && lines <= 4) { step = steps[i]; break }
-            if (lines < 3) { step = steps[i]; break }
-        }
-        return { step: step, maximum: Math.max(step * 3, Math.ceil(maximum / step) * step), lines: Math.max(3, Math.ceil(maximum / step)) }
-    }
-    function axisLabel(field, value) {
-        if (field !== "minutes") return String(value)
-        if (value === 0) return "0"
-        var h = Math.floor(value / 60), m = value % 60
-        return h ? (h + "h" + (m ? String(m).padStart(2, "0") : "")) : (value + "m")
-    }
     function isTyping() { var f = win.activeFocusItem; return f && f.inputMethodHints !== undefined }
 
     GlobalShortcuts {
@@ -218,6 +189,18 @@ ApplicationWindow {
     }
 
     onActiveChanged: if (active) backend.reload()
+
+    Connections {
+        target: backend
+        function onPreviewChanged() {
+            if (!win.pendingToast) return
+            var draft = win.pendingToast
+            win.pendingToast = null
+            var next = (backend.preview || {}).next_occurrence
+            if (next && next !== backend.selectedDay)
+                toast.show(String(draft.title || qsTr("Item")) + qsTr(" — next %1").arg(win.shortDate(next)))
+        }
+    }
 
     RowLayout {
         anchors.fill: parent
