@@ -7,17 +7,19 @@
 
 ## Now
 
-Core, CLI, app (three polish rounds), widget, and README are committed and
-installed (6389169). The app was verified offscreen against the real CLI.
-The live widget still runs a cached old component (labels showed raw i18n
-keys); it needs `omarchy restart shell` before it can be checked.
+User feedback round 2 (2026-11-22): drag and drop behaved like a free board,
+needed in the widget too; items needed before Fajr; hide the sleep setting in
+the widget; everything must feel fast. Core for the night block is committed
+(fe6419b): `night` is the coming day's first block (sleep → Fajr). The CLI
+answers in ~2 ms, so responsiveness work is in the UIs
+(`interaction.md`). Codex workers W2 (widget) and A4 (app) are implementing
+interaction.md and the night block.
 
 ## Next
 
-1. After the user restarts the shell: screenshot the widget popup
-   (`omarchy-shell shell summon local.salah ""`, `grim`), check the journal,
-   and try quick add, a prayer mark, and an item tick live.
-2. Test drag and drop by pointer in the installed app.
+1. Review W2/A4 diffs and screenshots; commit; install.
+2. User restarts the shell; live-check the widget: drag, quick add, ticks,
+   prayer marks, night block.
 3. Merge `sleep-boundary` and `items-mvp` into `main` once accepted.
 
 ## Interfaces

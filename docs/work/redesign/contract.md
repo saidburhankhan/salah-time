@@ -7,7 +7,10 @@ non-zero with `salah: <message>` on stderr. Dates are `YYYY-MM-DD`, times
 
 Enumerations:
 
-- prayer / block: `fajr`, `dhuhr`, `asr`, `maghrib`, `isha`
+- prayer: `fajr`, `dhuhr`, `asr`, `maghrib`, `isha`
+- block: `night` (shown as "Before Fajr"), then the five prayers. `night` runs
+  from the previous evening's sleep time to Fajr and belongs to the coming
+  day. Sleep ends a day; the night after it is the next day's first block.
 - boundary id (adds): `sleep`
 - repeat (stored and in JSON): `none`, `daily`, `weekly` (`weekly` always carries
   `weekdays`). The `--repeat` flag also accepts `once` (= `none`) and `weekdays`
@@ -45,19 +48,26 @@ ordered by `position`.
   "sleep": { "time": "23:00", "passed": false },
   "blocks": [
     { "start": "fajr", "end": "dhuhr", "items": [DayItem, …] },
-    … dhuhr→asr, asr→maghrib, maghrib→isha, isha→sleep (always 5)
+    … dhuhr→asr, asr→maghrib, maghrib→isha, isha→sleep
   ],
+  "night_start": "23:00",
   "open": 2 }
 ```
 
-`now` is `null` unless the day is the current day. While sleeping,
-`now.block` is `null`, `sleeping` is `true`, and `next` is Fajr. Default
+`blocks` has 6 entries: `{ "start": "night", "end": "fajr" }` first, then the
+five prayer blocks. `"night_start": "23:00"` gives the night block's start
+(the previous evening's sleep time).
+
+`now` is `null` unless the day is the current day. Between sleep and Fajr the
+current day is the coming day, `now.block` is `"night"`, `sleeping` is
+`true`, and `next` is Fajr. Default
 date: the current day (Fajr→Sleep). Past days: every prayer `passed`.
 
 ## Today — `salah item list --json`
 
 Unchanged from the MVP, plus `"prayer_marks": ["fajr", …]` for the current
-day. `salah status --json` embeds it as `planner`.
+day. `block` is `"night"` between sleep and Fajr (no longer `null`);
+`upcoming` is always empty and kept only for compatibility. `salah status --json` embeds it as `planner`.
 
 ## Quick add
 
