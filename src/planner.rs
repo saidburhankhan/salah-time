@@ -26,7 +26,7 @@ fn stamp(now: DateTime<Utc>) -> DateTime<Utc> {
 }
 
 fn new_id() -> String {
-    uuid::Uuid::now_v7().to_string()
+    uuid::Uuid::new_v4().to_string()
 }
 
 /// Caches the end instant of each block, computing a day's blocks once.
@@ -635,6 +635,19 @@ mod tests {
         assert!(find_item(&store, "abc").is_err());
         assert_eq!(store.items().unwrap().len(), 1);
         assert!(store.entries().unwrap().is_empty());
+    }
+
+    #[test]
+    fn ids_match_by_unique_prefix_only() {
+        let mut store = Store::open_in_memory().unwrap();
+        let mut item = add(&mut store, &config(), at(20, 13, 0), titled("One")).unwrap();
+        item.id = "abcd1111".into();
+        store.put_item(&item).unwrap();
+        item.id = "abcd2222".into();
+        store.put_item(&item).unwrap();
+        assert!(find_item(&store, "abcd").unwrap_err().contains("ambiguous"));
+        assert_eq!(find_item(&store, "abcd1").unwrap().id, "abcd1111");
+        assert!(find_item(&store, "abc").is_err(), "too short");
     }
 
     #[test]

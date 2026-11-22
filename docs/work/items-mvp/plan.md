@@ -34,7 +34,7 @@ projects, streaks, and cloud sync without rewriting stored data.
   history (derived, never rewritten). Tomorrow they can be re-planned.
 - Timers stop automatically at the end of the block they started in. The
   stop is derived when reading and persisted on the next write.
-- Ids are UUIDv7 strings. Rows carry `created_at`, `updated_at` (UTC RFC3339)
+- Ids are random UUIDv4 strings (v7 shares its leading timestamp characters, which made short ids ambiguous). Rows carry `created_at`, `updated_at` (UTC RFC3339)
   and `deleted_at` tombstones so deletions survive export/import and sync.
 - Storage is SQLite at `${XDG_DATA_HOME:-~/.local/share}/salah/salah.db`,
   WAL mode, busy timeout, numbered migrations in `PRAGMA user_version`.

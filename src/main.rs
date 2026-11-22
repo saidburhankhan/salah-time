@@ -1,11 +1,15 @@
-use chrono::{FixedOffset, Utc};
+use chrono::{Duration, FixedOffset, NaiveDate, Utc};
 use clap::{Args, Parser, Subcommand};
 use salah::{
     calculation::METHODS,
     config::{load, save},
-    location, official, status,
+    day::BoundaryId,
+    export,
+    item::{Measure, Repeat, State},
+    location, official, planner, schedule, status,
+    store::{Store, default_path},
 };
-use std::process::ExitCode;
+use std::{fs, path::PathBuf, process::ExitCode};
 
 #[derive(Parser)]
 #[command(
@@ -36,8 +40,145 @@ enum Command {
         #[command(subcommand)]
         command: OfficialCommand,
     },
+    /// Manage planned items
+    Item {
+        #[command(subcommand)]
+        command: ItemCommand,
+    },
+    /// Show planner history
+    History(HistoryArgs),
+    /// Export all planner data
+    Export(ExportArgs),
+    /// Import planner data
+    Import(ImportArgs),
     /// List the calculation methods
     Methods,
+    /// Open the Salah desktop app
+    Open,
+}
+
+#[derive(Subcommand)]
+enum ItemCommand {
+    /// Add an item
+    Add(ItemAddArgs),
+    /// List today's items
+    List(JsonArgs),
+    /// Mark an item done
+    Done(ItemIdArgs),
+    /// Undo an item's done state
+    Undo(ItemIdArgs),
+    /// Log minutes or a count
+    Log(ItemLogArgs),
+    /// Start an item's timer
+    Start(ItemIdArgs),
+    /// Stop the running timer
+    Stop(JsonArgs),
+    /// Edit an item
+    Edit(ItemEditArgs),
+    /// Remove an item
+    Remove(ItemIdArgs),
+}
+
+#[derive(Args)]
+struct JsonArgs {
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct ItemIdArgs {
+    /// Item id or unique id prefix
+    id: String,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct ItemAddArgs {
+    /// Words in the item title
+    #[arg(required = true, num_args = 1..)]
+    title: Vec<String>,
+    /// Prayer block
+    #[arg(long)]
+    block: Option<String>,
+    /// Repeat the item daily
+    #[arg(long)]
+    daily: bool,
+    /// How progress is measured
+    #[arg(long)]
+    measure: Option<String>,
+    /// Progress target
+    #[arg(long)]
+    target: Option<i64>,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct ItemLogArgs {
+    /// Item id or unique id prefix
+    id: String,
+    /// Minutes or count to record
+    value: i64,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct ItemEditArgs {
+    /// Item id or unique id prefix
+    id: String,
+    /// Replacement title
+    #[arg(long)]
+    title: Option<String>,
+    /// Replacement prayer block
+    #[arg(long)]
+    block: Option<String>,
+    /// Replacement progress target
+    #[arg(long, conflicts_with = "no_target")]
+    target: Option<i64>,
+    /// Remove the progress target
+    #[arg(long)]
+    no_target: bool,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct HistoryArgs {
+    /// First day, formatted YYYY-MM-DD
+    #[arg(long)]
+    from: Option<String>,
+    /// Last day, formatted YYYY-MM-DD
+    #[arg(long)]
+    to: Option<String>,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct ExportArgs {
+    /// Write JSON to this file instead of stdout
+    #[arg(long)]
+    output: Option<PathBuf>,
+    /// Replace an existing output file
+    #[arg(long, requires = "output")]
+    force: bool,
+}
+
+#[derive(Args)]
+struct ImportArgs {
+    /// Export file to import
+    file: PathBuf,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -118,7 +259,30 @@ struct OfficialSyncArgs {
 }
 
 fn main() -> ExitCode {
-    match run(Cli::parse()) {
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error)
+            if matches!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+            ) =>
+        {
+            let _ = error.print();
+            return ExitCode::SUCCESS;
+        }
+        Err(error) => {
+            let rendered = error.to_string();
+            let message = rendered
+                .lines()
+                .next()
+                .unwrap_or("invalid command")
+                .strip_prefix("error: ")
+                .unwrap_or(rendered.as_str());
+            eprintln!("salah: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("salah: {e}");
@@ -134,12 +298,39 @@ fn run(cli: Cli) -> Result<(), String> {
         Some(Command::Config { command }) => config_command(command),
         Some(Command::Location { command }) => location_command(command),
         Some(Command::Official { command }) => official_command(command),
+        Some(Command::Item { command }) => item_command(command),
+        Some(Command::History(args)) => history_command(args),
+        Some(Command::Export(args)) => export_command(args),
+        Some(Command::Import(args)) => import_command(args),
         Some(Command::Methods) => methods_command(),
+        Some(Command::Open) => open_command(),
     }
 }
 
+/// Starts `salah-app` from beside this binary when installed there, else from
+/// PATH. The app runs detached so the terminal is free immediately.
+fn open_command() -> Result<(), String> {
+    let sibling = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("salah-app")))
+        .filter(|path| path.is_file());
+    let program = sibling.unwrap_or_else(|| std::path::PathBuf::from("salah-app"));
+    std::process::Command::new(&program)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("cannot start the Salah app ({}): {e}", program.display()))
+}
+
 fn status_command(json: bool) -> Result<(), String> {
-    let report = status::build(&load()?, Utc::now())?;
+    let config = load()?;
+    let now = Utc::now();
+    let mut report = status::build(&config, now)?;
+    let planner =
+        Store::open(&default_path()).and_then(|store| planner::today(&store, &config, now));
+    report.attach_planner(planner);
     if json {
         println!(
             "{}",
@@ -149,6 +340,271 @@ fn status_command(json: bool) -> Result<(), String> {
         println!("{}", report.label);
     }
     Ok(())
+}
+
+fn open_planner() -> Result<(Store, salah::config::Config, chrono::DateTime<Utc>), String> {
+    Ok((Store::open(&default_path())?, load()?, Utc::now()))
+}
+
+fn parse_block(value: &str) -> Result<BoundaryId, String> {
+    let block = BoundaryId::parse(value).ok_or_else(|| format!("unknown block {value:?}"))?;
+    if block == BoundaryId::Sleep {
+        return Err("sleep is not a planner block".into());
+    }
+    Ok(block)
+}
+
+fn parse_measure(value: Option<String>) -> Result<Option<Measure>, String> {
+    value
+        .map(|value| {
+            serde_json::from_value(serde_json::Value::String(value.clone()))
+                .map_err(|_| format!("unknown measure {value:?}; use check, minutes, or count"))
+        })
+        .transpose()
+}
+
+fn json<T: serde::Serialize>(value: &T) -> Result<(), String> {
+    println!(
+        "{}",
+        serde_json::to_string(value).map_err(|e| e.to_string())?
+    );
+    Ok(())
+}
+
+fn short(id: &str) -> &str {
+    &id[..id.len().min(8)]
+}
+
+fn item_command(command: ItemCommand) -> Result<(), String> {
+    let (mut store, config, now) = open_planner()?;
+    match command {
+        ItemCommand::List(args) => {
+            let today = planner::today(&store, &config, now)?;
+            if args.json {
+                json(&today)
+            } else {
+                for item in &today.current {
+                    let mark = if item.state == State::Done { "x" } else { " " };
+                    println!("[{mark}] {}  {}", short(&item.id), item.title);
+                }
+                println!("{} open", today.open);
+                Ok(())
+            }
+        }
+        ItemCommand::Add(args) => {
+            planner::close_expired_timers(&mut store, &config, now)?;
+            let item = planner::add(
+                &mut store,
+                &config,
+                now,
+                planner::NewItem {
+                    title: args.title.join(" "),
+                    block: args.block.as_deref().map(parse_block).transpose()?,
+                    repeat: args.daily.then_some(Repeat::Daily),
+                    measure: parse_measure(args.measure)?,
+                    target: args.target,
+                },
+            )?;
+            if args.json {
+                json(&item)
+            } else {
+                println!(
+                    "Added {} \"{}\" to {:?}",
+                    short(&item.id),
+                    item.title,
+                    item.block
+                );
+                Ok(())
+            }
+        }
+        ItemCommand::Done(args) => {
+            write_entry(&mut store, &config, now, args, planner::done, "Done")
+        }
+        ItemCommand::Undo(args) => {
+            planner::close_expired_timers(&mut store, &config, now)?;
+            let count = planner::undo(&mut store, &config, now, &args.id)?;
+            if args.json {
+                json(&serde_json::json!({"undone": count}))
+            } else {
+                println!("Undid {count} entry");
+                Ok(())
+            }
+        }
+        ItemCommand::Log(args) => {
+            planner::close_expired_timers(&mut store, &config, now)?;
+            let entry = planner::log(&mut store, &config, now, &args.id, args.value)?;
+            if args.json {
+                json(&entry)
+            } else {
+                println!("Logged {} for {}", args.value, short(&entry.item_id));
+                Ok(())
+            }
+        }
+        ItemCommand::Start(args) => write_entry(
+            &mut store,
+            &config,
+            now,
+            args,
+            planner::start_timer,
+            "Started",
+        ),
+        ItemCommand::Stop(args) => {
+            planner::close_expired_timers(&mut store, &config, now)?;
+            let entries = planner::stop_timer(&mut store, &config, now)?;
+            if args.json {
+                json(&entries)
+            } else {
+                println!("Stopped {} timer", entries.len());
+                Ok(())
+            }
+        }
+        ItemCommand::Edit(args) => {
+            planner::close_expired_timers(&mut store, &config, now)?;
+            let target = if args.no_target {
+                Some(None)
+            } else {
+                args.target.map(Some)
+            };
+            let item = planner::edit(
+                &mut store,
+                now,
+                &args.id,
+                planner::ItemChanges {
+                    title: args.title,
+                    block: args.block.as_deref().map(parse_block).transpose()?,
+                    target,
+                },
+            )?;
+            if args.json {
+                json(&item)
+            } else {
+                println!("Edited {} \"{}\"", short(&item.id), item.title);
+                Ok(())
+            }
+        }
+        ItemCommand::Remove(args) => {
+            planner::close_expired_timers(&mut store, &config, now)?;
+            let item = planner::remove(&mut store, now, &args.id)?;
+            if args.json {
+                json(&item)
+            } else {
+                println!("Removed {} \"{}\"", short(&item.id), item.title);
+                Ok(())
+            }
+        }
+    }
+}
+
+fn write_entry(
+    store: &mut Store,
+    config: &salah::config::Config,
+    now: chrono::DateTime<Utc>,
+    args: ItemIdArgs,
+    operation: fn(
+        &mut Store,
+        &salah::config::Config,
+        chrono::DateTime<Utc>,
+        &str,
+    ) -> Result<salah::item::Entry, String>,
+    verb: &str,
+) -> Result<(), String> {
+    planner::close_expired_timers(store, config, now)?;
+    let entry = operation(store, config, now, &args.id)?;
+    if args.json {
+        json(&entry)
+    } else {
+        println!("{verb} {}", short(&entry.item_id));
+        Ok(())
+    }
+}
+
+fn parse_date(value: &str) -> Result<NaiveDate, String> {
+    NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map_err(|_| format!("invalid date {value:?}; use YYYY-MM-DD"))
+}
+
+fn history_command(args: HistoryArgs) -> Result<(), String> {
+    let (store, config, now) = open_planner()?;
+    let day = schedule::resolve(&config, now)?.day();
+    let last = args
+        .to
+        .as_deref()
+        .map(parse_date)
+        .transpose()?
+        .unwrap_or(day);
+    let first = args
+        .from
+        .as_deref()
+        .map(parse_date)
+        .transpose()?
+        .unwrap_or(last - Duration::days(6));
+    let reports = planner::history(&store, &config, now, first, last)?;
+    if args.json {
+        json(&reports)
+    } else {
+        println!("{} days from {first} to {last}", reports.len());
+        Ok(())
+    }
+}
+
+fn export_command(args: ExportArgs) -> Result<(), String> {
+    let (store, _, now) = open_planner()?;
+    let bytes = serde_json::to_vec(&export::export(&store, now)?).map_err(|e| e.to_string())?;
+    if let Some(path) = args.output {
+        atomic_write(&path, &bytes, args.force)?;
+        println!("Exported to {}", path.display());
+    } else {
+        println!("{}", String::from_utf8(bytes).map_err(|e| e.to_string())?);
+    }
+    Ok(())
+}
+
+fn atomic_write(path: &std::path::Path, bytes: &[u8], force: bool) -> Result<(), String> {
+    if path.exists() && !force {
+        return Err(format!(
+            "{} already exists; use --force to replace it",
+            path.display()
+        ));
+    }
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("invalid output file name")?;
+    let temp = parent.join(format!(".{name}.{}.tmp", std::process::id()));
+    let result = (|| {
+        fs::write(&temp, bytes).map_err(|e| format!("write {}: {e}", temp.display()))?;
+        fs::rename(&temp, path).map_err(|e| format!("rename {}: {e}", path.display()))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
+fn import_command(args: ImportArgs) -> Result<(), String> {
+    let metadata =
+        fs::metadata(&args.file).map_err(|e| format!("read {}: {e}", args.file.display()))?;
+    if metadata.len() > export::MAX_BYTES as u64 {
+        return Err(format!(
+            "export exceeds maximum size of {} bytes",
+            export::MAX_BYTES
+        ));
+    }
+    let bytes = fs::read(&args.file).map_err(|e| format!("read {}: {e}", args.file.display()))?;
+    let data = export::parse(&bytes)?;
+    let (mut store, config, now) = open_planner()?;
+    planner::close_expired_timers(&mut store, &config, now)?;
+    let summary = export::import(&mut store, &data)?;
+    if args.json {
+        json(&summary)
+    } else {
+        println!(
+            "Imported {} added, {} updated, {} unchanged",
+            summary.added, summary.updated, summary.unchanged
+        );
+        Ok(())
+    }
 }
 
 fn config_command(command: Option<ConfigCommand>) -> Result<(), String> {

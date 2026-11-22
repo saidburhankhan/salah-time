@@ -5,6 +5,7 @@ use std::process::{Command, Output};
 fn run(config: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_salah"))
         .env("SALAH_CONFIG", config)
+        .env("SALAH_DATA", config.with_extension("db"))
         .args(args)
         .output()
         .unwrap()
@@ -21,7 +22,10 @@ fn help_lists_subcommands() {
     let output = run(&path, &["--help"]);
     assert!(output.status.success(), "{}", stderr(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    for command in ["status", "config", "location", "official", "methods"] {
+    for command in [
+        "status", "config", "location", "official", "item", "history", "export", "import",
+        "methods",
+    ] {
         assert!(
             stdout.contains(command),
             "missing {command} in help:\n{stdout}"
