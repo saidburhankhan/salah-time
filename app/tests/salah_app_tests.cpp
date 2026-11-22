@@ -9,6 +9,7 @@
 #include <QQuickWindow>
 #include <QtTest>
 #include "backend.h"
+#include "client/coreclient.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -32,7 +33,82 @@ else printf '%s\n' '{}'; fi
         write(path,script); QFile::setPermissions(path,QFile::ReadOwner|QFile::WriteOwner|QFile::ExeOwner); return path;
     }
     static QStringList logLines(QTemporaryDir &dir) { QFile f(dir.filePath("args")); if (!f.open(QIODevice::ReadOnly)) return {}; return QString::fromUtf8(f.readAll()).split('\n',Qt::SkipEmptyParts); }
+    static QString fakeCore(QTemporaryDir &dir) {
+        const QString path = dir.filePath("core-salah"), log = dir.filePath("core-args");
+        QByteArray script = "#!/bin/sh\nfor arg in \"$@\"; do printf '<%s>' \"$arg\"; done >> '" + log.toUtf8() + "'\nprintf '\\n' >> '" + log.toUtf8() + "'\n";
+        script += R"SH(
+case "$*" in
+  *2099-01-01*) sleep 1 ;;
+  *malformed*) printf 'not-json\n'; exit 0 ;;
+  *failure*) printf 'salah: requested failure\n' >&2; exit 7 ;;
+esac
+printf '{"ok":true}\n'
+)SH";
+        write(path, script);
+        QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        return path;
+    }
+    static QStringList coreLogLines(QTemporaryDir &dir) {
+        QFile file(dir.filePath("core-args"));
+        if (!file.open(QIODevice::ReadOnly)) return {};
+        return QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts);
+    }
 private slots:
+    void coreClientBuildsEveryCommand() {
+        QTemporaryDir dir; CoreClient client(nullptr, fakeCore(dir)); QSignalSpy spy(&client, &CoreClient::requestFinished);
+        CoreClient::ItemFields add; add.title = "Title -- literal"; add.block = "asr"; add.repeat = "weekly";
+        add.weekdays = {"mon", "wed"}; add.measure = "minutes"; add.target = 30; add.hasTarget = true; add.date = QDate(2026,11,23);
+        CoreClient::ItemFields edit = add; edit.title = "New title"; edit.hasTarget = false;
+        client.day(QDate(2026,11,22), {}); client.stats(QDate(2026,11,1),QDate(2026,11,30),{});
+        client.itemAdd(add); client.itemEdit("id-1",edit); client.itemRemove("id-old"); client.itemMove("id-1","isha",-2);
+        client.itemDone("id-1",QDate(2026,11,22)); client.itemUndo("id-1",QDate(2026,11,22));
+        client.itemLog("id-1",-15,true,QDate(2026,11,23)); client.itemLog("id-1",-2,false);
+        client.timerStart("id-1"); client.timerStop("id-1");
+        client.prayerMark("fajr",QDate(2026,11,22)); client.prayerUnmark("fajr",QDate(2026,11,22));
+        client.parse("read -- carefully",{}); client.configShow({}); client.configSetSleepTime("22:45");
+        QTRY_COMPARE_WITH_TIMEOUT(spy.size(),17,5000);
+        const QStringList lines = coreLogLines(dir);
+        QCOMPARE(lines.at(0),"<day><--date><2026-11-22><--json>");
+        QCOMPARE(lines.at(1),"<stats><--from><2026-11-01><--to><2026-11-30><--json>");
+        QCOMPARE(lines.at(2),"<item><add><--json><--block><asr><--repeat><weekly><--days><mon,wed><--measure><minutes><--target><30><--date><2026-11-23><--><Title -- literal>");
+        QCOMPARE(lines.at(3),"<item><edit><--json><id-1><--title=New title><--block><asr><--repeat><weekly><--days><mon,wed><--measure><minutes><--no-target>");
+        QCOMPARE(lines.at(4),"<item><remove><--json><id-old>");
+        QCOMPARE(lines.at(5),"<item><move><--json><id-1><--block><isha><--index><-2>");
+        QCOMPARE(lines.at(6),"<item><done><--json><id-1><--date><2026-11-22>");
+        QCOMPARE(lines.at(7),"<item><undo><--json><id-1><--date><2026-11-22>");
+        QCOMPARE(lines.at(8),"<item><log><--json><--minutes><id-1><-15><--date><2026-11-23>");
+        QCOMPARE(lines.at(9),"<item><log><--json><id-1><-2>");
+        QCOMPARE(lines.at(10),"<item><start><--json><id-1>");
+        QCOMPARE(lines.at(11),"<item><stop><--json><id-1>");
+        QCOMPARE(lines.at(12),"<prayer><mark><--json><fajr><--date><2026-11-22>");
+        QCOMPARE(lines.at(13),"<prayer><unmark><--json><fajr><--date><2026-11-22>");
+        QCOMPARE(lines.at(14),"<item><parse><--json><--><read -- carefully>");
+        QCOMPARE(lines.at(15),"<config><show>");
+        QCOMPARE(lines.at(16),"<config><set><--sleep-time><22:45>");
+    }
+    void coreClientQueueCoalescingAndOrdering() {
+        QTemporaryDir dir; CoreClient client(nullptr,fakeCore(dir),3000); QSignalSpy spy(&client,&CoreClient::requestFinished);
+        int callbacks = 0;
+        const auto callback = [&callbacks](const CoreClient::Result &result){ QVERIFY(result.ok); ++callbacks; };
+        client.day(QDate(2099,1,1),callback); client.day(QDate(2099,1,1),callback);
+        client.statsDays(7,callback); client.day(QDate(2099,1,1),callback);
+        QTRY_COMPARE_WITH_TIMEOUT(spy.size(),2,5000);
+        QCOMPARE(callbacks,4);
+        QCOMPARE(coreLogLines(dir),QStringList({"<day><--date><2099-01-01><--json>","<stats><--days><7><--json>"}));
+    }
+    void coreClientTypedErrorsAndTimeoutKill() {
+        QTemporaryDir dir; CoreClient client(nullptr,fakeCore(dir),100); QSignalSpy spy(&client,&CoreClient::requestFinished);
+        QList<CoreClient::Result> results;
+        client.parse("failure",[&](const CoreClient::Result &r){results<<r;});
+        client.parse("malformed",[&](const CoreClient::Result &r){results<<r;});
+        client.day(QDate(2099,1,1),[&](const CoreClient::Result &r){results<<r;});
+        client.configShow([&](const CoreClient::Result &r){results<<r;});
+        QTRY_COMPARE_WITH_TIMEOUT(spy.size(),4,5000);
+        QCOMPARE(results.at(0).error.kind,CoreClient::ErrorKind::Exit); QCOMPARE(results.at(0).error.message,QString("requested failure"));
+        QCOMPARE(results.at(1).error.kind,CoreClient::ErrorKind::Decode); QVERIFY(results.at(1).error.message.contains("invalid JSON"));
+        QCOMPARE(results.at(2).error.kind,CoreClient::ErrorKind::Timeout); QVERIFY(results.at(2).error.message.contains("timed out"));
+        QVERIFY(results.at(3).ok);
+    }
     void realCliScreenshots() {
         const QString outputDir=qEnvironmentVariable("A9_SCREENSHOT_DIR");
         if(outputDir.isEmpty()) return;
