@@ -102,7 +102,7 @@ impl Store {
 
     pub fn items(&self) -> Result<Vec<Item>, Error> {
         self.all(
-            "SELECT * FROM items ORDER BY block, position, created_at, id",
+            "SELECT * FROM items ORDER BY created_at, id",
             [],
             codec::item,
         )

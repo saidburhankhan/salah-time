@@ -103,4 +103,10 @@ Deviations from interface.md (for the orchestrator):
 - Day rows drop `state`, `minutes`, `count`, `timer`, `carried`; status
   `planner` drops `timer`/`upcoming` (replaced by top-level `running`).
 
-Remaining: none for S4. Risks are listed in the final report.
+Commits: 4b1c5b7 (S4 checkpoint), then a follow-up listing items in day
+order (Night..Isha, then position) in core instead of by block text in SQL.
+
+Remaining: none for S4. Open risks: running timers are never auto-closed at
+the block or day end; status/day reads open a short write transaction to
+materialize snapshots; `docs/work/architecture/contract-v1.md` (human CLI
+JSON) is stale and owned by another worker.

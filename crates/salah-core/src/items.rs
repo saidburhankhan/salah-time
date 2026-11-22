@@ -89,9 +89,11 @@ pub struct Preview {
     pub schedule_text: String,
 }
 
-/// Live items in block and position order.
+/// Live items in block (day order) and position order.
 pub fn list(store: &Store) -> Result<Vec<Item>, Error> {
-    Ok(store.items()?.into_iter().filter(Item::is_live).collect())
+    let mut items: Vec<Item> = store.items()?.into_iter().filter(Item::is_live).collect();
+    items.sort_by_key(|item| (item.block, item.position));
+    Ok(items)
 }
 
 pub fn find(store: &Store, id: &str) -> Result<Item, Error> {
