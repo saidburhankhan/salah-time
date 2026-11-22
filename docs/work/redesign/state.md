@@ -7,19 +7,18 @@
 
 ## Now
 
-User feedback round 2 (2026-11-22): drag and drop behaved like a free board,
-needed in the widget too; items needed before Fajr; hide the sleep setting in
-the widget; everything must feel fast. Core for the night block is committed
-(fe6419b): `night` is the coming day's first block (sleep → Fajr). The CLI
-answers in ~2 ms, so responsiveness work is in the UIs
-(`interaction.md`). Codex workers W2 (widget) and A4 (app) are implementing
-interaction.md and the night block.
+Round 2 committed and installed (ebefdc8): night block, live drag and drop
+in app and widget, optimistic updates, no rebuild on unchanged data, widget
+without the sleep-time field. App drag verified with an offscreen harness that
+drives beginDrag/updateDrag/finishDrag and reads back `salah day --json`
+(two bugs found and fixed: window-to-item mapping threw; ListModel rows reached
+C++ as empty maps so drops were never saved). Widget drag is unverified live.
 
 ## Next
 
-1. Review W2/A4 diffs and screenshots; commit; install.
-2. User restarts the shell; live-check the widget: drag, quick add, ticks,
-   prayer marks, night block.
+1. User restarts the shell and tries the widget: drag (handle and
+   long-press), quick add, ticks, prayer marks, Before Fajr.
+2. Turn the drag harness into an app test so a broken drop fails `bin/test`.
 3. Merge `sleep-boundary` and `items-mvp` into `main` once accepted.
 
 ## Interfaces
