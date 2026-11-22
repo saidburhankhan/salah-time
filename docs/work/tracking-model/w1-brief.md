@@ -15,3 +15,12 @@ Work in order S1 → S2 → S3 → S4. Commit at each green checkpoint (./script
 Usage limits: work economically and keep reads targeted. If you may be cut off, the progress file is how the next run resumes. Keep a short progress file at docs/work/tracking-model/w1-progress.md (you may write that one file) with: last commit, current slice, next step — update it at every commit, so work can resume if you are cut off.
 
 When S4 is committed, or if you are blocked, finish with a final message (captured for the orchestrator) and the same content in w1-progress.md: commits, verification output, deviations from interface.md, remaining risks.
+
+## Checkpoint protocol (overrides any "commit" instruction above)
+
+Your sandbox cannot write `.git` or create Unix sockets. So: never run `git commit`.
+At each green checkpoint (all checks pass except tests that need Unix sockets),
+append to your progress file a line `CHECKPOINT <slice>: <one-line commit message>`
+listing the files in that checkpoint, then END your turn (exit). The orchestrator runs the
+socket tests, reviews, commits, and resumes you with the next step. Do not start the next slice
+before you are resumed.

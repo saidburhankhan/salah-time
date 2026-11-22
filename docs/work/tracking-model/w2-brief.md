@@ -58,3 +58,12 @@ Report contract mismatches; do not work around them silently.
 ## Final report (in w2-progress.md and your last message)
 
 Commits, verification output, contract mismatches, remaining gaps.
+
+## Checkpoint protocol (overrides any "commit" instruction above)
+
+Your sandbox cannot write `.git` or create Unix sockets. So: never run `git commit`.
+At each green checkpoint (all checks pass except tests that need Unix sockets),
+append to your progress file a line `CHECKPOINT <slice>: <one-line commit message>`
+listing the files in that checkpoint, then END your turn (exit). The orchestrator runs the
+socket tests, reviews, commits, and resumes you with the next step. Do not start the next slice
+before you are resumed.
