@@ -11,7 +11,7 @@ use salah_domain::{
 use salah_prayer::schedule;
 use salah_store::Store;
 use serde::Serialize;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn live_item(store: &Store, id: &str) -> Result<Item, Error> {
     store
@@ -353,7 +353,33 @@ pub struct Stats {
     pub to: NaiveDate,
     pub days: Vec<DayStat>,
     pub series: Vec<MetricSeries>,
+    pub projects: Vec<ProjectStat>,
+    pub tags: Vec<TagStat>,
+    pub blocks: Vec<BlockStat>,
     pub totals: StatsTotals,
+}
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct ProjectStat {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    pub minutes: i64,
+    pub sessions: i64,
+    pub metrics: BTreeMap<String, f64>,
+}
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct TagStat {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    pub minutes: i64,
+}
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct BlockStat {
+    pub block: BoundaryId,
+    pub minutes: i64,
+    pub capacity_minutes: i64,
+    pub avg_focus: Option<f64>,
 }
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct StatsTotals {
@@ -453,6 +479,105 @@ pub fn stats(
             None
         }
     };
+    let mut projects = vec![];
+    for p in store
+        .projects()?
+        .into_iter()
+        .filter(|p| p.deleted_at.is_none())
+    {
+        let ss: Vec<_> = sessions
+            .iter()
+            .filter(|s| s.project_id.as_deref() == Some(&p.id))
+            .collect();
+        if ss.is_empty() {
+            continue;
+        }
+        let mut values: BTreeMap<String, Vec<(f64, f64)>> = BTreeMap::new();
+        for s in &ss {
+            for v in &s.values {
+                values
+                    .entry(v.metric_id.clone())
+                    .or_default()
+                    .push((v.value, s.minutes.unwrap_or(1).max(1) as f64));
+            }
+        }
+        let metrics = values
+            .into_iter()
+            .map(|(id, v)| {
+                let def = store.metric(&id).ok().flatten();
+                let value = if def.is_some_and(|m| m.rollup == Rollup::Sum) {
+                    v.iter().map(|x| x.0).sum()
+                } else {
+                    let w: f64 = v.iter().map(|x| x.1).sum();
+                    v.iter().map(|x| x.0 * x.1).sum::<f64>() / w
+                };
+                (id, value)
+            })
+            .collect();
+        projects.push(ProjectStat {
+            id: p.id,
+            name: p.name,
+            color: p.color,
+            minutes: ss.iter().filter_map(|s| s.minutes).sum(),
+            sessions: ss.len() as i64,
+            metrics,
+        });
+    }
+    let mut tags = vec![];
+    for t in store.tags()?.into_iter().filter(|t| t.deleted_at.is_none()) {
+        let ids: BTreeSet<_> = store
+            .projects()?
+            .into_iter()
+            .filter(|p| p.tag_ids.contains(&t.id))
+            .map(|p| p.id)
+            .collect();
+        let minutes = sessions
+            .iter()
+            .filter(|s| s.project_id.as_ref().is_some_and(|p| ids.contains(p)))
+            .filter_map(|s| s.minutes)
+            .sum();
+        tags.push(TagStat {
+            id: t.id,
+            name: t.name,
+            color: t.color,
+            minutes,
+        });
+    }
+    let mut blocks = vec![];
+    for block in BoundaryId::AWAKE {
+        let ss: Vec<_> = sessions.iter().filter(|s| s.block.start == block).collect();
+        let focus: Vec<_> = ss
+            .iter()
+            .flat_map(|s| {
+                s.values
+                    .iter()
+                    .filter(|v| v.metric_id == "focus")
+                    .map(move |v| (v.value, s.minutes.unwrap_or(1).max(1) as f64))
+            })
+            .collect();
+        let weight: f64 = focus.iter().map(|v| v.1).sum();
+        blocks.push(BlockStat {
+            block,
+            minutes: ss.iter().filter_map(|s| s.minutes).sum(),
+            capacity_minutes: days
+                .iter()
+                .map(|d| {
+                    store
+                        .day_blocks(d.day)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|b| b.block == block)
+                        .map(|b| (b.ends_at - b.starts_at).num_minutes().max(0))
+                        .sum::<i64>()
+                })
+                .sum(),
+            avg_focus: if weight > 0.0 {
+                Some(focus.iter().map(|v| v.0 * v.1).sum::<f64>() / weight)
+            } else {
+                None
+            },
+        });
+    }
     Ok(Stats {
         from,
         to,
@@ -465,5 +590,8 @@ pub fn stats(
         },
         days,
         series,
+        projects,
+        tags,
+        blocks,
     })
 }
