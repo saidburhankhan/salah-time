@@ -3,24 +3,23 @@
 ## Repository
 
 - Branch: `items-mvp` (from `sleep-boundary`)
-- Uncommitted: `plugin/local.salah/` (S6 widget, awaiting live check);
-  `app/` and `.gitignore` (S7, Codex worker in progress)
+- Uncommitted: none
 
 ## Now
 
-S1–S5 committed: clap CLI, schedule/day keys, item/entry domain, SQLite
-store, export/import, planner use cases, `salah item|history|export|import|open`.
-Installer bug fixed: `scripts/test` was disabling the live bar widget through
-`uninstall` → `omarchy plugin disable` (acts on the live shell whatever HOME
-is). The widget code (S6) is installed, but the running shell still serves a
-cached old component.
+S1–S7 committed and installed: CLI, data core, widget, and the `salah-app`
+desktop app (`salah open`, launcher entry "Salah"). The app was verified
+offscreen against the real CLI with seeded data. The widget's live view is
+unverified because the running shell still serves a cached old component.
 
 ## Next
 
 1. User runs `omarchy restart shell`; then screenshot the popup
    (`omarchy-shell shell summon local.salah ""`, `grim`) and check the journal.
-2. Review the S7 app worker's diff, build, tests, and screenshots.
-3. Install the app (`salah-app`, desktop entry, icon) from `scripts/install`.
+2. Live evening check: after Isha the bar counts down to Sleep; after sleep
+   time it shows `Sleeping · Fajr`.
+3. Follow-up: make the app's CLI calls asynchronous (they block the window
+   for up to 10 s if the CLI hangs).
 
 ## Interfaces
 

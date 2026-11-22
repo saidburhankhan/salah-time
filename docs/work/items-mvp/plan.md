@@ -71,8 +71,8 @@ entries(id TEXT PK, item_id TEXT, day TEXT, block TEXT,
 - [x] S3 — item/entry domain and SQLite store with migrations (lead; `src/item.rs`, `src/store.rs`)
 - [x] S4 — export/import and round-trip tests (worker; `src/export.rs`, `tests/export.rs`)
 - [x] S5 — `salah item …`, `salah export|import` commands, status `items` block
-- [ ] S6 — widget: current block items, tick, quick add, open count, sleep time
-- [ ] S7 — `app/` Qt Quick desktop app: day/block history and per-item totals
+- [x] S6 — widget: current block items, tick, quick add, open count, sleep time
+- [x] S7 — `app/` Qt Quick desktop app: day/block history and per-item totals
 - [ ] S8 — integration, install, live verification
 
 ## Acceptance checks
