@@ -116,6 +116,7 @@ fn parallel_writers_produce_gapless_unique_revisions_and_change_rows() {
             ("item", "insert")
         );
         assert_eq!(change.version, 1);
-        assert_eq!(change.op_id, None);
     }
+    let op_ids: HashSet<&str> = changes.iter().filter_map(|c| c.op_id.as_deref()).collect();
+    assert_eq!(op_ids.len(), TOTAL, "every CLI write carries its own op id");
 }

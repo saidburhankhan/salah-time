@@ -325,7 +325,7 @@ fn method_success_and_error(client: &mut Client) {
             .as_array()
             .unwrap()
             .iter()
-            .any(|value| value == "events.v1")
+            .any(|value| value == "tracking.v1")
     );
     assert_eq!(
         client.bad("hello", json!({"protocol":[2],"client":"old"})),
@@ -341,23 +341,16 @@ fn method_success_and_error(client: &mut Client) {
     assert!(client.good("items.list", json!({})).is_array());
     assert_eq!(client.bad("items.list", json!([])), -32602);
 
-    assert_eq!(client.good("stats.get", json!({"days":7}))["days"], 7);
     assert_eq!(
-        client.bad("stats.get", json!({"from":"2031-05-01"})),
-        -32001
-    );
-
-    assert_eq!(
-        client
-            .good("history.get", json!({}))
+        client.good("stats.get", json!({"days":7}))["days"]
             .as_array()
             .unwrap()
             .len(),
         7
     );
     assert_eq!(
-        client.bad("history.get", json!({"to":"not-a-date"})),
-        -32602
+        client.bad("stats.get", json!({"from":"2031-05-01"})),
+        -32001
     );
 
     assert_eq!(
@@ -368,71 +361,146 @@ fn method_success_and_error(client: &mut Client) {
 
     let preview = client.good(
         "item.preview",
-        json!({
-            "block":"asr","repeat":"weekly","weekdays":["mon","wed","fri"],
-            "measure":"minutes","target":20,"date":DATE
-        }),
+        json!({"block":"asr","repeat":"weekly","weekdays":["mon","wed","fri"],"planned_minutes":20,"date":DATE}),
     );
     assert_eq!(preview["schedule_text"], "Mon, Wed, Fri");
-    assert_eq!(preview["next_occurrence"], DATE);
-    assert!(preview["occurrences_this_month"].as_u64().unwrap() > 0);
     assert_eq!(client.bad("item.preview", json!({"block":"asr"})), -32602);
 
-    let added = client.good(
-        "item.add",
-        json!({"op_id":"s4-add","title":"All methods","block":"fajr","measure":"minutes","target":30}),
+    let metrics = client.good("metrics.list", json!({}));
+    assert_eq!(metrics[0]["id"], "focus");
+    assert_eq!(
+        client.bad("metrics.list", json!({"archived":"yes"})),
+        -32602
     );
-    let id = added["changed"]["items"][0]["id"]
+    let metric = client.good(
+        "metric.add",
+        json!({"op_id":"s4-metric","name":"Pages","unit":"pages","kind":"count"}),
+    )["changed"]["metrics"][0]["id"]
         .as_str()
         .unwrap()
         .to_string();
-    let changed_row = &added["changed"]["items"][0];
-    assert_eq!(changed_row["version"], 1);
-    assert_eq!(changed_row["schedule_text"], "Once");
-    assert_eq!(changed_row["detail_text"], "0 / 30 min · Once");
-    assert_eq!(changed_row["next_occurrence"], DATE);
-    assert_eq!(changed_row["timer"]["running"], false);
-    assert_eq!(changed_row["carried"], false);
+    assert_eq!(
+        client.bad(
+            "metric.add",
+            json!({"op_id":"s4-metric-bad","name":"Mood","kind":"scale"})
+        ),
+        -32001
+    );
+    assert_eq!(
+        client.good(
+            "metric.edit",
+            json!({"op_id":"s4-metric-edit","id":metric,"unit":"pp"})
+        )["changed"]["metrics"][0]["unit"],
+        "pp"
+    );
+    assert_eq!(
+        client.bad(
+            "metric.edit",
+            json!({"op_id":"s4-metric-edit-bad","id":"focus","archived":true})
+        ),
+        -32001
+    );
+
+    let tag = client.good(
+        "tag.add",
+        json!({"op_id":"s4-tag","name":"Deen","color":"#00aa00"}),
+    )["changed"]["tags"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        client.bad(
+            "tag.add",
+            json!({"op_id":"s4-tag-bad","name":"Deen","color":"#00aa00"})
+        ),
+        -32001
+    );
+    assert_eq!(
+        client.good(
+            "tag.edit",
+            json!({"op_id":"s4-tag-edit","id":tag,"name":"Faith"})
+        )["changed"]["tags"][0]["name"],
+        "Faith"
+    );
+    assert_eq!(
+        client.bad(
+            "tag.edit",
+            json!({"op_id":"s4-tag-edit-bad","id":tag,"color":"red"})
+        ),
+        -32001
+    );
+    assert_eq!(
+        client
+            .good("tags.list", json!({}))
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(client.bad("tags.list", json!([])), -32602);
+
+    let project = client.good(
+        "project.add",
+        json!({"op_id":"s4-project","name":"Quran","tag_ids":[tag]}),
+    )["changed"]["projects"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        client.bad(
+            "project.add",
+            json!({"op_id":"s4-project-bad","name":"X","tag_ids":["missing"]})
+        ),
+        -32002
+    );
+    assert_eq!(
+        client.good(
+            "project.edit",
+            json!({"op_id":"s4-project-edit","id":project,"color":"#AA0000"})
+        )["changed"]["projects"][0]["color"],
+        "#aa0000"
+    );
+    assert_eq!(
+        client.bad(
+            "project.edit",
+            json!({"op_id":"s4-project-edit-bad","id":project,"expected_version":99,"name":"Y"})
+        ),
+        -32004
+    );
+    assert_eq!(
+        client.good("projects.list", json!({}))[0]["metrics"][0]["metric_id"],
+        "focus"
+    );
+    assert_eq!(client.bad("projects.list", json!([])), -32602);
+
+    let added = client.good(
+        "item.add",
+        json!({"op_id":"s4-add","title":"All methods","block":"fajr","project_id":project,"planned_minutes":30}),
+    );
+    let row = &added["changed"]["items"][0];
+    let id = row["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        (row["version"].clone(), row["schedule_text"].clone()),
+        (json!(1), json!("Once"))
+    );
     assert_eq!(
         client.bad("item.add", json!({"op_id":"s4-add-bad"})),
         -32001
     );
-
-    let day = client.good("day.get", json!({"date": DATE}));
-    let day_row = day["blocks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .flat_map(|block| block["items"].as_array().unwrap())
-        .find(|row| row["id"] == id)
-        .unwrap();
-    assert_eq!(day_row["version"], 1);
-    assert!(day_row["schedule_text"].is_string());
-    assert_eq!(day_row["timer"]["minutes_including_running"], 0);
-    let status = client.good("status.get", json!({}));
-    assert!(status["next"]["at"].is_string());
-    assert!(
-        status["planner"]["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["id"] == id && row["version"] == 1)
-    );
-
     let extra = client.good(
         "item.add",
         json!({"op_id":"s4-extra","title":"Extra","block":"fajr"}),
-    );
-    let extra_id = extra["changed"]["items"][0]["id"]
+    )["changed"]["items"][0]["id"]
         .as_str()
         .unwrap()
         .to_string();
-
-    let edited = client.good(
-        "item.edit",
-        json!({"op_id":"s4-edit","id":id,"title":"Renamed"}),
+    assert_eq!(
+        client.good(
+            "item.edit",
+            json!({"op_id":"s4-edit","id":id,"title":"Renamed"})
+        )["changed"]["items"][0]["title"],
+        "Renamed"
     );
-    assert_eq!(edited["changed"]["items"][0]["title"], "Renamed");
     assert_eq!(
         client.bad(
             "item.edit",
@@ -440,28 +508,26 @@ fn method_success_and_error(client: &mut Client) {
         ),
         -32004
     );
-
     assert!(
         client.good(
             "item.move",
-            json!({"op_id":"s4-move","id":extra_id,"block":"fajr","after_id":id})
+            json!({"op_id":"s4-move","id":extra,"block":"fajr","after_id":id})
         )["changed"]["items"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|row| row["id"] == extra_id)
+            .any(|row| row["id"] == extra)
     );
     assert_eq!(
         client.bad(
             "item.move",
-            json!({"op_id":"s4-move-bad","id":extra_id,"block":"fajr","after_id":id,"before_id":id})
+            json!({"op_id":"s4-move-bad","id":extra,"block":"fajr","after_id":id,"before_id":id})
         ),
         -32001
     );
-
     assert_eq!(
-        client.good("item.remove", json!({"op_id":"s4-remove","id":extra_id}))["changed"]["deleted"],
-        json!([extra_id])
+        client.good("item.remove", json!({"op_id":"s4-remove","id":extra}))["changed"]["deleted"],
+        json!([extra])
     );
     assert_eq!(
         client.bad(
@@ -471,74 +537,86 @@ fn method_success_and_error(client: &mut Client) {
         -32002
     );
 
-    assert_eq!(
-        client.good(
-            "entry.done",
-            json!({"op_id":"s4-done","item_id":id,"date":DATE})
-        )["changed"]["items"][0]["state"],
-        "done"
-    );
+    let started = client.good("session.start", json!({"op_id":"s4-start","item_id":id}));
+    let session = started["changed"]["sessions"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(started["changed"]["sessions"][0]["running"], true);
     assert_eq!(
         client.bad(
-            "entry.done",
-            json!({"op_id":"s4-done-bad","item_id":"missing"})
+            "session.start",
+            json!({"op_id":"s4-start-bad","item_id":id})
         ),
-        -32002
+        -32004
     );
-
-    assert_eq!(
-        client.good(
-            "entry.undo",
-            json!({"op_id":"s4-undo","item_id":id,"date":DATE})
-        )["undone"],
-        1
-    );
+    let status = client.good("status.get", json!({}));
+    assert_eq!(status["running"]["id"], json!(session));
+    assert_eq!(status["prompt"][1]["metric_id"], "quality");
     assert_eq!(
         client.bad(
-            "entry.undo",
-            json!({"op_id":"s4-undo-bad","item_id":"missing"})
-        ),
-        -32002
-    );
-
-    assert_eq!(
-        client.good(
-            "entry.log",
-            json!({"op_id":"s4-log","item_id":id,"kind":"minutes","value":5})
-        )["changed"]["items"][0]["minutes"],
-        5
-    );
-    assert_eq!(
-        client.bad(
-            "entry.log",
-            json!({"op_id":"s4-log-bad","item_id":id,"value":0})
+            "session.stop",
+            json!({"op_id":"s4-stop-bad","values":{"focus":4}})
         ),
         -32001
     );
-
-    assert!(
-        client.good("timer.start", json!({"op_id":"s4-start","item_id":id}))["changed"]["items"][0]
-            ["timer_started_at"]
-            .is_string()
+    assert_eq!(
+        client.good(
+            "session.stop",
+            json!({"op_id":"s4-stop","values":{"focus":4,"quality":5}})
+        )["changed"]["sessions"][0]["minutes"],
+        1
+    );
+    let logged = client.good(
+        "session.log",
+        json!({"op_id":"s4-log","project_id":project,"minutes":15,"values":{"focus":3,"quality":3}}),
+    )["changed"]["sessions"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        client.bad(
+            "session.log",
+            json!({"op_id":"s4-log-bad","project_id":project,"minutes":0})
+        ),
+        -32001
+    );
+    assert_eq!(
+        client.good(
+            "session.edit",
+            json!({"op_id":"s4-session-edit","id":logged,"minutes":20})
+        )["changed"]["sessions"][0]["minutes"],
+        20
     );
     assert_eq!(
         client.bad(
-            "timer.start",
-            json!({"op_id":"s4-start-bad","item_id":"missing"})
+            "session.edit",
+            json!({"op_id":"s4-session-edit-bad","id":"missing"})
+        ),
+        -32002
+    );
+    assert_eq!(
+        client.good(
+            "session.remove",
+            json!({"op_id":"s4-session-remove","id":logged})
+        )["changed"]["deleted"],
+        json!([logged])
+    );
+    assert_eq!(
+        client.bad(
+            "session.remove",
+            json!({"op_id":"s4-session-remove-bad","id":logged})
         ),
         -32002
     );
 
     assert_eq!(
-        client.good("timer.stop", json!({"op_id":"s4-stop","item_id":id}))["changed"]["entries"][0]
-            ["kind"],
-        "timer"
+        client.good("tag.remove", json!({"op_id":"s4-tag-remove","id":tag}))["changed"]["projects"]
+            [0]["tags"],
+        json!([])
     );
     assert_eq!(
-        client.bad(
-            "timer.stop",
-            json!({"op_id":"s4-stop-bad","item_id":"missing"})
-        ),
+        client.bad("tag.remove", json!({"op_id":"s4-tag-remove-bad","id":tag})),
         -32002
     );
 
@@ -556,7 +634,6 @@ fn method_success_and_error(client: &mut Client) {
         ),
         -32001
     );
-
     assert_eq!(
         client.good(
             "prayer.unmark",
@@ -574,7 +651,6 @@ fn method_success_and_error(client: &mut Client) {
 
     assert_eq!(client.good("config.get", json!({}))["method"], "mwl");
     assert_eq!(client.bad("config.get", json!([])), -32602);
-
     assert_eq!(
         client.good(
             "config.set",
@@ -587,21 +663,19 @@ fn method_success_and_error(client: &mut Client) {
         -32001
     );
 
-    let exported = client.good("export", json!({}));
-    assert_eq!(exported["format"], "salah-export");
-    assert_eq!(client.bad("export", json!([])), -32602);
-
-    assert!(
-        client.good("import", json!({"op_id":"s4-import","data":exported}))["summary"]["unchanged"]
-            .is_number()
-    );
-    assert_eq!(
-        client.bad(
-            "import",
-            json!({"op_id":"s4-import-bad","data":{"format":"not-salah"}})
-        ),
-        -32602
-    );
+    for removed in [
+        "entry.done",
+        "timer.start",
+        "history.get",
+        "export",
+        "import",
+    ] {
+        assert_eq!(
+            client.bad(removed, json!({})),
+            -32601,
+            "{removed} must be gone"
+        );
+    }
 
     let subscribed = client.good(
         "subscribe",

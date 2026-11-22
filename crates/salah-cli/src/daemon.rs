@@ -10,7 +10,7 @@
 //! `salah` CLI process, which never talks to the daemon, still produce
 //! `changed` notifications.
 
-use crate::XdgConfig;
+use crate::local::XdgConfig;
 use chrono::{DateTime, NaiveDate, Utc};
 use salah_core::status;
 use salah_domain::day::BoundaryId;
@@ -440,13 +440,9 @@ fn watcher_loop(data: PathBuf, shared: Arc<Shared>) {
                     scopes.clear();
                     op_id = None;
                 }
-                let scope = match change.entity.as_str() {
-                    "item" => ChangeScope::Items,
-                    "entry" => ChangeScope::Entries,
-                    "prayer_mark" => ChangeScope::Marks,
-                    _ => ChangeScope::Items,
-                };
-                if !scopes.contains(&scope) {
+                if let Some(scope) = ChangeScope::of_entity(&change.entity)
+                    && !scopes.contains(&scope)
+                {
                     scopes.push(scope);
                 }
                 if op_id.is_none() {

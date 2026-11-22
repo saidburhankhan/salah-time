@@ -20,8 +20,8 @@ fn missing_config_uses_tashkent() {
 }
 
 #[test]
-fn legacy_config_without_auto_location_fields_still_loads() {
-    let root = std::env::temp_dir().join(format!("salah-legacy-{}", std::process::id()));
+fn config_without_auto_location_fields_still_loads() {
+    let root = std::env::temp_dir().join(format!("salah-old-config-{}", std::process::id()));
     let path = root.join("config.json");
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(

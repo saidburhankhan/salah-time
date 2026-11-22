@@ -1,5 +1,7 @@
+use crate::Store;
 use crate::config::Config;
-use crate::planner::Today;
+use crate::day::Today;
+use crate::sessions::{self, PromptMetric, SessionView};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use salah_domain::day::{self, BlockKey, Boundary};
 use salah_domain::error::Error;
@@ -24,7 +26,6 @@ pub struct NextPrayer {
     pub remaining: String,
     pub remaining_short: String,
     /// UTC instant of the next boundary; clients derive countdowns from it.
-    #[serde(skip_serializing)]
     pub at: DateTime<Utc>,
     pub remaining_seconds: i64,
 }
@@ -75,14 +76,31 @@ pub struct Status {
     /// cannot be read, so prayer times still display.
     pub planner: Option<Today>,
     pub planner_error: Option<String>,
+    /// The running session, if any.
+    pub running: Option<SessionView>,
+    /// The metrics to ask for when `running` stops.
+    pub prompt: Vec<PromptMetric>,
 }
 
 impl Status {
-    pub fn attach_planner(&mut self, planner: Result<Today, Error>) {
-        match planner {
-            Ok(today) => {
+    /// Adds today's plan and the running session. A store failure is reported
+    /// in `planner_error` so prayer times still display.
+    pub fn attach_planner(&mut self, store: &mut Store, config: &Config, now: DateTime<Utc>) {
+        let mut tracking = || -> Result<_, Error> {
+            let today = crate::day::today(store, config, now)?;
+            let running = sessions::running(store)?;
+            let prompt = sessions::prompt(
+                store,
+                running.as_ref().and_then(|s| s.project_id.as_deref()),
+            )?;
+            Ok((today, running, prompt))
+        };
+        match tracking() {
+            Ok((today, running, prompt)) => {
                 self.planner = Some(today);
                 self.planner_error = None;
+                self.running = running.as_ref().map(SessionView::from);
+                self.prompt = prompt;
             }
             Err(error) => {
                 self.planner = None;
@@ -150,6 +168,8 @@ pub fn build(config: &Config, utc_now: DateTime<Utc>) -> Result<Status, Error> {
         boundaries,
         planner: None,
         planner_error: None,
+        running: None,
+        prompt: Vec::new(),
     })
 }
 

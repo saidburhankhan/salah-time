@@ -1,6 +1,6 @@
 use std::fmt;
 
-/// Stable application error classes. The contained text is the legacy CLI
+/// Stable application error classes. The contained text is the human CLI
 /// message and is deliberately rendered without decoration by `Display`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
@@ -8,6 +8,8 @@ pub enum Error {
         field: &'static str,
         message: String,
     },
+    /// A session was stopped or logged without its project's required metrics.
+    MissingMetrics(Vec<String>),
     NotFound {
         what: &'static str,
         id: String,
@@ -26,7 +28,7 @@ pub enum Error {
 impl Error {
     pub const fn code(&self) -> &'static str {
         match self {
-            Self::Validation { .. } => "validation",
+            Self::Validation { .. } | Self::MissingMetrics(_) => "validation",
             Self::NotFound { .. } => "not_found",
             Self::Ambiguous { .. } => "ambiguous",
             Self::Conflict(_) => "conflict",
@@ -65,6 +67,9 @@ impl fmt::Display for Error {
             | Self::SourceUnavailable(message)
             | Self::Config(message)
             | Self::Internal(message) => f.write_str(message),
+            Self::MissingMetrics(ids) => {
+                write!(f, "missing required metrics: {}", ids.join(", "))
+            }
             Self::NotFound { what, id } if *what == "item" && id.chars().count() < 4 => {
                 write!(f, "no item {id:?}; use at least 4 characters of the id")
             }

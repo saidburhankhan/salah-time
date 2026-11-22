@@ -1,0 +1,32 @@
+{
+  "id": 4,
+  "jsonrpc": "2.0",
+  "result": {
+    "changed": {
+      "deleted": [],
+      "items": [],
+      "marks": [],
+      "metrics": [
+        {
+          "archived": false,
+          "builtin": false,
+          "created_at": "2031-05-14T04:30:00Z",
+          "deleted_at": null,
+          "id": "<id:1>",
+          "kind": "count",
+          "name": "Pages read",
+          "rollup": "sum",
+          "scale_max": null,
+          "unit": "pages",
+          "updated_at": "2031-05-14T04:30:00Z",
+          "version": 2
+        }
+      ],
+      "projects": [],
+      "sessions": [],
+      "tags": []
+    },
+    "op_id": "op-metric-edit",
+    "revision": 2
+  }
+}

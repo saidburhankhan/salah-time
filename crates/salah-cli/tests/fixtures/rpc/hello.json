@@ -3,7 +3,7 @@
   "jsonrpc": "2.0",
   "result": {
     "capabilities": [
-      "timer.v1",
+      "tracking.v1",
       "events.v1",
       "clock.v1"
     ],

@@ -428,7 +428,6 @@ dependencies = [
  "salah-store",
  "serde",
  "serde_json",
- "uuid",
 ]
 
 [[package]]

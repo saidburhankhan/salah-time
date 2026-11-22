@@ -1,0 +1,16 @@
+{
+  "error": {
+    "code": -32001,
+    "data": {
+      "field": "values",
+      "kind": "validation",
+      "missing": [
+        "quality"
+      ],
+      "retryable": false
+    },
+    "message": "missing required metrics: quality"
+  },
+  "id": 2,
+  "jsonrpc": "2.0"
+}

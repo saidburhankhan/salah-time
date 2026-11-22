@@ -23,13 +23,16 @@ fn help_lists_subcommands() {
     assert!(output.status.success(), "{}", stderr(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     for command in [
-        "status", "config", "location", "official", "item", "history", "export", "import",
-        "methods",
+        "status", "config", "location", "official", "item", "session", "project", "tag", "metric",
+        "day", "stats", "methods",
     ] {
         assert!(
             stdout.contains(command),
             "missing {command} in help:\n{stdout}"
         );
+    }
+    for removed in ["history", "export", "import"] {
+        assert!(!stdout.contains(removed), "{removed} is still in help");
     }
     assert!(!path.exists());
 }

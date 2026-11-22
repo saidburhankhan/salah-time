@@ -1,0 +1,11 @@
+{
+  "id": 11,
+  "jsonrpc": "2.0",
+  "result": {
+    "block": "fajr",
+    "planned_minutes": 20,
+    "repeat": "daily",
+    "title": "Read",
+    "weekdays": null
+  }
+}

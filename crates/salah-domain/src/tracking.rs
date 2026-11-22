@@ -1,7 +1,7 @@
 //! Day-centred tracking entities shared by storage, core, and protocol.
 
 use crate::day::{BlockKey, BoundaryId};
-use crate::item::{Repeat, Weekdays};
+use crate::item::{self, Repeat, Weekdays};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +17,7 @@ pub struct Project {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
-    #[serde(default = "default_version", skip_serializing)]
+    #[serde(default = "default_version")]
     pub version: i64,
 }
 
@@ -29,7 +29,7 @@ pub struct Tag {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
-    #[serde(default = "default_version", skip_serializing)]
+    #[serde(default = "default_version")]
     pub version: i64,
 }
 
@@ -61,7 +61,7 @@ pub struct Metric {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
-    #[serde(default = "default_version", skip_serializing)]
+    #[serde(default = "default_version")]
     pub version: i64,
 }
 
@@ -92,7 +92,7 @@ pub struct Item {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
-    #[serde(default = "default_version", skip_serializing)]
+    #[serde(default = "default_version")]
     pub version: i64,
 }
 
@@ -111,7 +111,7 @@ pub struct Session {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
-    #[serde(default = "default_version", skip_serializing)]
+    #[serde(default = "default_version")]
     pub version: i64,
 }
 
@@ -190,6 +190,15 @@ impl Item {
                 }
             }
     }
+
+    /// First date on or after `from` (and the item's first day) on which it applies.
+    pub fn next_occurrence(&self, from: NaiveDate) -> Option<NaiveDate> {
+        item::next_occurrence(self.repeat, self.weekdays, self.day.max(from))
+    }
+
+    pub fn schedule_text(&self) -> String {
+        item::schedule_text(self.repeat, self.weekdays)
+    }
 }
 
 impl Session {
@@ -199,6 +208,18 @@ impl Session {
 
     pub fn is_running(&self) -> bool {
         self.is_live() && self.started_at.is_some() && self.ended_at.is_none()
+    }
+
+    /// Weight of this session in an `avg` rollup: its minutes, a tick weighs 1.
+    pub fn weight(&self) -> f64 {
+        self.minutes.unwrap_or(1).max(1) as f64
+    }
+
+    pub fn value(&self, metric_id: &str) -> Option<f64> {
+        self.values
+            .iter()
+            .find(|v| v.metric_id == metric_id)
+            .map(|v| v.value)
     }
 }
 
@@ -222,6 +243,70 @@ mod tests {
             deleted_at: None,
             version: 1,
         }
+    }
+
+    fn item(repeat: Repeat, weekdays: Option<Weekdays>) -> Item {
+        let now = Utc::now();
+        Item {
+            id: "item".into(),
+            title: "Item".into(),
+            project_id: None,
+            block: BoundaryId::Fajr,
+            repeat,
+            weekdays,
+            day: day(20),
+            planned_minutes: None,
+            position: 0,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            version: 1,
+        }
+    }
+
+    fn day(day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 11, day).unwrap()
+    }
+
+    #[test]
+    fn items_apply_by_repeat_rule_from_their_first_day() {
+        let once = item(Repeat::None, None);
+        assert!(once.applies_to(day(20)) && !once.applies_to(day(21)));
+        let daily = item(Repeat::Daily, None);
+        assert!(daily.applies_to(day(25)) && !daily.applies_to(day(19)));
+        // 2026-11-23 is a Monday.
+        let weekly = item(Repeat::Weekly, Some(Weekdays::parse_list("mon").unwrap()));
+        assert!(weekly.applies_to(day(23)) && !weekly.applies_to(day(24)));
+        assert_eq!(weekly.next_occurrence(day(1)), Some(day(23)));
+        let mut removed = daily.clone();
+        removed.deleted_at = Some(Utc::now());
+        assert!(!removed.applies_to(day(25)));
+    }
+
+    #[test]
+    fn running_sessions_have_a_start_and_no_end() {
+        let now = Utc::now();
+        let mut session = Session {
+            id: "s".into(),
+            item_id: None,
+            project_id: Some("p".into()),
+            block: BlockKey {
+                day: day(20),
+                start: BoundaryId::Fajr,
+            },
+            started_at: Some(now),
+            ended_at: None,
+            minutes: None,
+            note: None,
+            values: vec![],
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            version: 1,
+        };
+        assert!(session.is_running());
+        session.ended_at = Some(now);
+        assert!(!session.is_running());
     }
 
     #[test]

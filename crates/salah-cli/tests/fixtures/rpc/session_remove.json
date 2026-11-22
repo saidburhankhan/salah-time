@@ -1,0 +1,19 @@
+{
+  "id": 11,
+  "jsonrpc": "2.0",
+  "result": {
+    "changed": {
+      "deleted": [
+        "<id:7>"
+      ],
+      "items": [],
+      "marks": [],
+      "metrics": [],
+      "projects": [],
+      "sessions": [],
+      "tags": []
+    },
+    "op_id": "op-session-remove",
+    "revision": 17
+  }
+}

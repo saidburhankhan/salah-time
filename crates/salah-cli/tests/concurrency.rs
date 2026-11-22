@@ -1,4 +1,4 @@
-//! Real-process concurrency checks for the planner store.
+//! Real-process concurrency checks for the tracking store.
 //!
 //! Every command runs the actual `salah` binary against one temporary
 //! `SALAH_DATA`, so these tests exercise the same SQLite locking a desktop app
@@ -6,7 +6,6 @@
 
 use salah_core::config::Config;
 use salah_domain::day::BoundaryId;
-use salah_domain::item::LegacyEntryKind;
 use salah_store::Store;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -82,7 +81,10 @@ impl Fixture {
         let args = strings([
             "item", "add", title, "--block", "asr", "--date", DATE, "--json",
         ]);
-        self.json(&args)["id"].as_str().unwrap().to_string()
+        self.json(&args)["changed"]["items"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
     }
 
     fn store(&self) -> Store {
@@ -149,7 +151,7 @@ impl Readers {
                         strings(["day", "--json"]),
                         strings(["stats", "--json"]),
                         strings(["status", "--json"]),
-                        strings(["export"]),
+                        strings(["project", "list", "--json"]),
                     ];
                     while !stop.load(Ordering::SeqCst) {
                         for command in &commands {
@@ -247,7 +249,7 @@ fn concurrent_first_opens_migrate_once_without_failing() {
 }
 
 #[test]
-fn concurrent_mutations_keep_timers_and_entry_counts_correct() {
+fn concurrent_mutations_keep_one_timer_and_every_logged_session() {
     const WRITERS: usize = 6;
     const LOGS_PER_ITEM: usize = 3;
     let fixture = Arc::new(Fixture::new());
@@ -271,61 +273,58 @@ fn concurrent_mutations_keep_timers_and_entry_counts_correct() {
                 assert_success(&output, &args);
             }
             for _ in 0..LOGS_PER_ITEM {
-                let args = strings(["item", "log", &id, "5", "--json"]);
+                let args = strings(["session", "log", "--item", &id, "--minutes", "5", "--json"]);
                 let output = fixture.run(&args);
                 assert_success(&output, &args);
             }
-            let start = strings(["item", "start", &id, "--json"]);
-            let output = fixture.run(&start);
-            assert_success(&output, &start);
-            let stop = strings(["item", "stop", &id, "--json"]);
-            let output = fixture.run(&stop);
-            assert_success(&output, &stop);
         }));
     }
     for handle in handles {
         handle.join().unwrap();
     }
 
-    // Starts race too: the last committed start must have closed every other
-    // running timer in the same transaction.
+    // Starts race: exactly one wins, the others are refused as conflicts.
     let mut starts = Vec::new();
     for id in &ids {
         let fixture = Arc::clone(&fixture);
         let id = id.clone();
         starts.push(thread::spawn(move || {
-            let args = strings(["item", "start", &id, "--json"]);
-            let output = fixture.run(&args);
-            assert_success(&output, &args);
+            let output = fixture.run(&strings(["session", "start", "--item", &id, "--json"]));
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert!(
+                    stderr.contains("already running"),
+                    "unexpected failure: {stderr}"
+                );
+            }
+            output.status.success()
         }));
     }
-    for handle in starts {
-        handle.join().unwrap();
-    }
+    let started = starts
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .filter(|started| *started)
+        .count();
 
     readers.finish();
 
+    assert_eq!(started, 1, "exactly one concurrent start succeeds");
     let store = fixture.store();
-    assert_eq!(
-        store.running_timers().unwrap().len(),
-        1,
-        "at most one timer may run"
-    );
+    assert_eq!(store.running_sessions().unwrap().len(), 1);
     let positions = live_positions(&store, BoundaryId::Asr);
     assert_eq!(positions.len(), WRITERS);
     assert_dense(&positions);
 
-    let entries = store.entries().unwrap();
+    let day = chrono::NaiveDate::parse_from_str(DATE, "%Y-%m-%d").unwrap();
+    let sessions = store.sessions_between(day, day).unwrap();
     for id in &ids {
-        let logged = entries
+        let logged = sessions
             .iter()
-            .filter(|entry| {
-                entry.is_live() && entry.item_id == *id && entry.kind == LegacyEntryKind::Minutes
-            })
+            .filter(|s| s.is_live() && s.item_id.as_deref() == Some(id) && s.minutes == Some(5))
             .count();
         assert_eq!(
             logged, LOGS_PER_ITEM,
-            "every successful log command must keep exactly one entry"
+            "every successful log command must keep exactly one session"
         );
     }
 }

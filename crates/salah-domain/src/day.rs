@@ -12,7 +12,7 @@ pub struct PrayerTime {
 }
 
 /// Identifies one block of one day. This is the anchor stored with items and
-/// entries, so its serialized shape must stay stable.
+/// sessions, so its serialized shape must stay stable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct BlockKey {
     /// The day (Fajr→Sleep), named by the civil date of its Fajr.

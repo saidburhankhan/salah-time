@@ -1,0 +1,27 @@
+{
+  "id": 5,
+  "jsonrpc": "2.0",
+  "result": {
+    "changed": {
+      "deleted": [],
+      "items": [],
+      "marks": [],
+      "metrics": [],
+      "projects": [],
+      "sessions": [],
+      "tags": [
+        {
+          "color": "#2e7d32",
+          "created_at": "2031-05-14T04:30:00Z",
+          "deleted_at": null,
+          "id": "<id:2>",
+          "name": "Deen",
+          "updated_at": "2031-05-14T04:30:00Z",
+          "version": 1
+        }
+      ]
+    },
+    "op_id": "op-tag-add",
+    "revision": 3
+  }
+}

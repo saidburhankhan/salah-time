@@ -1,10 +1,10 @@
 //! Quick add: turns one line such as "read 20m after isha daily" into an
 //! item draft. Words that are not part of a recognised phrase form the title.
 
-use crate::planner::NewItem;
+use crate::items::NewItem;
 use salah_domain::day::BoundaryId;
 use salah_domain::error::Error;
-use salah_domain::item::{LegacyMeasure, Repeat, Weekdays, validate_title, weekday_index};
+use salah_domain::item::{Repeat, Weekdays, validate_title, weekday_index};
 use serde::Serialize;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -13,8 +13,7 @@ pub struct Draft {
     pub block: Option<BoundaryId>,
     pub repeat: Repeat,
     pub weekdays: Option<Weekdays>,
-    pub measure: LegacyMeasure,
-    pub target: Option<i64>,
+    pub planned_minutes: Option<i64>,
 }
 
 impl Draft {
@@ -24,9 +23,8 @@ impl Draft {
             block: self.block,
             repeat: Some(self.repeat),
             weekdays: self.weekdays,
-            measure: Some(self.measure),
-            target: self.target,
-            date: None,
+            planned_minutes: self.planned_minutes,
+            ..NewItem::default()
         }
     }
 }
@@ -75,14 +73,6 @@ fn duration(word: &str) -> Option<i64> {
     let (hours, rest) = word.split_once('h')?;
     let minutes = rest.strip_suffix('m').unwrap_or(rest);
     Some(digits(hours)? * 60 + digits(minutes)?)
-}
-
-/// `x3`, `3x` → count.
-fn times(word: &str) -> Option<i64> {
-    let n = word.strip_prefix('x').or_else(|| word.strip_suffix('x'))?;
-    (!n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
-        .then(|| n.parse().ok())
-        .flatten()
 }
 
 fn is_number(word: &str) -> Option<i64> {
@@ -138,8 +128,7 @@ pub fn parse(text: &str) -> Result<Draft, Error> {
         block: None,
         repeat: Repeat::None,
         weekdays: None,
-        measure: LegacyMeasure::Check,
-        target: None,
+        planned_minutes: None,
     };
     let mut i = 0;
     while i < words.len() {
@@ -159,25 +148,15 @@ pub fn parse(text: &str) -> Result<Draft, Error> {
         } else if let Some(block) = prayer(word).filter(|_| draft.block.is_none()) {
             draft.block = Some(block);
             take = 1;
-        } else if let Some(minutes) = duration(word).filter(|_| draft.target.is_none()) {
-            draft.measure = LegacyMeasure::Minutes;
-            draft.target = Some(minutes);
-            take = 1;
-        } else if let Some(count) = times(word).filter(|_| draft.target.is_none()) {
-            draft.measure = LegacyMeasure::Count;
-            draft.target = Some(count);
+        } else if let Some(minutes) = duration(word).filter(|_| draft.planned_minutes.is_none()) {
+            draft.planned_minutes = Some(minutes);
             take = 1;
         } else if let (Some(n), Some(unit)) = (is_number(word), next) {
-            if draft.target.is_none() {
-                if let Some(minutes) = duration(&format!("{n}{unit}")) {
-                    draft.measure = LegacyMeasure::Minutes;
-                    draft.target = Some(minutes);
-                    take = 2;
-                } else if matches!(unit, "times" | "time" | "x") {
-                    draft.measure = LegacyMeasure::Count;
-                    draft.target = Some(n);
-                    take = 2;
-                }
+            if draft.planned_minutes.is_none()
+                && let Some(minutes) = duration(&format!("{n}{unit}"))
+            {
+                draft.planned_minutes = Some(minutes);
+                take = 2;
             }
         } else if matches!(word, "daily" | "everyday") {
             draft.repeat = Repeat::Daily;
@@ -226,31 +205,25 @@ mod tests {
         assert_eq!(draft.title, "Read");
         assert_eq!(draft.block, Some(BoundaryId::Isha));
         assert_eq!(draft.repeat, Repeat::Daily);
-        assert_eq!(
-            (draft.measure, draft.target),
-            (LegacyMeasure::Minutes, Some(20))
-        );
+        assert_eq!(draft.planned_minutes, Some(20));
     }
 
     #[test]
-    fn understands_durations_counts_and_weekdays() {
+    fn understands_durations_and_weekdays() {
         let draft = parse("Deep work 1h30m before asr weekdays").unwrap();
         assert_eq!(draft.title, "Deep work");
         assert_eq!(draft.block, Some(BoundaryId::Dhuhr));
         assert_eq!(draft.weekdays, Some(Weekdays::WORKWEEK));
-        assert_eq!(draft.target, Some(90));
+        assert_eq!(draft.planned_minutes, Some(90));
 
-        let draft = parse("pushups 30 times every mon, wed and fri").unwrap();
+        let draft = parse("pushups every mon, wed and fri").unwrap();
         assert_eq!(draft.title, "Pushups");
-        assert_eq!(
-            (draft.measure, draft.target),
-            (LegacyMeasure::Count, Some(30))
-        );
+        assert_eq!(draft.planned_minutes, None);
         assert_eq!(draft.weekdays.unwrap().names(), ["mon", "wed", "fri"]);
 
         let draft = parse("call mum 15 min on sundays").unwrap();
         assert_eq!(draft.title, "Call mum");
-        assert_eq!(draft.target, Some(15));
+        assert_eq!(draft.planned_minutes, Some(15));
         assert_eq!(draft.weekdays.unwrap().names(), ["sun"]);
     }
 
@@ -269,12 +242,12 @@ mod tests {
     }
 
     #[test]
-    fn plain_text_is_a_one_time_tick() {
+    fn plain_text_is_a_one_time_item_without_a_plan() {
         let draft = parse("Pay the electricity bill").unwrap();
         assert_eq!(draft.title, "Pay the electricity bill");
         assert_eq!(draft.block, None);
         assert_eq!(draft.repeat, Repeat::None);
-        assert_eq!(draft.measure, LegacyMeasure::Check);
+        assert_eq!(draft.planned_minutes, None);
     }
 
     #[test]

@@ -1,0 +1,197 @@
+{
+  "id": 8,
+  "jsonrpc": "2.0",
+  "result": {
+    "blocks": [
+      {
+        "actual_minutes": 0,
+        "capacity_minutes": 252,
+        "end": "fajr",
+        "items": [],
+        "planned_minutes": 0,
+        "start": "night"
+      },
+      {
+        "actual_minutes": 45,
+        "capacity_minutes": 547,
+        "end": "dhuhr",
+        "items": [
+          {
+            "actual_minutes": 25,
+            "block": "fajr",
+            "detail_text": "25 / 30 min · Daily",
+            "done": true,
+            "id": "<id:4>",
+            "next_occurrence": "2031-05-14",
+            "planned_minutes": 30,
+            "position": 0,
+            "project": {
+              "color": "#4c8bf5",
+              "id": "<id:3>",
+              "name": "Quran"
+            },
+            "repeat": "daily",
+            "schedule_text": "Daily",
+            "sessions": [
+              {
+                "block": "fajr",
+                "day": "2031-05-14",
+                "ended_at": "2031-05-14T04:55:00Z",
+                "id": "<id:6>",
+                "item_id": "<id:4>",
+                "minutes": 25,
+                "note": "Calm",
+                "project_id": "<id:3>",
+                "running": false,
+                "started_at": "2031-05-14T04:30:00Z",
+                "values": {
+                  "<id:1>": 6.0,
+                  "focus": 4.0,
+                  "quality": 5.0
+                },
+                "version": 2
+              }
+            ],
+            "title": "Read Quran",
+            "version": 2,
+            "weekdays": null
+          },
+          {
+            "actual_minutes": 0,
+            "block": "fajr",
+            "detail_text": "0 / 15 min · Once",
+            "done": true,
+            "id": "<id:5>",
+            "next_occurrence": "2031-05-14",
+            "planned_minutes": 15,
+            "position": 1,
+            "project": null,
+            "repeat": "none",
+            "schedule_text": "Once",
+            "sessions": [
+              {
+                "block": "fajr",
+                "day": "2031-05-14",
+                "ended_at": null,
+                "id": "<id:8>",
+                "item_id": "<id:5>",
+                "minutes": null,
+                "note": null,
+                "project_id": null,
+                "running": false,
+                "started_at": null,
+                "values": {},
+                "version": 1
+              }
+            ],
+            "title": "Walk",
+            "version": 2,
+            "weekdays": null
+          }
+        ],
+        "planned_minutes": 45,
+        "start": "fajr"
+      },
+      {
+        "actual_minutes": 0,
+        "capacity_minutes": 305,
+        "end": "asr",
+        "items": [],
+        "planned_minutes": 0,
+        "start": "dhuhr"
+      },
+      {
+        "actual_minutes": 0,
+        "capacity_minutes": 129,
+        "end": "maghrib",
+        "items": [],
+        "planned_minutes": 0,
+        "start": "asr"
+      },
+      {
+        "actual_minutes": 0,
+        "capacity_minutes": 107,
+        "end": "isha",
+        "items": [],
+        "planned_minutes": 0,
+        "start": "maghrib"
+      },
+      {
+        "actual_minutes": 0,
+        "capacity_minutes": 100,
+        "end": "sleep",
+        "items": [],
+        "planned_minutes": 0,
+        "start": "isha"
+      }
+    ],
+    "day": "2031-05-14",
+    "fulfilment": {
+      "actual_minutes": 45,
+      "done_items": 2,
+      "planned_items": 2,
+      "planned_minutes": 45
+    },
+    "is_today": true,
+    "night_start": "23:00",
+    "now": {
+      "block": "fajr",
+      "next": {
+        "at": "2031-05-14T07:19:00Z",
+        "id": "dhuhr",
+        "name": "Dhuhr",
+        "remaining_seconds": 8640,
+        "time": "12:19"
+      },
+      "sleeping": false
+    },
+    "open": 0,
+    "prayers": [
+      {
+        "current": true,
+        "id": "fajr",
+        "marked": true,
+        "name": "Fajr",
+        "passed": true,
+        "time": "03:12"
+      },
+      {
+        "current": false,
+        "id": "dhuhr",
+        "marked": false,
+        "name": "Dhuhr",
+        "passed": false,
+        "time": "12:19"
+      },
+      {
+        "current": false,
+        "id": "asr",
+        "marked": false,
+        "name": "Asr",
+        "passed": false,
+        "time": "17:24"
+      },
+      {
+        "current": false,
+        "id": "maghrib",
+        "marked": false,
+        "name": "Maghrib",
+        "passed": false,
+        "time": "19:33"
+      },
+      {
+        "current": false,
+        "id": "isha",
+        "marked": false,
+        "name": "Isha",
+        "passed": false,
+        "time": "21:20"
+      }
+    ],
+    "sleep": {
+      "passed": false,
+      "time": "23:00"
+    },
+    "sunrise": "05:06"
+  }
+}

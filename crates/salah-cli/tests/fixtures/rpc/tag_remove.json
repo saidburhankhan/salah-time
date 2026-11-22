@@ -1,0 +1,95 @@
+{
+  "id": 12,
+  "jsonrpc": "2.0",
+  "result": {
+    "changed": {
+      "deleted": [
+        "<id:2>"
+      ],
+      "items": [],
+      "marks": [],
+      "metrics": [],
+      "projects": [
+        {
+          "archived": false,
+          "color": "#4c8bf5",
+          "created_at": "2031-05-14T04:30:00Z",
+          "deleted_at": null,
+          "id": "<id:3>",
+          "metrics": [
+            {
+              "metric": {
+                "archived": false,
+                "builtin": true,
+                "created_at": "1970-01-01T00:00:00Z",
+                "deleted_at": null,
+                "id": "focus",
+                "kind": "scale",
+                "name": "Focus",
+                "rollup": "avg",
+                "scale_max": 5,
+                "unit": "",
+                "updated_at": "1970-01-01T00:00:00Z",
+                "version": 1
+              },
+              "metric_id": "focus",
+              "position": 0,
+              "project_id": "<id:3>",
+              "required": true
+            },
+            {
+              "metric": {
+                "archived": false,
+                "builtin": true,
+                "created_at": "1970-01-01T00:00:00Z",
+                "deleted_at": null,
+                "id": "quality",
+                "kind": "scale",
+                "name": "Quality",
+                "rollup": "avg",
+                "scale_max": 5,
+                "unit": "",
+                "updated_at": "1970-01-01T00:00:00Z",
+                "version": 1
+              },
+              "metric_id": "quality",
+              "position": 1,
+              "project_id": "<id:3>",
+              "required": true
+            },
+            {
+              "metric": {
+                "archived": false,
+                "builtin": false,
+                "created_at": "2031-05-14T04:30:00Z",
+                "deleted_at": null,
+                "id": "<id:1>",
+                "kind": "count",
+                "name": "Pages read",
+                "rollup": "sum",
+                "scale_max": null,
+                "unit": "pages",
+                "updated_at": "2031-05-14T04:30:00Z",
+                "version": 2
+              },
+              "metric_id": "<id:1>",
+              "position": 2,
+              "project_id": "<id:3>",
+              "required": false
+            }
+          ],
+          "name": "Quran",
+          "note": "Daily recitation",
+          "tag_ids": [],
+          "tags": [],
+          "updated_at": "2031-05-14T04:55:00Z",
+          "version": 3
+        }
+      ],
+      "sessions": [],
+      "tags": []
+    },
+    "op_id": "op-tag-remove",
+    "revision": 18
+  }
+}

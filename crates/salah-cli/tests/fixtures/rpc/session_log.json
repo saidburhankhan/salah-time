@@ -1,0 +1,35 @@
+{
+  "id": 4,
+  "jsonrpc": "2.0",
+  "result": {
+    "changed": {
+      "deleted": [],
+      "items": [],
+      "marks": [],
+      "metrics": [],
+      "projects": [],
+      "sessions": [
+        {
+          "block": "fajr",
+          "day": "2031-05-14",
+          "ended_at": null,
+          "id": "<id:7>",
+          "item_id": null,
+          "minutes": 15,
+          "note": null,
+          "project_id": "<id:3>",
+          "running": false,
+          "started_at": null,
+          "values": {
+            "focus": 3.0,
+            "quality": 4.0
+          },
+          "version": 1
+        }
+      ],
+      "tags": []
+    },
+    "op_id": "op-session-log",
+    "revision": 13
+  }
+}

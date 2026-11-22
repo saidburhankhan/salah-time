@@ -104,9 +104,27 @@ impl Response {
 #[serde(rename_all = "lowercase")]
 pub enum ChangeScope {
     Items,
-    Entries,
+    Sessions,
+    Projects,
+    Tags,
+    Metrics,
     Marks,
     Config,
+}
+
+impl ChangeScope {
+    /// The scope of a store change-log entity name.
+    pub fn of_entity(entity: &str) -> Option<Self> {
+        Some(match entity {
+            "item" => Self::Items,
+            "session" => Self::Sessions,
+            "project" => Self::Projects,
+            "tag" => Self::Tags,
+            "metric" => Self::Metrics,
+            "prayer_mark" => Self::Marks,
+            _ => return None,
+        })
+    }
 }
 
 /// Invalidation notification. It deliberately carries no entity patches: a
@@ -217,7 +235,7 @@ mod tests {
         let notification = ChangedNotification {
             revision: 7,
             days: vec![NaiveDate::from_ymd_opt(2031, 5, 14).unwrap()],
-            scopes: vec![ChangeScope::Items, ChangeScope::Entries],
+            scopes: vec![ChangeScope::Items, ChangeScope::Sessions],
             op_id: Some("op-1".into()),
             actor: "widget".into(),
         }

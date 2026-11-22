@@ -52,3 +52,55 @@ IN PROGRESS S3: fixed BoundaryId schema checks and added night item/session roun
 IN PROGRESS S3 (continued): schema SQL is expanded and reviewable; added `salah_core::tracking` with start/stop/log/edit/remove, metric and required-metric validation, snapshot materialization, fulfilment, and weighted metric/day stats. Workspace compiles and focused store/core tests pass. Not checkpoint-ready: legacy planner/protocol/CLI types and ignored tests still require coordinated removal, stats still need project/tag/block projections, and `git diff --check` is currently blocked by W2's unrelated `app/tests/salah_app_tests.cpp` trailing blank line.
 
 IN PROGRESS S3/S4 handoff: completed project, tag, and block stats projections (including weighted focus and capacities); workspace check and strict core Clippy pass. Remaining critical path: replace `salah-protocol::{methods,dispatcher}` with the locked RPC surface, simplify the CLI to that surface, then delete old core planner/export/quick modules, store translation helpers, domain `Legacy*`/DayItem projections, and obsolete tests/fixtures. No checkpoint declared.
+
+CHECKPOINT S4 (W1-C, Claude): protocol, CLI and daemon on the tracking surface; legacy removed
+
+Taken over from the Codex worker. Its uncommitted S4 draft (one monolithic
+dispatcher, `day.get`/`status.get` shapes changed beyond the contract, op-id
+replay dropped) was discarded and S4 redone.
+
+- Domain: `item.rs` keeps only plan rules (Repeat, Weekdays, validators,
+  recurrence, PrayerMark); every `Legacy*`, `DayItem`, `DayView`, `State` is
+  gone. Entity `version` now serializes. `Error::MissingMetrics(ids)` maps to
+  `validation` with `data.field = "values"`, `data.missing = [ids]`.
+- Store: split into `schema.sql` (readable SQL, built-in metrics seeded with
+  fixed epoch timestamps), `codec.rs`, `read.rs`, `write.rs`; translation
+  helpers and `*_versioned` writers deleted.
+- Core: `planner/`, `export.rs`, `tracking.rs` replaced by focused modules
+  `items`, `projects`, `tags`, `metrics`, `sessions`, `day` (snapshots, rows,
+  fulfilment, widget `Today`), `stats`, `marks`, `quick`, `guard`. Mutations
+  take a `WriteTx`; the caller owns the transaction and op-id record.
+- Protocol: `dispatcher.rs` (framing, handshake, one method table that also
+  defines `is_mutation`), `reads.rs`, `writes.rs` (one `mutate` helper records
+  the full result under `op_id`), `methods.rs` (params/envelopes only, flattening
+  core inputs). `changed` scopes: items, sessions, projects, tags, metrics,
+  marks, config.
+- CLI: every human subcommand calls the dispatcher in-process (`local.rs`);
+  `tracking.rs` builds params, `render.rs` prints. New `session`, `project`,
+  `tag`, `metric`; removed `history`, `export`, `import`, `item done/undo/log/
+  start/stop`. `--json` prints the RPC result.
+- Tests: no ignored tests remain. New core unit tests per module,
+  `protocol/tests/dispatch.rs` (handshake, framing, replay, conflicts,
+  missing metrics), `cli/tests/tracking_cli.rs`, socket coverage of every
+  method in `daemon.rs`, and 33 golden fixtures in `tests/fixtures/rpc/`
+  (random ids normalised to `<id:N>`). The human-CLI `fixtures/contract/` set
+  was deleted: `--json` now prints RPC results, so the RPC fixtures are the
+  single contract.
+- Docs: `docs/work/architecture/protocol-v1.md` method table and shapes.
+
+Verification: `cargo test --offline --workspace` (daemon socket tests
+included), `cargo clippy --offline --all-targets -- -D warnings`,
+`git diff --check -- crates` all pass.
+
+Deviations from interface.md (for the orchestrator):
+- `history.get` removed as well (built on the old entry states; no frontend
+  calls it).
+- `projects.list` nests each metric as `metrics[].metric` beside the
+  ProjectMetric fields instead of merging both into one object.
+- `stats.series` leads with a `minutes` pseudo-series (`metric_id:"minutes"`).
+- `changed.items` are `ItemView` (stored item + schedule_text +
+  next_occurrence), not day rows; clients refetch `day.get` on `changed`.
+- Day rows drop `state`, `minutes`, `count`, `timer`, `carried`; status
+  `planner` drops `timer`/`upcoming` (replaced by top-level `running`).
+
+Remaining: none for S4. Risks are listed in the final report.

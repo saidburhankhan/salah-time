@@ -1,0 +1,28 @@
+{
+  "id": 7,
+  "jsonrpc": "2.0",
+  "result": {
+    "changed": {
+      "deleted": [],
+      "items": [],
+      "marks": [
+        {
+          "created_at": "2031-05-14T04:55:00Z",
+          "day": "2031-05-14",
+          "deleted_at": null,
+          "id": "2031-05-14:fajr",
+          "marked_at": "2031-05-14T04:55:00Z",
+          "prayer": "fajr",
+          "updated_at": "2031-05-14T04:55:00Z",
+          "version": 1
+        }
+      ],
+      "metrics": [],
+      "projects": [],
+      "sessions": [],
+      "tags": []
+    },
+    "op_id": "op-prayer-mark",
+    "revision": 16
+  }
+}

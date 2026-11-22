@@ -76,12 +76,13 @@ restart it on demand; a manually started daemon stays up.
    "params":{"protocol":[1],"client":"widget/0.4","actor":"widget"}}
 ← {"jsonrpc":"2.0","id":1,
    "result":{"protocol":1,"server":"salah 0.1.0",
-             "capabilities":["timer.v1","events.v1","clock.v1"],"revision":184}}
+             "capabilities":["tracking.v1","events.v1","clock.v1"],"revision":184}}
 ```
 
 Any other method before `hello` fails with JSON-RPC `-32600`. The server
 supports protocol major `1`; if the client does not offer it, `hello` fails with
 `-32602`. `capabilities` is additive: clients ignore names they do not know.
+`tracking.v1` means the projects, sessions, and metrics surface below.
 `events.v1` means the connection supports `subscribe` and `changed` pushes.
 `clock.v1` means the daemon can push `clock.boundary` (see Notifications).
 
@@ -89,82 +90,88 @@ supports protocol major `1`; if the client does not offer it, `hello` fails with
 
 Mutation parameters all include `op_id` (a stable client UUID, or a platform id
 such as `telegram:<update_id>`). `revision` in a mutation result is the
-store-wide counter, never a precondition. `changed.items` are canonical
-`DayItem` rows plus the display projections below; `changed.deleted` lists
-removed ids.
+store-wide counter, never a precondition.
 
 | Method | Params | Result | Errors | Idempotent | Version-checked |
 |---|---|---|---|---|---|
 | `hello` | `protocol[]`, `client`, `actor?` | `protocol`, `server`, `capabilities`, `revision` | protocol | — | — |
-| `status.get` | — | `Status` (today's widget projection, planner attached; rows and `next.at` as below) | config, source, storage | — | — |
-| `day.get` | `date?` | `DayPlan` (rows and `now.next.at` as below) | validation, source, storage | — | — |
-| `items.list` | — | live `Item` rows plus `version` | storage | — | — |
-| `stats.get` | `from,to` or `days?` | `Stats` plus `time_ticks` and per-day `tooltip` | validation, source, storage | — | — |
-| `history.get` | `from?`, `to?` (default last 7 days) | `[DayReport]` | validation, source, storage | — | — |
-| `item.parse` | `text` | `NewItemDraft` | validation | — | — |
-| `item.preview` | `block`, `repeat`, `weekdays?`, `measure`, `target?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
-| `item.add` | `op_id`, `title` or `quick_text`, `block?`, `repeat?`, `weekdays?`, `measure?`, `target?`, `date?` | mutation result | validation, source, storage | yes | no |
-| `item.edit` | `op_id`, `id`, `expected_version?`, `title?`, `block?`, `target?` (`null` clears), `repeat?`, `weekdays?`, `measure?` | mutation result | validation, not_found, conflict, storage | yes | yes |
-| `item.move` | `op_id`, `id`, `block`, `after_id?` / `before_id?` (or legacy `index?`), `expected_version?` | mutation result | validation, not_found, conflict, storage | yes | yes |
+| `status.get` | — | `Status`: prayer projection, `planner` (today's rows), `running: SessionView\|null`, `prompt: [PromptMetric]` | config, source, storage | — | — |
+| `day.get` | `date?` | `DayPlan`: prayers, blocks with `capacity_minutes`/`planned_minutes`/`actual_minutes` and rows, `open`, `fulfilment` | validation, source, storage | — | — |
+| `items.list` | — | `[ItemView]` | storage | — | — |
+| `stats.get` | `from,to` or `days?` (default 30), `tag_id?`, `project_id?` | `range`, `filter`, `days`, `series` (minutes first), `projects`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
+| `item.parse` | `text` | draft `{title, block, repeat, weekdays, planned_minutes}` | validation | — | — |
+| `item.preview` | `block`, `repeat`, `weekdays?`, `planned_minutes?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
+| `item.add` | `op_id`, `title` or `quick_text`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `planned_minutes?`, `date?` | mutation result (`changed.items`) | validation, not_found, source, storage | yes | no |
+| `item.edit` | `op_id`, `id`, `expected_version?`, `title?`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `planned_minutes?` (`null` clears either) | mutation result | validation, not_found, conflict, storage | yes | yes |
+| `item.move` | `op_id`, `id`, `block`, `after_id?` / `before_id?` / `index?`, `expected_version?` | mutation result (every renumbered item) | validation, not_found, conflict, storage | yes | yes |
 | `item.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`) | not_found, conflict, storage | yes | yes |
-| `entry.done` | `op_id`, `item_id`, `date?` | mutation result | not_found, validation, storage | yes | no |
-| `entry.undo` | `op_id`, `item_id`, `date?` | mutation result plus `undone` count | not_found, validation, storage | yes | no |
-| `entry.log` | `op_id`, `item_id`, `kind?` (`count`/`minutes`), `value`, `date?` | mutation result | not_found, validation, storage | yes | no |
-| `timer.start` | `op_id`, `item_id` | mutation result | not_found, validation, storage | yes | no |
-| `timer.stop` | `op_id`, `item_id?` (omit to stop whichever runs) | mutation result | not_found, validation, storage | yes | no |
+| `projects.list` | `archived?` | `[Project + tags:[Tag] + metrics:[ProjectMetric + metric:Metric]]` | storage | — | — |
+| `project.add` | `op_id`, `name`, `color?`, `note?`, `tag_ids?`, `metrics?:[{metric_id, required}]` (default focus and quality, required) | mutation result (`changed.projects`) | validation, not_found, storage | yes | no |
+| `project.edit` | `op_id`, `id`, `expected_version?`, any add field (`note: null` clears), `archived?` | mutation result | validation, not_found, conflict, storage | yes | yes |
+| `tags.list` | — | `[Tag]` | storage | — | — |
+| `tag.add` | `op_id`, `name`, `color` | mutation result (`changed.tags`) | validation, storage | yes | no |
+| `tag.edit` | `op_id`, `id`, `expected_version?`, `name?`, `color?` | mutation result | validation, not_found, conflict, storage | yes | yes |
+| `tag.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`, detached `changed.projects`) | not_found, conflict, storage | yes | yes |
+| `metrics.list` | `archived?` | `[Metric]`, built-ins first | storage | — | — |
+| `metric.add` | `op_id`, `name`, `unit?`, `kind` (`count`/`scale`/`check`), `scale_max?` (scale: 2–10), `rollup?` (default `avg` for a scale, else `sum`) | mutation result (`changed.metrics`) | validation, storage | yes | no |
+| `metric.edit` | `op_id`, `id`, `expected_version?`, `name?`, `unit?`, `archived?` (a built-in cannot be archived; `kind` never changes) | mutation result | validation, not_found, conflict, storage | yes | yes |
+| `session.start` | `op_id`, `item_id?` / `project_id?` | mutation result (`changed.sessions`) | validation, not_found, conflict (one already runs), storage | yes | no |
+| `session.stop` | `op_id`, `id?` (default: the running one), `values?:{metric_id: number}`, `note?` | mutation result | validation (`data.missing`), not_found, storage | yes | no |
+| `session.log` | `op_id`, `item_id?` / `project_id?`, `date?`, `block?`, `minutes?` (none: a tick), `values?`, `note?` | mutation result | validation (`data.missing`), not_found, storage | yes | no |
+| `session.edit` | `op_id`, `id`, `expected_version?`, `minutes?`, `values?`, `note?` (`null` clears), `block?` | mutation result | validation, not_found, conflict, storage | yes | yes |
+| `session.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`) | not_found, conflict, storage | yes | yes |
 | `prayer.mark` | `op_id`, `prayer`, `date?`, `expected_version?` | mutation result (`changed.marks`) | validation, conflict, storage | yes | optional |
 | `prayer.unmark` | same as `prayer.mark` | mutation result (`changed.marks`) | validation, conflict, storage | yes | optional |
 | `config.get` | — | `Config` | config | — | — |
 | `config.set` | `op_id?`, any `Config` field | `Config` | validation, config | yes with `op_id` | no |
-| `export` | — | v3 `salah-export` document | storage | — | — |
-| `import` | `data` (export document), `op_id?` | `revision`, `ImportSummary` | validation, storage | yes with `op_id` | no |
 | `subscribe` | `topics?` (`["changes"]`, `["clock"]`, or both), `after_revision?` | `revision`, `after_revision?`; the socket transport then pushes `changed` and/or `clock.boundary` | validation | — | — |
 
-Ids are **full ids** over RPC. Prefix resolution remains a human-CLI
-convenience only. A missing or stale entity is `not_found` or `conflict`.
+The `entry.*`, `timer.*`, `history.get`, `export`, and `import` methods of the
+first planner model are gone and answer `-32601`. The golden responses of every
+method live in `crates/salah-cli/tests/fixtures/rpc/` and are the reference
+shapes for clients.
 
-## Display projections
+A mutation result is `{revision, op_id, changed}`. `changed` always carries
+every list — `items` (`ItemView`: the stored item plus `schedule_text` and
+`next_occurrence`), `sessions` (`SessionView`), `projects`, `tags`, `metrics`,
+`marks`, and `deleted` (removed ids) — so clients never guard for a missing key.
 
-Every item row in `day.get`, the planner in `status.get`, and mutation
-`changed.items` carries the fields below in addition to the stored `DayItem`
-fields. They are computed by Rust, so clients never re-derive recurrence,
-progress, or timers. Labels are locale-neutral English for compatibility with
-the current UIs; later clients may map the semantic fields to another locale.
+## Shapes
 
-| Field | Type | Meaning |
-|---|---|---|
-| `version` | integer | Entity version for an immediate `expected_version` on edit/move/remove. |
-| `schedule_text` | string | `"Once"`, `"Daily"`, `"Mon–Fri"`, `"Mon, Wed, Fri"`, … |
-| `next_occurrence` | date or null | First date on or after the requested day when the item applies; equal to the row day when planned then. |
-| `detail_text` | string | `"20 / 30 min · Daily"`, `"3 / 10 · Mon–Fri"`, or the schedule alone for check items. |
-| `timer.running` | boolean | Whether a timer session is running for this row. |
-| `timer.started_at` | timestamp or null | UTC start of the running session. |
-| `timer.minutes_including_running` | integer | Row minutes at the projection instant, running session included. |
-| `carried` | boolean | True when this open item is carried into a later block. |
+- `SessionView`: `id`, `item_id`, `project_id`, `day`, `block`, `started_at`,
+  `ended_at`, `minutes` (`null` while running and for a tick), `running`,
+  `note`, `values` (`{metric_id: number}`), `version`. A session of an item
+  copies the item's project.
+- `PromptMetric`: `metric_id`, `name`, `unit`, `kind`, `scale_max`, `required`:
+  what to ask when the running session stops, in the project's order.
+- Day rows (`day.get` blocks and `status.get` planner): `id`, `title`, `block`,
+  `repeat`, `weekdays`, `position`, `version`, `project` (`{id,name,color}` or
+  `null`), `planned_minutes` (the day's snapshot), `actual_minutes`,
+  `sessions`, `done` (a session of the item finished that day; a tick counts),
+  `schedule_text`, `next_occurrence`, and `detail_text` (`"20 / 30 min ·
+  Daily"`). Running sessions add no minutes until they stop.
+- `fulfilment`: `planned_items`, `done_items`, `planned_minutes`,
+  `actual_minutes`.
+- `stats.get`: an `avg` rollup is weighted by session minutes, a tick weighing
+  1; `fulfilment_ratio` is logged over planned minutes, 0 without a plan.
+- A day's block times and plan lines are snapshotted the first time the day is
+  read or written. Today's and later plans follow item edits; past days keep
+  their snapshot. Snapshots are not entities: they neither bump the revision
+  nor appear in `changed`.
 
 `now.next.at` in `day.get` and `next.at` in `status.get` are UTC instants. A
 client computes a countdown as `next.at - Date.now()`; it does not add local
 boundary maths.
 
 `item.preview` is read-only and needs no `op_id`. It validates the draft like
-`item.add` (`block` may not be `sleep`, a weekly draft needs weekdays, a target
-needs the matching measure) and returns the first occurrence on or after
-`date`, the number of remaining occurrences in that calendar month, and
-`schedule_text`. It never reads or writes the store.
+`item.add` (`block` may not be `sleep`, a weekly draft needs weekdays) and
+returns the first occurrence on or after `date`, the number of remaining
+occurrences in that calendar month, and `schedule_text`. It never reads or
+writes the store.
 
 `item.move` accepts `after_id` or `before_id` and resolves them inside the
 write transaction. Clients should send a neighbour id from the rendered row
-list; there is deliberately no `item.move_target` method, because a row already
-exposes its `block`, `position`, and `id`, so a row-index→`(block, anchor)`
-mapping is trivially derivable and the server would only duplicate it.
-
-`stats.get` adds `time_ticks`, an ordered array of chart axis ticks:
-`{"minutes":90,"label":"1h30"}`. Clients draw these instead of choosing steps
-or formatting durations. Every `daily` row also has `tooltip`, the English text
-the charts currently build (`"Wed 14 May · 2 / 3 done · 40 min · 5 counts · 2
-prayers"`). Every `items[]` row additionally has `schedule_text` and
-`next_occurrence` (relative to today), which replaces the routines page's
-recurrence scan.
+list.
 
 ## Errors
 
@@ -201,7 +208,7 @@ Example stale edit:
 ## Idempotency and versions
 
 - A repeated `op_id` returns the stored result and revision and performs no
-  write, even if the retry body differs. On first application the planner
+  write, even if the retry body differs. On first application the dispatcher
   records the complete serialized protocol result in `applied_ops` inside the
   same `BEGIN IMMEDIATE` transaction as the mutation. A replay returns those
   exact bytes, including the `changed` rows as they were then, even if later
@@ -218,12 +225,11 @@ Example stale edit:
   half-written.
 - Reuse the same `op_id` when retrying after a timeout; use a new one for a new
   intent.
-- `expected_version` applies per entity on `item.edit`, `item.move`,
-  `item.remove` (and optionally prayer marks). Appends (`entry.*`, `timer.*`,
-  `item.add`) need no precondition, only `op_id`. A stale version is
-  `data.kind = "conflict"` and writes nothing.
-- Clients obtain item versions from `items.list` or from the `version` field on
-  mutation `changed.items`. `revision` orders pushes and de-duplicates them; it
+- `expected_version` applies per entity on every `*.edit` and `*.remove`,
+  `item.move`, and optionally prayer marks. Appends (`*.add`, `session.start`,
+  `session.stop`, `session.log`) need no precondition, only `op_id`. A stale
+  version is `data.kind = "conflict"` and writes nothing.
+- Every entity row carries its `version` (lists, day rows, and `changed`). `revision` orders pushes and de-duplicates them; it
   is never sent as a mutation precondition.
 
 ## Notifications
@@ -246,12 +252,12 @@ Notifications have no `id`:
 ```json
 {"jsonrpc":"2.0","method":"changed",
  "params":{"revision":185,"days":["2031-05-14"],
-           "scopes":["items","entries"],"op_id":"…","actor":"widget"}}
+           "scopes":["items","sessions"],"op_id":"…","actor":"widget"}}
 ```
 
 `changed` is an invalidation, not a patch: refetch `status.get` or `day.get`.
-`days` and `op_id` may be omitted; `scopes` is one of `items`, `entries`,
-`marks`, `config`. The daemon emits these from its `data_version` watcher; a
+`days` and `op_id` may be omitted; each scope is one of `items`, `sessions`,
+`projects`, `tags`, `metrics`, `marks`, `config`. The daemon emits these from its `data_version` watcher; a
 notification may cover more than one commit observed in the same poll, so
 clients treat its `revision` as the newest state to fetch and de-duplicate by
 revision.
