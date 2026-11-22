@@ -1,0 +1,99 @@
+{
+  "id": 3,
+  "jsonrpc": "2.0",
+  "result": {
+    "blocks": [
+      {
+        "end": "fajr",
+        "items": [],
+        "start": "night"
+      },
+      {
+        "end": "dhuhr",
+        "items": [],
+        "start": "fajr"
+      },
+      {
+        "end": "asr",
+        "items": [],
+        "start": "dhuhr"
+      },
+      {
+        "end": "maghrib",
+        "items": [],
+        "start": "asr"
+      },
+      {
+        "end": "isha",
+        "items": [],
+        "start": "maghrib"
+      },
+      {
+        "end": "sleep",
+        "items": [],
+        "start": "isha"
+      }
+    ],
+    "day": "2031-05-14",
+    "is_today": true,
+    "night_start": "23:00",
+    "now": {
+      "block": "fajr",
+      "next": {
+        "id": "dhuhr",
+        "name": "Dhuhr",
+        "remaining_seconds": 10140,
+        "time": "12:19"
+      },
+      "sleeping": false
+    },
+    "open": 0,
+    "prayers": [
+      {
+        "current": true,
+        "id": "fajr",
+        "marked": false,
+        "name": "Fajr",
+        "passed": true,
+        "time": "03:12"
+      },
+      {
+        "current": false,
+        "id": "dhuhr",
+        "marked": false,
+        "name": "Dhuhr",
+        "passed": false,
+        "time": "12:19"
+      },
+      {
+        "current": false,
+        "id": "asr",
+        "marked": false,
+        "name": "Asr",
+        "passed": false,
+        "time": "17:24"
+      },
+      {
+        "current": false,
+        "id": "maghrib",
+        "marked": false,
+        "name": "Maghrib",
+        "passed": false,
+        "time": "19:33"
+      },
+      {
+        "current": false,
+        "id": "isha",
+        "marked": false,
+        "name": "Isha",
+        "passed": false,
+        "time": "21:20"
+      }
+    ],
+    "sleep": {
+      "passed": false,
+      "time": "23:00"
+    },
+    "sunrise": "05:06"
+  }
+}

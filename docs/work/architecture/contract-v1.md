@@ -1,7 +1,8 @@
 # CLI contract v1: frozen fixtures
 
 This is the golden contract the desktop app and the bar widget consume today:
-the unwrapped JSON printed by the `salah` CLI. `tests/contract.rs` runs the real
+the unwrapped JSON printed by the `salah` CLI. The transport protocol is
+separate: see [`protocol-v1.md`](protocol-v1.md). `tests/contract.rs` runs the real
 binary against an isolated `SALAH_CONFIG`/`SALAH_DATA`, seeds state through the
 CLI, freezes the clock with the `SALAH_NOW` test hook, normalises random ids, and
 compares the result with `crates/salah-cli/tests/fixtures/contract/<name>.json`.

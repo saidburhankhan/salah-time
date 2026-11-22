@@ -138,6 +138,51 @@ pub fn log_with(
     record(store, config, now, ids, id, (None, value), date, mutation)
 }
 
+/// Records a count against any item, regardless of its own measure.
+pub fn log_count(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
+    id: &str,
+    value: i64,
+    date: Option<NaiveDate>,
+) -> Result<Entry, Error> {
+    log_count_with(
+        store,
+        config,
+        now,
+        ids,
+        id,
+        value,
+        date,
+        Mutation::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn log_count_with(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
+    id: &str,
+    value: i64,
+    date: Option<NaiveDate>,
+    mutation: Mutation<'_>,
+) -> Result<Entry, Error> {
+    record(
+        store,
+        config,
+        now,
+        ids,
+        id,
+        (Some(EntryKind::Count), value),
+        date,
+        mutation,
+    )
+}
+
 /// Adds (or, when negative, subtracts) minutes of time spent on any item,
 /// including count items, whose `log` adjusts the count instead.
 pub fn adjust_time(

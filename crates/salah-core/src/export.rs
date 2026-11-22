@@ -95,7 +95,7 @@ impl Serialize for Export {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImportSummary {
     pub added: usize,
     pub updated: usize,

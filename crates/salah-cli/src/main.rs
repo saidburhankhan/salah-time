@@ -10,8 +10,14 @@ use salah_domain::{
     runtime::{Clock, FixedClock, IdGenerator, SystemClock, UuidV4},
 };
 use salah_prayer::{calculation::METHODS, official, schedule};
+use salah_protocol::{ConfigRepository, Context, Dispatcher};
 use salah_store::{Store, default_path};
-use std::{fs, path::PathBuf, process::ExitCode};
+use std::{
+    fs,
+    io::{BufRead, Write},
+    path::PathBuf,
+    process::ExitCode,
+};
 
 #[derive(Parser)]
 #[command(
@@ -62,6 +68,8 @@ enum Command {
     Export(ExportArgs),
     /// Import planner data
     Import(ImportArgs),
+    /// Read JSON-RPC 2.0 requests from stdin and write responses to stdout
+    Rpc,
     /// List the calculation methods
     Methods,
     /// Open the Salah desktop app
@@ -443,6 +451,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Some(Command::History(args)) => history_command(args, now),
         Some(Command::Export(args)) => export_command(args, now),
         Some(Command::Import(args)) => import_command(args, now),
+        Some(Command::Rpc) => rpc_command(clock.as_ref(), &ids),
         Some(Command::Methods) => methods_command(),
         Some(Command::Open) => open_command(),
     }
@@ -460,6 +469,61 @@ fn clock_from_env() -> Result<Box<dyn Clock>, String> {
         Err(std::env::VarError::NotPresent) => Ok(Box::new(SystemClock)),
         Err(error) => Err(format!("invalid SALAH_NOW: {error}")),
     }
+}
+
+/// Adapter from the protocol's config port to the XDG JSON repository.
+struct XdgConfig {
+    path: PathBuf,
+}
+
+impl ConfigRepository for XdgConfig {
+    fn load(&self) -> Result<salah_core::config::Config, salah_domain::error::Error> {
+        salah_core::config::load_from(&self.path)
+    }
+
+    fn save(&self, config: &salah_core::config::Config) -> Result<(), salah_domain::error::Error> {
+        salah_core::config::save_to(config, &self.path)
+    }
+}
+
+/// `salah rpc`: one JSON-RPC object per input line, one per output line, until
+/// stdin reaches EOF. The same dispatcher will back the S4 Unix socket daemon.
+fn rpc_command(clock: &dyn Clock, ids: &dyn IdGenerator) -> Result<(), String> {
+    let mut store = Store::open(&default_path())?;
+    let config = XdgConfig {
+        path: salah_core::config::path(),
+    };
+    let mut dispatcher = Dispatcher::new();
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    let stdout = std::io::stdout();
+    let mut output = std::io::BufWriter::new(stdout.lock());
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let read = input
+            .read_line(&mut line)
+            .map_err(|error| format!("read stdin: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        let mut context = Context {
+            store: &mut store,
+            config: &config,
+            clock,
+            ids,
+        };
+        if let Some(response) = dispatcher.handle_line(&line, &mut context) {
+            let encoded = response
+                .into_line()
+                .map_err(|error| format!("serialize response: {error}"))?;
+            writeln!(output, "{encoded}").map_err(|error| format!("write stdout: {error}"))?;
+            output
+                .flush()
+                .map_err(|error| format!("write stdout: {error}"))?;
+        }
+    }
+    Ok(())
 }
 
 /// Starts `salah-app` from beside this binary when installed there, else from

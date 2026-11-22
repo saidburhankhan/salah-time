@@ -424,6 +424,7 @@ dependencies = [
  "salah-core",
  "salah-domain",
  "salah-prayer",
+ "salah-protocol",
  "salah-store",
  "serde",
  "serde_json",
@@ -457,6 +458,17 @@ name = "salah-prayer"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "salah-domain",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "salah-protocol"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "salah-core",
  "salah-domain",
  "serde",
  "serde_json",

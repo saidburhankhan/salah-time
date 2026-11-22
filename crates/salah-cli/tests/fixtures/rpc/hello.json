@@ -1,0 +1,12 @@
+{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": {
+    "capabilities": [
+      "timer.v1"
+    ],
+    "protocol": 1,
+    "revision": 0,
+    "server": "salah 0.1.0"
+  }
+}

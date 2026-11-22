@@ -9,7 +9,10 @@ mod stats;
 mod timers;
 mod views;
 
-pub use entries::{adjust_time, adjust_time_with, done, done_with, log, log_with, undo, undo_with};
+pub use entries::{
+    adjust_time, adjust_time_with, done, done_with, log, log_count, log_count_with, log_with, undo,
+    undo_with,
+};
 pub use items::{
     ItemChanges, NewItem, add, add_with, edit, edit_with, find_item, move_item, move_item_with,
     remove, remove_with,

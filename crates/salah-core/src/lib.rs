@@ -7,3 +7,5 @@ pub mod location;
 pub mod planner;
 pub mod quick;
 pub mod status;
+
+pub use salah_store::Store;

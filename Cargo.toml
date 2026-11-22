@@ -4,6 +4,7 @@ members = [
     "crates/salah-prayer",
     "crates/salah-store",
     "crates/salah-core",
+    "crates/salah-protocol",
     "crates/salah-cli",
 ]
 resolver = "3"

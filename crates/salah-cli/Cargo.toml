@@ -13,6 +13,7 @@ path = "src/main.rs"
 salah-core = { path = "../salah-core" }
 salah-domain = { path = "../salah-domain" }
 salah-prayer = { path = "../salah-prayer" }
+salah-protocol = { path = "../salah-protocol" }
 salah-store = { path = "../salah-store" }
 clap.workspace = true
 chrono.workspace = true

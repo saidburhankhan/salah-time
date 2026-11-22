@@ -1,0 +1,13 @@
+[package]
+name = "salah-protocol"
+description = "Transport-independent JSON-RPC protocol for Salah"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+salah-core = { path = "../salah-core" }
+salah-domain = { path = "../salah-domain" }
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
