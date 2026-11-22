@@ -46,3 +46,7 @@ Files:
 - crates/salah-cli/tests/planner_cli.rs
 
 Verification: all non-daemon workspace suites pass; strict Clippy, formatting, and `git diff --check` pass. Store tests cover foreign keys, seeded metrics, constraints, round trips, revisions, and old-database rename. Eight obsolete legacy entry/count assertions are temporarily ignored and identify their S3/S4 replacements. Remaining risk/deviation: the native store API is entirely tracking-model based, but a narrow `Legacy*` translation bridge remains for the old core/protocol callers; S3 must remove that bridge and the domain compatibility types while replacing those callers.
+
+IN PROGRESS S3: fixed BoundaryId schema checks and added night item/session round-trip coverage. Store tests pass. Schema readability rewrite and the S3 core/Legacy removal remain; this is not a checkpoint.
+
+IN PROGRESS S3 (continued): schema SQL is expanded and reviewable; added `salah_core::tracking` with start/stop/log/edit/remove, metric and required-metric validation, snapshot materialization, fulfilment, and weighted metric/day stats. Workspace compiles and focused store/core tests pass. Not checkpoint-ready: legacy planner/protocol/CLI types and ignored tests still require coordinated removal, stats still need project/tag/block projections, and `git diff --check` is currently blocked by W2's unrelated `app/tests/salah_app_tests.cpp` trailing blank line.

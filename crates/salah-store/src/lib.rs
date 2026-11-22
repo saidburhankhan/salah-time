@@ -19,21 +19,205 @@ use std::{
 
 const ATTEMPTS: u32 = 5;
 const SCHEMA: &str = r#"
-CREATE TABLE projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,color TEXT NOT NULL,note TEXT,archived INTEGER NOT NULL CHECK(archived IN(0,1)),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,deleted_at TEXT,version INTEGER NOT NULL CHECK(version>=1));
-CREATE TABLE tags(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,color TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,deleted_at TEXT,version INTEGER NOT NULL CHECK(version>=1));
-CREATE TABLE project_tags(project_id TEXT NOT NULL REFERENCES projects(id),tag_id TEXT NOT NULL REFERENCES tags(id),PRIMARY KEY(project_id,tag_id));
-CREATE TABLE metrics(id TEXT PRIMARY KEY,name TEXT NOT NULL,unit TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('count','scale','check')),scale_max INTEGER,rollup TEXT NOT NULL CHECK(rollup IN('sum','avg')),builtin INTEGER NOT NULL CHECK(builtin IN(0,1)),archived INTEGER NOT NULL CHECK(archived IN(0,1)),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,deleted_at TEXT,version INTEGER NOT NULL CHECK(version>=1),CHECK((kind='scale' AND scale_max>=1) OR (kind!='scale' AND scale_max IS NULL)));
-CREATE TABLE project_metrics(project_id TEXT NOT NULL REFERENCES projects(id),metric_id TEXT NOT NULL REFERENCES metrics(id),required INTEGER NOT NULL CHECK(required IN(0,1)),position INTEGER NOT NULL,PRIMARY KEY(project_id,metric_id));
-CREATE TABLE items(id TEXT PRIMARY KEY,title TEXT NOT NULL,project_id TEXT REFERENCES projects(id),block TEXT NOT NULL CHECK(block IN('fajr','sunrise','dhuhr','asr','maghrib','isha')),repeat TEXT NOT NULL CHECK(repeat IN('none','daily','weekly')),weekdays INTEGER,start_day TEXT NOT NULL,planned_minutes INTEGER CHECK(planned_minutes IS NULL OR planned_minutes>=0),position INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,deleted_at TEXT,version INTEGER NOT NULL CHECK(version>=1),CHECK((repeat='weekly' AND weekdays BETWEEN 1 AND 127) OR (repeat!='weekly' AND weekdays IS NULL)));
-CREATE TABLE sessions(id TEXT PRIMARY KEY,item_id TEXT REFERENCES items(id),project_id TEXT REFERENCES projects(id),day TEXT NOT NULL,block TEXT NOT NULL CHECK(block IN('sleep','fajr','sunrise','dhuhr','asr','maghrib','isha')),started_at TEXT,ended_at TEXT,minutes INTEGER CHECK(minutes IS NULL OR minutes>=1),note TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,deleted_at TEXT,version INTEGER NOT NULL CHECK(version>=1),CHECK(item_id IS NOT NULL OR project_id IS NOT NULL));
-CREATE TABLE session_values(session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,metric_id TEXT NOT NULL REFERENCES metrics(id),value REAL NOT NULL,PRIMARY KEY(session_id,metric_id));
-CREATE TABLE day_blocks(day TEXT NOT NULL,block TEXT NOT NULL CHECK(block IN('sleep','fajr','sunrise','dhuhr','asr','maghrib','isha')),starts_at TEXT NOT NULL,ends_at TEXT NOT NULL,source TEXT NOT NULL CHECK(source IN('official','calculated')),PRIMARY KEY(day,block));
-CREATE TABLE day_plan(day TEXT NOT NULL,block TEXT NOT NULL CHECK(block IN('sleep','fajr','sunrise','dhuhr','asr','maghrib','isha')),item_id TEXT NOT NULL REFERENCES items(id),planned_minutes INTEGER CHECK(planned_minutes IS NULL OR planned_minutes>=0),PRIMARY KEY(day,block,item_id));
-CREATE TABLE prayer_marks(id TEXT PRIMARY KEY,day TEXT NOT NULL,prayer TEXT NOT NULL,marked_at TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,deleted_at TEXT,version INTEGER NOT NULL CHECK(version>=1));
-CREATE TABLE meta(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL);INSERT INTO meta VALUES(1,0);
-CREATE TABLE changes(seq INTEGER PRIMARY KEY AUTOINCREMENT,revision INTEGER NOT NULL,entity TEXT NOT NULL,entity_id TEXT NOT NULL,op TEXT NOT NULL CHECK(op IN('insert','update','delete')),version INTEGER NOT NULL,at TEXT NOT NULL,op_id TEXT);
-CREATE TABLE applied_ops(op_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,result_json TEXT NOT NULL,at TEXT NOT NULL);
-CREATE INDEX sessions_by_day ON sessions(day);CREATE INDEX sessions_by_project_day ON sessions(project_id,day);CREATE INDEX sessions_by_item ON sessions(item_id);CREATE INDEX session_values_by_metric ON session_values(metric_id);CREATE INDEX items_by_project ON items(project_id);CREATE INDEX prayer_marks_by_day ON prayer_marks(day);CREATE INDEX changes_by_revision ON changes(revision);CREATE INDEX changes_by_entity ON changes(entity,entity_id);
+CREATE TABLE projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL,
+    note TEXT,
+    archived INTEGER NOT NULL CHECK(archived IN(0,
+    1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL CHECK(version>=1)
+);
+CREATE TABLE tags (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL CHECK(version>=1)
+);
+CREATE TABLE project_tags (
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    tag_id TEXT NOT NULL REFERENCES tags(id),
+    PRIMARY KEY(project_id,
+    tag_id)
+);
+CREATE TABLE metrics (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN('count',
+    'scale',
+    'check')),
+    scale_max INTEGER,
+    rollup TEXT NOT NULL CHECK(rollup IN('sum',
+    'avg')),
+    builtin INTEGER NOT NULL CHECK(builtin IN(0,
+    1)),
+    archived INTEGER NOT NULL CHECK(archived IN(0,
+    1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL CHECK(version>=1),
+    CHECK((kind='scale' AND scale_max>=1) OR (kind!='scale' AND scale_max IS NULL))
+);
+CREATE TABLE project_metrics (
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    metric_id TEXT NOT NULL REFERENCES metrics(id),
+    required INTEGER NOT NULL CHECK(required IN(0,
+    1)),
+    position INTEGER NOT NULL,
+    PRIMARY KEY(project_id,
+    metric_id)
+);
+CREATE TABLE items (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    project_id TEXT REFERENCES projects(id),
+    block TEXT NOT NULL CHECK(block IN('night',
+    'fajr',
+    'dhuhr',
+    'asr',
+    'maghrib',
+    'isha')),
+    repeat TEXT NOT NULL CHECK(repeat IN('none',
+    'daily',
+    'weekly')),
+    weekdays INTEGER,
+    start_day TEXT NOT NULL,
+    planned_minutes INTEGER CHECK(planned_minutes IS NULL OR planned_minutes>=0),
+    position INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL CHECK(version>=1),
+    CHECK((repeat='weekly' AND weekdays BETWEEN 1 AND 127) OR (repeat!='weekly' AND weekdays IS NULL))
+);
+CREATE TABLE sessions (
+    id TEXT PRIMARY KEY,
+    item_id TEXT REFERENCES items(id),
+    project_id TEXT REFERENCES projects(id),
+    day TEXT NOT NULL,
+    block TEXT NOT NULL CHECK(block IN('night',
+    'fajr',
+    'dhuhr',
+    'asr',
+    'maghrib',
+    'isha',
+    'sleep')),
+    started_at TEXT,
+    ended_at TEXT,
+    minutes INTEGER CHECK(minutes IS NULL OR minutes>=1),
+    note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL CHECK(version>=1),
+    CHECK(item_id IS NOT NULL OR project_id IS NOT NULL)
+);
+CREATE TABLE session_values (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    metric_id TEXT NOT NULL REFERENCES metrics(id),
+    value REAL NOT NULL,
+    PRIMARY KEY(session_id,
+    metric_id)
+);
+CREATE TABLE day_blocks (
+    day TEXT NOT NULL,
+    block TEXT NOT NULL CHECK(block IN('night',
+    'fajr',
+    'dhuhr',
+    'asr',
+    'maghrib',
+    'isha',
+    'sleep')),
+    starts_at TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    source TEXT NOT NULL CHECK(source IN('official',
+    'calculated')),
+    PRIMARY KEY(day,
+    block)
+);
+CREATE TABLE day_plan (
+    day TEXT NOT NULL,
+    block TEXT NOT NULL CHECK(block IN('night',
+    'fajr',
+    'dhuhr',
+    'asr',
+    'maghrib',
+    'isha',
+    'sleep')),
+    item_id TEXT NOT NULL REFERENCES items(id),
+    planned_minutes INTEGER CHECK(planned_minutes IS NULL OR planned_minutes>=0),
+    PRIMARY KEY(day,
+    block,
+    item_id)
+);
+CREATE TABLE prayer_marks (
+    id TEXT PRIMARY KEY,
+    day TEXT NOT NULL,
+    prayer TEXT NOT NULL,
+    marked_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL CHECK(version>=1)
+);
+CREATE TABLE meta (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    revision INTEGER NOT NULL
+);
+INSERT INTO meta VALUES(1,
+    0
+);
+CREATE TABLE changes (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    revision INTEGER NOT NULL,
+    entity TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    op TEXT NOT NULL CHECK(op IN('insert',
+    'update',
+    'delete')),
+    version INTEGER NOT NULL,
+    at TEXT NOT NULL,
+    op_id TEXT
+);
+CREATE TABLE applied_ops (
+    op_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL,
+    result_json TEXT NOT NULL,
+    at TEXT NOT NULL
+);
+CREATE INDEX sessions_by_day ON sessions(day
+);
+
+CREATE INDEX sessions_by_project_day ON sessions(project_id,
+    day
+);
+
+CREATE INDEX sessions_by_item ON sessions(item_id
+);
+
+CREATE INDEX session_values_by_metric ON session_values(metric_id
+);
+
+CREATE INDEX items_by_project ON items(project_id
+);
+
+CREATE INDEX prayer_marks_by_day ON prayer_marks(day
+);
+
+CREATE INDEX changes_by_revision ON changes(revision
+);
+
+CREATE INDEX changes_by_entity ON changes(entity,
+    entity_id
+);
 "#;
 pub fn schema_version() -> i64 {
     1
@@ -888,6 +1072,38 @@ mod tests {
         let mut x = i();
         x.planned_minutes = Some(-1);
         assert!(s.write(|q| q.put_item(&x)).is_err())
+    }
+    #[test]
+    fn night_item_and_session_round_trip() {
+        let mut s = Store::open_in_memory().unwrap();
+        let mut item = i();
+        item.block = BoundaryId::Night;
+        let session = Session {
+            id: "night-session".into(),
+            item_id: Some(item.id.clone()),
+            project_id: Some("p".into()),
+            block: BlockKey {
+                day: d(),
+                start: BoundaryId::Night,
+            },
+            started_at: None,
+            ended_at: None,
+            minutes: Some(10),
+            note: None,
+            values: vec![],
+            created_at: t(2),
+            updated_at: t(2),
+            deleted_at: None,
+            version: 1,
+        };
+        s.write(|x| {
+            x.put_project(&p())?;
+            x.put_item(&item)?;
+            x.put_session(&session)
+        })
+        .unwrap();
+        assert_eq!(s.item(&item.id).unwrap(), Some(item));
+        assert_eq!(s.session(&session.id).unwrap(), Some(session));
     }
     #[test]
     fn old_database_is_renamed_aside() {
