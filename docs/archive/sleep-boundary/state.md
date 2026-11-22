@@ -15,6 +15,10 @@ last. The installed plugin reloaded without QML warnings.
 
 ## Next
 
+Archived 2026-11-22. Code verified and installed; the evening (after-Isha and
+sleeping) bar views remain to be seen live by the user.
+
+Previous next step: 
 Visually inspect the bar and popup after Isha (counting down to Sleep) and
 after the sleep time (`Sleeping · Fajr …`). Then archive this work item.
 
