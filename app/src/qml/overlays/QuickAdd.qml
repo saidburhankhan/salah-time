@@ -61,9 +61,7 @@ Popup {
             font.pixelSize: 20
             onTextChanged: parseTimer.restart()
             onAccepted: if (text.trim()) {
-                var d = backend.parseDraft || {}
-                d.title = d.title || text
-                quickPopup.win.maybeToast(d)
+                quickPopup.win.maybeToast({ title: backend.parseDraft.title || text })
                 backend.addQuick(text, quickPopup.win.quickBlock)
                 quickPopup.win.quickVisible = false
             }
@@ -94,10 +92,7 @@ Popup {
                 win: quickPopup.win
                 text: qsTr("Edit details")
                 onClicked: {
-                    var d = backend.parseDraft || {}
-                    d.title = d.title || quickField.text
-                    d.block = d.block || quickPopup.win.quickBlock || "fajr"
-                    quickPopup.win.openEntry(d)
+                    quickPopup.win.openEntryFromParse(quickField.text)
                     quickPopup.win.quickVisible = false
                 }
             }
@@ -107,9 +102,7 @@ Popup {
                 primary: true
                 enabled: quickField.text.trim() !== ""
                 onClicked: {
-                    var d = backend.parseDraft || {}
-                    d.title = d.title || quickField.text
-                    quickPopup.win.maybeToast(d)
+                    quickPopup.win.maybeToast({ title: backend.parseDraft.title || quickField.text })
                     backend.addQuick(quickField.text, quickPopup.win.quickBlock)
                     quickPopup.win.quickVisible = false
                 }

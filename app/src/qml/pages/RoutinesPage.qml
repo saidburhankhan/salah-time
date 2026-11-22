@@ -16,9 +16,19 @@ ScrollView {
             bottomPadding: 8
         }
         Repeater {
-            model: (backend.routinesStats.items || []).filter(function(x) { return x.repeat !== "none" })
+            model: backend.routines
             Rectangle {
-                required property var modelData
+                id: routineRow
+                required property string itemId
+                required property string title
+                required property string block
+                required property string scheduleText
+                required property int plannedDays
+                required property int doneDays
+                required property string nextOccurrence
+                required property int minutes
+                required property int count
+                required property var series
                 width: parent.width
                 height: 116
                 radius: theme.radius
@@ -32,7 +42,7 @@ ScrollView {
                         Layout.preferredWidth: 270
                         spacing: 5
                         Label {
-                            text: modelData.title
+                            text: routineRow.title
                             color: routinesScroll.win.text
                             font.pixelSize: 17
                             font.weight: Font.Medium
@@ -40,17 +50,15 @@ ScrollView {
                             elide: Text.ElideRight
                         }
                         Label {
-                            text: routinesScroll.win.joinedDetail(
-                                modelData.block,
-                                modelData.schedule_text || "")
+                            text: routinesScroll.win.joinedDetail(routineRow.block, routineRow.scheduleText)
                             color: routinesScroll.win.muted
                             font.family: routinesScroll.win.mono
                             font.pixelSize: 12
                         }
                         Label {
-                            text: modelData.planned_days === 0 && modelData.next_occurrence
-                                ? qsTr("Starts %1").arg(routinesScroll.win.shortDate(modelData.next_occurrence))
-                                : qsTr("%1 of %2 days").arg(modelData.done_days).arg(modelData.planned_days)
+                            text: routineRow.plannedDays === 0 && routineRow.nextOccurrence
+                                ? qsTr("Starts %1").arg(routinesScroll.win.shortDate(routineRow.nextOccurrence))
+                                : qsTr("%1 of %2 days").arg(routineRow.doneDays).arg(routineRow.plannedDays)
                             color: "#c7c2b9"
                             font.pixelSize: 13
                         }
@@ -60,20 +68,22 @@ ScrollView {
                         Layout.fillHeight: true
                         spacing: 5
                         Repeater {
-                            model: modelData.series || []
+                            model: routineRow.series
                             Item {
-                                required property var modelData
+                                required property bool done
+                                required property int minutes
+                                required property int count
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 Rectangle {
                                     anchors.horizontalCenter: parent.horizontalCenter
                                     anchors.bottom: parent.bottom
-                                    width: modelData.measure === "check" ? 7 : Math.max(5, parent.width - 3)
-                                    height: modelData.done
-                                        ? Math.max(7, Math.min(parent.height - 12, (modelData.minutes || modelData.count || 1) * 2))
+                                    width: Math.max(5, parent.width - 3)
+                                    height: done
+                                        ? Math.max(7, Math.min(parent.height - 12, (minutes || count || 1) * 2))
                                         : 5
                                     radius: 3
-                                    color: modelData.done ? theme.accent : "#38352f"
+                                    color: done ? theme.accent : "#38352f"
                                 }
                             }
                         }
@@ -81,15 +91,15 @@ ScrollView {
                     ColumnLayout {
                         Layout.preferredWidth: 120
                         Label {
-                            text: qsTr("%1 min").arg(modelData.minutes || 0)
+                            text: qsTr("%1 min").arg(routineRow.minutes || 0)
                             color: routinesScroll.win.text
                             font.family: routinesScroll.win.mono
                             font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                         }
                         Label {
-                            visible: modelData.measure === "count"
-                            text: qsTr("%1 count").arg(modelData.count || 0)
+                            visible: routineRow.count > 0
+                            text: qsTr("%1 count").arg(routineRow.count || 0)
                             color: routinesScroll.win.text
                             font.family: routinesScroll.win.mono
                             font.pixelSize: 14
@@ -104,7 +114,7 @@ ScrollView {
                 }
                 MouseArea {
                     anchors.fill: parent
-                    onClicked: routinesScroll.win.openEntry(modelData)
+                    onClicked: routinesScroll.win.openEntry(routineRow.itemId)
                 }
             }
         }

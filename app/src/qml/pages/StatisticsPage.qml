@@ -22,18 +22,18 @@ ScrollView {
             Repeater {
                 model: [
                     [qsTr("Tasks done"),
-                        (backend.stats.totals || {}).done + " / " + (backend.stats.totals || {}).planned,
-                        ((backend.stats.totals || {}).planned
-                            ? Math.round(100 * (backend.stats.totals || {}).done / (backend.stats.totals || {}).planned)
+                        backend.statsTotals.done + " / " + backend.statsTotals.planned,
+                        (backend.statsTotals.planned
+                            ? Math.round(100 * backend.statsTotals.done / backend.statsTotals.planned)
                             : 0) + "% completed"],
                     [qsTr("Time spent"),
-                        statsScroll.win.formatMinutes((backend.stats.totals || {}).minutes),
-                        qsTr("%1 active days").arg((backend.stats.totals || {}).active_days || 0)],
+                        statsScroll.win.formatMinutes(backend.statsTotals.minutes),
+                        qsTr("%1 active days").arg(backend.statsTotals.activeDays || 0)],
                     [qsTr("Counts"),
-                        String((backend.stats.totals || {}).count || 0),
+                        String(backend.statsTotals.count || 0),
                         qsTr("logged in this range")],
                     [qsTr("Prayers"),
-                        (backend.stats.totals || {}).prayers + " / " + (backend.stats.prayer_slots || 0),
+                        backend.statsTotals.prayers + " / " + backend.statsTotals.prayerSlots,
                         qsTr("five daily prayers")]
                 ]
                 SummaryTile {
@@ -45,7 +45,7 @@ ScrollView {
         RowLayout {
             width: parent.width
             Label {
-                text: statsScroll.win.selectedStatsItem ? qsTr("Filtered task") : qsTr("Daily activity")
+                text: backend.selectedStatsItem !== "" ? qsTr("Filtered task") : qsTr("Daily activity")
                 color: statsScroll.win.text
                 font.pixelSize: 18
                 font.weight: Font.DemiBold
@@ -53,9 +53,9 @@ ScrollView {
             }
             AppButton {
                 win: statsScroll.win
-                visible: statsScroll.win.selectedStatsItem
+                visible: backend.selectedStatsItem !== ""
                 text: qsTr("All tasks  ×")
-                onClicked: statsScroll.win.selectedStatsItem = ""
+                onClicked: backend.selectedStatsItem = ""
             }
             Rectangle {
                 width: 138
@@ -118,18 +118,13 @@ ScrollView {
             topPadding: 4
         }
         Repeater {
-            model: (backend.stats.items || []).slice().sort(function(a, b) {
-                return (b.minutes || 0) - (a.minutes || 0)
-            })
+            model: backend.statsItems
             TaskBreakdown {
-                taskData: modelData
                 win: statsScroll.win
             }
         }
         Label {
-            visible: !backend.busy && !(backend.stats.daily || []).some(function(x) {
-                return x.done || x.minutes || x.count || x.prayers
-            })
+            visible: !backend.busy && !backend.statsDaily.hasActivity
             width: parent.width
             height: 80
             text: qsTr("No activity in this range")

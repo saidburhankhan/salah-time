@@ -32,7 +32,7 @@ Item {
                 RowLayout {
                     TextField {
                         id: sleepField
-                        text: backend.config.sleep_time || "23:00"
+                        text: backend.config.sleepTime || "23:00"
                         placeholderText: "HH:MM"
                         font.family: settingsPage.win.mono
                         Layout.preferredWidth: 160

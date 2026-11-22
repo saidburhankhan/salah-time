@@ -4,7 +4,8 @@ import QtQuick.Controls
 Row {
     id: marker
     property var win
-    property var payload: ({})
+    property string markerName: ""
+    property string markerTime: ""
     height: 26
     spacing: 12
     leftPadding: 18
@@ -16,7 +17,7 @@ Row {
         anchors.verticalCenter: parent.verticalCenter
     }
     Label {
-        text: (marker.payload.name || "") + "  " + (marker.payload.time || "--:--")
+        text: marker.markerName + "  " + (marker.markerTime || "--:--")
         color: marker.win.muted
         font.family: marker.win.mono
         font.pixelSize: 12

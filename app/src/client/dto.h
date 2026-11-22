@@ -50,7 +50,7 @@ struct PrayerMark { QJsonObject json; QString id, day, prayer; };
 struct ParseDraft { QJsonObject json; QString title, repeat, measure; };
 // item.preview result for the entry form and quick-add toast.
 struct Preview { QJsonObject json; QString next_occurrence, schedule_text; int occurrences_this_month = 0; };
-struct Config { QJsonObject json; QString location, method, sleepTime; };
+struct Config { QJsonObject json; QString location, method, sleepTime, asr; };
 struct Undo { QJsonObject json; int undone = 0; };
 // Canonical protocol v1 mutation result: the projection rows the UI renders.
 struct MutationResult {

@@ -5,7 +5,7 @@ import QtQuick.Layouts
 ColumnLayout {
     id: correction
     property var win
-    property var payload: ({})
+    property string itemId: ""
     property string correctionError: ""
     spacing: 1
     Rectangle {
@@ -33,7 +33,7 @@ ColumnLayout {
                     correction.correctionError = qsTr("Use ±1–1440")
                     correctionErrorTimer.restart()
                 } else {
-                    backend.adjustMinutes(correction.payload.id, n)
+                    backend.adjustMinutes(correction.itemId, n)
                     text = ""
                 }
             }

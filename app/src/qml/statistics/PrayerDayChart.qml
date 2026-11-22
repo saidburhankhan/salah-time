@@ -6,18 +6,6 @@ Rectangle {
     id: chart
     property var win
     property var tip
-    property var rows: []
-    function refreshRows() { rows = win ? win.selectedDaily() : [] }
-    Component.onCompleted: refreshRows()
-    onWinChanged: refreshRows()
-    Connections {
-        target: backend
-        function onChanged() { chart.refreshRows() }
-    }
-    Connections {
-        target: chart.win
-        function onSelectedStatsItemChanged() { chart.refreshRows() }
-    }
     width: parent.width
     height: 218
     radius: theme.radius
@@ -69,13 +57,15 @@ Rectangle {
             anchors.fill: parent
             spacing: 2
             Repeater {
-                model: chart.rows
+                model: backend.statsDaily
                 Item {
                     id: prayerDay
-                    required property var modelData
+                    required property string day
+                    required property int prayers
+                    required property string tooltip
                     required property int index
-                    property var dayRow: modelData
-                    width: (prayerPlot.width - Math.max(0, chart.rows.length - 1) * 2) / Math.max(1, chart.rows.length)
+                    width: (prayerPlot.width - Math.max(0, backend.statsDaily.count - 1) * 2)
+                        / Math.max(1, backend.statsDaily.count)
                     height: prayerPlot.height
                     Column {
                         anchors.horizontalCenter: parent.horizontalCenter
@@ -88,7 +78,7 @@ Rectangle {
                                 width: 7
                                 height: 7
                                 radius: 4
-                                color: index < (prayerDay.dayRow.prayers || 0) ? theme.accent : "#45423b"
+                                color: index < prayerDay.prayers ? theme.accent : "#45423b"
                             }
                         }
                     }
@@ -96,22 +86,22 @@ Rectangle {
                         anchors.top: parent.bottom
                         anchors.topMargin: 7
                         anchors.horizontalCenter: parent.horizontalCenter
-                        color: parent.dayRow.day > backend.todayDay ? "#5f5b54" : chart.win.muted
+                        color: chart.win.muted
                         font.family: chart.win.mono
                         font.pixelSize: 10
                         text: {
-                            var d = Date.fromLocaleString(Qt.locale(), parent.dayRow.day, "yyyy-MM-dd")
+                            var d = Date.fromLocaleString(Qt.locale(), prayerDay.day, "yyyy-MM-dd")
                             if (chart.win.statsMode === "week")
                                 return Qt.locale("en_US").toString(d, "ddd").charAt(0)
-                            return (parent.index % Math.max(1, Math.ceil(chart.rows.length / 12)) === 0
-                                || parent.index === chart.rows.length - 1) ? d.getDate() : ""
+                            return (prayerDay.index % Math.max(1, Math.ceil(backend.statsDaily.count / 12)) === 0
+                                || prayerDay.index === backend.statsDaily.count - 1) ? d.getDate() : ""
                         }
                     }
                     MouseArea {
                         anchors.fill: parent
                         hoverEnabled: true
                         onEntered: {
-                            chart.tip.text = (chart.rows[parent.index] || {}).tooltip || ""
+                            chart.tip.text = prayerDay.tooltip
                             chart.tip.visible = true
                             var p = mapToItem(chart.win.contentItem, width / 2, 0)
                             chart.tip.x = Math.max(230, Math.min(chart.win.width - chart.tip.width - 10,

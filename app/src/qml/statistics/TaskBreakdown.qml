@@ -4,14 +4,22 @@ import QtQuick.Layouts
 
 Rectangle {
     id: taskStatsRow
-    property var taskData
+    required property string itemId
+    required property string title
+    required property string block
+    required property string scheduleText
+    required property string measure
+    required property int plannedDays
+    required property int doneDays
+    required property int minutes
+    required property int count
+    required property var series
     property var win
-    property var rowData: taskData
     width: parent.width
     height: 88
     radius: theme.radius
-    color: win.selectedStatsItem === taskData.id ? "#292722" : win.panel
-    border.color: win.selectedStatsItem === taskData.id ? theme.accent : win.border
+    color: win.selectedStatsItem === itemId ? "#292722" : win.panel
+    border.color: win.selectedStatsItem === itemId ? theme.accent : win.border
     RowLayout {
         anchors.fill: parent
         anchors.margins: 15
@@ -20,7 +28,7 @@ Rectangle {
             Layout.preferredWidth: 260
             spacing: 4
             Label {
-                text: taskStatsRow.taskData.title
+                text: taskStatsRow.title
                 color: taskStatsRow.win.text
                 font.pixelSize: 14
                 font.weight: Font.Medium
@@ -28,7 +36,7 @@ Rectangle {
                 elide: Text.ElideRight
             }
             Label {
-                text: taskStatsRow.win.joinedDetail(taskStatsRow.taskData.block, taskStatsRow.taskData.schedule_text || "")
+                text: taskStatsRow.win.joinedDetail(taskStatsRow.block, taskStatsRow.scheduleText)
                 color: taskStatsRow.win.muted
                 font.family: taskStatsRow.win.mono
                 font.pixelSize: 11
@@ -38,8 +46,8 @@ Rectangle {
             Layout.preferredWidth: 190
             spacing: 6
             Label {
-                text: (taskStatsRow.taskData.done_days || 0) + " / "
-                    + (taskStatsRow.taskData.planned_days || 0) + qsTr(" days")
+                text: (taskStatsRow.doneDays || 0) + " / "
+                    + (taskStatsRow.plannedDays || 0) + qsTr(" days")
                 color: taskStatsRow.win.muted
                 font.family: taskStatsRow.win.mono
                 font.pixelSize: 11
@@ -51,8 +59,8 @@ Rectangle {
                 color: "#403d37"
                 Rectangle {
                     height: parent.height
-                    width: parent.width * (taskStatsRow.taskData.planned_days
-                        ? taskStatsRow.taskData.done_days / taskStatsRow.taskData.planned_days : 0)
+                    width: parent.width * (taskStatsRow.plannedDays
+                        ? taskStatsRow.doneDays / taskStatsRow.plannedDays : 0)
                     radius: 2
                     color: theme.accent
                 }
@@ -65,13 +73,13 @@ Rectangle {
                 anchors.fill: parent
                 spacing: 2
                 Repeater {
-                    model: taskStatsRow.rowData.series || []
+                    model: taskStatsRow.series
                     Rectangle {
-                        required property var modelData
+                        required property int minutes
                         width: (parent.parent.width
-                            - Math.max(0, (taskStatsRow.rowData.series || []).length - 1) * 2)
-                            / Math.max(1, (taskStatsRow.rowData.series || []).length)
-                        height: Math.max(2, parent.parent.height * Math.min(1, (modelData.minutes || 0) / 60))
+                            - Math.max(0, taskStatsRow.series.count - 1) * 2)
+                            / Math.max(1, taskStatsRow.series.count)
+                        height: Math.max(2, parent.parent.height * Math.min(1, minutes / 60))
                         anchors.bottom: parent.bottom
                         radius: 2
                         color: "#777168"
@@ -81,7 +89,7 @@ Rectangle {
         }
         Label {
             Layout.preferredWidth: 90
-            text: taskStatsRow.win.formatMinutes(taskStatsRow.taskData.minutes)
+            text: taskStatsRow.win.formatMinutes(taskStatsRow.minutes)
             color: taskStatsRow.win.text
             font.family: taskStatsRow.win.mono
             font.pixelSize: 14
@@ -89,8 +97,8 @@ Rectangle {
         }
         Label {
             Layout.preferredWidth: 76
-            text: taskStatsRow.taskData.measure === "count"
-                ? (taskStatsRow.taskData.count || 0) + " ×" : "—"
+            text: taskStatsRow.measure === "count"
+                ? (taskStatsRow.count || 0) + " ×" : "—"
             color: taskStatsRow.win.muted
             font.family: taskStatsRow.win.mono
             font.pixelSize: 12
@@ -99,6 +107,6 @@ Rectangle {
     }
     MouseArea {
         anchors.fill: parent
-        onClicked: taskStatsRow.win.selectedStatsItem = taskStatsRow.taskData.id
+        onClicked: taskStatsRow.win.selectedStatsItem = taskStatsRow.itemId
     }
 }

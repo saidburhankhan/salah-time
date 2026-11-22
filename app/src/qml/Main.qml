@@ -51,10 +51,13 @@ ApplicationWindow {
     property alias timelineModel: todayPage.timelineModel
     property alias dragging: todayPage.dragging
     property alias dragId: todayPage.dragId
-    property alias dragPayload: todayPage.dragPayload
     property alias dragPointerY: todayPage.dragPointerY
+    property alias dragTitle: todayPage.dragTitle
+    property alias dragDetail: todayPage.dragDetail
+    property alias dragDone: todayPage.dragDone
+    property alias dragPayload: todayPage.dragPayload
 
-    function beginDrag(rowIndex, id, globalY) { todayPage.beginDrag(rowIndex, id, globalY) }
+    function beginDrag(rowIndex, id, globalY, title, detail, done) { todayPage.beginDrag(rowIndex, id, globalY, title, detail, done) }
     function updateDrag(globalY) { todayPage.updateDrag(globalY) }
     function finishDrag(cancelled) { todayPage.finishDrag(cancelled) }
     function syncTimeline() { todayPage.syncTimeline() }
@@ -65,14 +68,15 @@ ApplicationWindow {
         quickVisible = true
         quickPopup.reset()
     }
-    function openEntry(item) { editItem = item || ({}); entryVisible = true }
-    function locationName() {
-        var c = backend.config || {}
-        return c.location_name || c.name
-            || (typeof c.location === "string" ? c.location : (c.location ? c.location.name : ""))
-            || qsTr("Location")
+    function openEntry(item) {
+        if (typeof item === "string") editItem = backend.itemForId(item)
+        else if (item && item.id) editItem = backend.itemForId(item.id)
+        else editItem = item || ({})
+        entryVisible = true
     }
-    function methodName() { var c = backend.config || {}; return c.method_name || c.method || "—" }
+    function openEntryFromParse(title) { editItem = backend.itemFromParse(title || ""); entryVisible = true }
+    function locationName() { return backend.config.locationName || backend.config.location || qsTr("Location") }
+    function methodName() { return backend.config.methodName || backend.config.method || "—" }
     function capitalized(s) { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1) }
     function weekdayId(d) { return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][d.getDay()] }
     function shortDate(value) {
@@ -80,26 +84,19 @@ ApplicationWindow {
         return Qt.locale("en_US").toString(d, "ddd d MMM")
     }
     function countdownFromNext() {
-        var next = (backend.dayPlan.now || {}).next
-        if (!next) return 0
-        var at = Date.parse(String(next.at || ""))
+        if (!backend.nowState.nextAt) return Number(backend.nowState.nextRemainingSeconds || 0)
+        var at = Date.parse(String(backend.nowState.nextAt || ""))
         if (!isNaN(at)) return Math.max(0, Math.floor((at - Date.now()) / 1000))
-        return Number(next.remaining_seconds || 0)
+        return Number(backend.nowState.nextRemainingSeconds || 0)
     }
-    function timerRunning(x) {
-        var snapshot = x.timer || {}
-        return snapshot.running !== undefined ? !!snapshot.running : !!x.timer_started_at
-    }
-    function timerMinutes(x) {
-        var snapshot = x.timer || {}
-        var projected = snapshot.minutes_including_running !== undefined
-        var total = Number(projected ? snapshot.minutes_including_running : (x.minutes || 0))
-        var started = String(snapshot.started_at || x.timer_started_at || "")
-        if (timerRunning(x) && started) {
-            var ms = Date.parse(started)
-            var since = projected ? backend.dayPlanFetchedAt : ms
-            if (!isNaN(ms) && since) total += Math.max(0, Math.floor((timerNow - since) / 60000))
-        }
+    function timerMinutes(snapshot, started, projected, running) {
+        var total = Number(snapshot || 0)
+        var use = projected ? backend.nowState.fetchedAt : 0
+        if (!running || !started) return total
+        var ms = Date.parse(String(started))
+        if (isNaN(ms)) return total
+        var since = projected ? use : ms
+        if (since) total += Math.max(0, Math.floor((timerNow - since) / 60000))
         return total
     }
     function maybeToast(item) {
@@ -159,29 +156,6 @@ ApplicationWindow {
         return l.toString(b.first, "d MMM") + " – " + l.toString(b.last, "d MMM yyyy")
     }
     function formatMinutes(n) { n = Number(n || 0); return n >= 60 ? Math.floor(n / 60) + " h " + (n % 60) + " m" : n + " m" }
-    function selectedDaily() {
-        if (!selectedStatsItem) return backend.stats.daily || []
-        var items = backend.stats.items || [], daily = backend.stats.daily || []
-        for (var i = 0; i < items.length; i++)
-            if (items[i].id === selectedStatsItem) {
-                var out = [], s = items[i].series || []
-                for (var j = 0; j < s.length; j++) {
-                    var tooltip = ""
-                    for (var k = 0; k < daily.length; k++)
-                        if (daily[k].day === s[j].day) { tooltip = daily[k].tooltip || ""; break }
-                    out.push({ day: s[j].day, planned: s[j].planned ? 1 : 0, done: s[j].done ? 1 : 0, minutes: s[j].minutes || 0, count: s[j].count || 0, prayers: 0, tooltip: tooltip })
-                }
-                return out
-            }
-        return []
-    }
-    function shownDaily() { var source = selectedDaily(), out = []; for (var i = 0; i < source.length; i++) if (source[i].day <= backend.todayDay) out.push(source[i]); return out }
-    function newestDaily() { var source = shownDaily(), out = []; for (var i = source.length - 1; i >= 0; i--) out.push(source[i]); return out }
-    function shownTotals() {
-        var rows = shownDaily(), t = { done: 0, planned: 0, minutes: 0, count: 0, prayers: 0 }
-        for (var i = 0; i < rows.length; i++) { t.done += Number(rows[i].done || 0); t.planned += Number(rows[i].planned || 0); t.minutes += Number(rows[i].minutes || 0); t.count += Number(rows[i].count || 0); t.prayers += Number(rows[i].prayers || 0) }
-        return t
-    }
     function isTyping() { var f = win.activeFocusItem; return f && f.inputMethodHints !== undefined }
 
     GlobalShortcuts {
@@ -191,12 +165,12 @@ ApplicationWindow {
     onActiveChanged: if (active) backend.reload()
 
     Connections {
-        target: backend
-        function onPreviewChanged() {
+        target: backend.preview
+        function onChanged() {
             if (!win.pendingToast) return
             var draft = win.pendingToast
             win.pendingToast = null
-            var next = (backend.preview || {}).next_occurrence
+            var next = backend.preview.nextOccurrence
             if (next && next !== backend.selectedDay)
                 toast.show(String(draft.title || qsTr("Item")) + qsTr(" — next %1").arg(win.shortDate(next)))
         }

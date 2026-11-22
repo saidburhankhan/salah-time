@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QAbstractItemModelTester>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QSignalSpy>
@@ -23,6 +24,7 @@
 #include "backend.h"
 #include "client/coreclient.h"
 #include "client/dto.h"
+#include "models/statsseriesmodel.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -179,6 +181,32 @@ esac
             if (object->property("text").toString() == text) return true;
         return false;
     }
+    static int timelineItem(DayTimelineModel *model, const QString &id) {
+        for (int row = 0; row < model->rowCount(); ++row)
+            if (model->data(model->index(row, 0), DayTimelineModel::RowKindRole).toString() == "item" &&
+                model->data(model->index(row, 0), DayTimelineModel::ItemIdRole).toString() == id)
+                return row;
+        return -1;
+    }
+    static int timelineTitle(DayTimelineModel *model, const QString &title) {
+        for (int row = 0; row < model->rowCount(); ++row)
+            if (model->data(model->index(row, 0), DayTimelineModel::RowKindRole).toString() == "item" &&
+                model->data(model->index(row, 0), DayTimelineModel::TitleRole).toString() == title)
+                return row;
+        return -1;
+    }
+    static int prayerRow(PrayerModel *model, const QString &id) {
+        for (int row = 0; row < model->rowCount(); ++row)
+            if (model->data(model->index(row, 0), PrayerModel::PrayerIdRole).toString() == id) return row;
+        return -1;
+    }
+    static QVariantMap itemEditMap(Backend &backend, const QString &id) {
+        ItemDraft *draft = backend.itemForId(id);
+        QVariantMap item{{"id", draft->id()}, {"title", draft->title()}, {"block", draft->block()},
+                         {"repeat", draft->repeat()}, {"measure", draft->measure()},
+                         {"target", draft->target()}, {"weekdays", draft->weekdays()}};
+        return item;
+    }
 
     static QJsonObject fixture(const QString &name) {
         return readJson(QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/contract/") + name + ".json").object();
@@ -320,11 +348,9 @@ private slots:
         Backend backend(nullptr, QString(), 3000, daemon_path(dir));
         QSignalSpy spy(&backend, &Backend::requestFinished);
         backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
-        QVariantMap item;
-        for (const QVariant &block : backend.dayPlan().value("blocks").toList())
-            for (const QVariant &row : block.toMap().value("items").toList())
-                if (row.toMap().value("id").toString() == "<id:1>") item = row.toMap();
-        QVERIFY(!item.isEmpty());
+        const int row = timelineItem(backend.dayTimeline(), "<id:1>");
+        QVERIFY(row >= 0);
+        QVariantMap item = itemEditMap(backend, "<id:1>");
         item["title"] = "Changed";
         backend.saveItem(item);
         QTRY_VERIFY_WITH_TIMEOUT(editRequests == 1, 3000);
@@ -374,16 +400,11 @@ private slots:
         QSignalSpy spy(&backend, &Backend::requestFinished);
         backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
         backend.addQuick("Canonical", "fajr");
-        auto contains = [&](const QString &id) {
-            for (const QVariant &block : backend.dayPlan().value("blocks").toList())
-                for (const QVariant &row : block.toMap().value("items").toList())
-                    if (row.toMap().value("id").toString() == id) return true;
-            return false;
-        };
+        auto contains = [&](const QString &id) { return timelineItem(backend.dayTimeline(), id) >= 0; };
         QTRY_VERIFY_WITH_TIMEOUT(contains("new-1"), 3000);
-        for (const QVariant &block : backend.dayPlan().value("blocks").toList())
-            for (const QVariant &row : block.toMap().value("items").toList())
-                QVERIFY(!row.toMap().value("id").toString().startsWith("pending-"));
+        for (int row = 0; row < backend.dayTimeline()->rowCount(); ++row)
+            QVERIFY(!backend.dayTimeline()->data(backend.dayTimeline()->index(row, 0),
+                    DayTimelineModel::ItemIdRole).toString().startsWith("pending-"));
     }
     void missingSocketFallsBackToCliAndReportsOffline() {
         QTemporaryDir dir;
@@ -462,38 +483,51 @@ private slots:
         QScopedPointer<QObject> root(component.create());
         QVERIFY2(root, qPrintable(component.errorString()));
         root->setProperty("visible", false);
-        auto findItem = [&](const QString &title) {
-            for (const QVariant &block : backend.dayPlan().value("blocks").toList())
-                for (const QVariant &row : block.toMap().value("items").toList())
-                    if (row.toMap().value("title").toString() == title) return row.toMap();
-            return QVariantMap{};
-        };
+        auto findItem = [&](const QString &title) { return timelineTitle(backend.dayTimeline(), title); };
         backend.addQuick("Smoke add", "fajr");
         auto canonical = [&](const QString &title) {
-            const QVariantMap item = findItem(title);
-            return !item.isEmpty() && !item.value("id").toString().startsWith("pending-") && !item.value("pending").toBool();
+            const int row = findItem(title);
+            if (row < 0) return false;
+            const auto id = backend.dayTimeline()->data(backend.dayTimeline()->index(row, 0),
+                                                        DayTimelineModel::ItemIdRole).toString();
+            const bool pending = backend.dayTimeline()->data(backend.dayTimeline()->index(row, 0),
+                                                             DayTimelineModel::PendingRole).toBool();
+            return !id.startsWith("pending-") && !pending;
         };
         QTRY_VERIFY_WITH_TIMEOUT(canonical("Smoke add"), 8000);
-        const QVariantMap added = findItem("Smoke add");
-        const QString id = added.value("id").toString();
+        const int added = findItem("Smoke add");
+        const QString id = backend.dayTimeline()->data(backend.dayTimeline()->index(added, 0),
+                                                       DayTimelineModel::ItemIdRole).toString();
+        backend.moveItem(id, "dhuhr", {}, {});
+        QTRY_VERIFY_WITH_TIMEOUT([&] {
+            const int row = timelineItem(backend.dayTimeline(), id);
+            return row >= 0 && backend.dayTimeline()->data(backend.dayTimeline()->index(row, 0),
+                    DayTimelineModel::BlockRole).toString() == "dhuhr";
+        }(), 8000);
+        auto started = [&] {
+            const int row = findItem("Smoke add");
+            return row >= 0 && !backend.dayTimeline()->data(backend.dayTimeline()->index(row, 0),
+                    DayTimelineModel::TimerStartedAtRole).toString().isEmpty();
+        };
         backend.toggleTimer(id, false);
-        QTRY_VERIFY_WITH_TIMEOUT(!findItem("Smoke add").value("timer_started_at").toString().isEmpty(), 8000);
+        QTRY_VERIFY_WITH_TIMEOUT(started(), 8000);
         backend.toggleTimer(id, true);
-        QTRY_VERIFY_WITH_TIMEOUT(findItem("Smoke add").value("timer_started_at").toString().isEmpty(), 8000);
-        bool marked = false;
-        for (const QVariant &row : backend.dayPlan().value("prayers").toList())
-            if (row.toMap().value("id").toString() == "fajr") marked = row.toMap().value("marked").toBool();
+        QTRY_VERIFY_WITH_TIMEOUT(!started(), 8000);
+        const int prayer = prayerRow(backend.prayers(), "fajr");
+        QVERIFY(prayer >= 0);
+        bool marked = backend.prayers()->data(backend.prayers()->index(prayer, 0),
+                                             PrayerModel::MarkedRole).toBool();
         backend.togglePrayer("fajr", marked);
         QTRY_VERIFY_WITH_TIMEOUT([&] {
-            for (const QVariant &row : backend.dayPlan().value("prayers").toList())
-                if (row.toMap().value("id").toString() == "fajr") return row.toMap().value("marked").toBool() != marked;
-            return false;
+            const int row = prayerRow(backend.prayers(), "fajr");
+            return row >= 0 && backend.prayers()->data(backend.prayers()->index(row, 0),
+                    PrayerModel::MarkedRole).toBool() != marked;
         }(), 8000);
         QProcess external;
         external.start(qEnvironmentVariable("SALAH_BIN", "salah"), {"item", "add", "--json", "--", "External smoke"});
         QVERIFY(external.waitForFinished(8000));
         QCOMPARE(external.exitCode(), 0);
-        QTRY_VERIFY_WITH_TIMEOUT(!findItem("External smoke").isEmpty(), 8000);
+        QTRY_VERIFY_WITH_TIMEOUT(findItem("External smoke") >= 0, 8000);
         QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
         root->setProperty("visible", false);
     }
@@ -625,14 +659,14 @@ private slots:
         QScopedPointer<QObject> root(component.create()); QVERIFY2(root,qPrintable(component.errorString())); root->setProperty("visible",false);
         root->setProperty("page",2); root->setProperty("statsMode","week");
         QVERIFY(QMetaObject::invokeMethod(root.data(),"loadStatistics")); QTRY_VERIFY_WITH_TIMEOUT(!backend.busy(),5000);
-        QVERIFY2(backend.error().isEmpty(),qPrintable(backend.error())); QVERIFY(!backend.stats().isEmpty());
+        QVERIFY2(backend.error().isEmpty(),qPrintable(backend.error())); QVERIFY(backend.statsItems()->rowCount() > 0);
     }
     void asyncQueueAndModels() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
         b.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(),3,3000);
-        QCOMPARE(b.todayDay(),QString("2026-11-22")); QCOMPARE(b.dayPlan().value("prayers").toList().size(),5);
-        QCOMPARE(b.routinesStats().value("items").toList().first().toMap().value("title").toString(),QString("Read"));
-        QCOMPARE(b.config().value("location").toString(),QString("Tashkent"));
+        QCOMPARE(b.todayDay(),QString("2026-11-22")); QCOMPARE(b.prayers()->rowCount(),5);
+        QCOMPARE(b.routines()->data(b.routines()->index(0, 0), StatsItemsModel::TitleRole).toString(),QString("Read"));
+        QCOMPARE(b.config()->location(),QString("Tashkent"));
         QCOMPARE(logLines(dir).mid(0,3),QStringList({"day --json","stats --days 14 --json","config show"}));
     }
     void timeoutReportsAndQueueContinues() {
@@ -680,16 +714,24 @@ private slots:
     }
     void unchangedJsonDoesNotResetDayModel() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
-        b.reload(); QTRY_COMPARE(spy.size(),3); const int revision=b.dayRevision();
-        b.reload(); QTRY_COMPARE(spy.size(),6); QCOMPARE(b.dayRevision(),revision);
+        b.reload(); QTRY_COMPARE(spy.size(),3);
+        auto *model = b.dayTimeline();
+        QSignalSpy changed(model, &QAbstractItemModel::dataChanged);
+        QSignalSpy inserted(model, &QAbstractItemModel::rowsInserted);
+        QSignalSpy removed(model, &QAbstractItemModel::rowsRemoved);
+        QSignalSpy moved(model, &QAbstractItemModel::rowsMoved);
+        QSignalSpy reset(model, &QAbstractItemModel::modelReset);
+        b.reload(); QTRY_COMPARE(spy.size(),6); QTest::qWait(50);
+        QCOMPARE(changed.size(), 0); QCOMPARE(inserted.size(), 0);
+        QCOMPARE(removed.size(), 0); QCOMPARE(moved.size(), 0); QCOMPARE(reset.size(), 0);
     }
     void pendingTickWaitsForCanonicalResponse() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
         b.reload(); QTRY_COMPARE(spy.size(),3); b.toggleDone("a1","done");
-        const auto blocks=b.dayPlan().value("blocks").toList();
-        const auto row=blocks.at(1).toMap().value("items").toList().first().toMap();
-        QCOMPARE(row.value("state").toString(),QString("done"));
-        QVERIFY(row.value("pending").toBool());
+        const int row = timelineItem(b.dayTimeline(), "a1");
+        QVERIFY(row >= 0);
+        QCOMPARE(b.dayTimeline()->data(b.dayTimeline()->index(row, 0), DayTimelineModel::StateRole).toString(),QString("done"));
+        QVERIFY(b.dayTimeline()->data(b.dayTimeline()->index(row, 0), DayTimelineModel::PendingRole).toBool());
         QVERIFY(b.busy());
     }
     void adjustmentArgumentsAndClamp() {
@@ -708,10 +750,13 @@ private slots:
     void timerStartMarksOnlyTheTouchedRowPending() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
         b.reload(); QTRY_COMPARE(spy.size(),3); b.toggleTimer("a1",false);
-        const auto blocks=b.dayPlan().value("blocks").toList();
-        QVERIFY(blocks.at(0).toMap().value("items").toList().first().toMap().value("timer_started_at").toString() == QString("2026-11-22T08:00:00Z"));
-        QVERIFY(blocks.at(1).toMap().value("items").toList().first().toMap().value("pending").toBool());
-        QVERIFY(blocks.at(1).toMap().value("items").toList().first().toMap().value("timer_started_at").toString().isEmpty());
+        const int n1 = timelineItem(b.dayTimeline(), "n1");
+        const int a1 = timelineItem(b.dayTimeline(), "a1");
+        QVERIFY(n1 >= 0); QVERIFY(a1 >= 0);
+        QCOMPARE(b.dayTimeline()->data(b.dayTimeline()->index(n1, 0), DayTimelineModel::TimerStartedAtRole).toString(),
+                 QString("2026-11-22T08:00:00Z"));
+        QVERIFY(b.dayTimeline()->data(b.dayTimeline()->index(a1, 0), DayTimelineModel::PendingRole).toBool());
+        QVERIFY(b.dayTimeline()->data(b.dayTimeline()->index(a1, 0), DayTimelineModel::TimerStartedAtRole).toString().isEmpty());
         b.toggleTimer("a1",true);
         QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item stop --json a1"),3000);
     }
@@ -748,8 +793,8 @@ private slots:
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
         b.loadStatsRange("2026-11-01","2026-11-30"); QTRY_COMPARE(spy.size(),1);
         QCOMPARE(logLines(dir).last(),QString("stats --from 2026-11-01 --to 2026-11-30 --json"));
-        QCOMPARE(b.stats().value("daily").toList().first().toMap().value("minutes").toInt(),25);
-        QCOMPARE(b.stats().value("totals").toMap().value("active_days").toInt(),11);
+        QCOMPARE(b.statsDaily()->data(b.statsDaily()->index(0, 0), StatsDailyModel::MinutesRole).toInt(),25);
+        QCOMPARE(b.statsTotals()->activeDays(),11);
     }
     void statsRangeMathAndTooltip() {
         QTemporaryDir dir; Backend backend(nullptr,fake(dir)); Theme theme(dir.path());
@@ -840,18 +885,15 @@ private slots:
         Backend backend(nullptr, QString(), 3000, daemon_path(dir));
         QSignalSpy spy(&backend, &Backend::requestFinished);
         backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
-        QVariantMap row;
-        for (const QVariant &block : backend.dayPlan().value("blocks").toList())
-            for (const QVariant &item : block.toMap().value("items").toList())
-                if (item.toMap().value("id").toString() == "<id:1>") row = item.toMap();
-        QCOMPARE(row.value("detail_text").toString(), QString("CORE 0 / 30 min · CORE Daily"));
-        QCOMPARE(row.value("next_occurrence").toString(), QString("2031-05-14"));
-        QCOMPARE((row.value("timer").toMap()).value("minutes_including_running").toInt(), 0);
-        QCOMPARE(backend.routinesStats().value("time_ticks").toList().size(), 4);
-        QCOMPARE(backend.routinesStats().value("daily").toList().last().toMap().value("tooltip").toString(), QString("CORE TOOLTIP"));
+        const int row = timelineItem(backend.dayTimeline(), "<id:1>");
+        QVERIFY(row >= 0);
+        auto role = [&](int r) { return backend.dayTimeline()->data(backend.dayTimeline()->index(row, 0), r); };
+        QCOMPARE(role(DayTimelineModel::DetailTextRole).toString(), QString("CORE 0 / 30 min · CORE Daily"));
+        QCOMPARE(role(DayTimelineModel::NextOccurrenceRole).toString(), QString("2031-05-14"));
+        QCOMPARE(role(DayTimelineModel::TimerMinutesRole).toInt(), 0);
         backend.loadStatsRange("2031-05-08", "2031-05-14");
         QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 4, 3000);
-        QCOMPARE(backend.stats().value("time_ticks").toList().size(), 4);
+        QCOMPARE(backend.statsTicks()->rowCount(), 4);
 
         auto decodedDay = Dto::decode<Dto::DayPlan>(day);
         QVERIFY(decodedDay);
@@ -885,20 +927,232 @@ private slots:
 
         QQmlComponent cardComponent(&engine, QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/qml/today/ItemCard.qml")));
         QScopedPointer<QObject> card(cardComponent.createWithInitialProperties(
-            {{"win", QVariant::fromValue(root.data())}, {"payload", row}}));
+            {{"win", QVariant::fromValue(root.data())},
+             {"itemId", role(DayTimelineModel::ItemIdRole)},
+             {"title", role(DayTimelineModel::TitleRole)},
+             {"state", role(DayTimelineModel::StateRole)},
+             {"measure", role(DayTimelineModel::MeasureRole)},
+             {"detailText", role(DayTimelineModel::DetailTextRole)},
+             {"pending", role(DayTimelineModel::PendingRole)},
+             {"timerRunning", role(DayTimelineModel::TimerRunningRole)},
+             {"timerStartedAt", role(DayTimelineModel::TimerStartedAtRole)},
+             {"timerMinutes", role(DayTimelineModel::TimerMinutesRole)},
+             {"timerProjected", role(DayTimelineModel::TimerProjectedRole)},
+             {"count", role(DayTimelineModel::CountRole)},
+             {"target", role(DayTimelineModel::TargetRole)}}));
         QVERIFY2(card, qPrintable(cardComponent.errorString()));
         QTest::qWait(50);
         QVERIFY(hasLabelText(card.data(), "CORE 0 / 30 min · CORE Daily"));
 
         backend.previewItem(QVariantMap{{"block", "asr"}, {"repeat", "weekly"},
             {"weekdays", QVariantList{"mon", "wed", "fri"}}, {"measure", "check"}, {"target", 0}});
-        QTRY_COMPARE_WITH_TIMEOUT(backend.preview().value("schedule_text").toString(), QString("CORE PREVIEW"), 3000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.preview()->scheduleText(), QString("CORE PREVIEW"), 3000);
         QObject *entry = root->findChild<QObject *>("entryPopup"); QVERIFY(entry);
         root->setProperty("entryVisible", true); entry->setProperty("visible", true);
         QTRY_VERIFY_WITH_TIMEOUT(hasLabelText(root.data(), "CORE PREVIEW"), 3000);
         QVERIFY(hasLabelText(root.data(), "May 19, 2031"));
         root->setProperty("visible", false);
     }
+
+    void dayTimelineModelDiffsRowsInPlace() {
+        DayTimelineModel model;
+        QAbstractItemModelTester tester(&model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+        auto make = [](DayTimelineModel::Kind kind, const QString &key, const QString &title) {
+            DayTimelineModel::Row row;
+            row.kind = kind;
+            row.key = key;
+            row.block = "fajr";
+            row.itemId = key;
+            row.title = title;
+            row.state = "open";
+            row.measure = "check";
+            row.repeat = "daily";
+            return row;
+        };
+        QVector<DayTimelineModel::Row> rows{
+            make(DayTimelineModel::Kind::Header, "header:fajr", ""),
+            make(DayTimelineModel::Kind::Item, "item:a", "A"),
+            make(DayTimelineModel::Kind::Item, "item:b", "B"),
+            make(DayTimelineModel::Kind::Add, "add:fajr", "")};
+        model.setRows(rows);
+        QCOMPARE(model.rowCount(), 4);
+
+        QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+        QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+        QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+        QSignalSpy moved(&model, &QAbstractItemModel::rowsMoved);
+        QSignalSpy reset(&model, &QAbstractItemModel::modelReset);
+
+        rows[1].title = "A changed";
+        model.setRows(rows);
+        QCOMPARE(changed.size(), 1);
+        const QList<QVariant> change = changed.takeFirst();
+        QCOMPARE(change.at(0).toModelIndex().row(), 1);
+        QCOMPARE(change.at(1).toModelIndex().row(), 1);
+        QVERIFY(change.at(2).value<QList<int>>().contains(DayTimelineModel::TitleRole));
+
+        rows.insert(3, make(DayTimelineModel::Kind::Item, "item:c", "C"));
+        model.setRows(rows);
+        QCOMPARE(inserted.size(), 1);
+        QCOMPARE(inserted.takeFirst().at(1).toInt(), 3);
+
+        rows.move(3, 1);
+        model.setRows(rows);
+        QCOMPARE(moved.size(), 1);
+
+        rows.removeAt(1);
+        model.setRows(rows);
+        QCOMPARE(removed.size(), 1);
+        QCOMPARE(reset.size(), 0);
+        QCOMPARE(model.indexOfItem("b") >= 0, true);
+    }
+
+    void prayerSeriesDailyAndStatsModelsReportDiffs() {
+        PrayerModel prayers;
+        QAbstractItemModelTester prayerTester(&prayers, QAbstractItemModelTester::FailureReportingMode::QtTest);
+        QVector<PrayerModel::Row> prayerRows;
+        for (const QString &id : {"fajr", "dhuhr", "asr", "maghrib", "isha"}) {
+            PrayerModel::Row row;
+            row.prayerId = id;
+            row.name = id;
+            row.time = "05:00";
+            prayerRows.append(row);
+        }
+        prayers.setRows(prayerRows);
+        QSignalSpy prayerChanged(&prayers, &QAbstractItemModel::dataChanged);
+        prayerRows[0].marked = true;
+        prayers.setRows(prayerRows);
+        QCOMPARE(prayerChanged.size(), 1);
+        QCOMPARE(prayerChanged.takeFirst().at(0).toModelIndex().row(), 0);
+
+        StatsSeriesModel series;
+        QAbstractItemModelTester seriesTester(&series, QAbstractItemModelTester::FailureReportingMode::QtTest);
+        series.setRows({{"2031-05-14", true, true, 25, 0}, {"2031-05-15", true, false, 0, 0}});
+        QCOMPARE(series.rowCount(), 2);
+
+        const auto stats = Dto::decode<Dto::Stats>(fixture("stats_days"));
+        QVERIFY(stats);
+        StatsDailyModel daily;
+        QAbstractItemModelTester dailyTester(&daily, QAbstractItemModelTester::FailureReportingMode::QtTest);
+        daily.setStats(*stats.value, "9999-12-31", "");
+        QVERIFY(daily.rowCount() > 0);
+        QSignalSpy dailyChanged(&daily, &QAbstractItemModel::dataChanged);
+        QSignalSpy dailyReset(&daily, &QAbstractItemModel::modelReset);
+        Dto::Stats changedStats = *stats.value;
+        changedStats.daily[0].json["minutes"] = changedStats.daily[0].json.value("minutes").toInt() + 7;
+        daily.setStats(changedStats, "9999-12-31", "");
+        QCOMPARE(dailyChanged.size(), 1);
+        QCOMPARE(dailyChanged.takeFirst().at(0).toModelIndex().row(), 0);
+        QCOMPARE(dailyReset.size(), 0);
+
+        StatsItemsModel items;
+        QAbstractItemModelTester itemsTester(&items, QAbstractItemModelTester::FailureReportingMode::QtTest);
+        items.setItems(stats.value->items);
+        QVERIFY(items.rowCount() > 0);
+        auto *child = qobject_cast<StatsSeriesModel *>(
+            items.data(items.index(0, 0), StatsItemsModel::SeriesRole).value<QObject *>());
+        QVERIFY(child);
+        QAbstractItemModelTester childTester(child, QAbstractItemModelTester::FailureReportingMode::QtTest);
+        QVERIFY(child->rowCount() > 0);
+
+        RoutinesModel routines;
+        QAbstractItemModelTester routinesTester(&routines, QAbstractItemModelTester::FailureReportingMode::QtTest);
+        routines.setStats(*stats.value);
+        for (int row = 0; row < routines.rowCount(); ++row)
+            QVERIFY(routines.data(routines.index(row, 0), StatsItemsModel::RepeatRole).toString() != "none");
+
+        StatsTicksModel ticks;
+        QAbstractItemModelTester ticksTester(&ticks, QAbstractItemModelTester::FailureReportingMode::QtTest);
+        ticks.setTicks(stats.value->time_ticks);
+        QCOMPARE(ticks.rowCount(), int(stats.value->time_ticks.size()));
+        if (!stats.value->time_ticks.empty())
+            QCOMPARE(ticks.lastMinutes(), int(stats.value->time_ticks.back().minutes));
+    }
+
+    void timelineOrdersItemsByBlockAndPosition() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        QJsonObject day = fixture("day");
+        QJsonArray blocks = day.value("blocks").toArray();
+        for (int b = 0; b < blocks.size(); ++b) {
+            QJsonObject block = blocks[b].toObject();
+            if (block.value("start").toString() != "fajr") continue;
+            QJsonObject base = fixture("day").value("blocks").toArray().at(b).toObject()
+                .value("items").toArray().first().toObject();
+            QJsonArray ordered;
+            for (int i = 0; i < 3; ++i) {
+                QJsonObject item = base;
+                item["id"] = QStringLiteral("fajr-%1").arg(i);
+                item["title"] = QStringLiteral("Fajr %1").arg(i);
+                item["position"] = i == 0 ? 2 : i == 1 ? 0 : 1;
+                ordered.append(item);
+            }
+            block["items"] = ordered;
+            blocks[b] = block;
+            break;
+        }
+        day["blocks"] = blocks;
+        daemon.setHandler(readHandler(day));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
+        QStringList ids;
+        for (int row = 0; row < backend.dayTimeline()->rowCount(); ++row) {
+            if (backend.dayTimeline()->data(backend.dayTimeline()->index(row, 0),
+                                            DayTimelineModel::BlockRole).toString() != "fajr")
+                continue;
+            if (backend.dayTimeline()->data(backend.dayTimeline()->index(row, 0),
+                                            DayTimelineModel::RowKindRole).toString() != "item")
+                continue;
+            ids << backend.dayTimeline()->data(backend.dayTimeline()->index(row, 0),
+                                               DayTimelineModel::ItemIdRole).toString();
+        }
+        QCOMPARE(ids, QStringList({"fajr-1", "fajr-2", "fajr-0"}));
+    }
+
+    void singleRowMutationChangesOnlyThatRow() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); QVERIFY(daemon.ok());
+        QJsonObject day = fixture("day");
+        QJsonObject edited;
+        for (const QJsonValue &blockValue : day.value("blocks").toArray()) {
+            for (const QJsonValue &itemValue : blockValue.toObject().value("items").toArray()) {
+                if (itemValue.toObject().value("id").toString() == "<id:1>") edited = itemValue.toObject();
+            }
+        }
+        QVERIFY(!edited.isEmpty());
+        auto reads = readHandler(day);
+        daemon.setHandler([reads, edited](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) mutable {
+            if (request.value("method").toString() == "item.edit") {
+                QJsonObject row = edited;
+                row["title"] = "Mutated";
+                row["version"] = 8;
+                const QJsonObject changed{{"items", QJsonArray{row}}, {"entries", QJsonArray{}},
+                                          {"marks", QJsonArray{}}, {"deleted", QJsonArray{}}};
+                server->respond(socket, request, QJsonObject{
+                    {"revision", 101}, {"op_id", request.value("params").toObject().value("op_id")},
+                    {"changed", changed}});
+                return;
+            }
+            reads(request, socket, server);
+        });
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 3, 3000);
+        QSignalSpy changed(backend.dayTimeline(), &QAbstractItemModel::dataChanged);
+        QSignalSpy reset(backend.dayTimeline(), &QAbstractItemModel::modelReset);
+        QVariantMap item = itemEditMap(backend, "<id:1>");
+        item["title"] = "Mutated";
+        backend.saveItem(item);
+        QTRY_VERIFY_WITH_TIMEOUT(timelineItem(backend.dayTimeline(), "<id:1>") >= 0, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.dayTimeline()->data(
+            backend.dayTimeline()->index(timelineItem(backend.dayTimeline(), "<id:1>"), 0),
+            DayTimelineModel::TitleRole).toString() == "Mutated", 3000);
+        QVERIFY(changed.size() >= 1);
+        for (const QList<QVariant> &args : changed) {
+            QCOMPARE(args.at(0).toModelIndex().row(), args.at(1).toModelIndex().row());
+        }
+        QCOMPARE(reset.size(), 0);
+    }
+
     void themeFallbackAndAccent() {
         QTemporaryDir dir; Theme fallback(dir.path()); QCOMPARE(fallback.accent(),QString("#FFD60A")); QCOMPARE(fallback.accentForeground(),QString("black"));
         QDir(dir.path()).mkpath("theme"); write(dir.filePath("theme/colors.toml"),"accent = \"#112233\"\n"); Theme themed(dir.path()); QCOMPARE(themed.accent(),QString("#112233")); QCOMPARE(themed.accentForeground(),QString("white"));

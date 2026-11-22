@@ -6,124 +6,76 @@ import "."
 Item {
     id: timeline
     property var win
-    readonly property ListModel timelineModel: listModel
-    property bool timelineSyncing: false
-    property int timelineRevision: -1
+    readonly property var timelineModel: backend.dayTimeline
     property bool dragging: false
     property string dragId: ""
     property int dragOriginalIndex: -1
     property real dragPointerY: 0
-    property var dragPayload: ({})
+    property string dragTitle: ""
+    property string dragDetail: ""
+    property bool dragDone: false
+    // Compatibility for callers that used the old payload map; the ghost
+    // itself binds the three typed properties above.
+    readonly property var dragPayload: ({ title: dragTitle, detail_text: dragDetail,
+                                          state: dragDone ? "done" : "open" })
 
-    ListModel { id: listModel }
+    // The model is owned and diffed by Backend now; kept for callers that used
+    // to force a QML-side ListModel sync.
+    function syncTimeline() {}
 
-    function desiredTimelineRows() {
-        var rows = [], blocks = backend.dayPlan.blocks || [], prayers = backend.dayPlan.prayers || []
-        for (var b = 0; b < win.blockIds.length; b++) {
-            var id = win.blockIds[b], prayer = b > 0 ? (prayers[b - 1] || {}) : ({})
-            rows.push({
-                key: "header:" + id,
-                kind: "header",
-                block: id,
-                payload: {
-                    name: win.blockNames[b],
-                    time: b === 0 ? (backend.dayPlan.night_start || "--:--") : (prayer.time || "--:--"),
-                    marked: !!prayer.marked,
-                    current: id === (backend.dayPlan.now || {}).block
-                }
-            })
-            var items = []
-            for (var x = 0; x < blocks.length; x++)
-                if (blocks[x].start === id) { items = blocks[x].items || []; break }
-            for (var i = 0; i < items.length; i++)
-                rows.push({ key: "item:" + items[i].id, kind: "item", block: id, payload: items[i] })
-            rows.push({ key: "add:" + id, kind: "add", block: id, payload: {} })
-            if (id === "fajr")
-                rows.push({ key: "marker:sunrise", kind: "marker", block: id, payload: { name: qsTr("Sunrise"), time: backend.dayPlan.sunrise || "--:--" } })
-            if (id === "isha")
-                rows.push({ key: "marker:sleep", kind: "marker", block: id, payload: { name: qsTr("Sleep"), time: (backend.dayPlan.sleep || {}).time || "--:--" } })
-        }
-        return rows
-    }
-
-    function syncTimeline() {
-        if (dragging || timelineRevision === backend.dayRevision)
-            return
-        timelineRevision = backend.dayRevision
-        timelineSyncing = true
-        var wanted = desiredTimelineRows()
-        for (var i = 0; i < wanted.length; i++) {
-            var found = -1
-            for (var j = i; j < listModel.count; j++)
-                if (listModel.get(j).key === wanted[i].key) { found = j; break }
-            if (found < 0) {
-                listModel.insert(i, wanted[i])
-            } else {
-                if (found !== i) listModel.move(found, i, 1)
-                listModel.set(i, wanted[i])
-            }
-        }
-        while (listModel.count > wanted.length)
-            listModel.remove(listModel.count - 1)
-        timelineSyncing = false
-    }
-
-    function beginDrag(rowIndex, id, globalY) {
+    function beginDrag(rowIndex, id, globalY, title, detail, done) {
         dragging = true
         dragId = id
         dragOriginalIndex = rowIndex
         dragPointerY = globalY
-        dragPayload = listModel.get(rowIndex).payload || ({})
+        dragTitle = title || ""
+        dragDetail = detail || ""
+        dragDone = !!done
     }
 
     function updateDrag(globalY) {
         if (!dragging) return
         dragPointerY = globalY
+        var model = backend.dayTimeline
         var p = todayList.mapFromItem(win.contentItem, 0, globalY)
         var idx = todayList.indexAt(10, p.y + todayList.contentY)
-        if (idx < 0) idx = p.y < 0 ? 0 : listModel.count - 1
-        var from = -1
-        for (var i = 0; i < listModel.count; i++)
-            if (listModel.get(i).key === "item:" + dragId) { from = i; break }
+        if (idx < 0) idx = p.y < 0 ? 0 : model.count - 1
+        var from = model.indexOfItem(dragId)
         // The gap belongs between a block's header and its "+ add" row: over a
         // header it goes just below it, over "+ add" just above it, and markers
-        // (Sunrise, Sleep) never take it. Moving down, ListModel.move puts the
-        // row after the target row; moving up, before it.
-        var k = listModel.get(idx).kind
-        if (k === "marker") return
-        if (k === "header" && from > idx) idx++
-        if (k === "add" && from < idx) idx--
+        // (Sunrise, Sleep) never take it. Moving down, moveRow puts the row
+        // after the target row; moving up, before it.
+        var kind = model.kindAt(idx)
+        if (kind === "marker") return
+        if (kind === "header" && from > idx) idx++
+        if (kind === "add" && from < idx) idx--
         if (from >= 0 && idx !== from)
-            listModel.move(from, Math.max(0, Math.min(idx, listModel.count - 1)), 1)
+            model.moveRow(from, Math.max(0, Math.min(idx, model.count - 1)))
     }
 
     function finishDrag(cancelled) {
         if (!dragging) return
-        var from = -1
-        for (var i = 0; i < listModel.count; i++)
-            if (listModel.get(i).key === "item:" + dragId) { from = i; break }
+        var model = backend.dayTimeline
+        var from = model.indexOfItem(dragId)
         if (cancelled || from < 0) {
             if (from >= 0 && dragOriginalIndex >= 0)
-                listModel.move(from, dragOriginalIndex, 1)
+                model.moveRow(from, dragOriginalIndex)
         } else {
-            var block = listModel.get(from).block
+            var block = model.blockAt(from)
             var afterId = "", beforeId = ""
             for (var p = from - 1; p >= 0; p--) {
-                var previous = listModel.get(p)
-                if (previous.block !== block) break
-                if (previous.kind === "item") { afterId = previous.payload.id; break }
+                if (model.blockAt(p) !== block) break
+                if (model.kindAt(p) === "item") { afterId = model.itemIdAt(p); break }
             }
-            for (var n = from + 1; n < listModel.count; n++) {
-                var following = listModel.get(n)
-                if (following.block !== block) break
-                if (following.kind === "item") { beforeId = following.payload.id; break }
+            for (var n = from + 1; n < model.count; n++) {
+                if (model.blockAt(n) !== block) break
+                if (model.kindAt(n) === "item") { beforeId = model.itemIdAt(n); break }
             }
             backend.moveItem(dragId, block, afterId, beforeId)
         }
         dragging = false
         dragId = ""
         dragOriginalIndex = -1
-        syncTimeline()
     }
 
     ListView {
@@ -141,38 +93,68 @@ Item {
         delegate: Item {
             id: rowDelegate
             required property int index
-            required property string kind
+            required property string rowKind
             required property string block
-            required property var payload
-            required property string key
+            required property string name
+            required property string time
+            required property bool marked
+            required property bool current
+            required property string itemId
+            required property string title
+            required property string state
+            required property string measure
+            required property string repeat
+            required property string detailText
+            required property bool pending
+            required property bool timerRunning
+            required property string timerStartedAt
+            required property int timerMinutes
+            required property bool timerProjected
+            required property int count
+            required property int target
             width: todayList.width
-            height: kind === "header" ? 60 : kind === "item" ? 82 : kind === "add" ? 32 : 26
-            property var safePayload: payload || ({})
+            height: rowKind === "header" ? 60 : rowKind === "item" ? 82 : rowKind === "add" ? 32 : 26
             PrayerHeader {
                 anchors.fill: parent
-                visible: rowDelegate.kind === "header"
+                visible: rowDelegate.rowKind === "header"
                 win: timeline.win
                 block: rowDelegate.block
-                payload: rowDelegate.safePayload
+                headerName: rowDelegate.name
+                headerTime: rowDelegate.time
+                marked: rowDelegate.marked
+                current: rowDelegate.current
             }
             ItemCard {
                 anchors.fill: parent
-                visible: rowDelegate.kind === "item"
+                visible: rowDelegate.rowKind === "item"
                 win: timeline.win
-                payload: rowDelegate.safePayload
+                itemId: rowDelegate.itemId
+                title: rowDelegate.title
+                state: rowDelegate.state
+                measure: rowDelegate.measure
+                repeat: rowDelegate.repeat
+                detailText: rowDelegate.detailText
+                pending: rowDelegate.pending
+                timerRunning: rowDelegate.timerRunning
+                timerStartedAt: rowDelegate.timerStartedAt
+                timerMinutes: rowDelegate.timerMinutes
+                timerProjected: rowDelegate.timerProjected
+                count: rowDelegate.count
+                target: rowDelegate.target
                 rowIndex: rowDelegate.index
                 list: todayList
             }
             AddRow {
                 anchors.fill: parent
-                visible: rowDelegate.kind === "add"
+                visible: rowDelegate.rowKind === "add"
                 win: timeline.win
                 block: rowDelegate.block
             }
             MarkerRow {
-                visible: rowDelegate.kind === "marker"
+                visible: rowDelegate.rowKind === "marker"
                 win: timeline.win
-                payload: rowDelegate.safePayload
+                markerName: rowDelegate.name
+                markerTime: rowDelegate.time
             }
         }
     }

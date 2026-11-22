@@ -1,6 +1,7 @@
 #include "backend.h"
 
 #include <QCalendar>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -8,41 +9,94 @@
 #include <algorithm>
 
 namespace {
-bool removeFromBlocks(QVariantList &blocks, const QString &id) {
+const QStringList kBlockOrder{QStringLiteral("night"), QStringLiteral("fajr"),
+                              QStringLiteral("dhuhr"), QStringLiteral("asr"),
+                              QStringLiteral("maghrib"), QStringLiteral("isha")};
+
+QString blockName(const QString &block) {
+    if (block == QStringLiteral("night")) return QCoreApplication::translate("Main", "Before Fajr");
+    if (block == QStringLiteral("fajr")) return QCoreApplication::translate("Main", "Fajr");
+    if (block == QStringLiteral("dhuhr")) return QCoreApplication::translate("Main", "Dhuhr");
+    if (block == QStringLiteral("asr")) return QCoreApplication::translate("Main", "Asr");
+    if (block == QStringLiteral("maghrib")) return QCoreApplication::translate("Main", "Maghrib");
+    if (block == QStringLiteral("isha")) return QCoreApplication::translate("Main", "Isha");
+    return block;
+}
+
+void sortItems(std::vector<Dto::DayItem> &items) {
+    std::stable_sort(items.begin(), items.end(), [](const Dto::DayItem &a, const Dto::DayItem &b) {
+        const int ap = a.json.value(QStringLiteral("position")).toInt();
+        const int bp = b.json.value(QStringLiteral("position")).toInt();
+        if (ap != bp) return ap < bp;
+        return a.id < b.id;
+    });
+}
+
+bool removeFromBlocks(std::vector<Dto::DayBlock> &blocks, const QString &id) {
     bool removed = false;
-    for (int b = 0; b < blocks.size(); ++b) {
-        QVariantMap block = blocks.at(b).toMap();
-        QVariantList items = block.value("items").toList();
-        for (int i = 0; i < items.size();) {
-            if (items.at(i).toMap().value("id").toString() == id) {
-                items.removeAt(i);
+    for (Dto::DayBlock &block : blocks) {
+        for (auto it = block.items.begin(); it != block.items.end();) {
+            if (it->id == id) {
+                it = block.items.erase(it);
                 removed = true;
             } else {
-                ++i;
+                ++it;
             }
         }
-        block["items"] = items;
-        blocks[b] = block;
     }
     return removed;
 }
 
-void sortBlock(QVariantList &items) {
-    std::sort(items.begin(), items.end(), [](const QVariant &a, const QVariant &b) {
-        const QVariantMap left = a.toMap();
-        const QVariantMap right = b.toMap();
-        const int lp = left.value("position", 0).toInt();
-        const int rp = right.value("position", 0).toInt();
-        if (lp != rp) return lp < rp;
-        return left.value("id").toString() < right.value("id").toString();
-    });
+QStringList weekdaysOf(const QJsonObject &json) {
+    QStringList days;
+    for (const QJsonValue &day : json.value(QStringLiteral("weekdays")).toArray())
+        days.append(day.toString());
+    return days;
+}
+
+DayTimelineModel::Row itemRow(const Dto::DayItem &item, bool pending) {
+    DayTimelineModel::Row row;
+    row.kind = DayTimelineModel::Kind::Item;
+    row.key = QStringLiteral("item:") + item.id;
+    row.block = item.block;
+    row.itemId = item.id;
+    row.title = item.title;
+    row.state = item.state;
+    row.measure = item.measure;
+    row.repeat = item.repeat;
+    row.detailText = item.detail_text;
+    row.scheduleText = item.schedule_text;
+    row.nextOccurrence = item.next_occurrence;
+    row.carried = item.carried;
+    row.pending = pending;
+    row.timerRunning = item.timer_running;
+    row.timerStartedAt = item.timer_started_at;
+    row.timerMinutes = int(item.timer_minutes_including_running);
+    row.timerProjected = item.json.contains(QStringLiteral("timer"));
+    row.count = item.json.value(QStringLiteral("count")).toInt();
+    row.target = item.json.value(QStringLiteral("target")).toInt();
+    row.weekdays = weekdaysOf(item.json);
+    row.version = item.json.value(QStringLiteral("version")).toVariant().toLongLong();
+    row.position = item.json.value(QStringLiteral("position")).toInt();
+    return row;
 }
 } // namespace
 
 Backend::Backend(QObject *parent, const QString &program, int timeoutMs, const QString &socketPath)
     : QObject(parent), m_client(this, program, timeoutMs, socketPath) {
-    connect(&m_client, &CoreClient::busyChanged, this, &Backend::changed);
-    connect(&m_client, &CoreClient::offlineChanged, this, [this](bool) { emit changed(); });
+    m_statsDailyNewest.setSourceModel(&m_statsDaily);
+    m_statsDailyNewest.setSortRole(StatsDailyModel::DayRole);
+    m_statsDailyNewest.setDynamicSortFilter(true);
+    m_statsDailyNewest.sort(0, Qt::DescendingOrder);
+    auto notifyCount = [this] { emit statsDailyNewestCountChanged(); };
+    connect(&m_statsDailyNewest, &QAbstractItemModel::rowsInserted, this, notifyCount);
+    connect(&m_statsDailyNewest, &QAbstractItemModel::rowsRemoved, this, notifyCount);
+    connect(&m_statsDailyNewest, &QAbstractItemModel::modelReset, this, notifyCount);
+    connect(&m_statsDailyNewest, &QAbstractItemModel::layoutChanged, this, notifyCount);
+    m_editItem = new ItemDraft(this);
+
+    connect(&m_client, &CoreClient::busyChanged, this, &Backend::busyChanged);
+    connect(&m_client, &CoreClient::offlineChanged, this, [this](bool) { emit offlineChanged(); });
     connect(&m_client, &CoreClient::reconnected, this, [this] { reload(); });
     connect(&m_client, &CoreClient::changed, this, &Backend::reloadFromNotification);
     connect(&m_client, &CoreClient::requestFinished, this, [this](const QStringList &args, bool success) {
@@ -56,14 +110,28 @@ Backend::Backend(QObject *parent, const QString &program, int timeoutMs, const Q
 
 Backend::~Backend() = default;
 
-CoreClient::Callback Backend::response(std::function<void(const QJsonObject &)> success, bool reloadAfter) {
+void Backend::fail(const QString &message) {
+    if (m_error == message) return;
+    m_error = message;
+    emit errorChanged();
+}
+
+void Backend::clearError() {
+    if (m_error.isEmpty()) return;
+    m_error.clear();
+    emit errorChanged();
+}
+
+void Backend::dismissError() { clearError(); }
+
+CoreClient::Callback Backend::readResponse(std::function<void(const CoreClient::Result &)> success,
+                                           bool reloadAfter) {
     return [this, success = std::move(success), reloadAfter](const CoreClient::Result &result) {
         if (!result.ok) fail(result.error.message);
         else {
-            if (success) success(Dto::jsonObject(result.value));
+            if (success) success(result);
             if (reloadAfter) m_refreshPending = true;
         }
-        emit changed();
     };
 }
 
@@ -73,66 +141,32 @@ CoreClient::Callback Backend::mutationResponse(const QString &pendingId, const Q
             if (const auto *mutation = std::get_if<Dto::MutationResult>(&result.value)) {
                 applyMutation(*mutation);
             } else {
-                // Legacy CLI fallback: it does not return canonical rows, so
-                // refetch once the queue drains.
+                // Legacy CLI fallback: no canonical rows, so refetch once the
+                // queue drains.
                 if (!pendingOpId.isEmpty()) removePendingCreate(pendingOpId);
-                if (pendingId.startsWith("prayer:")) setPrayerPending(pendingId.mid(7), false);
+                if (pendingId.startsWith(QStringLiteral("prayer:"))) setPrayerPending(pendingId.mid(7), false);
                 else if (!pendingId.isEmpty()) setItemPending(pendingId, false);
                 m_refreshPending = true;
             }
         } else {
             if (!pendingOpId.isEmpty()) removePendingCreate(pendingOpId);
-            if (pendingId.startsWith("prayer:")) setPrayerPending(pendingId.mid(7), false);
+            if (pendingId.startsWith(QStringLiteral("prayer:"))) setPrayerPending(pendingId.mid(7), false);
             else if (!pendingId.isEmpty()) setItemPending(pendingId, false);
             fail(result.error.message);
-            if (result.error.kind == CoreClient::ErrorKind::Conflict) {
-                // The entity changed underneath us; refetch the affected view
-                // and keep the server's human message in the error banner.
-                reload();
-            } else if (!m_client.offline()) {
-                reload();
-            }
+            if (result.error.kind == CoreClient::ErrorKind::Conflict || !m_client.offline()) reload();
         }
-        emit changed();
     };
 }
 
-void Backend::fail(const QString &message) { m_error = message; }
-void Backend::dismissError() { m_error.clear(); emit changed(); }
-
-QVariantMap Backend::normalizedObject(const QJsonObject &object) { return object.toVariantMap(); }
-
-bool Backend::setJsonModel(QVariantMap &target, QByteArray &previous, const QJsonObject &object) {
-    const QByteArray json = QJsonDocument(object).toJson(QJsonDocument::Compact);
-    if (json == previous) return false;
-    previous = json;
-    target = normalizedObject(object);
-    return true;
-}
-
 void Backend::reload() {
-    m_client.day(m_selected, response([this](const QJsonObject &object) {
-        const bool modelChanged = setJsonModel(m_dayPlan, m_dayJson, object);
-        m_dayPlanFetchedAt = QDateTime::currentMSecsSinceEpoch();
-        const QDate cliDay = QDate::fromString(object.value("day").toString(), Qt::ISODate);
-        if (cliDay.isValid()) {
-            m_selected = cliDay;
-            if (object.value("is_today").toBool()) m_today = cliDay;
-        }
-        for (const QVariant &entry : m_dayPlan.value("blocks").toList()) {
-            for (const QVariant &item : entry.toMap().value("items").toList()) {
-                const QVariantMap map = item.toMap();
-                if (map.contains("version")) m_versions.insert(map.value("id").toString(), map.value("version").toLongLong());
-            }
-        }
-        applyPendingFlags();
-        if (modelChanged) { ++m_dayRevision; emit changed(); }
+    m_client.day(m_selected, readResponse([this](const CoreClient::Result &result) {
+        if (const auto *plan = std::get_if<Dto::DayPlan>(&result.value)) applyDayPlan(*plan);
     }));
-    m_client.statsDays(14, response([this](const QJsonObject &object) {
-        if (setJsonModel(m_routinesStats, m_routinesJson, object)) emit changed();
+    m_client.statsDays(14, readResponse([this](const CoreClient::Result &result) {
+        if (const auto *stats = std::get_if<Dto::Stats>(&result.value)) applyRoutines(*stats);
     }));
-    m_client.configShow(response([this](const QJsonObject &object) {
-        if (setJsonModel(m_config, m_configJson, object)) emit changed();
+    m_client.configShow(readResponse([this](const CoreClient::Result &result) {
+        if (const auto *config = std::get_if<Dto::Config>(&result.value)) applyConfig(*config);
     }));
 }
 
@@ -142,10 +176,227 @@ void Backend::reloadFromNotification(qint64 revision) {
     reload();
 }
 
+void Backend::applyDayPlan(const Dto::DayPlan &plan) {
+    const QString previousSelected = selectedDay();
+    const QString previousToday = todayDay();
+    m_dayPlan = plan;
+    m_dayPlanFetchedAt = QDateTime::currentMSecsSinceEpoch();
+    const QDate cliDay = QDate::fromString(plan.day, Qt::ISODate);
+    if (cliDay.isValid()) {
+        m_selected = cliDay;
+        if (plan.json.value(QStringLiteral("is_today")).toBool()) m_today = cliDay;
+    }
+    m_versions.clear();
+    for (const Dto::DayBlock &block : m_dayPlan.blocks)
+        for (const Dto::DayItem &item : block.items)
+            if (item.json.contains(QStringLiteral("version")))
+                m_versions.insert(item.id, item.json.value(QStringLiteral("version")).toVariant().toLongLong());
+
+    rebuildTimeline();
+    rebuildPrayers();
+    m_now.update(m_dayPlan, m_dayPlanFetchedAt);
+    if (previousSelected != selectedDay()) emit selectedDayChanged();
+    if (previousToday != todayDay()) emit todayDayChanged();
+}
+
+void Backend::applyStats(const Dto::Stats &stats) {
+    m_stats = stats;
+    m_totals.update(m_stats);
+    m_statsItems.setItems(m_stats.items, StatsItemsModel::Sort::MinutesDescending);
+    m_ticks.setTicks(m_stats.time_ticks);
+    m_statsDaily.setStats(m_stats, todayDay(), m_selectedStatsItem);
+}
+
+void Backend::applyRoutines(const Dto::Stats &stats) {
+    m_routinesStats = stats;
+    m_routines.setStats(m_routinesStats);
+}
+
+void Backend::applyConfig(const Dto::Config &config) {
+    m_config = config;
+    m_configState.update(m_config);
+}
+
+void Backend::rebuildTimeline() {
+    QVector<DayTimelineModel::Row> rows;
+    QHash<QString, const Dto::DayBlock *> blockFor;
+    for (const Dto::DayBlock &block : m_dayPlan.blocks) blockFor.insert(block.start, &block);
+    QHash<QString, const Dto::Prayer *> prayerFor;
+    for (const Dto::Prayer &prayer : m_dayPlan.prayers) prayerFor.insert(prayer.id, &prayer);
+    const QString nowBlock = m_dayPlan.now ? m_dayPlan.now->block : QString();
+    const QString nightStart = m_dayPlan.json.value(QStringLiteral("night_start")).toString();
+    const QString sunrise = m_dayPlan.json.value(QStringLiteral("sunrise")).toString();
+
+    for (const QString &blockId : kBlockOrder) {
+        const Dto::Prayer *prayer = prayerFor.value(blockId, nullptr);
+        DayTimelineModel::Row header;
+        header.kind = DayTimelineModel::Kind::Header;
+        header.key = QStringLiteral("header:") + blockId;
+        header.block = blockId;
+        header.name = blockName(blockId);
+        header.time = blockId == QStringLiteral("night")
+            ? nightStart
+            : (prayer ? prayer->json.value(QStringLiteral("time")).toString() : QString());
+        header.marked = prayer && prayer->json.value(QStringLiteral("marked")).toBool();
+        header.current = blockId == nowBlock;
+        rows.append(header);
+
+        const Dto::DayBlock *block = blockFor.value(blockId, nullptr);
+        QVector<DayTimelineModel::Row> itemRows;
+        if (block) {
+            std::vector<Dto::DayItem> items = block->items;
+            sortItems(items);
+            for (const Dto::DayItem &item : items)
+                itemRows.append(itemRow(item, m_pendingItems.contains(item.id)));
+        }
+        for (const PendingCreate &pending : m_pendingCreates) {
+            if (pending.block != blockId) continue;
+            DayTimelineModel::Row row;
+            row.kind = DayTimelineModel::Kind::Item;
+            row.key = QStringLiteral("item:") + pending.localId;
+            row.block = pending.block;
+            row.itemId = pending.localId;
+            row.title = pending.title;
+            row.state = QStringLiteral("open");
+            row.measure = pending.measure;
+            row.repeat = pending.repeat;
+            row.target = pending.target;
+            row.weekdays = pending.weekdays;
+            row.pending = true;
+            row.position = 1000000 + itemRows.size();
+            itemRows.append(row);
+        }
+        for (const DayTimelineModel::Row &row : itemRows) rows.append(row);
+
+        DayTimelineModel::Row add;
+        add.kind = DayTimelineModel::Kind::Add;
+        add.key = QStringLiteral("add:") + blockId;
+        add.block = blockId;
+        rows.append(add);
+
+        if (blockId == QStringLiteral("fajr")) {
+            DayTimelineModel::Row marker;
+            marker.kind = DayTimelineModel::Kind::Marker;
+            marker.key = QStringLiteral("marker:sunrise");
+            marker.block = blockId;
+            marker.name = QCoreApplication::translate("Main", "Sunrise");
+            marker.time = sunrise;
+            rows.append(marker);
+        }
+        if (blockId == QStringLiteral("isha")) {
+            DayTimelineModel::Row marker;
+            marker.kind = DayTimelineModel::Kind::Marker;
+            marker.key = QStringLiteral("marker:sleep");
+            marker.block = blockId;
+            marker.name = QCoreApplication::translate("Main", "Sleep");
+            marker.time = m_dayPlan.sleep.time;
+            rows.append(marker);
+        }
+    }
+    m_timeline.setRows(rows);
+}
+
+void Backend::rebuildPrayers() {
+    QVector<PrayerModel::Row> rows;
+    rows.reserve(int(m_dayPlan.prayers.size()));
+    for (const Dto::Prayer &prayer : m_dayPlan.prayers) {
+        PrayerModel::Row row;
+        row.prayerId = prayer.id;
+        row.name = prayer.json.value(QStringLiteral("name")).toString();
+        row.time = prayer.json.value(QStringLiteral("time")).toString();
+        row.passed = prayer.json.value(QStringLiteral("passed")).toBool();
+        row.current = prayer.json.value(QStringLiteral("current")).toBool();
+        row.marked = prayer.json.value(QStringLiteral("marked")).toBool();
+        row.pending = m_pendingPrayers.contains(prayer.id);
+        row.version = versionFor(prayer.id);
+        row.day = m_dayPlan.day;
+        rows.append(row);
+    }
+    m_prayers.setRows(rows);
+}
+
+void Backend::setItemPending(const QString &id, bool pending) {
+    if (pending) m_pendingItems.insert(id);
+    else m_pendingItems.remove(id);
+    rebuildTimeline();
+}
+
+void Backend::setPrayerPending(const QString &prayer, bool pending) {
+    if (pending) m_pendingPrayers.insert(prayer);
+    else m_pendingPrayers.remove(prayer);
+    rebuildPrayers();
+}
+
+void Backend::insertPending(const PendingCreate &pending) {
+    m_pendingCreates.insert(pending.opId, pending);
+    m_pendingItems.insert(pending.localId);
+    rebuildTimeline();
+}
+
+void Backend::removePendingCreate(const QString &opId) {
+    const auto it = m_pendingCreates.find(opId);
+    if (it == m_pendingCreates.end()) return;
+    const QString id = it.value().localId;
+    m_pendingCreates.erase(it);
+    m_pendingItems.remove(id);
+    rebuildTimeline();
+}
+
+qint64 Backend::versionFor(const QString &id) const {
+    const auto it = m_versions.constFind(id);
+    return it == m_versions.constEnd() ? -1 : it.value();
+}
+
+bool Backend::dayContains(const QString &id) const {
+    for (const Dto::DayBlock &block : m_dayPlan.blocks)
+        for (const Dto::DayItem &item : block.items)
+            if (item.id == id) return true;
+    return false;
+}
+
+void Backend::applyMutation(const Dto::MutationResult &mutation) {
+    removePendingCreate(mutation.opId);
+    for (const QString &id : mutation.deleted) {
+        removeFromBlocks(m_dayPlan.blocks, id);
+        m_pendingItems.remove(id);
+        m_versions.remove(id);
+    }
+    for (const Dto::DayItem &row : mutation.items) {
+        if (row.json.contains(QStringLiteral("version")))
+            m_versions.insert(row.id, row.json.value(QStringLiteral("version")).toVariant().toLongLong());
+        m_pendingItems.remove(row.id);
+        removeFromBlocks(m_dayPlan.blocks, row.id);
+        for (Dto::DayBlock &block : m_dayPlan.blocks) {
+            if (block.start != row.block) continue;
+            block.items.push_back(row);
+            sortItems(block.items);
+            break;
+        }
+    }
+    for (const Dto::PrayerMark &mark : mutation.marks) {
+        if (mark.json.contains(QStringLiteral("version")))
+            m_versions.insert(mark.id, mark.json.value(QStringLiteral("version")).toVariant().toLongLong());
+        m_versions.insert(QStringLiteral("%1:%2").arg(mark.day, mark.prayer),
+                          mark.json.value(QStringLiteral("version")).toVariant().toLongLong());
+        m_pendingPrayers.remove(mark.prayer);
+        for (Dto::Prayer &prayer : m_dayPlan.prayers) {
+            if (prayer.id != mark.prayer) continue;
+            prayer.json[QStringLiteral("marked")] =
+                mark.json.value(QStringLiteral("deleted_at")).isNull() ||
+                !mark.json.contains(QStringLiteral("deleted_at"));
+            break;
+        }
+    }
+    m_dayPlanFetchedAt = QDateTime::currentMSecsSinceEpoch();
+    rebuildTimeline();
+    rebuildPrayers();
+    m_now.update(m_dayPlan, m_dayPlanFetchedAt);
+}
+
 void Backend::loadStats(int days) {
     if (days != 7 && days != 30) days = 30;
-    m_client.statsDays(days, response([this](const QJsonObject &object) {
-        if (setJsonModel(m_stats, m_statsJson, object)) emit changed();
+    m_client.statsDays(days, readResponse([this](const CoreClient::Result &result) {
+        if (const auto *stats = std::get_if<Dto::Stats>(&result.value)) applyStats(*stats);
     }));
 }
 
@@ -153,45 +404,74 @@ void Backend::loadStatsRange(const QString &from, const QString &to) {
     const QDate first = QDate::fromString(from, Qt::ISODate);
     const QDate last = QDate::fromString(to, Qt::ISODate);
     if (!first.isValid() || !last.isValid() || first > last || first.daysTo(last) >= 366) {
-        fail(tr("Invalid statistics date range.")); emit changed(); return;
+        fail(tr("Invalid statistics date range."));
+        return;
     }
-    m_client.stats(first, last, response([this](const QJsonObject &object) {
-        if (setJsonModel(m_stats, m_statsJson, object)) emit changed();
+    m_client.stats(first, last, readResponse([this](const CoreClient::Result &result) {
+        if (const auto *stats = std::get_if<Dto::Stats>(&result.value)) applyStats(*stats);
     }));
 }
 
-void Backend::moveDay(int amount) { if (!m_selected.isValid()) m_selected = m_today; m_selected = m_selected.addDays(amount); reload(); }
-void Backend::selectDay(const QString &day) { const QDate parsed = QDate::fromString(day, Qt::ISODate); if (parsed.isValid() && parsed != m_selected) { m_selected = parsed; reload(); } }
-void Backend::jumpToday() { m_selected = m_today; reload(); }
+void Backend::moveDay(int amount) {
+    if (!m_selected.isValid()) m_selected = m_today;
+    m_selected = m_selected.addDays(amount);
+    emit selectedDayChanged();
+    reload();
+}
+
+void Backend::selectDay(const QString &day) {
+    const QDate parsed = QDate::fromString(day, Qt::ISODate);
+    if (parsed.isValid() && parsed != m_selected) {
+        m_selected = parsed;
+        emit selectedDayChanged();
+        reload();
+    }
+}
+
+void Backend::jumpToday() {
+    m_selected = m_today;
+    emit selectedDayChanged();
+    reload();
+}
+
 void Backend::parseQuick(const QString &text) {
-    if (text.trimmed().isEmpty()) { m_parseDraft.clear(); emit changed(); return; }
-    m_client.parse(text, response([this](const QJsonObject &object) {
-        m_parseDraft = normalizedObject(object);
-        emit changed();
+    if (text.trimmed().isEmpty()) {
+        m_parse = Dto::ParseDraft{};
+        m_parseDraft.clear();
+        return;
+    }
+    m_client.parse(text, readResponse([this](const CoreClient::Result &result) {
+        if (const auto *draft = std::get_if<Dto::ParseDraft>(&result.value)) {
+            m_parse = *draft;
+            m_parseDraft.update(m_parse);
+        }
     }));
 }
 
 void Backend::previewItem(const QVariantMap &item) {
-    const QString repeat = item.value("repeat", "none").toString();
-    QStringList weekdays = item.value("weekdays").toStringList();
-    if (repeat == "weekly" && weekdays.isEmpty()) {
+    const QString repeat = item.value(QStringLiteral("repeat"), QStringLiteral("none")).toString();
+    QStringList weekdays = item.value(QStringLiteral("weekdays")).toStringList();
+    if (repeat == QStringLiteral("weekly") && weekdays.isEmpty()) {
         m_preview.clear();
-        emit previewChanged();
         return;
     }
     CoreClient::ItemFields fields;
-    fields.block = item.value("block", "fajr").toString();
-    if (fields.block.isEmpty() || fields.block == "sleep") fields.block = "fajr";
+    fields.block = item.value(QStringLiteral("block"), QStringLiteral("fajr")).toString();
+    if (fields.block.isEmpty() || fields.block == QStringLiteral("sleep")) fields.block = QStringLiteral("fajr");
     fields.repeat = repeat;
     fields.weekdays = weekdays;
-    fields.measure = item.value("measure", "check").toString();
-    const int target = item.value("target").toInt();
-    fields.hasTarget = fields.measure != "check" && target > 0;
+    fields.measure = item.value(QStringLiteral("measure"), QStringLiteral("check")).toString();
+    const int target = item.value(QStringLiteral("target")).toInt();
+    fields.hasTarget = fields.measure != QStringLiteral("check") && target > 0;
     fields.target = target;
     fields.date = m_selected.isValid() ? m_selected : m_today;
     m_client.preview(fields, [this](const CoreClient::Result &result) {
-        m_preview = result.ok ? normalizedObject(Dto::jsonObject(result.value)) : QVariantMap{};
-        emit previewChanged();
+        if (result.ok) {
+            if (const auto *preview = std::get_if<Dto::Preview>(&result.value)) m_preview.update(*preview);
+            else m_preview.clear();
+        } else {
+            m_preview.clear();
+        }
     });
 }
 
@@ -202,218 +482,40 @@ void Backend::addQuick(const QString &text, const QString &block) {
     fields.quick = true;
     fields.opId = CoreClient::makeOpId();
     if (m_selected.isValid() && m_selected != m_today) fields.date = m_selected;
-    const QString pendingId = QStringLiteral("pending-%1").arg(fields.opId);
-    const QVariantMap pending{{"id", pendingId}, {"title", text}, {"block", fields.block}, {"position", 9999},
-                              {"repeat", "none"}, {"measure", "check"}, {"state", "open"}, {"pending", true}};
-    insertPendingItem(pending);
-    m_pendingCreates.insert(fields.opId, pending);
-    m_client.itemAdd(fields, mutationResponse(pendingId, fields.opId));
-}
-
-void Backend::insertPendingItem(const QVariantMap &source) {
-    QVariantMap item = source;
-    const QString target = item.value("block", "fajr").toString();
-    QVariantList blocks = m_dayPlan.value("blocks").toList();
-    for (int b = 0; b < blocks.size(); ++b) {
-        QVariantMap block = blocks[b].toMap();
-        if (block.value("start").toString() != target) continue;
-        QVariantList items = block.value("items").toList();
-        item["position"] = items.size();
-        items.append(item);
-        block["items"] = items;
-        blocks[b] = block;
-        m_dayPlan["blocks"] = blocks;
-        m_pendingItems.insert(item.value("id").toString());
-        m_dayJson.clear();
-        ++m_dayRevision;
-        emit changed();
-        return;
-    }
-}
-
-void Backend::removePendingCreate(const QString &opId) {
-    const auto it = m_pendingCreates.find(opId);
-    if (it == m_pendingCreates.end()) return;
-    const QString id = it.value().value("id").toString();
-    m_pendingCreates.erase(it);
-    m_pendingItems.remove(id);
-    if (removeItemFromModel(id)) {
-        ++m_dayRevision;
-        emit changed();
-    }
-}
-
-qint64 Backend::versionFor(const QString &id) const {
-    const auto it = m_versions.constFind(id);
-    return it == m_versions.constEnd() ? -1 : it.value();
-}
-
-bool Backend::removeItemFromModel(const QString &id) {
-    QVariantList blocks = m_dayPlan.value("blocks").toList();
-    if (!removeFromBlocks(blocks, id)) return false;
-    m_dayPlan["blocks"] = blocks;
-    m_dayJson.clear();
-    return true;
-}
-
-void Backend::setItemPending(const QString &id, bool pending) {
-    if (pending) m_pendingItems.insert(id);
-    else m_pendingItems.remove(id);
-    QVariantList blocks = m_dayPlan.value("blocks").toList();
-    bool found = false;
-    for (int b = 0; b < blocks.size(); ++b) {
-        QVariantMap block = blocks[b].toMap();
-        QVariantList items = block.value("items").toList();
-        for (int i = 0; i < items.size(); ++i) {
-            QVariantMap item = items[i].toMap();
-            if (item.value("id").toString() != id) continue;
-            if (pending) item["pending"] = true;
-            else item.remove("pending");
-            items[i] = item;
-            found = true;
-        }
-        block["items"] = items;
-        blocks[b] = block;
-    }
-    if (found) {
-        m_dayPlan["blocks"] = blocks;
-        m_dayJson.clear();
-        ++m_dayRevision;
-        emit changed();
-    }
-}
-
-void Backend::setPrayerPending(const QString &prayer, bool pending) {
-    if (pending) m_pendingPrayers.insert(prayer);
-    else m_pendingPrayers.remove(prayer);
-    QVariantList prayers = m_dayPlan.value("prayers").toList();
-    for (int i = 0; i < prayers.size(); ++i) {
-        QVariantMap item = prayers[i].toMap();
-        if (item.value("id").toString() != prayer) continue;
-        if (pending) item["pending"] = true;
-        else item.remove("pending");
-        prayers[i] = item;
-        m_dayPlan["prayers"] = prayers;
-        m_dayJson.clear();
-        ++m_dayRevision;
-        emit changed();
-        return;
-    }
-}
-
-void Backend::applyMutation(const Dto::MutationResult &mutation) {
-    removePendingCreate(mutation.opId);
-    QVariantList blocks = m_dayPlan.value("blocks").toList();
-    for (const QString &id : mutation.deleted) {
-        removeFromBlocks(blocks, id);
-        m_pendingItems.remove(id);
-        m_versions.remove(id);
-    }
-    for (const Dto::DayItem &row : mutation.items) {
-        const QVariantMap item = normalizedObject(row.json);
-        const QString id = item.value("id").toString();
-        if (item.contains("version")) m_versions.insert(id, item.value("version").toLongLong());
-        m_pendingItems.remove(id);
-        removeFromBlocks(blocks, id);
-        const QString block = item.value("block").toString();
-        for (int b = 0; b < blocks.size(); ++b) {
-            QVariantMap target = blocks[b].toMap();
-            if (target.value("start").toString() != block) continue;
-            QVariantList items = target.value("items").toList();
-            items.append(item);
-            sortBlock(items);
-            target["items"] = items;
-            blocks[b] = target;
-            break;
-        }
-    }
-    m_dayPlan["blocks"] = blocks;
-    for (const Dto::PrayerMark &mark : mutation.marks) {
-        if (mark.json.contains("version")) m_versions.insert(mark.id, mark.json.value("version").toVariant().toLongLong());
-        m_pendingPrayers.remove(mark.prayer);
-        QVariantList prayers = m_dayPlan.value("prayers").toList();
-        for (int i = 0; i < prayers.size(); ++i) {
-            QVariantMap item = prayers[i].toMap();
-            if (item.value("id").toString() != mark.prayer) continue;
-            item["marked"] = mark.json.value("deleted_at").isNull() || !mark.json.contains("deleted_at");
-            item.remove("pending");
-            prayers[i] = item;
-            m_dayPlan["prayers"] = prayers;
-            break;
-        }
-    }
-    m_dayPlanFetchedAt = QDateTime::currentMSecsSinceEpoch();
-    m_dayJson.clear();
-    ++m_dayRevision;
-}
-
-void Backend::applyPendingFlags() {
-    QVariantList blocks = m_dayPlan.value("blocks").toList();
-    bool changedModel = false;
-    for (auto it = m_pendingCreates.cbegin(); it != m_pendingCreates.cend(); ++it) {
-        const QVariantMap pending = it.value();
-        const QString id = pending.value("id").toString();
-        bool present = false;
-        for (const QVariant &blockValue : std::as_const(blocks))
-            for (const QVariant &row : blockValue.toMap().value("items").toList())
-                if (row.toMap().value("id").toString() == id) present = true;
-        if (present) continue;
-        const QString target = pending.value("block").toString();
-        for (int b = 0; b < blocks.size(); ++b) {
-            QVariantMap block = blocks[b].toMap();
-            if (block.value("start").toString() != target) continue;
-            QVariantList items = block.value("items").toList();
-            items.append(pending);
-            block["items"] = items;
-            blocks[b] = block;
-            changedModel = true;
-            break;
-        }
-    }
-    for (int b = 0; b < blocks.size(); ++b) {
-        QVariantMap block = blocks[b].toMap();
-        QVariantList items = block.value("items").toList();
-        for (int i = 0; i < items.size(); ++i) {
-            QVariantMap item = items[i].toMap();
-            const QString id = item.value("id").toString();
-            const bool pending = m_pendingItems.contains(id);
-            if (pending == item.contains("pending")) continue;
-            if (pending) item["pending"] = true;
-            else item.remove("pending");
-            items[i] = item;
-            changedModel = true;
-        }
-        block["items"] = items;
-        blocks[b] = block;
-    }
-    if (changedModel) {
-        m_dayPlan["blocks"] = blocks;
-        m_dayJson.clear();
-        ++m_dayRevision;
-        emit changed();
-    }
+    PendingCreate pending;
+    pending.opId = fields.opId;
+    pending.localId = QStringLiteral("pending-%1").arg(fields.opId);
+    pending.title = text;
+    pending.block = fields.block;
+    insertPending(pending);
+    m_client.itemAdd(fields, mutationResponse(pending.localId, fields.opId));
 }
 
 void Backend::saveItem(const QVariantMap &item) {
-    const QString id = item.value("id").toString();
+    const QString id = item.value(QStringLiteral("id")).toString();
     CoreClient::ItemFields fields;
-    fields.title = item.value("title").toString();
-    fields.block = item.value("block", "fajr").toString();
-    fields.repeat = item.value("repeat", "none").toString();
-    fields.weekdays = item.value("weekdays").toStringList();
-    fields.measure = item.value("measure", "check").toString();
-    const int target = item.value("target").toInt();
-    fields.hasTarget = fields.measure != "check" && target > 0;
+    fields.title = item.value(QStringLiteral("title")).toString();
+    fields.block = item.value(QStringLiteral("block"), QStringLiteral("fajr")).toString();
+    fields.repeat = item.value(QStringLiteral("repeat"), QStringLiteral("none")).toString();
+    fields.weekdays = item.value(QStringLiteral("weekdays")).toStringList();
+    fields.measure = item.value(QStringLiteral("measure"), QStringLiteral("check")).toString();
+    const int target = item.value(QStringLiteral("target")).toInt();
+    fields.hasTarget = fields.measure != QStringLiteral("check") && target > 0;
     fields.target = target;
     if (id.isEmpty()) {
-        if (fields.repeat == "none" && m_selected != m_today) fields.date = m_selected;
+        if (fields.repeat == QStringLiteral("none") && m_selected != m_today) fields.date = m_selected;
         fields.opId = CoreClient::makeOpId();
-        const QString pendingId = QStringLiteral("pending-%1").arg(fields.opId);
-        const QVariantMap pending{{"id", pendingId}, {"title", fields.title}, {"block", fields.block}, {"position", 9999},
-                                  {"repeat", fields.repeat}, {"measure", fields.measure}, {"state", "open"}, {"pending", true}};
-        insertPendingItem(pending);
-        m_pendingCreates.insert(fields.opId, pending);
-        m_client.itemAdd(fields, mutationResponse(pendingId, fields.opId));
+        PendingCreate pending;
+        pending.opId = fields.opId;
+        pending.localId = QStringLiteral("pending-%1").arg(fields.opId);
+        pending.title = fields.title;
+        pending.block = fields.block;
+        pending.repeat = fields.repeat;
+        pending.measure = fields.measure;
+        pending.target = fields.hasTarget ? fields.target : 0;
+        pending.weekdays = fields.weekdays;
+        insertPending(pending);
+        m_client.itemAdd(fields, mutationResponse(pending.localId, fields.opId));
     } else {
         setItemPending(id, true);
         m_client.itemEdit(id, fields, mutationResponse(id), versionFor(id));
@@ -424,50 +526,87 @@ void Backend::removeItem(const QString &id) {
     setItemPending(id, true);
     m_client.itemRemove(id, mutationResponse(id), versionFor(id));
 }
-int Backend::legacyMoveIndex(const QString &id, const QString &block, const QString &afterId, const QString &beforeId) const {
-    // The socket protocol resolves anchors in the write transaction; the
-    // legacy CLI only accepts an index, so derive it from the rendered model.
-    QVariantList peers;
-    for (const QVariant &entry : m_dayPlan.value("blocks").toList()) {
-        const QVariantMap target = entry.toMap();
-        if (target.value("start").toString() != block) continue;
-        for (const QVariant &row : target.value("items").toList()) {
-            const QVariantMap map = row.toMap();
-            if (map.value("id").toString() != id) peers.append(map);
-        }
+
+int Backend::legacyMoveIndex(const QString &id, const QString &block, const QString &afterId,
+                             const QString &beforeId) const {
+    QStringList peers;
+    for (const Dto::DayBlock &entry : m_dayPlan.blocks) {
+        if (entry.start != block) continue;
+        std::vector<Dto::DayItem> items = entry.items;
+        sortItems(items);
+        for (const Dto::DayItem &item : items)
+            if (item.id != id) peers.append(item.id);
         break;
     }
     for (int i = 0; i < peers.size(); ++i) {
-        const QString peer = peers.at(i).toMap().value("id").toString();
+        const QString peer = peers.at(i);
         if (!afterId.isEmpty() && peer == afterId) return i + 1;
         if (!beforeId.isEmpty() && peer == beforeId) return i;
     }
     return 0;
 }
 
-void Backend::moveItem(const QString &id, const QString &block, const QString &afterId, const QString &beforeId) {
-    setItemPending(id, true);
+void Backend::optimisticMove(const QString &id, const QString &block, const QString &afterId,
+                             const QString &beforeId) {
+    Dto::DayItem moving;
+    bool found = false;
+    for (Dto::DayBlock &entry : m_dayPlan.blocks) {
+        for (auto it = entry.items.begin(); it != entry.items.end(); ++it) {
+            if (it->id != id) continue;
+            moving = *it;
+            entry.items.erase(it);
+            found = true;
+            break;
+        }
+        if (found) break;
+    }
+    if (!found) return;
+    moving.block = block;
+    moving.json[QStringLiteral("block")] = block;
+    for (Dto::DayBlock &entry : m_dayPlan.blocks) {
+        if (entry.start != block) continue;
+        int insertAt = int(entry.items.size());
+        for (int i = 0; i < int(entry.items.size()); ++i) {
+            if (!afterId.isEmpty() && entry.items.at(i).id == afterId) { insertAt = i + 1; break; }
+            if (!beforeId.isEmpty() && entry.items.at(i).id == beforeId) { insertAt = i; break; }
+        }
+        entry.items.insert(entry.items.begin() + insertAt, moving);
+        for (int i = 0; i < int(entry.items.size()); ++i)
+            entry.items[i].json[QStringLiteral("position")] = i;
+        break;
+    }
+}
+
+void Backend::moveItem(const QString &id, const QString &block, const QString &afterId,
+                       const QString &beforeId) {
     const int index = legacyMoveIndex(id, block, afterId, beforeId);
+    optimisticMove(id, block, afterId, beforeId);
+    setItemPending(id, true);
     m_client.itemMove(id, block, index, mutationResponse(id), versionFor(id), afterId, beforeId);
 }
+
 void Backend::toggleDone(const QString &id, const QString &state) {
     setItemPending(id, true);
-    if (state == "done") m_client.itemUndo(id, m_selected, mutationResponse(id));
+    if (state == QStringLiteral("done")) m_client.itemUndo(id, m_selected, mutationResponse(id));
     else m_client.itemDone(id, m_selected, mutationResponse(id));
 }
+
 void Backend::adjustMinutes(const QString &id, int amount) {
     setItemPending(id, true);
     m_client.itemLog(id, amount, true, m_selected != m_today ? m_selected : QDate(), mutationResponse(id));
 }
+
 void Backend::adjustCount(const QString &id, int amount) {
     setItemPending(id, true);
     m_client.itemLog(id, amount, false, m_selected != m_today ? m_selected : QDate(), mutationResponse(id));
 }
+
 void Backend::toggleTimer(const QString &id, bool running) {
     setItemPending(id, true);
     if (running) m_client.timerStop(id, mutationResponse(id));
     else m_client.timerStart(id, mutationResponse(id));
 }
+
 void Backend::togglePrayer(const QString &prayer, bool marked) {
     setPrayerPending(prayer, true);
     const QDate day = m_selected.isValid() ? m_selected : m_today;
@@ -476,16 +615,92 @@ void Backend::togglePrayer(const QString &prayer, bool marked) {
     if (marked) m_client.prayerUnmark(prayer, m_selected, mutationResponse(pending), version);
     else m_client.prayerMark(prayer, m_selected, mutationResponse(pending), version);
 }
+
 void Backend::setSleepTime(const QString &time) {
-    m_client.configSetSleepTime(time, response({}, true));
+    m_client.configSetSleepTime(time, readResponse([this](const CoreClient::Result &result) {
+        if (const auto *config = std::get_if<Dto::Config>(&result.value)) applyConfig(*config);
+    }, true));
+}
+
+void Backend::setSelectedStatsItem(const QString &id) {
+    if (m_selectedStatsItem == id) return;
+    m_selectedStatsItem = id;
+    m_statsDaily.setStats(m_stats, todayDay(), m_selectedStatsItem);
+    emit selectedStatsItemChanged();
+}
+
+ItemDraft *Backend::itemForId(const QString &id) {
+    bool found = false;
+    for (const Dto::DayBlock &block : m_dayPlan.blocks) {
+        for (const Dto::DayItem &item : block.items) {
+            if (item.id != id) continue;
+            m_editItem->update(item.json);
+            found = true;
+            break;
+        }
+        if (found) break;
+    }
+    if (!found) {
+        const auto pending = std::find_if(m_pendingCreates.cbegin(), m_pendingCreates.cend(),
+                                          [&](const PendingCreate &p) { return p.localId == id; });
+        if (pending != m_pendingCreates.cend()) {
+            QJsonObject row{{QStringLiteral("id"), pending->localId},
+                            {QStringLiteral("title"), pending->title},
+                            {QStringLiteral("block"), pending->block},
+                            {QStringLiteral("repeat"), pending->repeat},
+                            {QStringLiteral("measure"), pending->measure},
+                            {QStringLiteral("target"), pending->target}};
+            QJsonArray days;
+            for (const QString &day : pending->weekdays) days.append(day);
+            row[QStringLiteral("weekdays")] = days;
+            m_editItem->update(row);
+            found = true;
+        }
+    }
+    if (!found) {
+        for (const Dto::StatsItem &item : m_routinesStats.items) {
+            if (item.id != id) continue;
+            m_editItem->update(item.json);
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        for (const Dto::StatsItem &item : m_stats.items) {
+            if (item.id != id) continue;
+            m_editItem->update(item.json);
+            found = true;
+            break;
+        }
+    }
+    if (!found) m_editItem->clear();
+    emit editItemChanged();
+    return m_editItem;
+}
+
+ItemDraft *Backend::itemFromParse(const QString &fallbackTitle) {
+    if (fallbackTitle.isEmpty() || !m_parse.title.isEmpty()) {
+        m_editItem->update(m_parse);
+    } else {
+        QJsonObject row = m_parse.json;
+        row[QStringLiteral("title")] = fallbackTitle;
+        m_editItem->update(row);
+    }
+    emit editItemChanged();
+    return m_editItem;
 }
 
 QString Backend::hijriHeader(const QString &isoDate) const {
-    const QDate date = QDate::fromString(isoDate, Qt::ISODate); if (!date.isValid()) return {};
-    const QCalendar calendar(QCalendar::System::IslamicCivil); const auto parts = calendar.partsFromDate(date);
+    const QDate date = QDate::fromString(isoDate, Qt::ISODate);
+    if (!date.isValid()) return {};
+    const QCalendar calendar(QCalendar::System::IslamicCivil);
+    const auto parts = calendar.partsFromDate(date);
     static const QStringList months{tr("Muharram"), tr("Safar"), tr("Rabi al-Awwal"), tr("Rabi al-Thani"), tr("Jumada al-Awwal"), tr("Jumada al-Thani"), tr("Rajab"), tr("Sha'ban"), tr("Ramadan"), tr("Shawwal"), tr("Dhu al-Qadah"), tr("Dhu al-Hijjah")};
     const QString month = parts.month >= 1 && parts.month <= months.size() ? months.at(parts.month - 1) : QString();
     return tr("%1 %2 %3").arg(QLocale::c().dayName(date.dayOfWeek(), QLocale::LongFormat), QString::number(parts.day), month);
 }
 
-QString Backend::gregorianHeader(const QString &isoDate) const { const QDate date = QDate::fromString(isoDate, Qt::ISODate); return date.isValid() ? QLocale::c().toString(date, "MMMM d, yyyy") : QString(); }
+QString Backend::gregorianHeader(const QString &isoDate) const {
+    const QDate date = QDate::fromString(isoDate, Qt::ISODate);
+    return date.isValid() ? QLocale::c().toString(date, "MMMM d, yyyy") : QString();
+}

@@ -20,10 +20,10 @@ Card {
             }
             Label {
                 Layout.fillWidth: true
-                text: (backend.dayPlan.now || {}).block === "night"
+                text: backend.nowState.block === "night"
                     ? qsTr("Before Fajr")
-                    : ((backend.dayPlan.now || {}).block
-                        ? nowCard.win.capitalized((backend.dayPlan.now || {}).block)
+                    : (backend.nowState.block
+                        ? nowCard.win.capitalized(backend.nowState.block)
                         : "")
                 color: nowCard.win.muted
                 font.family: nowCard.win.mono
@@ -39,7 +39,7 @@ Card {
         }
         Label {
             Layout.alignment: Qt.AlignHCenter
-            text: qsTr("NEXT · %1").arg(((backend.dayPlan.now || {}).next || {}).name || "—")
+            text: qsTr("NEXT · %1").arg(backend.nowState.nextName || "—")
             color: nowCard.win.muted
             font.family: nowCard.win.mono
             font.pixelSize: 13
@@ -55,7 +55,7 @@ Card {
         }
         Label {
             Layout.alignment: Qt.AlignHCenter
-            text: qsTr("at %1").arg(((backend.dayPlan.now || {}).next || {}).time || "--:--")
+            text: qsTr("at %1").arg(backend.nowState.nextTime || "--:--")
             color: nowCard.win.muted
             font.family: nowCard.win.mono
             font.pixelSize: 14

@@ -29,14 +29,14 @@ Rectangle {
             width: 24
             height: 24
             radius: Math.min(5, theme.radius)
-            color: ghost.win.dragPayload.state === "done" ? theme.accent : "transparent"
+            color: ghost.win.dragDone ? theme.accent : "transparent"
             border.color: "#777168"
         }
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 4
             Label {
-                text: ghost.win.dragPayload.title || ""
+                text: ghost.win.dragTitle
                 color: ghost.win.text
                 font.pixelSize: 15
                 font.weight: Font.Medium
@@ -45,7 +45,7 @@ Rectangle {
                 textFormat: Text.PlainText
             }
             Label {
-                text: ghost.win.dragPayload.detail_text || ""
+                text: ghost.win.dragDetail
                 color: ghost.win.muted
                 font.family: ghost.win.mono
                 font.pixelSize: 12

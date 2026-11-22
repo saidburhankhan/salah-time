@@ -9,9 +9,12 @@ RowLayout {
     property alias timelineModel: timeline.timelineModel
     property alias dragging: timeline.dragging
     property alias dragId: timeline.dragId
-    property alias dragPayload: timeline.dragPayload
     property alias dragPointerY: timeline.dragPointerY
-    function beginDrag(rowIndex, id, globalY) { timeline.beginDrag(rowIndex, id, globalY) }
+    property alias dragTitle: timeline.dragTitle
+    property alias dragDetail: timeline.dragDetail
+    property alias dragDone: timeline.dragDone
+    property alias dragPayload: timeline.dragPayload
+    function beginDrag(rowIndex, id, globalY, title, detail, done) { timeline.beginDrag(rowIndex, id, globalY, title, detail, done) }
     function updateDrag(globalY) { timeline.updateDrag(globalY) }
     function finishDrag(cancelled) { timeline.finishDrag(cancelled) }
     function syncTimeline() { timeline.syncTimeline() }

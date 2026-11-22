@@ -4,20 +4,8 @@ import QtQuick.Controls
 Rectangle {
     id: tableCard
     property var win
-    property var rows: []
-    function refreshRows() { rows = win ? win.newestDaily() : [] }
-    Component.onCompleted: refreshRows()
-    onWinChanged: refreshRows()
-    Connections {
-        target: backend
-        function onChanged() { tableCard.refreshRows() }
-    }
-    Connections {
-        target: tableCard.win
-        function onSelectedStatsItemChanged() { tableCard.refreshRows() }
-    }
     width: parent.width
-    height: 74 + rows.length * 35
+    height: 74 + backend.statsDailyNewestCount * 35
     radius: theme.radius
     color: win ? win.panel : "#1b1a17"
     border.color: win ? win.border : "#34312a"
@@ -42,22 +30,27 @@ Rectangle {
             }
         }
         Repeater {
-            model: tableCard.rows
+            model: backend.statsDailyNewest
             Row {
-                required property var modelData
+                required property string day
+                required property bool planned
+                required property bool done
+                required property int minutes
+                required property int count
+                required property int prayers
                 width: tableCard.width - 28
                 height: 35
-                opacity: (modelData.done || modelData.minutes || modelData.count || modelData.prayers) ? .95 : .38
+                opacity: (done || minutes || count || prayers) ? .95 : .38
                 Label {
                     width: parent.width * .34
                     text: Qt.locale("en_US").toString(
-                        Date.fromLocaleString(Qt.locale(), parent.modelData.day, "yyyy-MM-dd"), "ddd, d MMM")
+                        Date.fromLocaleString(Qt.locale(), parent.day, "yyyy-MM-dd"), "ddd, d MMM")
                     color: tableCard.win.text
                     font.pixelSize: 12
                 }
                 Label {
                     width: parent.width * .2
-                    text: (parent.modelData.done || 0) + " / " + (parent.modelData.planned || 0)
+                    text: (parent.done ? 1 : 0) + " / " + (parent.planned ? 1 : 0)
                     color: tableCard.win.text
                     font.family: tableCard.win.mono
                     font.pixelSize: 12
@@ -65,7 +58,7 @@ Rectangle {
                 }
                 Label {
                     width: parent.width * .16
-                    text: tableCard.win.formatMinutes(parent.modelData.minutes)
+                    text: tableCard.win.formatMinutes(parent.minutes)
                     color: tableCard.win.text
                     font.family: tableCard.win.mono
                     font.pixelSize: 12
@@ -73,7 +66,7 @@ Rectangle {
                 }
                 Label {
                     width: parent.width * .15
-                    text: String(parent.modelData.count || 0)
+                    text: String(parent.count || 0)
                     color: tableCard.win.text
                     font.family: tableCard.win.mono
                     font.pixelSize: 12
@@ -81,7 +74,7 @@ Rectangle {
                 }
                 Label {
                     width: parent.width * .15
-                    text: (parent.modelData.prayers || 0) + " / 5"
+                    text: (parent.prayers || 0) + " / 5"
                     color: tableCard.win.text
                     font.family: tableCard.win.mono
                     font.pixelSize: 12
@@ -92,7 +85,7 @@ Rectangle {
         Row {
             width: parent.width
             height: 38
-            property var t: tableCard.win.shownTotals()
+            property var t: backend.statsDaily.shownTotals
             Rectangle {
                 anchors.top: parent.top
                 width: parent.width
@@ -128,7 +121,7 @@ Rectangle {
             }
             Label {
                 width: parent.width * .15
-                text: (parent.t.prayers || 0) + " / " + (tableCard.win.shownDaily().length * 5)
+                text: (parent.t.prayers || 0) + " / " + (backend.statsDaily.shownCount * 5)
                 color: tableCard.win.text
                 font.family: tableCard.win.mono
                 horizontalAlignment: Text.AlignRight

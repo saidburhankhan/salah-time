@@ -4,42 +4,69 @@
 #include <QHash>
 #include <QObject>
 #include <QSet>
-#include <QVariantMap>
+#include <QSortFilterProxyModel>
 #include <functional>
-#include "client/coreclient.h"
 
+#include "client/coreclient.h"
+#include "models/daytimelinemodel.h"
+#include "models/prayermodel.h"
+#include "models/routinesmodel.h"
+#include "models/statsdailymodel.h"
+#include "models/statsitemsmodel.h"
+#include "models/statsticksmodel.h"
+#include "models/viewstate.h"
+
+// Thin facade between CoreClient and QML. It owns the typed view models and
+// singular view states, feeds them from checked DTOs, and exposes intent
+// methods. It never hands a JSON blob to QML.
 class Backend : public QObject {
     Q_OBJECT
-    Q_PROPERTY(QString selectedDay READ selectedDay NOTIFY changed)
-    Q_PROPERTY(QString todayDay READ todayDay NOTIFY changed)
-    Q_PROPERTY(QVariantMap dayPlan READ dayPlan NOTIFY changed)
-    Q_PROPERTY(QVariantMap stats READ stats NOTIFY changed)
-    Q_PROPERTY(QVariantMap routinesStats READ routinesStats NOTIFY changed)
-    Q_PROPERTY(QVariantMap config READ config NOTIFY changed)
-    Q_PROPERTY(QVariantMap parseDraft READ parseDraft NOTIFY changed)
-    Q_PROPERTY(QVariantMap preview READ preview NOTIFY previewChanged)
-    Q_PROPERTY(qint64 dayPlanFetchedAt READ dayPlanFetchedAt NOTIFY changed)
-    Q_PROPERTY(QString error READ error NOTIFY changed)
-    Q_PROPERTY(bool busy READ busy NOTIFY changed)
-    Q_PROPERTY(bool offlineMode READ offlineMode NOTIFY changed)
-    Q_PROPERTY(int dayRevision READ dayRevision NOTIFY changed)
+    Q_PROPERTY(QString selectedDay READ selectedDay NOTIFY selectedDayChanged)
+    Q_PROPERTY(QString todayDay READ todayDay NOTIFY todayDayChanged)
+    Q_PROPERTY(DayTimelineModel *dayTimeline READ dayTimeline CONSTANT)
+    Q_PROPERTY(PrayerModel *prayers READ prayers CONSTANT)
+    Q_PROPERTY(RoutinesModel *routines READ routines CONSTANT)
+    Q_PROPERTY(StatsItemsModel *statsItems READ statsItems CONSTANT)
+    Q_PROPERTY(StatsDailyModel *statsDaily READ statsDaily CONSTANT)
+    Q_PROPERTY(QSortFilterProxyModel *statsDailyNewest READ statsDailyNewest CONSTANT)
+    Q_PROPERTY(int statsDailyNewestCount READ statsDailyNewestCount NOTIFY statsDailyNewestCountChanged)
+    Q_PROPERTY(StatsTicksModel *statsTicks READ statsTicks CONSTANT)
+    Q_PROPERTY(NowState *nowState READ nowState CONSTANT)
+    Q_PROPERTY(StatsTotals *statsTotals READ statsTotals CONSTANT)
+    Q_PROPERTY(Config *config READ config CONSTANT)
+    Q_PROPERTY(ParseDraftState *parseDraft READ parseDraft CONSTANT)
+    Q_PROPERTY(PreviewState *preview READ preview CONSTANT)
+    Q_PROPERTY(ItemDraft *editItem READ editItem NOTIFY editItemChanged)
+    Q_PROPERTY(QString selectedStatsItem READ selectedStatsItem WRITE setSelectedStatsItem NOTIFY selectedStatsItemChanged)
+    Q_PROPERTY(QString error READ error NOTIFY errorChanged)
+    Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+    Q_PROPERTY(bool offlineMode READ offlineMode NOTIFY offlineChanged)
 public:
     explicit Backend(QObject *parent = nullptr, const QString &program = {}, int timeoutMs = 10000,
                      const QString &socketPath = {});
     ~Backend() override;
+
     QString selectedDay() const { return m_selected.toString(Qt::ISODate); }
     QString todayDay() const { return m_today.toString(Qt::ISODate); }
-    QVariantMap dayPlan() const { return m_dayPlan; }
-    QVariantMap stats() const { return m_stats; }
-    QVariantMap routinesStats() const { return m_routinesStats; }
-    QVariantMap config() const { return m_config; }
-    QVariantMap parseDraft() const { return m_parseDraft; }
-    QVariantMap preview() const { return m_preview; }
-    qint64 dayPlanFetchedAt() const { return m_dayPlanFetchedAt; }
+    DayTimelineModel *dayTimeline() { return &m_timeline; }
+    PrayerModel *prayers() { return &m_prayers; }
+    RoutinesModel *routines() { return &m_routines; }
+    StatsItemsModel *statsItems() { return &m_statsItems; }
+    StatsDailyModel *statsDaily() { return &m_statsDaily; }
+    QSortFilterProxyModel *statsDailyNewest() { return &m_statsDailyNewest; }
+    int statsDailyNewestCount() const { return m_statsDailyNewest.rowCount(); }
+    StatsTicksModel *statsTicks() { return &m_ticks; }
+    NowState *nowState() { return &m_now; }
+    StatsTotals *statsTotals() { return &m_totals; }
+    Config *config() { return &m_configState; }
+    ParseDraftState *parseDraft() { return &m_parseDraft; }
+    PreviewState *preview() { return &m_preview; }
+    ItemDraft *editItem() { return m_editItem; }
+    QString selectedStatsItem() const { return m_selectedStatsItem; }
+    void setSelectedStatsItem(const QString &id);
     QString error() const { return m_error; }
     bool busy() const { return m_client.busy(); }
     bool offlineMode() const { return m_client.offline(); }
-    int dayRevision() const { return m_dayRevision; }
 
     Q_INVOKABLE void reload();
     Q_INVOKABLE void loadStats(int days);
@@ -61,43 +88,87 @@ public:
     Q_INVOKABLE void toggleTimer(const QString &id, bool running);
     Q_INVOKABLE void togglePrayer(const QString &prayer, bool marked);
     Q_INVOKABLE void setSleepTime(const QString &time);
+    Q_INVOKABLE ItemDraft *itemForId(const QString &id);
+    Q_INVOKABLE ItemDraft *itemFromParse(const QString &fallbackTitle = {});
     Q_INVOKABLE QString hijriHeader(const QString &isoDate) const;
     Q_INVOKABLE QString gregorianHeader(const QString &isoDate) const;
 
 signals:
-    void changed();
-    void previewChanged();
+    void selectedDayChanged();
+    void todayDayChanged();
+    void selectedStatsItemChanged();
+    void statsDailyNewestCountChanged();
+    void editItemChanged();
+    void errorChanged();
+    void busyChanged();
+    void offlineChanged();
     void requestFinished(QStringList arguments, bool success);
 
 private:
+    struct PendingCreate {
+        QString opId;
+        QString localId;
+        QString title;
+        QString block;
+        QString repeat = QStringLiteral("none");
+        QString measure = QStringLiteral("check");
+        int target = 0;
+        QStringList weekdays;
+    };
+
     void fail(const QString &message);
-    static QVariantMap normalizedObject(const QJsonObject &object);
-    bool setJsonModel(QVariantMap &target, QByteArray &previous, const QJsonObject &object);
-    CoreClient::Callback response(std::function<void(const QJsonObject &)> success = {}, bool reloadAfter = false);
+    void clearError();
+    CoreClient::Callback readResponse(std::function<void(const CoreClient::Result &)> success,
+                                      bool reloadAfter = false);
     CoreClient::Callback mutationResponse(const QString &pendingId = {}, const QString &pendingOpId = {});
+    void applyDayPlan(const Dto::DayPlan &plan);
+    void applyStats(const Dto::Stats &stats);
+    void applyRoutines(const Dto::Stats &stats);
+    void applyConfig(const Dto::Config &config);
     void applyMutation(const Dto::MutationResult &mutation);
+    void rebuildTimeline();
+    void rebuildPrayers();
     void setItemPending(const QString &id, bool pending);
     void setPrayerPending(const QString &prayer, bool pending);
-    void insertPendingItem(const QVariantMap &item);
+    void insertPending(const PendingCreate &pending);
     void removePendingCreate(const QString &opId);
-    void applyPendingFlags();
+    void optimisticMove(const QString &id, const QString &block, const QString &afterId,
+                        const QString &beforeId);
     qint64 versionFor(const QString &id) const;
-    bool removeItemFromModel(const QString &id);
-    int legacyMoveIndex(const QString &id, const QString &block, const QString &afterId, const QString &beforeId) const;
+    int legacyMoveIndex(const QString &id, const QString &block, const QString &afterId,
+                        const QString &beforeId) const;
     void reloadFromNotification(qint64 revision);
+    bool dayContains(const QString &id) const;
 
     CoreClient m_client;
     QDate m_today = QDate::currentDate();
     QDate m_selected;
-    QVariantMap m_dayPlan, m_stats, m_routinesStats, m_config, m_parseDraft, m_preview;
+    Dto::DayPlan m_dayPlan;
+    Dto::Stats m_stats;
+    Dto::Stats m_routinesStats;
+    Dto::Config m_config;
+    Dto::ParseDraft m_parse;
     qint64 m_dayPlanFetchedAt = 0;
-    QByteArray m_dayJson, m_statsJson, m_routinesJson, m_configJson;
     QString m_error;
+    QString m_selectedStatsItem;
     bool m_refreshPending = false;
-    int m_dayRevision = 0;
     qint64 m_lastNotificationRevision = -1;
     QHash<QString, qint64> m_versions;
     QSet<QString> m_pendingItems;
     QSet<QString> m_pendingPrayers;
-    QHash<QString, QVariantMap> m_pendingCreates;
+    QHash<QString, PendingCreate> m_pendingCreates;
+    ItemDraft *m_editItem = nullptr;
+
+    DayTimelineModel m_timeline;
+    PrayerModel m_prayers;
+    RoutinesModel m_routines;
+    StatsItemsModel m_statsItems;
+    StatsDailyModel m_statsDaily;
+    QSortFilterProxyModel m_statsDailyNewest;
+    StatsTicksModel m_ticks;
+    NowState m_now;
+    StatsTotals m_totals;
+    Config m_configState;
+    ParseDraftState m_parseDraft;
+    PreviewState m_preview;
 };

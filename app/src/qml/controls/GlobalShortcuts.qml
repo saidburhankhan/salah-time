@@ -35,10 +35,9 @@ Item {
         onTriggered: backend.reload()
     }
     Connections {
-        target: backend
+        target: backend.nowState
         function onChanged() {
             shortcuts.win.countdown = shortcuts.win.countdownFromNext()
-            shortcuts.win.syncTimeline()
         }
     }
     Shortcut {
