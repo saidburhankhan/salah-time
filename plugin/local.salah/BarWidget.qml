@@ -17,9 +17,13 @@ BarWidget {
 
   readonly property var tr: strings
   property var report: null
-  property int remainingSeconds: report && report.next
-    ? Math.max(0, Number(report.next.remaining_seconds) || 0)
-    : 0
+  property double countdownAtMs: 0
+  property double countdownNowMs: Date.now()
+  readonly property int remainingSeconds: {
+    countdownNowMs
+    if (!(countdownAtMs > 0)) return 0
+    return Math.max(0, Math.floor((countdownAtMs - countdownNowMs) / 1000))
+  }
   property string errorMessage: ""
   property string locationWarning: ""
   property string officialWarning: ""
@@ -32,7 +36,6 @@ BarWidget {
   property string quickAddBlock: ""
   property int minuteTick: 0
   property var pendingOps: ({})
-  property var optimisticTimer: undefined
   property double timerSnapshotMs: Date.now()
 
   readonly property string nextName: report && report.next
@@ -47,17 +50,25 @@ BarWidget {
   readonly property string remainingLong: formatRemaining(remainingSeconds, false)
   readonly property string remainingShort: formatRemaining(remainingSeconds, true)
   readonly property var planner: report && report.planner ? report.planner : null
-  readonly property var runningTimer: optimisticTimer !== undefined
-    ? optimisticTimer : (planner && planner.timer ? planner.timer : null)
+  readonly property var runningTimer: {
+    var rows = planner && planner.items ? planner.items : []
+    for (var i = 0; i < rows.length; i++) {
+      var timer = rows[i].timer
+      if (timer && timer.running === true) return {
+        "item_id": String(rows[i].id || ""),
+        "title": String(rows[i].title || ""),
+        "started_at": String(timer.started_at || ""),
+        "minutes": Number(timer.minutes_including_running) || 0
+      }
+    }
+    return planner && planner.timer ? planner.timer : null
+  }
   readonly property int runningMinutes: {
     minuteTick
+    timerSnapshotMs
     if (!runningTimer) return 0
     var base = Math.max(0, Number(runningTimer.minutes) || 0)
-    var started = Date.parse(String(runningTimer.started_at || ""))
-    if (isNaN(started)) return base
-    var thenMinutes = Math.max(0, Math.floor((timerSnapshotMs - started) / 60000))
-    var nowMinutes = Math.max(0, Math.floor((Date.now() - started) / 60000))
-    return base + Math.max(0, nowMinutes - thenMinutes)
+    return base + Math.max(0, Math.floor((Date.now() - timerSnapshotMs) / 60000))
   }
   readonly property string displayText: localizedNextName !== ""
     ? strings.t("bar.nextStatus").arg(localizedNextName).arg(remainingShort)
@@ -84,6 +95,16 @@ BarWidget {
 
   function formatMinutes(value) {
     return strings.t("unit.minutesShort").arg(Math.max(0, Math.floor(Number(value) || 0)))
+  }
+
+  function countdownDeadline(status) {
+    var next = status && status.next ? status.next : null
+    if (!next) return 0
+    var at = Date.parse(String(next.at || ""))
+    if (!isNaN(at)) return at
+    // The CLI fallback reports a snapshot rather than next.at. Converting it
+    // once for the display countdown does not add any boundary rule.
+    return Date.now() + Math.max(0, Number(next.remaining_seconds) || 0) * 1000
   }
 
   function refresh() {
@@ -147,19 +168,9 @@ BarWidget {
 
   function togglePrayer(prayer) {
     var id = String(prayer.id)
-    var content = panel.loadedContent
-    var marked = content ? content.togglePrayerOptimistic(id) : !isPrayerMarked(id)
+    var marked = !isPrayerMarked(id)
     var opId = beginOp("prayer", "header:" + id)
     client.markPrayer(opId, id, marked)
-  }
-
-  function itemsForBlock(block, source) {
-    var rows = source || (planner ? (planner.items || []) : [])
-    var result = []
-    for (var i = 0; i < rows.length; i++)
-      if (String(rows[i].block || "") === String(block || "")) result.push(rows[i])
-    result.sort(function(a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0) })
-    return result
   }
 
   function boundary(id) {
@@ -171,26 +182,12 @@ BarWidget {
 
   function toggleItem(row) {
     var wasDone = row.state === "done"
-    var content = panel.loadedContent
-    if (content) content.patchItem(String(row.id), {
-      "itemState": wasDone ? "open" : "done", "pending": true
-    })
     var opId = beginOp("done", "item:" + String(row.id))
     client.setDone(opId, String(row.id), !wasDone)
   }
 
   function toggleTimer(row) {
-    var running = String(row.timer_started_at || "") !== ""
-    var content = panel.loadedContent
-    if (content) {
-      content.setRunningTimer(running ? "" : String(row.id))
-      content.patchItem(String(row.id), { "pending": true })
-    }
-    optimisticTimer = running ? null : {
-      "item_id": String(row.id), "title": String(row.title || ""),
-      "started_at": new Date().toISOString(), "minutes": Number(row.minutes) || 0
-    }
-    timerSnapshotMs = Date.now()
+    var running = row.timerRunning === true
     var opId = beginOp(running ? "stopTimer" : "startTimer", "item:" + String(row.id))
     if (running) client.stopTimer(opId, String(row.id))
     else client.startTimer(opId, String(row.id))
@@ -198,25 +195,11 @@ BarWidget {
 
   function adjustCount(row, delta) {
     var amount = delta < 0 ? -1 : 1
-    var current = Math.max(0, Number(row.count) || 0)
-    var next = Math.max(0, current + amount)
-    var content = panel.loadedContent
-    if (content) content.patchItem(String(row.id), { "count": next, "pending": true })
     var opId = beginOp("logCount", "item:" + String(row.id))
     client.logCount(opId, String(row.id), amount)
   }
 
   function correctMinutes(row, amount) {
-    var current = Math.max(0, Number(row.minutes) || 0)
-    var next = Math.max(0, current + amount)
-    var content = panel.loadedContent
-    if (content) content.patchItem(String(row.id), { "minutes": next, "pending": true })
-    if (runningTimer && String(runningTimer.item_id || "") === String(row.id)) {
-      optimisticTimer = {
-        "item_id": String(row.id), "title": String(runningTimer.title || row.title || ""),
-        "started_at": String(runningTimer.started_at || row.timer_started_at || ""), "minutes": next
-      }
-    }
     var opId = beginOp("logMinutes", "item:" + String(row.id))
     client.logMinutes(opId, String(row.id), amount)
   }
@@ -224,26 +207,13 @@ BarWidget {
   function editItem(row, title) {
     var text = String(title || "").trim()
     if (text === "" || text === String(row.title || "")) return
-    var content = panel.loadedContent
-    if (content) content.patchItem(String(row.id), { "title": text, "pending": true })
     var opId = beginOp("edit", "item:" + String(row.id))
     client.editItem(opId, String(row.id), text)
   }
 
   function removeItem(row) {
-    var content = panel.loadedContent
-    if (content) content.removeItem(String(row.id))
     var opId = beginOp("remove", "item:" + String(row.id))
     client.removeItem(opId, String(row.id))
-  }
-
-  function itemDetail(row) {
-    var parts = []
-    if (row.measure === "minutes")
-      parts.push(strings.t("panel.timeProgress").arg(row.minutes).arg(row.target))
-    if (row.repeat === "daily") parts.push(strings.t("repeat.daily"))
-    else if (row.repeat === "weekly") parts.push(strings.t("repeat.weekly"))
-    return parts.join(strings.t("panel.detailSeparator"))
   }
 
   function syncLocation(force) {
@@ -282,17 +252,11 @@ BarWidget {
       if (!status || !status.next || !(status.prayers instanceof Array))
         throw new Error("missing next/prayers fields")
       report = status
-      optimisticTimer = undefined
       timerSnapshotMs = Date.now()
+      countdownAtMs = countdownDeadline(status)
+      countdownNowMs = Date.now()
       var content = panel.loadedContent
       if (content) content.syncTimeline(status)
-      remainingSeconds = Math.max(0, Number(status.next.remaining_seconds) || 0)
-      if (remainingSeconds > 0) {
-        boundaryTimer.interval = remainingSeconds * 1000
-        boundaryTimer.restart()
-      } else {
-        boundaryTimer.stop()
-      }
       errorMessage = ""
     } catch (error) {
       errorMessage = String(error)
@@ -339,18 +303,7 @@ BarWidget {
     plan.items = rows
     plan.prayer_marks = marks
     plan.timer = null
-    for (var t = 0; t < rows.length; t++) {
-      if (rows[t].timer_started_at) {
-        plan.timer = {
-          "item_id": String(rows[t].id || ""), "title": String(rows[t].title || ""),
-          "started_at": String(rows[t].timer_started_at),
-          "minutes": Number(rows[t].minutes) || 0
-        }
-        break
-      }
-    }
     report = Object.assign({}, report, { "planner": plan })
-    optimisticTimer = undefined
     timerSnapshotMs = Date.now()
     var content = panel.loadedContent
     if (content) content.syncTimeline(report)
@@ -360,8 +313,10 @@ BarWidget {
     if (result && result.fallback) {
       clearPending(opId)
       if (kind === "add" && result.raw) {
-        var content = panel.loadedContent
-        if (content) content.showNextOccurrence(result.raw)
+        var raw = null
+        try { raw = JSON.parse(String(result.raw || "").trim()) } catch (error) { raw = null }
+        var fallbackContent = panel.loadedContent
+        if (fallbackContent && raw) fallbackContent.showNextOccurrence(raw)
       }
       client.refreshStatus()
       return
@@ -369,10 +324,8 @@ BarWidget {
     if (result && result.changed) applyChanged(result.changed)
     if (kind === "add" && result && result.changed && result.changed.items
         && result.changed.items.length > 0) {
-      var hint = Object.assign({}, result.changed.items[0])
-      if (!hint.day && report && report.planner) hint.day = String(report.planner.day || "")
       var target = panel.loadedContent
-      if (target) target.showNextOccurrence(JSON.stringify(hint))
+      if (target) target.showNextOccurrence(result.changed.items[0])
     }
     clearPending(opId)
   }
@@ -403,16 +356,7 @@ BarWidget {
     interval: 1000
     running: true
     repeat: true
-    onTriggered: if (root.remainingSeconds > 0) root.remainingSeconds--
-  }
-
-  Timer {
-    // The daemon does not emit a clock boundary yet, so take one snapshot
-    // when the local countdown expires. This is a one-shot, not a poll.
-    id: boundaryTimer
-    repeat: false
-    running: false
-    onTriggered: root.refresh()
+    onTriggered: root.countdownNowMs = Date.now()
   }
 
   Timer {
@@ -579,7 +523,9 @@ BarWidget {
         return {
           "rowType": type, "rowKey": key, "block": block || "", "itemId": "",
           "title": "", "time": "", "itemState": "", "measure": "check", "target": 0,
-          "minutes": 0, "count": 0, "repeat": "none", "timer_started_at": "",
+          "minutes": 0, "count": 0, "repeat": "none", "timerRunning": false,
+          "timerStartedAt": "", "timerMinutes": 0, "detailText": "",
+          "scheduleText": "", "nextOccurrence": "", "carried": false,
           "current": false, "marked": false, "passed": false, "pending": false
         }
       }
@@ -613,9 +559,12 @@ BarWidget {
           header.passed = prayer ? prayer.passed === true : false
           result.push(header)
 
-          var blockItems = root.itemsForBlock(block, items)
-          for (var i = 0; i < blockItems.length; i++) {
-            var source = blockItems[i]
+          // The core returns rows ordered by block then position; grouping a
+          // block's rows is row assembly, not a re-sort.
+          for (var i = 0; i < items.length; i++) {
+            var source = items[i]
+            if (String(source.block || "") !== block) continue
+            var timer = source.timer || {}
             var item = baseRow("item", "item:" + String(source.id), block)
             item.itemId = String(source.id || "")
             item.title = String(source.title || "")
@@ -625,7 +574,13 @@ BarWidget {
             item.minutes = Number(source.minutes) || 0
             item.count = Number(source.count) || 0
             item.repeat = String(source.repeat || "none")
-            item.timer_started_at = String(source.timer_started_at || "")
+            item.timerRunning = timer.running === true
+            item.timerStartedAt = String(timer.started_at || "")
+            item.timerMinutes = Number(timer.minutes_including_running) || 0
+            item.detailText = String(source.detail_text || "")
+            item.scheduleText = String(source.schedule_text || "")
+            item.nextOccurrence = source.next_occurrence ? String(source.next_occurrence) : ""
+            item.carried = source.carried === true
             result.push(item)
           }
           var add = baseRow("add", "add:" + block, block)
@@ -702,24 +657,10 @@ BarWidget {
         }
       }
 
-      function patchItem(id, changes) {
-        var index = indexOfKey("item:" + id)
-        if (index < 0) return
-        for (var role in changes) timelineModel.setProperty(index, role, changes[role])
-      }
-
-      function removeItem(id) {
-        var index = indexOfKey("item:" + id)
+      function removeItem(key) {
+        var index = indexOfKey(key)
+        if (index < 0) index = indexOfKey("item:" + key)
         if (index >= 0) timelineModel.remove(index)
-      }
-
-      function setRunningTimer(id) {
-        var started = new Date().toISOString()
-        for (var i = 0; i < timelineModel.count; i++) {
-          var row = timelineModel.get(i)
-          if (row.rowType === "item")
-            timelineModel.setProperty(i, "timer_started_at", row.itemId === id ? started : "")
-        }
       }
 
       function weekdayName(index) {
@@ -727,52 +668,24 @@ BarWidget {
         return strings.t("weekday." + keys[index])
       }
 
-      function showNextOccurrence(raw) {
-        try {
-          var item = JSON.parse(String(raw || "").trim())
-          var today = new Date()
-          var occurs = false
-          var next = ""
-          if (item.repeat === "daily") occurs = true
-          else if (item.repeat === "weekly" && item.weekdays instanceof Array) {
-            var dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
-            occurs = item.weekdays.indexOf(dayKeys[today.getDay()]) >= 0
-            for (var offset = occurs ? 0 : 1; !occurs && offset <= 7; offset++) {
-              var candidate = (today.getDay() + offset) % 7
-              if (item.weekdays.indexOf(dayKeys[candidate]) >= 0) {
-                next = weekdayName(candidate); break
-              }
-            }
-          } else if (item.day) {
-            var parts = String(item.day).split("-")
-            if (parts.length === 3) {
-              var date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
-              occurs = date.toDateString() === today.toDateString()
-              if (!occurs && date > today) next = weekdayName(date.getDay())
-            }
-          }
-          if (!occurs && next !== "") {
-            occurrenceHint = strings.t("panel.nextOccurrence").arg(String(item.title || "")).arg(next)
-            occurrenceHintTimer.restart()
-          }
-        } catch (error) {
-          // Status refresh remains authoritative if optional add metadata is malformed.
-        }
-      }
-
-      function togglePrayerOptimistic(id) {
-        var index = indexOfKey("header:" + id)
-        if (index < 0) return false
-        var marked = !timelineModel.get(index).marked
-        timelineModel.setProperty(index, "marked", marked)
-        return marked
+      function showNextOccurrence(item) {
+        var next = item ? String(item.next_occurrence || "") : ""
+        var today = root.planner ? String(root.planner.day || "") : ""
+        if (next === "" || today === "" || next <= today) return
+        var parts = next.split("-")
+        if (parts.length !== 3) return
+        var date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
+        occurrenceHint = strings.t("panel.nextOccurrence")
+          .arg(String(item.title || "")).arg(weekdayName(date.getDay()))
+        occurrenceHintTimer.restart()
       }
 
       function addPendingItem(title, requestedBlock, key) {
         var block = String(requestedBlock || "")
-        if (block === "") block = root.planner ? String(root.planner.block || "") : ""
-        if (["night", "fajr", "dhuhr", "asr", "maghrib", "isha"].indexOf(block) < 0)
-          block = "fajr"
+        if (block === "" && root.planner) {
+          var planning = root.planner.planning_block
+          block = String(planning && planning.start || root.planner.block || "")
+        }
         var addIndex = indexOfKey("add:" + block)
         if (addIndex < 0) return
         var pending = baseRow("item", key || ("pending:" + Date.now()), block)
@@ -865,7 +778,8 @@ BarWidget {
         restoreServerOrder()
         var opId = root.beginOp("move", "item:" + id)
         setRowPending("item:" + id, true)
-        client.moveItem(opId, id, target.block, target.index)
+        client.moveItem(opId, id, target.block, target.index,
+          String(target.after_id || ""), String(target.before_id || ""))
       }
 
       ListModel {

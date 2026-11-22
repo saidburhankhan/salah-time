@@ -21,7 +21,13 @@ Item {
   required property int minutes
   required property int count
   required property string repeat
-  required property string timer_started_at
+  required property bool timerRunning
+  required property string timerStartedAt
+  required property int timerMinutes
+  required property string detailText
+  required property string scheduleText
+  required property string nextOccurrence
+  required property bool carried
   required property bool current
   required property bool marked
   required property bool passed
@@ -67,16 +73,18 @@ Item {
 
   readonly property int elapsedMinutes: {
     host.minuteTick
-    var started = Date.parse(timer_started_at)
-    if (isNaN(started)) return Math.max(0, minutes)
-    var thenMinutes = Math.max(0, Math.floor((host.timerSnapshotMs - started) / 60000))
-    var nowMinutes = Math.max(0, Math.floor((Date.now() - started) / 60000))
-    return Math.max(0, minutes + nowMinutes - thenMinutes)
+    host.timerSnapshotMs
+    var base = Math.max(0, timerMinutes)
+    if (!timerRunning) return base
+    return base + Math.max(0, Math.floor((Date.now() - host.timerSnapshotMs) / 60000))
   }
   readonly property var itemData: ({
     "id": itemId, "title": title, "block": block, "state": itemState,
     "measure": measure, "target": target, "minutes": minutes,
-    "count": count, "repeat": repeat, "timer_started_at": timer_started_at
+    "count": count, "repeat": repeat, "timerRunning": timerRunning,
+    "timerStartedAt": timerStartedAt, "timerMinutes": timerMinutes,
+    "detailText": detailText, "scheduleText": scheduleText,
+    "nextOccurrence": nextOccurrence, "carried": carried
   })
 
   width: timeline ? timeline.width : 0
@@ -285,7 +293,7 @@ Item {
         visible: !row.editing && text !== ""
         width: parent.width
         textFormat: Text.PlainText
-        text: row.pending ? row.strings.t("panel.pending") : row.host.itemDetail(row.itemData)
+        text: row.pending ? row.strings.t("panel.pending") : row.detailText
         color: row.mutedForeground
         font.family: row.fontFamily
         font.pixelSize: Style.font.caption
@@ -361,10 +369,10 @@ Item {
       Button {
         width: Style.space(68)
         height: Style.space(26)
-        text: (row.timer_started_at !== ""
+        text: (row.timerRunning
             ? row.strings.t("panel.pauseWithTime") : row.strings.t("panel.startWithTime"))
           .arg(row.host.formatMinutes(row.elapsedMinutes))
-        tooltipText: row.timer_started_at !== ""
+        tooltipText: row.timerRunning
           ? row.strings.t("panel.pauseTimer") : row.strings.t("panel.startTimer")
         foreground: row.foreground
         fontFamily: "monospace"

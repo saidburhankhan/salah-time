@@ -159,8 +159,15 @@ Item {
       return
     }
     if (!message || typeof message !== "object") return
-    if (String(message.method || "") === "changed") {
+    var method = String(message.method || "")
+    if (method === "changed") {
       client.handleChanged(message.params || {})
+      return
+    }
+    if (method === "clock.boundary") {
+      // The core pushes the authoritative boundary; refetch its status
+      // projection instead of running a local boundary timer.
+      client.refreshStatus()
       return
     }
     if (message.id === undefined || message.id === null) return
@@ -219,7 +226,8 @@ Item {
     handshakeTimer.stop()
     client.serverName = String(result.server || "")
     client.lastKnownRevision = Number(result.revision) || 0
-    client.request("subscribe", { "topics": ["changes"] }, { "type": "subscribe" })
+    client.request("subscribe", { "topics": ["changes", "clock"] },
+      { "type": "subscribe" })
   }
 
   function handleSubscribed(result) {
@@ -374,11 +382,15 @@ Item {
     client.fallback(opId, "stopTimer", ["salah", "item", "stop", "--json", String(itemId)])
   }
 
-  function moveItem(opId, itemId, block, index) {
+  function moveItem(opId, itemId, block, index, afterId, beforeId) {
     if (client.socketActive) {
-      client.sendMutation(opId, "move", "item.move", {
-        "id": String(itemId), "block": String(block), "index": Number(index) || 0
-      })
+      var params = { "id": String(itemId), "block": String(block) }
+      // A row already exposes its neighbours, so RPC sends a stable anchor
+      // rather than a numeric index that may have gone stale.
+      if (String(afterId || "") !== "") params.after_id = String(afterId)
+      else if (String(beforeId || "") !== "") params.before_id = String(beforeId)
+      else params.index = Number(index) || 0
+      client.sendMutation(opId, "move", "item.move", params)
       return
     }
     client.fallback(opId, "move", ["salah", "item", "move", "--json", String(itemId),
