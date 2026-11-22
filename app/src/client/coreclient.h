@@ -29,9 +29,9 @@ public:
         QString block = "fajr";
         QString repeat = "none";
         QStringList weekdays;
-        QString measure = "check";
-        int target = 0;
-        bool hasTarget = false;
+        QString projectId;
+        int plannedMinutes = 0;
+        bool hasPlannedMinutes = false;
         QDate date;
         bool quick = false;
         // Optional caller-supplied idempotency key (used by the UI to map a
@@ -54,11 +54,12 @@ public:
     void itemRemove(const QString &id, Callback callback = {}, qint64 expectedVersion = -1);
     void itemMove(const QString &id, const QString &block, int index, Callback callback = {}, qint64 expectedVersion = -1,
                   const QString &afterId = {}, const QString &beforeId = {});
-    void itemDone(const QString &id, const QDate &date, Callback callback = {});
-    void itemUndo(const QString &id, const QDate &date, Callback callback = {});
-    void itemLog(const QString &id, int value, bool minutes, const QDate &date = {}, Callback callback = {});
-    void timerStart(const QString &id, Callback callback = {});
-    void timerStop(const QString &id, Callback callback = {});
+    void sessionLog(const QString &itemId, const QString &projectId = {}, int minutes = -1,
+                    const QJsonObject &values = {}, const QString &note = {},
+                    const QDate &date = {}, Callback callback = {});
+    void sessionStart(const QString &itemId, const QString &projectId = {}, Callback callback = {});
+    void sessionStop(const QString &sessionId = {}, const QJsonObject &values = {},
+                     const QString &note = {}, Callback callback = {});
     void prayerMark(const QString &prayer, const QDate &date, Callback callback = {}, qint64 expectedVersion = -1);
     void prayerUnmark(const QString &prayer, const QDate &date, Callback callback = {}, qint64 expectedVersion = -1);
     void parse(const QString &text, Callback callback);
@@ -66,6 +67,8 @@ public:
     void preview(const ItemFields &fields, Callback callback);
     void configShow(Callback callback);
     void configSetSleepTime(const QString &time, Callback callback = {});
+    void listEntities(const QString &method, Callback callback);
+    void mutateEntity(const QString &method, QJsonObject params, Callback callback = {});
 
     static QString makeOpId();
     QString socketPath() const { return m_socketPath; }

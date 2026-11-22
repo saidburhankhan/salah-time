@@ -47,11 +47,12 @@ struct Stats { QJsonObject json; QString from, to; std::vector<StatsItem> items;
 struct Item { QJsonObject json; QString id, title, block, repeat, measure; };
 struct Entry { QJsonObject json; QString id, itemId, kind; };
 struct PrayerMark { QJsonObject json; QString id, day, prayer; };
-struct ParseDraft { QJsonObject json; QString title, repeat, measure; };
+struct ParseDraft { QJsonObject json; QString title, repeat; int plannedMinutes = 0; bool hasPlannedMinutes = false; };
 // item.preview result for the entry form and quick-add toast.
 struct Preview { QJsonObject json; QString next_occurrence, schedule_text; int occurrences_this_month = 0; };
 struct Config { QJsonObject json; QString location, method, sleepTime, asr; };
 struct Undo { QJsonObject json; int undone = 0; };
+struct Json { QJsonValue value; QJsonObject json; };
 // Canonical protocol v1 mutation result: the projection rows the UI renders.
 struct MutationResult {
     QJsonObject json;
@@ -65,7 +66,7 @@ struct MutationResult {
 
 using Value = std::variant<std::monostate, DayPlan, Today, Stats, Item, Entry,
                            std::vector<Entry>, PrayerMark, ParseDraft, Preview, Config,
-                           Undo, MutationResult>;
+                           Undo, MutationResult, Json>;
 using AnyDecoded = Decoded<Value>;
 
 template <typename T> Decoded<T> decode(const QJsonValue &value);
@@ -76,6 +77,7 @@ AnyDecoded decodePrayerMark(const QJsonValue &); AnyDecoded decodeParseDraft(con
 AnyDecoded decodeConfig(const QJsonValue &); AnyDecoded decodeUndo(const QJsonValue &);
 AnyDecoded decodePreview(const QJsonValue &);
 AnyDecoded decodeMutationResult(const QJsonValue &);
+AnyDecoded decodeJson(const QJsonValue &);
 QJsonObject jsonObject(const Value &value);
 
 } // namespace Dto

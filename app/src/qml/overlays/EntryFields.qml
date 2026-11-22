@@ -8,14 +8,15 @@ ScrollView {
     property var win
     property var form
     property alias titleText: titleField.text
-    property alias goalText: goalField.text
+    property alias goalText: plannedField.text
+    property alias projectIndex: projectPicker.currentIndex
     Layout.fillWidth: true
     Layout.fillHeight: true
     Layout.minimumWidth: 450
     clip: true
     function initialize(title, target) {
         titleField.text = title
-        goalField.text = target
+        plannedField.text = target
     }
     function clearTitle() {
         titleField.text = ""
@@ -104,31 +105,21 @@ ScrollView {
                 anchors.margins: 22
                 spacing: 14
                 Label {
-                    text: qsTr("Kind")
+                    text: qsTr("Project and plan")
                     color: form.win.text
                     font.pixelSize: 17
                     font.weight: Font.DemiBold
                 }
                 RowLayout {
                     spacing: 8
-                    Repeater {
-                        model: [{ id: "task", name: qsTr("Task") },
-                            { id: "counter", name: qsTr("Counter") }]
-                        ChoiceChip {
-                            required property var modelData
-                            win: form.win
-                            text: modelData.name
-                            selected: form.kind === modelData.id
-                            onClicked: form.kind = modelData.id
-                        }
-                    }
+                    ComboBox { id: projectPicker; model: [qsTr("Routine / no project")].concat((backend.projects || []).map(function(p){ return String(p.name || "") })) }
                     Label {
-                        text: form.kind === "task" ? qsTr("Time goal (min)") : qsTr("Goal")
+                        text: qsTr("Planned minutes")
                         color: form.win.muted
                         Layout.leftMargin: 10
                     }
                     TextField {
-                        id: goalField
+                        id: plannedField
                         Layout.preferredWidth: 110
                         placeholderText: qsTr("Optional")
                         font.family: form.win.mono

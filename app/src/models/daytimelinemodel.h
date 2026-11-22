@@ -35,6 +35,8 @@ public:
         WeekdaysRole,
         VersionRole,
         PositionRole
+        , ProjectColorRole, PlannedMinutesRole, ActualMinutesRole, SessionsRole,
+        CapacityMinutesRole, BlockPlannedMinutesRole, BlockActualMinutesRole
     };
 
     enum class Kind { Header, Item, Add, Marker };
@@ -66,6 +68,13 @@ public:
         QStringList weekdays;
         qint64 version = 0;
         int position = 0;
+        QString projectColor;
+        int plannedMinutes = 0;
+        int actualMinutes = 0;
+        int sessions = 0;
+        int capacityMinutes = 0;
+        int blockPlannedMinutes = 0;
+        int blockActualMinutes = 0;
     };
 
     explicit DayTimelineModel(QObject *parent = nullptr);

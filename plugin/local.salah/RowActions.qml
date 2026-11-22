@@ -2,7 +2,8 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// Expanded-row controls: minute correction, edit, and a two-step delete.
+// Expanded-row controls: edit and a two-step delete. Session minutes are
+// recorded only through the session flow.
 Item {
   id: root
 
@@ -16,23 +17,15 @@ Item {
   property color mutedForeground
   property string repeat
   property bool titleEditing: false
-  property string correctionError: ""
-
-  signal correctMinutes(int amount)
   signal beginEdit()
   signal removeConfirmed()
 
   height: Style.space(38)
 
-  function focusCorrection() {
-    correctionField.forceActiveFocus()
-    correctionField.selectAll()
-  }
+  function focusCorrection() {}
 
   onVisibleChanged: if (!visible) {
     confirmingDelete = false
-    correctionError = ""
-    correctionField.text = ""
   }
 
   property bool confirmingDelete: false
@@ -41,70 +34,6 @@ Item {
     anchors.left: parent.left
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(4)
-
-    Text {
-      anchors.verticalCenter: parent.verticalCenter
-      textFormat: Text.PlainText
-      text: root.strings.t("panel.time")
-      color: root.mutedForeground
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
-    }
-
-    TextField {
-      id: correctionField
-      width: Style.space(78)
-      height: Style.space(28)
-      placeholderText: root.strings.t("panel.correctionPlaceholder")
-      foreground: root.foreground
-      font.family: "monospace"
-      font.pixelSize: Style.font.caption
-      horizontalPadding: Style.space(5)
-      verticalPadding: 0
-      maximumLength: 5
-      onActiveFocusChanged: {
-        if (activeFocus) root.controller.editingKey = root.rowKey
-        else if (root.controller.editingKey === root.rowKey && !root.titleEditing)
-          root.controller.editingKey = ""
-      }
-      onAccepted: {
-        var raw = String(text).trim()
-        var value = Number(raw)
-        if (!/^[+-]?\d+$/.test(raw) || value === 0 || value < -1440 || value > 1440) {
-          root.correctionError = root.strings.t("panel.correctionError")
-          return
-        }
-        root.correctMinutes(value)
-        text = ""
-        root.correctionError = ""
-      }
-      Keys.onEscapePressed: function(event) {
-        text = ""
-        root.correctionError = ""
-        root.controller.collapseExpanded()
-        root.controller.forceActiveFocus()
-        event.accepted = true
-      }
-    }
-
-    Repeater {
-      model: [
-        { "amount": -5, "key": "panel.minusFive" },
-        { "amount": 5, "key": "panel.plusFive" },
-        { "amount": 15, "key": "panel.plusFifteen" }
-      ]
-      Button {
-        required property var modelData
-        width: Style.space(34)
-        height: Style.space(28)
-        text: root.strings.t(modelData.key)
-        foreground: root.mutedForeground
-        fontFamily: "monospace"
-        horizontalPadding: 0
-        verticalPadding: 0
-        onClicked: root.correctMinutes(modelData.amount)
-      }
-    }
 
     Button {
       visible: root.repeat === "none" && !root.confirmingDelete

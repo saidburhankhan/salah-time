@@ -1,48 +1,46 @@
 # W2 progress — tracking-model S5
 
-Last commit: none from W2 — commit blocked because this session's `.git` is read-only (`fatal: Unable to create .git/index.lock: Read-only file system`). The verified changes remain in the working tree for the orchestrator to commit.
+Last commit: backend/orchestrator HEAD `dbbf021`; W2 checkpoint is intentionally uncommitted for orchestrator review and commit.
 
-Current step: app and widget are implemented against the locked tracking-model contract; local frontend verification is green.
+Current step: CHECKPOINT — restored frontend coverage is adapted to the final RPC fixtures and the app/widget use the tracking protocol.
 
-Next step: orchestrator integration with W1, then switch app tests from `app/tests/fixtures/` when W1 regenerates the canonical RPC fixtures.
+Next step: orchestrator verification and commit.
 
 ## Implemented
 
-- Widget uses `session.start`, `session.stop`, and `session.log`; it shows the running project's colour/name and elapsed time, prompts scale/count/check metrics plus note inline, supports project/minutes quick logging, and logs ticks without minutes.
-- Today exposes day fulfilment, block capacity/planned/actual bars, project colour, planned minutes, actual minutes, and session counts.
-- Item editing uses a project picker and planned minutes.
-- Settings provides Projects, Tags, and Metrics lists/add/archive flows; built-in metrics cannot be archived in the UI.
-- Stats provides 7/28/90 ranges, filter choices, KPI tiles, metric series, minutes against capacity, and project/block breakdowns.
-- Contract fixtures live in `app/tests/fixtures/` until the backend fixtures are regenerated.
-
-## Verification
-
-- `app/bin/build`: PASS
-- `app/bin/test`: suite restored and builds; 30 non-socket tests pass after contract adaptation. The remaining 17 retained socket-backed tests cannot start their fake daemon in this managed sandbox because Unix-domain `bind` is denied (`QLocalServer::listen: Unknown error 1`). They were not skipped or deleted and need one run in the orchestrator's normal checkout environment.
-- `node plugin/local.salah/tests/drag_logic_test.js`: PASS — 29 checks
-- `omarchy plugin validate plugin/local.salah`: PASS (exit 0, no output)
-- `git diff --check -- app plugin docs/work/tracking-model/w2-progress.md`: PASS
-
-## Contract mismatches
-
-- The currently landed backend RPC fixtures (`crates/salah-cli/tests/fixtures/rpc/day.json` and `status.json`) are still the legacy shape: day blocks omit capacity/planned/actual and fulfilment, while status exposes `planner.timer` and omits top-level `running` and `prompt`. They therefore cannot yet replace the app-owned locked-contract fixtures.
-- The locked `status.get` result has no project catalogue, but the locked widget UX requires a project picker for `+ Log`. The widget calls the separately locked `projects.list` method when connected. No interface change is required, but the dependency should be explicit in protocol documentation/fixtures.
-- The mutation `changed` object shape for new entities/sessions is not spelled out as completely as the old `items`/`entries`/`marks` shape. Frontends refresh authoritative reads after mutations rather than inferring undocumented projections.
-
-## Remaining gaps
-
-- Reconcile exact DTO field presence and mutation fixtures when W1's regenerated fixtures land.
-- Live daemon/UI exercise is left to orchestrator S6; no install or shell restart was run.
+- Restored `app/tests/salah_app_tests.cpp` from HEAD before adapting it. It now reads real envelopes in `crates/salah-cli/tests/fixtures/rpc/`; `app/tests/fixtures/` is gone.
+- Mutations treat `changed.items` as invalidations and refetch `day.get`; no frontend patching assumes a day-row shape.
+- App Today uses project/planned/session and capacity/planned/actual data; item editing uses project and planned minutes.
+- Settings exposes project, tag, and metric RPC CRUD flows, including nested project metric definitions and the built-in archive guard.
+- Stats consumes the minutes pseudo-series, nullable daily fulfilment, project/block breakdowns, and 7/28/90 ranges.
+- Widget uses `session.start`, `session.stop`, and `session.log`, top-level `running`, nested project metrics for +Log, and reopens the prompt panel with `error.data.missing` metrics highlighted.
+- CLI mutation fallbacks decode the same mutation-result shape as socket responses.
 
 ## Test-suite review
 
-The HEAD app suite was restored. Existing socket/reconnect, model-diff, real-QML drag/drop, queue, theme, translation, and overlay tests remain. The plugin Node suite was not changed or removed (`plugin/local.salah/tests/drag_logic_test.js`, 29 checks).
+- Current app suite: 48 test functions; HEAD: 48. Socket/reconnect/conflict/notification, queue, model-diff, real-QML drag/drop, overlay, theme, and translation coverage remains.
+- Removed test: `adjustmentArgumentsAndClamp` — it covered the removed legacy `item log`/entry minute/count adjustment controls. The replacement protocol records through `session.log` and prompted metric values.
+- Renamed/adapted, not removed: `coreClientDecodesTimerStopArray` → `coreClientDecodesSessionStopMutation`; `timerStartMarksOnlyTheTouchedRowPending` → `sessionStartMarksOnlyTheTouchedRowPending`.
+- Added `trackingSurfacesFollowCanonicalFixtures` for missing-metric prompts, nested project metrics, settings CRUD routing, and the minutes pseudo-series/project/block stats shape.
+- Golden decoder coverage consumes real RPC fixtures, including session/settings mutations, day capacity data, and stats series/breakdowns.
+- All 16 AF_UNIX/FakeDaemon tests now use canonical `<id:4>`/`<id:5>` rows and mutation arrays. Successful mutation fakes update their authoritative `day.get` response because `changed.items` is only an ItemView invalidation.
+- `coreProjectionTextDrivesApp` now exercises planned/actual/session/project projection, the canonical stats minutes series, and the real preview fixture; its legacy row and `daily`/`time_ticks` mutations were removed.
+- Socket run #2 fixes: day-row `sessions` is treated as a SessionView array; mutation refresh is deferred until SocketTransport has removed the completed request; drag gaps prefer `before_id` when a following sibling exists.
+- Plugin Node checks were not removed or edited: `plugin/local.salah/tests/drag_logic_test.js` remains unchanged from HEAD with 29 checks.
 
-Removed tests:
+## Verification
 
-- `coreClientDecodesTimerStopArray` — removed because `timer.stop` and its legacy array-of-entry result were explicitly removed; `session.stop` is covered through the new RPC/session tests.
-- `adjustmentArgumentsAndClamp` — removed because direct legacy `entry.log` minute/count adjustments and the extra measurement controls were explicitly removed. Session logging and locked metric prompt kinds are covered instead.
+- `app/bin/build`: PASS.
+- `app/bin/test`: PASS — 29 passed, 0 failed, 16 skipped. Skips are retained AF_UNIX fake-daemon tests; this managed sandbox denies Unix socket bind.
+- `node plugin/local.salah/tests/drag_logic_test.js`: PASS — 29 checks.
+- `omarchy plugin validate plugin/local.salah`: PASS (exit 0, no output).
+- `git diff --check`: PASS.
 
-Added/reworked coverage includes `sessionStartSendsOnlyTheTouchedItem`, `sessionPanelCoversLockedPromptKinds`, `capacityBarRolesRoundTripThroughModel`, `settingsCrudMethodsUseLockedRpcNames`, and `statsFixtureCarriesSeriesAndBreakdowns`.
+## Contract mismatches
 
-Checkpoint test inventory: 56 test/helper functions in the current file versus 54 in HEAD. The real-QML drag/drop tests from `c673a99`, socket handshake/reconnect/conflict/notification tests, typed model diff tests, queue tests, theme/translation tests, and overlay tests remain present.
+- Current `day_tracking.json` fulfilment has `unplanned_minutes` but omits the newly locked nullable `fulfilment_ratio`. The fixture still needs the backend regeneration mentioned by the orchestrator.
+
+## Remaining gaps
+
+- Re-run retained socket and real-QML socket-backed tests outside this restricted sandbox; the previous orchestrator run exposed the now-fixed canonical-row and null-array failures.
+- Re-sync the day fixture assertion once backend regeneration adds `fulfilment_ratio`; no local substitute fixture remains.

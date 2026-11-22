@@ -106,6 +106,10 @@ Item {
                     break
                 }
             }
+            // Prefer the following sibling when both sides of the gap are
+            // known. This preserves the user's exact "drop before" intent;
+            // CoreClient deliberately serializes only one anchor.
+            if (beforeId !== "") afterId = ""
             backend.moveItem(dragId, block, afterId, beforeId)
         }
         dragging = false
@@ -119,6 +123,19 @@ Item {
         clip: true
         spacing: 8
         model: timeline.timelineModel
+        header: Rectangle {
+            width: todayList.width; height: 64; radius: theme.radius
+            color: timeline.win.card; border.color: timeline.win.border
+            RowLayout {
+                anchors.fill: parent; anchors.margins: 14
+                Label { text: qsTr("Today fulfilment"); color: timeline.win.text; font.weight: Font.DemiBold }
+                Item { Layout.fillWidth: true }
+                Label { text: qsTr("%1 / %2 items").arg(backend.doneItems).arg(backend.plannedItems); color: timeline.win.muted }
+                Label { text: qsTr("%1 / %2 min").arg(backend.actualMinutes).arg(backend.plannedMinutes); color: timeline.win.text; font.family: timeline.win.mono }
+                Label { text: qsTr("+%1 unplanned").arg(backend.unplannedMinutes); visible: backend.unplannedMinutes > 0; color: timeline.win.muted; font.family: timeline.win.mono }
+                Label { text: backend.fulfilmentRatio == null ? qsTr("—") : qsTr("%1%").arg(Math.round(Number(backend.fulfilmentRatio) * 100)); color: timeline.win.text; font.family: timeline.win.mono }
+            }
+        }
         move: Transition {
             NumberAnimation { properties: "y"; duration: 120; easing.type: Easing.OutCubic }
         }
@@ -147,6 +164,13 @@ Item {
             required property bool timerProjected
             required property int count
             required property int target
+            required property string projectColor
+            required property int plannedMinutes
+            required property int actualMinutes
+            required property int sessions
+            required property int capacityMinutes
+            required property int blockPlannedMinutes
+            required property int blockActualMinutes
             width: todayList.width
             height: rowKind === "header" ? 60 : rowKind === "item" ? 82 : rowKind === "add" ? 32 : 26
             PrayerHeader {
@@ -158,6 +182,9 @@ Item {
                 headerTime: rowDelegate.time
                 marked: rowDelegate.marked
                 current: rowDelegate.current
+                capacityMinutes: rowDelegate.capacityMinutes
+                plannedMinutes: rowDelegate.blockPlannedMinutes
+                actualMinutes: rowDelegate.blockActualMinutes
             }
             ItemCard {
                 anchors.fill: parent
@@ -176,6 +203,10 @@ Item {
                 timerProjected: rowDelegate.timerProjected
                 count: rowDelegate.count
                 target: rowDelegate.target
+                projectColor: rowDelegate.projectColor
+                plannedMinutes: rowDelegate.plannedMinutes
+                actualMinutes: rowDelegate.actualMinutes
+                sessions: rowDelegate.sessions
                 rowIndex: rowDelegate.index
                 list: todayList
             }

@@ -36,6 +36,9 @@ BarWidget {
   property string quickAddBlock: ""
   property int minuteTick: 0
   property var pendingOps: ({})
+  property var projects: []
+  property bool sessionPanelOpen: false
+  property bool sessionLogMode: false
   property double timerSnapshotMs: Date.now()
 
   readonly property string nextName: report && report.next
@@ -50,25 +53,13 @@ BarWidget {
   readonly property string remainingLong: formatRemaining(remainingSeconds, false)
   readonly property string remainingShort: formatRemaining(remainingSeconds, true)
   readonly property var planner: report && report.planner ? report.planner : null
-  readonly property var runningTimer: {
-    var rows = planner && planner.items ? planner.items : []
-    for (var i = 0; i < rows.length; i++) {
-      var timer = rows[i].timer
-      if (timer && timer.running === true) return {
-        "item_id": String(rows[i].id || ""),
-        "title": String(rows[i].title || ""),
-        "started_at": String(timer.started_at || ""),
-        "minutes": Number(timer.minutes_including_running) || 0
-      }
-    }
-    return planner && planner.timer ? planner.timer : null
-  }
+  readonly property var runningTimer: report && report.running ? report.running : null
   readonly property int runningMinutes: {
     minuteTick
     timerSnapshotMs
     if (!runningTimer) return 0
-    var base = Math.max(0, Number(runningTimer.minutes) || 0)
-    return base + Math.max(0, Math.floor((Date.now() - timerSnapshotMs) / 60000))
+    var started = Date.parse(String(runningTimer.started_at || ""))
+    return isNaN(started) ? 0 : Math.max(0, Math.floor((Date.now() - started) / 60000))
   }
   readonly property string displayText: localizedNextName !== ""
     ? strings.t("bar.nextStatus").arg(localizedNextName).arg(remainingShort)
@@ -181,27 +172,29 @@ BarWidget {
   }
 
   function toggleItem(row) {
-    var wasDone = row.state === "done"
-    var opId = beginOp("done", "item:" + String(row.id))
-    client.setDone(opId, String(row.id), !wasDone)
+    var opId = beginOp("tick", "item:" + String(row.id))
+    client.logSession(opId, String(row.id), String(row.projectId || ""), null, {}, "", String(row.block || ""))
   }
 
   function toggleTimer(row) {
-    var running = row.timerRunning === true
-    var opId = beginOp(running ? "stopTimer" : "startTimer", "item:" + String(row.id))
-    if (running) client.stopTimer(opId, String(row.id))
-    else client.startTimer(opId, String(row.id))
+    if (runningTimer) {
+      sessionLogMode = false
+      sessionPanelOpen = true
+      return
+    }
+    var opId = beginOp("startSession", "item:" + String(row.id))
+    client.startSession(opId, String(row.id), String(row.projectId || ""))
   }
 
-  function adjustCount(row, delta) {
-    var amount = delta < 0 ? -1 : 1
-    var opId = beginOp("logCount", "item:" + String(row.id))
-    client.logCount(opId, String(row.id), amount)
-  }
-
-  function correctMinutes(row, amount) {
-    var opId = beginOp("logMinutes", "item:" + String(row.id))
-    client.logMinutes(opId, String(row.id), amount)
+  function saveSession(projectId, values, minutes, note) {
+    if (sessionLogMode) {
+      var logOp = beginOp("logSession", "")
+      client.logSession(logOp, "", projectId, minutes, values, note, "")
+    } else {
+      var stopOp = beginOp("stopSession", "")
+      client.stopSession(stopOp, runningTimer ? String(runningTimer.id || "") : "", values, note)
+    }
+    sessionPanelOpen = false
   }
 
   function editItem(row, title) {
@@ -270,45 +263,6 @@ BarWidget {
     firstLoad = false
   }
 
-  function applyChanged(changed) {
-    if (!report || !report.planner || !changed) return
-    var plan = report.planner
-    var rows = (plan.items || []).slice()
-    var items = changed.items || []
-    for (var i = 0; i < items.length; i++) {
-      var source = items[i]
-      var found = -1
-      for (var j = 0; j < rows.length; j++)
-        if (String(rows[j].id || "") === String(source.id || "")) { found = j; break }
-      if (found >= 0) rows[found] = source
-      else rows.push(source)
-    }
-    var deleted = changed.deleted || []
-    for (var d = 0; d < deleted.length; d++) {
-      var id = String(deleted[d])
-      rows = rows.filter(function(item) { return String(item.id || "") !== id })
-    }
-    var marks = (plan.prayer_marks || []).slice()
-    var changedMarks = changed.marks || []
-    for (var m = 0; m < changedMarks.length; m++) {
-      var mark = changedMarks[m]
-      var prayer = String(mark.prayer || "")
-      var at = marks.indexOf(prayer)
-      if (mark.deleted_at) {
-        if (at >= 0) marks.splice(at, 1)
-      } else if (at < 0) {
-        marks.push(prayer)
-      }
-    }
-    plan.items = rows
-    plan.prayer_marks = marks
-    plan.timer = null
-    report = Object.assign({}, report, { "planner": plan })
-    timerSnapshotMs = Date.now()
-    var content = panel.loadedContent
-    if (content) content.syncTimeline(report)
-  }
-
   function handleMutationSuccess(opId, kind, result) {
     if (result && result.fallback) {
       clearPending(opId)
@@ -321,19 +275,26 @@ BarWidget {
       client.refreshStatus()
       return
     }
-    if (result && result.changed) applyChanged(result.changed)
     if (kind === "add" && result && result.changed && result.changed.items
         && result.changed.items.length > 0) {
       var target = panel.loadedContent
       if (target) target.showNextOccurrence(result.changed.items[0])
     }
     clearPending(opId)
+    client.refreshStatus()
   }
 
-  function handleMutationFailure(opId, kind, message) {
+  function handleMutationFailure(opId, kind, message, data) {
     clearPending(opId)
     var detail = String(message || "").trim().replace(/[\r\n]+/g, " ")
     actionError = detail === "" ? strings.t("panel.commandFailed") : detail.slice(0, 240)
+    if ((kind === "stopSession" || kind === "logSession") && data && data.missing) {
+      sessionLogMode = kind === "logSession"
+      sessionPanelOpen = true
+      Qt.callLater(function() {
+        if (sessionEditor) sessionEditor.markMissing(data.missing)
+      })
+    }
     client.refreshStatus()
   }
 
@@ -391,8 +352,12 @@ BarWidget {
     onStatusLoaded: function(status) { root.acceptReport(status) }
     onStatusFailed: function(message) { root.reportFailure(message) }
     onMutationSucceeded: function(opId, kind, result) { root.handleMutationSuccess(opId, kind, result) }
-    onMutationFailed: function(opId, kind, message) { root.handleMutationFailure(opId, kind, message) }
-    onTransportChanged: function(active) { if (!active) root.refresh() }
+    onMutationFailed: function(opId, kind, message, data) { root.handleMutationFailure(opId, kind, message, data) }
+    onProjectsLoaded: function(rows) { root.projects = rows || [] }
+    onTransportChanged: function(active) {
+      if (!active) root.refresh()
+      else client.loadProjects()
+    }
   }
 
   Process {
@@ -522,7 +487,7 @@ BarWidget {
       function baseRow(type, key, block) {
         return {
           "rowType": type, "rowKey": key, "block": block || "", "itemId": "",
-          "title": "", "time": "", "itemState": "", "measure": "check", "target": 0,
+          "title": "", "time": "", "itemState": "", "projectId": "", "projectColor": "transparent", "plannedMinutes": 0,
           "minutes": 0, "count": 0, "repeat": "none", "timerRunning": false,
           "timerStartedAt": "", "timerMinutes": 0, "detailText": "",
           "scheduleText": "", "nextOccurrence": "", "carried": false,
@@ -564,19 +529,18 @@ BarWidget {
           for (var i = 0; i < items.length; i++) {
             var source = items[i]
             if (String(source.block || "") !== block) continue
-            var timer = source.timer || {}
             var item = baseRow("item", "item:" + String(source.id), block)
             item.itemId = String(source.id || "")
             item.title = String(source.title || "")
-            item.itemState = String(source.state || "open")
-            item.measure = String(source.measure || "check")
-            item.target = Number(source.target) || 0
-            item.minutes = Number(source.minutes) || 0
-            item.count = Number(source.count) || 0
+            item.itemState = source.done === true ? "done" : "open"
+            item.projectId = source.project ? String(source.project.id || "") : ""
+            item.projectColor = source.project ? String(source.project.color || "transparent") : "transparent"
+            item.plannedMinutes = Number(source.planned_minutes) || 0
+            item.minutes = Number(source.actual_minutes) || 0
             item.repeat = String(source.repeat || "none")
-            item.timerRunning = timer.running === true
-            item.timerStartedAt = String(timer.started_at || "")
-            item.timerMinutes = Number(timer.minutes_including_running) || 0
+            item.timerRunning = root.runningTimer && String(root.runningTimer.item_id || "") === item.itemId
+            item.timerStartedAt = item.timerRunning ? String(root.runningTimer.started_at || "") : ""
+            item.timerMinutes = item.timerRunning ? root.runningMinutes : 0
             item.detailText = String(source.detail_text || "")
             item.scheduleText = String(source.schedule_text || "")
             item.nextOccurrence = source.next_occurrence ? String(source.next_occurrence) : ""
@@ -892,6 +856,48 @@ BarWidget {
             mutedForeground: root.mutedForeground
             occurrenceHint: keyCatcher.occurrenceHint
             actionError: root.actionError
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.space(6)
+            Button {
+              text: "+ Log"
+              foreground: root.foreground
+              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+              bordered: true
+              onClicked: {
+                root.sessionLogMode = true
+                root.sessionPanelOpen = true
+                sessionEditor.reset()
+                client.loadProjects()
+              }
+            }
+            Text {
+              visible: root.runningTimer !== null
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: root.runningTimer && root.runningTimer.project
+                ? String(root.runningTimer.project.name || "") + " · " + root.formatMinutes(root.runningMinutes) : ""
+              color: root.mutedForeground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            }
+          }
+
+          SessionPanel {
+            id: sessionEditor
+            visible: root.sessionPanelOpen
+            logMode: root.sessionLogMode
+            metrics: root.report && root.report.prompt ? root.report.prompt : []
+            projects: root.projects
+            strings: root.tr
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            foreground: root.foreground
+            mutedForeground: root.mutedForeground
+            onSaveRequested: function(projectId, values, minutes, note) {
+              root.saveSession(projectId, values, minutes, note)
+            }
+            onCancelRequested: root.sessionPanelOpen = false
           }
 
           PanelSeparator {

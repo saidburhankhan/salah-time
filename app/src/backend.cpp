@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLocale>
+#include <QTimer>
 #include <algorithm>
 
 namespace {
@@ -78,6 +79,10 @@ DayTimelineModel::Row itemRow(const Dto::DayItem &item, bool pending) {
     row.weekdays = weekdaysOf(item.json);
     row.version = item.json.value(QStringLiteral("version")).toVariant().toLongLong();
     row.position = item.json.value(QStringLiteral("position")).toInt();
+    row.projectColor = item.json.value(QStringLiteral("project")).toObject().value(QStringLiteral("color")).toString();
+    row.plannedMinutes = item.json.value(QStringLiteral("planned_minutes")).toInt();
+    row.actualMinutes = item.json.value(QStringLiteral("actual_minutes")).toInt();
+    row.sessions = item.json.value(QStringLiteral("sessions")).toArray().size();
     return row;
 }
 } // namespace
@@ -101,10 +106,14 @@ Backend::Backend(QObject *parent, const QString &program, int timeoutMs, const Q
     connect(&m_client, &CoreClient::changed, this, &Backend::reloadFromNotification);
     connect(&m_client, &CoreClient::requestFinished, this, [this](const QStringList &args, bool success) {
         emit requestFinished(args, success);
-        if (!m_client.busy() && m_refreshPending) {
+        // SocketTransport emits requestFinished before it removes the request
+        // from its pending map. Recheck on the next event-loop turn so a
+        // successful mutation can issue its authoritative day.get refresh.
+        QTimer::singleShot(0, this, [this] {
+            if (m_client.busy() || !m_refreshPending) return;
             m_refreshPending = false;
             reload();
-        }
+        });
     });
 }
 
@@ -138,16 +147,13 @@ CoreClient::Callback Backend::readResponse(std::function<void(const CoreClient::
 CoreClient::Callback Backend::mutationResponse(const QString &pendingId, const QString &pendingOpId) {
     return [this, pendingId, pendingOpId](const CoreClient::Result &result) {
         if (result.ok) {
-            if (const auto *mutation = std::get_if<Dto::MutationResult>(&result.value)) {
-                applyMutation(*mutation);
-            } else {
-                // Legacy CLI fallback: no canonical rows, so refetch once the
-                // queue drains.
-                if (!pendingOpId.isEmpty()) removePendingCreate(pendingOpId);
-                if (pendingId.startsWith(QStringLiteral("prayer:"))) setPrayerPending(pendingId.mid(7), false);
-                else if (!pendingId.isEmpty()) setItemPending(pendingId, false);
-                m_refreshPending = true;
-            }
+            // Mutation changed rows are invalidations, not day projections.
+            // In particular changed.items are ItemView and do not carry the
+            // day snapshot fields. Clear optimistic state and refetch once.
+            if (!pendingOpId.isEmpty()) removePendingCreate(pendingOpId);
+            if (pendingId.startsWith(QStringLiteral("prayer:"))) setPrayerPending(pendingId.mid(7), false);
+            else if (!pendingId.isEmpty()) setItemPending(pendingId, false);
+            m_refreshPending = true;
         } else {
             if (!pendingOpId.isEmpty()) removePendingCreate(pendingOpId);
             if (pendingId.startsWith(QStringLiteral("prayer:"))) setPrayerPending(pendingId.mid(7), false);
@@ -180,6 +186,7 @@ void Backend::applyDayPlan(const Dto::DayPlan &plan) {
     const QString previousSelected = selectedDay();
     const QString previousToday = todayDay();
     m_dayPlan = plan;
+    emit fulfilmentChanged();
     m_dayPlanFetchedAt = QDateTime::currentMSecsSinceEpoch();
     const QDate cliDay = QDate::fromString(plan.day, Qt::ISODate);
     if (cliDay.isValid()) {
@@ -201,6 +208,7 @@ void Backend::applyDayPlan(const Dto::DayPlan &plan) {
 
 void Backend::applyStats(const Dto::Stats &stats) {
     m_stats = stats;
+    emit statsDataChanged();
     m_totals.update(m_stats);
     m_statsItems.setItems(m_stats.items, StatsItemsModel::Sort::MinutesDescending);
     m_ticks.setTicks(m_stats.time_ticks);
@@ -239,6 +247,12 @@ void Backend::rebuildTimeline() {
             : (prayer ? prayer->json.value(QStringLiteral("time")).toString() : QString());
         header.marked = prayer && prayer->json.value(QStringLiteral("marked")).toBool();
         header.current = blockId == nowBlock;
+        const Dto::DayBlock *capacityBlock = blockFor.value(blockId, nullptr);
+        if (capacityBlock) {
+            header.capacityMinutes = capacityBlock->json.value(QStringLiteral("capacity_minutes")).toInt();
+            header.blockPlannedMinutes = capacityBlock->json.value(QStringLiteral("planned_minutes")).toInt();
+            header.blockActualMinutes = capacityBlock->json.value(QStringLiteral("actual_minutes")).toInt();
+        }
         rows.append(header);
 
         const Dto::DayBlock *block = blockFor.value(blockId, nullptr);
@@ -258,9 +272,9 @@ void Backend::rebuildTimeline() {
             row.itemId = pending.localId;
             row.title = pending.title;
             row.state = QStringLiteral("open");
-            row.measure = pending.measure;
+            row.measure = QStringLiteral("check");
             row.repeat = pending.repeat;
-            row.target = pending.target;
+            row.target = pending.plannedMinutes;
             row.weekdays = pending.weekdays;
             row.pending = true;
             row.position = 1000000 + itemRows.size();
@@ -394,7 +408,7 @@ void Backend::applyMutation(const Dto::MutationResult &mutation) {
 }
 
 void Backend::loadStats(int days) {
-    if (days != 7 && days != 30) days = 30;
+    if (days != 7 && days != 28 && days != 90) days = 28;
     m_client.statsDays(days, readResponse([this](const CoreClient::Result &result) {
         if (const auto *stats = std::get_if<Dto::Stats>(&result.value)) applyStats(*stats);
     }));
@@ -460,10 +474,9 @@ void Backend::previewItem(const QVariantMap &item) {
     if (fields.block.isEmpty() || fields.block == QStringLiteral("sleep")) fields.block = QStringLiteral("fajr");
     fields.repeat = repeat;
     fields.weekdays = weekdays;
-    fields.measure = item.value(QStringLiteral("measure"), QStringLiteral("check")).toString();
-    const int target = item.value(QStringLiteral("target")).toInt();
-    fields.hasTarget = fields.measure != QStringLiteral("check") && target > 0;
-    fields.target = target;
+    fields.projectId = item.value(QStringLiteral("project_id")).toString();
+    fields.plannedMinutes = item.value(QStringLiteral("planned_minutes")).toInt();
+    fields.hasPlannedMinutes = fields.plannedMinutes > 0;
     fields.date = m_selected.isValid() ? m_selected : m_today;
     m_client.preview(fields, [this](const CoreClient::Result &result) {
         if (result.ok) {
@@ -498,10 +511,9 @@ void Backend::saveItem(const QVariantMap &item) {
     fields.block = item.value(QStringLiteral("block"), QStringLiteral("fajr")).toString();
     fields.repeat = item.value(QStringLiteral("repeat"), QStringLiteral("none")).toString();
     fields.weekdays = item.value(QStringLiteral("weekdays")).toStringList();
-    fields.measure = item.value(QStringLiteral("measure"), QStringLiteral("check")).toString();
-    const int target = item.value(QStringLiteral("target")).toInt();
-    fields.hasTarget = fields.measure != QStringLiteral("check") && target > 0;
-    fields.target = target;
+    fields.projectId = item.value(QStringLiteral("project_id")).toString();
+    fields.plannedMinutes = item.value(QStringLiteral("planned_minutes")).toInt();
+    fields.hasPlannedMinutes = fields.plannedMinutes > 0;
     if (id.isEmpty()) {
         if (fields.repeat == QStringLiteral("none") && m_selected != m_today) fields.date = m_selected;
         fields.opId = CoreClient::makeOpId();
@@ -511,8 +523,8 @@ void Backend::saveItem(const QVariantMap &item) {
         pending.title = fields.title;
         pending.block = fields.block;
         pending.repeat = fields.repeat;
-        pending.measure = fields.measure;
-        pending.target = fields.hasTarget ? fields.target : 0;
+        pending.projectId = fields.projectId;
+        pending.plannedMinutes = fields.hasPlannedMinutes ? fields.plannedMinutes : 0;
         pending.weekdays = fields.weekdays;
         insertPending(pending);
         m_client.itemAdd(fields, mutationResponse(pending.localId, fields.opId));
@@ -587,24 +599,25 @@ void Backend::moveItem(const QString &id, const QString &block, const QString &a
 
 void Backend::toggleDone(const QString &id, const QString &state) {
     setItemPending(id, true);
-    if (state == QStringLiteral("done")) m_client.itemUndo(id, m_selected, mutationResponse(id));
-    else m_client.itemDone(id, m_selected, mutationResponse(id));
+    Q_UNUSED(state)
+    m_client.sessionLog(id, {}, -1, {}, {}, m_selected, mutationResponse(id));
 }
 
 void Backend::adjustMinutes(const QString &id, int amount) {
     setItemPending(id, true);
-    m_client.itemLog(id, amount, true, m_selected != m_today ? m_selected : QDate(), mutationResponse(id));
+    m_client.sessionLog(id, {}, amount, {}, {}, m_selected != m_today ? m_selected : QDate(), mutationResponse(id));
 }
 
 void Backend::adjustCount(const QString &id, int amount) {
     setItemPending(id, true);
-    m_client.itemLog(id, amount, false, m_selected != m_today ? m_selected : QDate(), mutationResponse(id));
+    Q_UNUSED(amount)
+    m_client.sessionLog(id, {}, -1, {}, {}, m_selected != m_today ? m_selected : QDate(), mutationResponse(id));
 }
 
 void Backend::toggleTimer(const QString &id, bool running) {
     setItemPending(id, true);
-    if (running) m_client.timerStop(id, mutationResponse(id));
-    else m_client.timerStart(id, mutationResponse(id));
+    if (running) m_client.sessionStop({}, {}, {}, mutationResponse(id));
+    else m_client.sessionStart(id, {}, mutationResponse(id));
 }
 
 void Backend::togglePrayer(const QString &prayer, bool marked) {
@@ -620,6 +633,29 @@ void Backend::setSleepTime(const QString &time) {
     m_client.configSetSleepTime(time, readResponse([this](const CoreClient::Result &result) {
         if (const auto *config = std::get_if<Dto::Config>(&result.value)) applyConfig(*config);
     }, true));
+}
+
+void Backend::loadSettings() {
+    auto load = [this](const QString &method, QVariantList *target) {
+        m_client.listEntities(method, readResponse([this, target](const CoreClient::Result &result) {
+            if (const auto *json = std::get_if<Dto::Json>(&result.value)) {
+                *target = json->value.toArray().toVariantList();
+                emit settingsChanged();
+            }
+        }));
+    };
+    load(QStringLiteral("projects.list"), &m_projects);
+    load(QStringLiteral("tags.list"), &m_tags);
+    load(QStringLiteral("metrics.list"), &m_metrics);
+}
+
+void Backend::saveEntity(const QString &kind, const QVariantMap &fields) {
+    static const QSet<QString> allowed{QStringLiteral("project"), QStringLiteral("tag"), QStringLiteral("metric")};
+    if (!allowed.contains(kind)) return;
+    const bool editing = !fields.value(QStringLiteral("id")).toString().isEmpty();
+    m_client.mutateEntity(kind + (editing ? QStringLiteral(".edit") : QStringLiteral(".add")),
+                          QJsonObject::fromVariantMap(fields),
+                          readResponse([this](const CoreClient::Result &) { loadSettings(); }));
 }
 
 void Backend::setSelectedStatsItem(const QString &id) {
@@ -648,8 +684,8 @@ ItemDraft *Backend::itemForId(const QString &id) {
                             {QStringLiteral("title"), pending->title},
                             {QStringLiteral("block"), pending->block},
                             {QStringLiteral("repeat"), pending->repeat},
-                            {QStringLiteral("measure"), pending->measure},
-                            {QStringLiteral("target"), pending->target}};
+                            {QStringLiteral("project_id"), pending->projectId},
+                            {QStringLiteral("planned_minutes"), pending->plannedMinutes}};
             QJsonArray days;
             for (const QString &day : pending->weekdays) days.append(day);
             row[QStringLiteral("weekdays")] = days;

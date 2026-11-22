@@ -41,6 +41,16 @@ class Backend : public QObject {
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(bool offlineMode READ offlineMode NOTIFY offlineChanged)
+    Q_PROPERTY(int plannedItems READ plannedItems NOTIFY fulfilmentChanged)
+    Q_PROPERTY(int doneItems READ doneItems NOTIFY fulfilmentChanged)
+    Q_PROPERTY(int plannedMinutes READ plannedMinutes NOTIFY fulfilmentChanged)
+    Q_PROPERTY(int actualMinutes READ actualMinutes NOTIFY fulfilmentChanged)
+    Q_PROPERTY(int unplannedMinutes READ unplannedMinutes NOTIFY fulfilmentChanged)
+    Q_PROPERTY(QVariant fulfilmentRatio READ fulfilmentRatio NOTIFY fulfilmentChanged)
+    Q_PROPERTY(QVariantList projects READ projects NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantList tags READ tags NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantList metrics READ metrics NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantMap statsData READ statsData NOTIFY statsDataChanged)
 public:
     explicit Backend(QObject *parent = nullptr, const QString &program = {}, int timeoutMs = 10000,
                      const QString &socketPath = {});
@@ -67,6 +77,19 @@ public:
     QString error() const { return m_error; }
     bool busy() const { return m_client.busy(); }
     bool offlineMode() const { return m_client.offline(); }
+    int plannedItems() const { return m_dayPlan.json.value(QStringLiteral("fulfilment")).toObject().value(QStringLiteral("planned_items")).toInt(); }
+    int doneItems() const { return m_dayPlan.json.value(QStringLiteral("fulfilment")).toObject().value(QStringLiteral("done_items")).toInt(); }
+    int plannedMinutes() const { return m_dayPlan.json.value(QStringLiteral("fulfilment")).toObject().value(QStringLiteral("planned_minutes")).toInt(); }
+    int actualMinutes() const { return m_dayPlan.json.value(QStringLiteral("fulfilment")).toObject().value(QStringLiteral("actual_minutes")).toInt(); }
+    int unplannedMinutes() const { return m_dayPlan.json.value(QStringLiteral("fulfilment")).toObject().value(QStringLiteral("unplanned_minutes")).toInt(); }
+    QVariant fulfilmentRatio() const {
+        const QJsonValue value = m_dayPlan.json.value(QStringLiteral("fulfilment")).toObject().value(QStringLiteral("fulfilment_ratio"));
+        return value.isDouble() ? QVariant(value.toDouble()) : QVariant();
+    }
+    QVariantList projects() const { return m_projects; }
+    QVariantList tags() const { return m_tags; }
+    QVariantList metrics() const { return m_metrics; }
+    QVariantMap statsData() const { return m_stats.json.toVariantMap(); }
 
     Q_INVOKABLE void reload();
     Q_INVOKABLE void loadStats(int days);
@@ -88,6 +111,8 @@ public:
     Q_INVOKABLE void toggleTimer(const QString &id, bool running);
     Q_INVOKABLE void togglePrayer(const QString &prayer, bool marked);
     Q_INVOKABLE void setSleepTime(const QString &time);
+    Q_INVOKABLE void loadSettings();
+    Q_INVOKABLE void saveEntity(const QString &kind, const QVariantMap &fields);
     Q_INVOKABLE ItemDraft *itemForId(const QString &id);
     Q_INVOKABLE ItemDraft *itemFromParse(const QString &fallbackTitle = {});
     Q_INVOKABLE QString hijriHeader(const QString &isoDate) const;
@@ -103,6 +128,9 @@ signals:
     void busyChanged();
     void offlineChanged();
     void requestFinished(QStringList arguments, bool success);
+    void fulfilmentChanged();
+    void settingsChanged();
+    void statsDataChanged();
 
 private:
     struct PendingCreate {
@@ -111,8 +139,8 @@ private:
         QString title;
         QString block;
         QString repeat = QStringLiteral("none");
-        QString measure = QStringLiteral("check");
-        int target = 0;
+        QString projectId;
+        int plannedMinutes = 0;
         QStringList weekdays;
     };
 
@@ -171,4 +199,5 @@ private:
     Config m_configState;
     ParseDraftState m_parseDraft;
     PreviewState m_preview;
+    QVariantList m_projects, m_tags, m_metrics;
 };

@@ -9,7 +9,6 @@ Popup {
     property var win
     property var item: ({})
     property string block: item.block || "fajr"
-    property string kind: item.measure === "count" ? "counter" : "task"
     property string repeat: item.repeat || "none"
     property var days: item.weekdays || []
     property bool confirming: false
@@ -27,11 +26,11 @@ Popup {
     background: null
     onOpened: {
         block = item.block || "fajr"
-        kind = item.measure === "count" ? "counter" : "task"
         repeat = item.repeat || "none"
         days = item.weekdays || []
         confirming = false
-        entryFields.initialize(item.title || "", item.target ? String(item.target) : "")
+        backend.loadSettings()
+        entryFields.initialize(item.title || "", item.plannedMinutes ? String(item.plannedMinutes) : "")
         refreshPreview()
     }
     function refreshPreview() {
@@ -39,7 +38,6 @@ Popup {
         backend.previewItem(draft())
     }
     onBlockChanged: previewTimer.restart()
-    onKindChanged: previewTimer.restart()
     onRepeatChanged: previewTimer.restart()
     onDaysChanged: previewTimer.restart()
     Timer {
@@ -57,8 +55,8 @@ Popup {
             id: item.id || "",
             title: entryFields.titleText,
             block: block,
-            measure: kind === "counter" ? "count" : goal > 0 ? "minutes" : "check",
-            target: goal > 0 ? goal : 0,
+            project_id: entryFields.projectIndex > 0 ? backend.projects[entryFields.projectIndex - 1].id : "",
+            planned_minutes: goal > 0 ? goal : 0,
             repeat: repeat,
             weekdays: repeat === "weekly" ? days : []
         }

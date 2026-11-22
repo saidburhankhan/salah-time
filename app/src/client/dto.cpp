@@ -19,12 +19,14 @@ struct Reader {
     bool fail(const QString&p,const QString&m){if(error.isEmpty())error=(p.isEmpty()?m:p+": "+m);return false;}
 };
 const QStringList blocks={"night","fajr","dhuhr","asr","maghrib","isha"}, boundaries={"night","fajr","dhuhr","asr","maghrib","isha","sleep"};
-const QStringList prayers={"fajr","dhuhr","asr","maghrib","isha"}, repeats={"none","daily","weekly"}, measures={"check","minutes","count"}, states={"open","done","missed"}, weekdays={"mon","tue","wed","thu","fri","sat","sun"};
+const QStringList prayers={"fajr","dhuhr","asr","maghrib","isha"}, repeats={"none","daily","weekly"}, measures={"check","minutes","count"}, weekdays={"mon","tue","wed","thu","fri","sat","sun"};
 
 bool weekdaysField(Reader&r,const QJsonObject&o,const QString&p){auto v=o.value("weekdays");if(v.isUndefined())return r.fail(p+".weekdays","missing required field");if(v.isNull())return true;if(!v.isArray())return r.fail(p+".weekdays","expected array or null");for(int i=0;i<v.toArray().size();++i){auto x=v.toArray()[i];if(!x.isString()||!weekdays.contains(x.toString()))return r.fail(p+QString(".weekdays[%1]").arg(i),"expected one of "+weekdays.join('|'));}return true;}
 bool dayItem(Reader&r,const QJsonValue&v,const QString&p,DayItem&x){
     QJsonObject o;if(!r.object(v,p,o))return false;x.json=o;
-    if(!r.str(o,"id",p,x.id)||!r.str(o,"title",p,x.title)||!r.enumv(o,"block",p,blocks,x.block)||!r.enumv(o,"repeat",p,repeats,x.repeat)||!weekdaysField(r,o,p)||!r.enumv(o,"measure",p,measures,x.measure)||!r.number(o,"target",p,true)||!r.number(o,"position",p)||!r.enumv(o,"state",p,states,x.state)||!r.number(o,"minutes",p)||!r.number(o,"count",p)||!r.nullableString(o,"timer_started_at",p))return false;
+    if(!r.str(o,"id",p,x.id)||!r.str(o,"title",p,x.title)||!r.enumv(o,"block",p,blocks,x.block)||!r.enumv(o,"repeat",p,repeats,x.repeat)||!weekdaysField(r,o,p)||!r.number(o,"planned_minutes",p,true)||!r.number(o,"position",p)||!r.number(o,"actual_minutes",p)||!r.boolean(o,"done",p))return false;
+    QJsonArray sessions;if(!r.array(o,"sessions",p,sessions))return false;
+    x.measure=QStringLiteral("minutes");x.state=o.value("done").toBool()?QStringLiteral("done"):QStringLiteral("open");
     // Protocol v1 display projections are optional only because the frozen
     // legacy CLI JSON predates them; when present they must be well formed.
     if(o.contains("schedule_text")&&!r.str(o,"schedule_text",p,x.schedule_text))return false;
@@ -32,17 +34,7 @@ bool dayItem(Reader&r,const QJsonValue&v,const QString&p,DayItem&x){
     if(o.contains("next_occurrence")&&!r.str(o,"next_occurrence",p,x.next_occurrence,true))return false;
     if(o.contains("carried")&&!r.boolean(o,"carried",p))return false;
     x.carried=o.value("carried").toBool();
-    if(o.contains("timer")){
-        QJsonObject t;const QString tp=p+".timer";
-        if(!r.object(o.value("timer"),tp,t)||!r.boolean(t,"running",tp)||!r.nullableString(t,"started_at",tp)||!r.number(t,"minutes_including_running",tp))return false;
-        x.timer_running=t.value("running").toBool();
-        x.timer_started_at=t.value("started_at").toString();
-        x.timer_minutes_including_running=t.value("minutes_including_running").toVariant().toLongLong();
-    } else {
-        x.timer_running=!o.value("timer_started_at").toString().isEmpty();
-        x.timer_started_at=o.value("timer_started_at").toString();
-        x.timer_minutes_including_running=o.value("minutes").toVariant().toLongLong();
-    }
+    x.timer_minutes_including_running=o.value("actual_minutes").toVariant().toLongLong();
     return true;
 }
 bool item(Reader&r,const QJsonValue&v,const QString&p,Item&x){QJsonObject o;if(!r.object(v,p,o))return false;x.json=o;if(!r.str(o,"id",p,x.id)||!r.str(o,"title",p,x.title)||!r.enumv(o,"block",p,blocks,x.block)||!r.enumv(o,"repeat",p,repeats,x.repeat)||!weekdaysField(r,o,p)||!r.enumv(o,"measure",p,measures,x.measure)||!r.number(o,"target",p,true)||!r.number(o,"position",p)||!r.str(o,"day",p,x.title)||!r.str(o,"created_at",p,x.title)||!r.str(o,"updated_at",p,x.title)||!r.nullableString(o,"deleted_at",p))return false;return true;}
@@ -55,10 +47,13 @@ bool mutationResult(Reader&r,const QJsonValue&v,MutationResult&x){
     if(!r.number(o,"revision","mutation")||!r.str(o,"op_id","mutation",x.opId))return false;
     x.revision=o.value("revision").toVariant().toLongLong();
     if(!r.object(o.value("changed"),"mutation.changed",changed))return false;
-    QJsonArray items,entries,marks,deleted;
-    if(!r.array(changed,"items","mutation.changed",items)||!r.array(changed,"entries","mutation.changed",entries)||!r.array(changed,"marks","mutation.changed",marks)||!r.array(changed,"deleted","mutation.changed",deleted))return false;
-    for(int i=0;i<items.size();++i){DayItem d;if(!dayItem(r,items[i],QString("mutation.changed.items[%1]").arg(i),d))return false;x.items.push_back(std::move(d));}
-    for(int i=0;i<entries.size();++i){Entry e;if(!entry(r,entries[i],QString("mutation.changed.entries[%1]").arg(i),e))return false;x.entries.push_back(std::move(e));}
+    QJsonArray items,sessions,projects,tags,metrics,marks,deleted;
+    if(!r.array(changed,"items","mutation.changed",items)||!r.array(changed,"sessions","mutation.changed",sessions)||
+       !r.array(changed,"projects","mutation.changed",projects)||!r.array(changed,"tags","mutation.changed",tags)||
+       !r.array(changed,"metrics","mutation.changed",metrics)||!r.array(changed,"marks","mutation.changed",marks)||
+       !r.array(changed,"deleted","mutation.changed",deleted))return false;
+    for(int i=0;i<items.size();++i)if(!items[i].isObject())return r.fail(QString("mutation.changed.items[%1]").arg(i),"expected object");
+    for(int i=0;i<sessions.size();++i)if(!sessions[i].isObject())return r.fail(QString("mutation.changed.sessions[%1]").arg(i),"expected object");
     for(int i=0;i<marks.size();++i){PrayerMark m;if(!prayerMark(r,marks[i],QString("mutation.changed.marks[%1]").arg(i),m))return false;x.marks.push_back(std::move(m));}
     for(int i=0;i<deleted.size();++i){if(!deleted[i].isString())return r.fail(QString("mutation.changed.deleted[%1]").arg(i),"expected string");x.deleted.push_back(deleted[i].toString());}
     return true;
@@ -70,6 +65,16 @@ template<class T> AnyDecoded any(Decoded<T> d){if(!d)return {{},d.error};return 
 template<> Decoded<DayPlan> decode<DayPlan>(const QJsonValue&v){return run<DayPlan>(v,[](Reader&r,const QJsonValue&v,DayPlan&x){QJsonObject o;if(!r.object(v,"day",o))return false;x.json=o;QString z;if(!r.str(o,"day","day",x.day)||!r.boolean(o,"is_today","day")||!r.str(o,"sunrise","day",z)||!r.str(o,"night_start","day",z)||!r.number(o,"open","day"))return false;QJsonObject sl;if(!r.object(o.value("sleep"),"day.sleep",sl)||!r.str(sl,"time","day.sleep",x.sleep.time)||!r.boolean(sl,"passed","day.sleep"))return false;x.sleep.json=sl;if(!o.contains("now"))return r.fail("day.now","missing required field");if(!o.value("now").isNull()){QJsonObject n,next;if(!r.object(o.value("now"),"day.now",n)||!r.enumv(n,"block","day.now",blocks,z)||!r.boolean(n,"sleeping","day.now")||!r.object(n.value("next"),"day.now.next",next))return false;QString z;if(!r.enumv(next,"id","day.now.next",boundaries,z)||!r.str(next,"name","day.now.next",z)||!r.str(next,"time","day.now.next",z)||!r.number(next,"remaining_seconds","day.now.next"))return false;if(next.contains("at")&&!r.str(next,"at","day.now.next",z))return false;x.now=Now{n,n.value("block").toString(),next.value("at").toString()};}QJsonArray a;if(!r.array(o,"prayers","day",a))return false;for(int i=0;i<a.size();++i){QJsonObject p;QString z;if(!r.object(a[i],QString("day.prayers[%1]").arg(i),p)||!r.enumv(p,"id",QString("day.prayers[%1]").arg(i),prayers,z)||!r.str(p,"name",QString("day.prayers[%1]").arg(i),z)||!r.str(p,"time",QString("day.prayers[%1]").arg(i),z)||!r.boolean(p,"passed",QString("day.prayers[%1]").arg(i))||!r.boolean(p,"current",QString("day.prayers[%1]").arg(i))||!r.boolean(p,"marked",QString("day.prayers[%1]").arg(i)))return false;x.prayers.push_back({p,p.value("id").toString()});}if(!r.array(o,"blocks","day",a))return false;for(int i=0;i<a.size();++i){QString bp=QString("day.blocks[%1]").arg(i);QJsonObject b;DayBlock db;if(!r.object(a[i],bp,b)||!r.enumv(b,"start",bp,blocks,db.start)||!r.enumv(b,"end",bp,boundaries,db.end))return false;db.json=b;QJsonArray its;if(!r.array(b,"items",bp,its))return false;for(int j=0;j<its.size();++j){DayItem di;if(!dayItem(r,its[j],bp+QString(".items[%1]").arg(j),di))return false;db.items.push_back(std::move(di));}x.blocks.push_back(std::move(db));}return true;});}
 template<> Decoded<Stats> decode<Stats>(const QJsonValue&v){return run<Stats>(v,[](Reader&r,const QJsonValue&v,Stats&x){
     QJsonObject o;if(!r.object(v,"stats",o))return false;x.json=o;
+    if(o.contains("range")) {
+        QJsonObject range;if(!r.object(o.value("range"),"stats.range",range))return false;
+        if(!r.str(range,"from","stats.range",x.from)||!r.str(range,"to","stats.range",x.to))return false;
+        QJsonArray rows;if(!r.array(o,"days","stats",rows))return false;
+        for(int i=0;i<rows.size();++i){QJsonObject q;QString day;const QString p=QString("stats.days[%1]").arg(i);if(!r.object(rows[i],p,q)||!r.str(q,"day",p,day)||!r.number(q,"minutes",p)||!r.number(q,"capacity_minutes",p)||!r.number(q,"planned_minutes",p)||!r.number(q,"unplanned_minutes",p)||!r.number(q,"fulfilment_ratio",p,true))return false;StatsDaily d;d.json=q;d.day=day;x.daily.push_back(d);}
+        QJsonArray projects;if(!r.array(o,"projects","stats",projects))return false;
+        for(int i=0;i<projects.size();++i){QJsonObject q;StatsItem si;const QString p=QString("stats.projects[%1]").arg(i);if(!r.object(projects[i],p,q)||!r.str(q,"id",p,si.id)||!r.str(q,"name",p,si.title)||!r.number(q,"minutes",p)||!r.number(q,"sessions",p))return false;si.json=q;x.items.push_back(si);}
+        QJsonObject totals;if(!r.object(o.value("totals"),"stats.totals",totals)||!r.number(totals,"minutes","stats.totals")||!r.number(totals,"sessions","stats.totals")||!r.number(totals,"active_days","stats.totals"))return false;x.totals={totals};
+        return true;
+    }
     if(!r.str(o,"from","stats",x.from)||!r.str(o,"to","stats",x.to)||!r.number(o,"days","stats")||!r.number(o,"marked_total","stats")||!r.number(o,"prayer_slots","stats"))return false;
     QJsonArray a;if(!r.array(o,"items","stats",a))return false;
     for(int i=0;i<a.size();++i){
@@ -103,7 +108,7 @@ template<> Decoded<Stats> decode<Stats>(const QJsonValue&v){return run<Stats>(v,
 template<> Decoded<Item> decode<Item>(const QJsonValue&v){return run<Item>(v,[](Reader&r,const QJsonValue&v,Item&x){return item(r,v,"item",x);});}
 template<> Decoded<Entry> decode<Entry>(const QJsonValue&v){return run<Entry>(v,[](Reader&r,const QJsonValue&v,Entry&x){return entry(r,v,"entry",x);});}
 template<> Decoded<std::vector<Entry>> decode<std::vector<Entry>>(const QJsonValue&v){return run<std::vector<Entry>>(v,[](Reader&r,const QJsonValue&v,std::vector<Entry>&x){if(!v.isArray())return r.fail("entries","expected array");for(int i=0;i<v.toArray().size();++i){Entry e;if(!entry(r,v.toArray()[i],QString("entries[%1]").arg(i),e))return false;x.push_back(std::move(e));}return true;});}
-template<> Decoded<ParseDraft> decode<ParseDraft>(const QJsonValue&v){return run<ParseDraft>(v,[](Reader&r,const QJsonValue&v,ParseDraft&x){QJsonObject o;if(!r.object(v,"draft",o))return false;x.json=o;QString block;if(!r.str(o,"title","draft",x.title)||!r.enumv(o,"block","draft",blocks,block,true)||!r.enumv(o,"repeat","draft",repeats,x.repeat)||!weekdaysField(r,o,"draft")||!r.enumv(o,"measure","draft",measures,x.measure)||!r.number(o,"target","draft",true))return false;return true;});}
+template<> Decoded<ParseDraft> decode<ParseDraft>(const QJsonValue&v){return run<ParseDraft>(v,[](Reader&r,const QJsonValue&v,ParseDraft&x){QJsonObject o;if(!r.object(v,"draft",o))return false;x.json=o;QString block;if(!r.str(o,"title","draft",x.title)||!r.enumv(o,"block","draft",blocks,block,true)||!r.enumv(o,"repeat","draft",repeats,x.repeat)||!weekdaysField(r,o,"draft")||!r.number(o,"planned_minutes","draft",true))return false;x.hasPlannedMinutes=!o.value("planned_minutes").isNull();x.plannedMinutes=o.value("planned_minutes").toInt();return true;});}
 template<> Decoded<PrayerMark> decode<PrayerMark>(const QJsonValue&v){return run<PrayerMark>(v,[](Reader&r,const QJsonValue&v,PrayerMark&x){return prayerMark(r,v,"prayer_mark",x);});}
 template<> Decoded<Config> decode<Config>(const QJsonValue&v){return run<Config>(v,[](Reader&r,const QJsonValue&v,Config&x){QJsonObject o;if(!r.object(v,"config",o))return false;x.json=o;if(!r.str(o,"location","config",x.location)||!r.str(o,"method","config",x.method)||!r.str(o,"sleep_time","config",x.sleepTime)||!r.str(o,"asr","config",x.asr)||!r.boolean(o,"auto_location","config")||!r.number(o,"latitude","config")||!r.number(o,"longitude","config")||!r.number(o,"timezone_offset","config")||!r.nullableString(o,"last_location_provider","config")||!r.nullableString(o,"last_location_sync","config"))return false;return true;});}
 template<> Decoded<Undo> decode<Undo>(const QJsonValue&v){return run<Undo>(v,[](Reader&r,const QJsonValue&v,Undo&x){QJsonObject o;if(!r.object(v,"undo",o)||!r.number(o,"undone","undo"))return false;x={o,o.value("undone").toInt()};return true;});}
@@ -118,5 +123,6 @@ AnyDecoded decodePrayerMark(const QJsonValue&v){return any(decode<PrayerMark>(v)
 AnyDecoded decodeConfig(const QJsonValue&v){return any(decode<Config>(v));} AnyDecoded decodeUndo(const QJsonValue&v){return any(decode<Undo>(v));}
 AnyDecoded decodePreview(const QJsonValue&v){return any(decode<Preview>(v));}
 AnyDecoded decodeMutationResult(const QJsonValue&v){return any(decode<MutationResult>(v));}
+AnyDecoded decodeJson(const QJsonValue&v){Json decoded{v,{}};if(v.isObject())decoded.json=v.toObject();return {{Value{decoded}}, {}};}
 QJsonObject jsonObject(const Value&v){return std::visit([](const auto&x)->QJsonObject{using T=std::decay_t<decltype(x)>;if constexpr(std::is_same_v<T,std::monostate>||std::is_same_v<T,std::vector<Entry>>)return {};else return x.json;},v);}
 } // namespace Dto

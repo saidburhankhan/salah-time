@@ -16,8 +16,9 @@ Item {
   required property string title
   required property string time
   required property string itemState
-  required property string measure
-  required property int target
+  required property string projectId
+  required property color projectColor
+  required property int plannedMinutes
   required property int minutes
   required property int count
   required property string repeat
@@ -80,7 +81,7 @@ Item {
   }
   readonly property var itemData: ({
     "id": itemId, "title": title, "block": block, "state": itemState,
-    "measure": measure, "target": target, "minutes": minutes,
+    "projectId": projectId, "projectColor": projectColor, "plannedMinutes": plannedMinutes, "minutes": minutes,
     "count": count, "repeat": repeat, "timerRunning": timerRunning,
     "timerStartedAt": timerStartedAt, "timerMinutes": timerMinutes,
     "detailText": detailText, "scheduleText": scheduleText,
@@ -205,6 +206,12 @@ Item {
     }
 
     MouseArea {
+      anchors.fill: itemCheck
+      cursorShape: Qt.PointingHandCursor
+      onClicked: if (!row.pending) row.host.toggleItem(row.itemData)
+    }
+
+    MouseArea {
       id: itemMouse
       anchors.left: itemCheck.left
       anchors.right: controlRow.left
@@ -263,6 +270,12 @@ Item {
         elide: Text.ElideRight
       }
 
+      Rectangle {
+        visible: row.projectId !== ""
+        width: Style.space(7); height: width; radius: width / 2
+        color: row.projectColor
+      }
+
       TextField {
         id: titleEditor
         visible: row.editing
@@ -309,62 +322,13 @@ Item {
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(1)
 
-      Row {
-        visible: row.measure === "count"
-        height: Style.space(26)
-        spacing: 0
-
-        Button {
-          width: Style.space(24)
-          height: parent.height
-          text: row.strings.t("panel.decrease")
-          tooltipText: row.strings.t("panel.decreaseCount")
-          foreground: row.mutedForeground
-          fontFamily: row.fontFamily
-          horizontalPadding: 0
-          verticalPadding: 0
-          onClicked: {
-            row.selectRow()
-            row.host.adjustCount(row.itemData, -1)
-          }
-        }
-        Row {
-          width: row.target > 0 ? Style.space(54) : Style.space(32)
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(2)
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: String(row.count)
-            color: row.foreground
-            font.family: "monospace"
-            font.pixelSize: Style.font.caption
-          }
-          Text {
-            visible: row.target > 0
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: row.strings.t("panel.countGoal").arg(row.target)
-            color: row.mutedForeground
-            font.family: "monospace"
-            font.pixelSize: Style.font.caption
-          }
-        }
-        Button {
-          width: Style.space(24)
-          height: parent.height
-          text: row.strings.t("panel.increase")
-          tooltipText: row.strings.t("panel.increaseCount")
-          foreground: row.mutedForeground
-          fontFamily: row.fontFamily
-          horizontalPadding: 0
-          verticalPadding: 0
-          onClicked: {
-            row.selectRow()
-            row.host.adjustCount(row.itemData, 1)
-          }
-        }
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
+        text: row.plannedMinutes > 0 ? row.plannedMinutes + "m" : ""
+        color: row.mutedForeground
+        font.family: "monospace"
+        font.pixelSize: Style.font.caption
       }
       Button {
         width: Style.space(68)
@@ -420,7 +384,6 @@ Item {
     mutedForeground: row.mutedForeground
     repeat: row.repeat
     titleEditing: row.editing
-    onCorrectMinutes: function(amount) { row.host.correctMinutes(row.itemData, amount) }
     onBeginEdit: row.beginTitleEdit()
     onRemoveConfirmed: {
       row.controller.collapseExpanded()

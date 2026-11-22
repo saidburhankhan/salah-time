@@ -10,6 +10,9 @@ Rectangle {
     property string headerTime: ""
     property bool marked: false
     property bool current: false
+    property int capacityMinutes: 0
+    property int plannedMinutes: 0
+    property int actualMinutes: 0
     radius: theme.radius
     color: win.card
     border.color: win.border
@@ -65,5 +68,11 @@ Rectangle {
                 font.pixelSize: 11
             }
         }
+    }
+    Rectangle {
+        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+        height: 4; color: "#2a2823"
+        Rectangle { height: parent.height; width: parent.width * Math.min(1, header.plannedMinutes / Math.max(1, header.capacityMinutes)); color: "#6f6b63" }
+        Rectangle { height: parent.height; width: parent.width * Math.min(1, header.actualMinutes / Math.max(1, header.capacityMinutes)); color: theme.accent }
     }
 }

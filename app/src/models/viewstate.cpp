@@ -90,8 +90,8 @@ void ParseDraftState::update(const Dto::ParseDraft &draft) {
     m_title = draft.title;
     m_block = draft.json.value(QStringLiteral("block")).toString();
     m_repeat = draft.repeat;
-    m_measure = draft.measure;
-    m_target = draft.json.value(QStringLiteral("target")).toInt();
+    m_plannedMinutes = draft.plannedMinutes;
+    m_hasPlannedMinutes = draft.hasPlannedMinutes;
     m_weekdays.clear();
     for (const QJsonValue &day : draft.json.value(QStringLiteral("weekdays")).toArray())
         m_weekdays.append(day.toString());
@@ -102,8 +102,8 @@ void ParseDraftState::clear() {
     m_title.clear();
     m_block.clear();
     m_repeat.clear();
-    m_measure.clear();
-    m_target = 0;
+    m_plannedMinutes = 0;
+    m_hasPlannedMinutes = false;
     m_weekdays.clear();
     emit changed();
 }

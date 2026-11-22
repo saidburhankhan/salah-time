@@ -24,8 +24,9 @@ Item {
 
   signal statusLoaded(var report)
   signal statusFailed(string message)
+  signal projectsLoaded(var projects)
   signal mutationSucceeded(string opId, string kind, var result)
-  signal mutationFailed(string opId, string kind, string message)
+  signal mutationFailed(string opId, string kind, string message, var data)
   signal transportChanged(bool socketActive)
 
   readonly property string socketPath: {
@@ -160,7 +161,7 @@ Item {
       for (var i = 0; i < failures.length; i++) {
         var failure = failures[i]
         if (failure.type === "status") client.statusFailed(failure.reason)
-        else client.mutationFailed(failure.opId, failure.kind, failure.reason)
+        else client.mutationFailed(failure.opId, failure.kind, failure.reason, {})
       }
     })
   }
@@ -219,9 +220,10 @@ Item {
     if (message.error) {
       var detail = client.errorDetail(message.error)
       if (meta.type === "status") client.handleStatusFailure(detail)
+      else if (meta.type === "projects") client.statusFailed(detail)
       else if (meta.type === "mutation") {
         delete client.activeOps[meta.opId]
-        client.mutationFailed(meta.opId, meta.kind, detail)
+        client.mutationFailed(meta.opId, meta.kind, detail, message.error.data || {})
       } else if (meta.type === "hello" || meta.type === "subscribe") {
         client.markDisconnected(detail)
       }
@@ -235,6 +237,8 @@ Item {
       client.handleSubscribed(result)
     } else if (meta.type === "status") {
       client.handleStatusResult(meta, result)
+    } else if (meta.type === "projects") {
+      client.projectsLoaded(result || [])
     } else if (meta.type === "mutation") {
       delete client.activeOps[meta.opId]
       var revision = Number(result && result.revision) || 0
@@ -344,7 +348,7 @@ Item {
     client.activeOps[opId] = true
     if (client.request(method, params, { "type": "mutation", "opId": opId, "kind": kind }) < 0) {
       delete client.activeOps[opId]
-      client.mutationFailed(opId, kind, "connection closed")
+      client.mutationFailed(opId, kind, "connection closed", {})
     }
   }
 
@@ -377,50 +381,44 @@ Item {
     client.fallback(opId, "add", command)
   }
 
-  function setDone(opId, itemId, done) {
+  function logSession(opId, itemId, projectId, minutes, values, note, block) {
     if (client.socketActive) {
-      client.sendMutation(opId, "done", done ? "entry.done" : "entry.undo",
-        { "item_id": String(itemId) })
+      var params = { "values": values || {} }
+      if (String(itemId || "") !== "") params.item_id = String(itemId)
+      if (String(projectId || "") !== "") params.project_id = String(projectId)
+      if (minutes !== undefined && minutes !== null) params.minutes = Number(minutes)
+      if (String(note || "") !== "") params.note = String(note)
+      if (String(block || "") !== "") params.block = String(block)
+      client.sendMutation(opId, "logSession", "session.log", params)
       return
     }
-    client.fallback(opId, "done",
-      ["salah", "item", done ? "done" : "undo", "--json", String(itemId)])
+    var command = ["salah", "session", "log", "--json"]
+    if (String(itemId || "") !== "") command = command.concat(["--item", String(itemId)])
+    if (String(projectId || "") !== "") command = command.concat(["--project", String(projectId)])
+    if (minutes !== undefined && minutes !== null) command = command.concat(["--minutes", String(Number(minutes))])
+    client.fallback(opId, "logSession", command)
   }
 
-  function logCount(opId, itemId, delta) {
+  function startSession(opId, itemId, projectId) {
     if (client.socketActive) {
-      client.sendMutation(opId, "logCount", "entry.log",
-        { "item_id": String(itemId), "kind": "count", "value": Number(delta) || 0 })
+      var params = {}
+      if (String(itemId || "") !== "") params.item_id = String(itemId)
+      if (String(projectId || "") !== "") params.project_id = String(projectId)
+      client.sendMutation(opId, "startSession", "session.start", params)
       return
     }
-    client.fallback(opId, "logCount",
-      ["salah", "item", "log", "--json", String(itemId), String(Number(delta) || 0)])
+    client.fallback(opId, "startSession", ["salah", "session", "start", "--json", "--item", String(itemId)])
   }
 
-  function logMinutes(opId, itemId, delta) {
+  function stopSession(opId, sessionId, values, note) {
     if (client.socketActive) {
-      client.sendMutation(opId, "logMinutes", "entry.log",
-        { "item_id": String(itemId), "kind": "minutes", "value": Number(delta) || 0 })
+      var params = { "values": values || {} }
+      if (String(sessionId || "") !== "") params.id = String(sessionId)
+      if (String(note || "") !== "") params.note = String(note)
+      client.sendMutation(opId, "stopSession", "session.stop", params)
       return
     }
-    client.fallback(opId, "logMinutes",
-      ["salah", "item", "log", "--json", "--minutes", String(itemId), String(Number(delta) || 0)])
-  }
-
-  function startTimer(opId, itemId) {
-    if (client.socketActive) {
-      client.sendMutation(opId, "startTimer", "timer.start", { "item_id": String(itemId) })
-      return
-    }
-    client.fallback(opId, "startTimer", ["salah", "item", "start", "--json", String(itemId)])
-  }
-
-  function stopTimer(opId, itemId) {
-    if (client.socketActive) {
-      client.sendMutation(opId, "stopTimer", "timer.stop", { "item_id": String(itemId) })
-      return
-    }
-    client.fallback(opId, "stopTimer", ["salah", "item", "stop", "--json", String(itemId)])
+    client.fallback(opId, "stopSession", ["salah", "session", "stop", "--json"])
   }
 
   function moveItem(opId, itemId, block, index, afterId, beforeId) {
@@ -482,6 +480,11 @@ Item {
       return
     }
     statusProcess.running = true
+  }
+
+  function loadProjects() {
+    if (client.socketActive)
+      client.request("projects.list", { "archived": false }, { "type": "projects" })
   }
 
   Component.onCompleted: {
@@ -582,7 +585,7 @@ Item {
           })
         } else {
           client.mutationFailed(active.opId, active.kind,
-            String(actionStderr.text || "").trim().replace(/[\r\n]+/g, " "))
+            String(actionStderr.text || "").trim().replace(/[\r\n]+/g, " "), {})
         }
         client.statusAfterFallback = true
       }

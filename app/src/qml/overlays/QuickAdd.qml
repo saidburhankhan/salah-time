@@ -72,8 +72,8 @@ Popup {
                 ? qsTr("%1 · %2 · %3 %4")
                     .arg(backend.parseDraft.title)
                     .arg(backend.parseDraft.block || qsTr("next prayer"))
-                    .arg(backend.parseDraft.target || "")
-                    .arg(backend.parseDraft.measure || "")
+                    .arg(backend.parseDraft.hasPlannedMinutes ? backend.parseDraft.plannedMinutes : "")
+                    .arg(backend.parseDraft.hasPlannedMinutes ? "min" : "")
                 : qsTr("Describe what, when, and how often.")
             color: quickPopup.win.muted
             font.family: quickPopup.win.mono

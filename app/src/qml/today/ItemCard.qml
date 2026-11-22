@@ -18,6 +18,10 @@ Rectangle {
     property bool timerProjected: false
     property int count: 0
     property int target: 0
+    property string projectColor: "transparent"
+    property int plannedMinutes: 0
+    property int actualMinutes: 0
+    property int sessions: 0
     property int rowIndex: 0
     property var list: null
     radius: theme.radius
@@ -58,6 +62,7 @@ Rectangle {
                 onCanceled: itemCard.win.finishDrag(true)
             }
         }
+        Rectangle { width: 8; height: 8; radius: 4; color: itemCard.projectColor; visible: itemCard.projectColor !== "" }
         Rectangle {
             width: 24
             height: 24
@@ -94,13 +99,7 @@ Rectangle {
                 font.pixelSize: 12
             }
         }
-        CounterStepper {
-            visible: itemCard.measure === "count"
-            win: itemCard.win
-            itemId: itemCard.itemId
-            count: itemCard.count
-            target: itemCard.target
-        }
+        Label { textFormat: Text.PlainText; text: (itemCard.sessions === 1 ? qsTr("%1m · %2 session") : qsTr("%1m · %2 sessions")).arg(itemCard.plannedMinutes).arg(itemCard.sessions); color: itemCard.win.muted; font.family: itemCard.win.mono }
         Button {
             flat: true
             property int minutes: itemCard.win.timerMinutes(itemCard.timerMinutes,
@@ -108,10 +107,6 @@ Rectangle {
             text: itemCard.timerRunning ? qsTr("❚❚ %1m").arg(minutes) : qsTr("▶︎ %1m").arg(minutes)
             font.family: itemCard.win.mono
             onClicked: backend.toggleTimer(itemCard.itemId, itemCard.timerRunning)
-        }
-        CorrectionBox {
-            win: itemCard.win
-            itemId: itemCard.itemId
         }
     }
     MouseArea {

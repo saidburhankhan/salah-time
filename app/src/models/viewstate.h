@@ -136,8 +136,8 @@ class ParseDraftState : public QObject {
     Q_PROPERTY(QString title READ title NOTIFY changed)
     Q_PROPERTY(QString block READ block NOTIFY changed)
     Q_PROPERTY(QString repeat READ repeat NOTIFY changed)
-    Q_PROPERTY(QString measure READ measure NOTIFY changed)
-    Q_PROPERTY(int target READ target NOTIFY changed)
+    Q_PROPERTY(int plannedMinutes READ plannedMinutes NOTIFY changed)
+    Q_PROPERTY(bool hasPlannedMinutes READ hasPlannedMinutes NOTIFY changed)
     Q_PROPERTY(QStringList weekdays READ weekdays NOTIFY changed)
 public:
     explicit ParseDraftState(QObject *parent = nullptr);
@@ -145,8 +145,8 @@ public:
     QString title() const { return m_title; }
     QString block() const { return m_block; }
     QString repeat() const { return m_repeat; }
-    QString measure() const { return m_measure; }
-    int target() const { return m_target; }
+    int plannedMinutes() const { return m_plannedMinutes; }
+    bool hasPlannedMinutes() const { return m_hasPlannedMinutes; }
     QStringList weekdays() const { return m_weekdays; }
 
     void update(const Dto::ParseDraft &draft);
@@ -156,8 +156,9 @@ signals:
     void changed();
 
 private:
-    QString m_title, m_block, m_repeat, m_measure;
-    int m_target = 0;
+    QString m_title, m_block, m_repeat;
+    int m_plannedMinutes = 0;
+    bool m_hasPlannedMinutes = false;
     QStringList m_weekdays;
 };
 
