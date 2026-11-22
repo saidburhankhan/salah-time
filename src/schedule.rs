@@ -57,31 +57,33 @@ impl Schedule {
         shift(self.date, boundary.owner_offset)
     }
 
-    /// The day that is in progress. During the sleeping block this is the day
-    /// that has just ended.
+    /// The day that is in progress. Sleep ends a day, so between sleep and
+    /// Fajr this is the coming day, in its night block.
     pub fn day(&self) -> NaiveDate {
-        self.owner_day(&self.timeline.current_start)
+        let owner = self.owner_day(&self.timeline.current_start);
+        if self.timeline.sleeping() {
+            shift(owner, 1)
+        } else {
+            owner
+        }
     }
 
-    /// The block now in progress.
+    /// The block now in progress; `night` between sleep and Fajr.
     pub fn current_block(&self) -> BlockKey {
+        let start = if self.timeline.sleeping() {
+            BoundaryId::Night
+        } else {
+            self.timeline.current_start.id
+        };
         BlockKey {
             day: self.day(),
-            start: self.timeline.current_start.id,
+            start,
         }
     }
 
-    /// Where something planned "now" belongs: the current block while awake,
-    /// otherwise the coming day's Fajr block.
+    /// Where something planned "now" belongs: the block in progress.
     pub fn planning_block(&self) -> BlockKey {
-        if self.timeline.sleeping() {
-            BlockKey {
-                day: shift(self.day(), 1),
-                start: BoundaryId::Fajr,
-            }
-        } else {
-            self.current_block()
-        }
+        self.current_block()
     }
 }
 
@@ -162,8 +164,9 @@ pub fn resolve(config: &Config, utc_now: DateTime<Utc>) -> Result<Schedule, Stri
     })
 }
 
-/// The five awake blocks of a day with their UTC start and end instants. The
-/// Isha block ends at the sleep boundary.
+/// The six blocks of a day with their UTC start and end instants. The night
+/// block runs from the previous evening's sleep time to Fajr; the Isha block
+/// ends at this evening's sleep time.
 pub fn day_blocks(config: &Config, day: NaiveDate) -> Result<Vec<BlockWindow>, String> {
     let zone = offset(config)?;
     let (prayers, _) = prayers_for(config, day)?;
@@ -186,14 +189,17 @@ pub fn day_blocks(config: &Config, day: NaiveDate) -> Result<Vec<BlockWindow>, S
             .ok_or("invalid local time")?;
         Ok((local + Duration::minutes(minutes)).with_timezone(&Utc))
     };
-    let sleep = instant(
-        day::evening_sleep_offset(sleep_minutes, fajr),
-        sleep_minutes,
-    )?;
+    let sleep_offset = day::evening_sleep_offset(sleep_minutes, fajr);
+    let sleep = instant(sleep_offset, sleep_minutes)?;
+    // Yesterday's Fajr is close enough to today's to place last night's sleep.
+    let last_night = instant(sleep_offset - 1, sleep_minutes)?;
     BoundaryId::AWAKE
         .into_iter()
         .map(|id| {
-            let start = instant(0, minutes_of(id)?)?;
+            let start = match id {
+                BoundaryId::Night => last_night,
+                _ => instant(0, minutes_of(id)?)?,
+            };
             let end = match id.next() {
                 Some(BoundaryId::Sleep) | None => sleep,
                 Some(next) => instant(0, minutes_of(next)?)?,
@@ -264,17 +270,20 @@ mod tests {
     }
 
     #[test]
-    fn sleeping_plans_into_the_coming_fajr_block() {
-        let schedule = resolve(&tashkent(), at(2, 0, (2026, 11, 21))).unwrap();
-        assert!(schedule.timeline.sleeping());
-        assert_eq!(schedule.day(), date(2026, 11, 20));
-        assert_eq!(
-            schedule.planning_block(),
-            BlockKey {
-                day: date(2026, 11, 21),
-                start: BoundaryId::Fajr
-            }
-        );
+    fn after_sleep_the_coming_day_starts_with_its_night_block() {
+        for moment in [at(23, 30, (2026, 11, 20)), at(2, 0, (2026, 11, 21))] {
+            let schedule = resolve(&tashkent(), moment).unwrap();
+            assert!(schedule.timeline.sleeping());
+            assert_eq!(schedule.day(), date(2026, 11, 21));
+            assert_eq!(
+                schedule.current_block(),
+                BlockKey {
+                    day: date(2026, 11, 21),
+                    start: BoundaryId::Night
+                }
+            );
+            assert_eq!(schedule.planning_block(), schedule.current_block());
+        }
     }
 
     #[test]
@@ -284,12 +293,14 @@ mod tests {
             ..tashkent()
         };
         let blocks = day_blocks(&config, date(2026, 11, 20)).unwrap();
-        assert_eq!(blocks.len(), 5);
+        assert_eq!(blocks.len(), 6);
+        assert_eq!(blocks[0].key.start, BoundaryId::Night);
+        assert_eq!(blocks[0].start, at(0, 30, (2026, 11, 20)));
         for pair in blocks.windows(2) {
             assert_eq!(pair[0].end, pair[1].start);
         }
-        assert_eq!(blocks[4].key.start, BoundaryId::Isha);
-        assert_eq!(blocks[4].end, at(0, 30, (2026, 11, 21)));
+        assert_eq!(blocks[5].key.start, BoundaryId::Isha);
+        assert_eq!(blocks[5].end, at(0, 30, (2026, 11, 21)));
     }
 
     #[test]

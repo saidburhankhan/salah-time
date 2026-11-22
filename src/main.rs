@@ -720,14 +720,24 @@ fn day_command(args: DayArgs) -> Result<(), String> {
         return json(&plan);
     }
     println!("{}", plan.day);
-    for (prayer, block) in plan.prayers.iter().zip(&plan.blocks) {
-        let mark = if prayer.marked { "●" } else { "○" };
-        let now = if prayer.current { "  ← now" } else { "" };
-        println!("{mark} {:<8}{}{now}", prayer.name, prayer.time);
-        for item in &block.items {
+    let item_lines = |items: &[salah::item::DayItem]| {
+        for item in items {
             let tick = if item.state == State::Done { "x" } else { " " };
             println!("    [{tick}] {}  {}", short(&item.id), item.title);
         }
+    };
+    let night_now = plan
+        .now
+        .as_ref()
+        .is_some_and(|n| n.block == Some(BoundaryId::Night));
+    let now = if night_now { "  ← now" } else { "" };
+    println!("  {:<8}{}{now}", "Night", plan.night_start);
+    item_lines(&plan.blocks[0].items);
+    for (prayer, block) in plan.prayers.iter().zip(&plan.blocks[1..]) {
+        let mark = if prayer.marked { "●" } else { "○" };
+        let now = if prayer.current { "  ← now" } else { "" };
+        println!("{mark} {:<8}{}{now}", prayer.name, prayer.time);
+        item_lines(&block.items);
     }
     println!("  Sleep   {}", plan.sleep.time);
     Ok(())

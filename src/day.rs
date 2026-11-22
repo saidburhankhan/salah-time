@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BoundaryId {
+    /// The night block: from the previous evening's sleep time to Fajr. It
+    /// starts at the sleep boundary but belongs to the coming day, so it has
+    /// its own id. Declared first so it sorts before Fajr.
+    Night,
     Fajr,
     Dhuhr,
     Asr,
@@ -18,9 +22,19 @@ pub enum BoundaryId {
 }
 
 impl BoundaryId {
-    /// The five blocks that can hold items, in daily order. The sleeping block
-    /// that starts at `Sleep` holds none.
-    pub const AWAKE: [BoundaryId; 5] = [
+    /// The five prayers, in daily order.
+    pub const PRAYERS: [BoundaryId; 5] = [
+        BoundaryId::Fajr,
+        BoundaryId::Dhuhr,
+        BoundaryId::Asr,
+        BoundaryId::Maghrib,
+        BoundaryId::Isha,
+    ];
+
+    /// The six blocks that can hold items, in daily order: the night before
+    /// Fajr, then one block per prayer.
+    pub const AWAKE: [BoundaryId; 6] = [
+        BoundaryId::Night,
         BoundaryId::Fajr,
         BoundaryId::Dhuhr,
         BoundaryId::Asr,
@@ -30,6 +44,7 @@ impl BoundaryId {
 
     pub fn as_str(self) -> &'static str {
         match self {
+            BoundaryId::Night => "night",
             BoundaryId::Fajr => "fajr",
             BoundaryId::Dhuhr => "dhuhr",
             BoundaryId::Asr => "asr",
@@ -41,6 +56,7 @@ impl BoundaryId {
 
     pub fn name(self) -> &'static str {
         match self {
+            BoundaryId::Night => "Before Fajr",
             BoundaryId::Fajr => "Fajr",
             BoundaryId::Dhuhr => "Dhuhr",
             BoundaryId::Asr => "Asr",
@@ -51,11 +67,15 @@ impl BoundaryId {
     }
 
     pub fn kind(self) -> &'static str {
-        if self == BoundaryId::Sleep {
-            "sleep"
-        } else {
-            "prayer"
+        match self {
+            BoundaryId::Sleep => "sleep",
+            BoundaryId::Night => "night",
+            _ => "prayer",
         }
+    }
+
+    pub fn is_prayer(self) -> bool {
+        Self::PRAYERS.contains(&self)
     }
 
     pub fn parse(value: &str) -> Option<BoundaryId> {
@@ -68,6 +88,7 @@ impl BoundaryId {
     /// The boundary that ends the block this boundary starts.
     pub fn next(self) -> Option<BoundaryId> {
         match self {
+            BoundaryId::Night => Some(BoundaryId::Fajr),
             BoundaryId::Fajr => Some(BoundaryId::Dhuhr),
             BoundaryId::Dhuhr => Some(BoundaryId::Asr),
             BoundaryId::Asr => Some(BoundaryId::Maghrib),
@@ -78,7 +99,7 @@ impl BoundaryId {
     }
 
     fn of_prayer(prayer: &PrayerTime) -> Option<BoundaryId> {
-        BoundaryId::parse(prayer.id).filter(|id| *id != BoundaryId::Sleep)
+        BoundaryId::parse(prayer.id).filter(|id| id.is_prayer())
     }
 }
 

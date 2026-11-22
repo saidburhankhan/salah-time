@@ -41,6 +41,11 @@ fn prayer(word: &str) -> Option<BoundaryId> {
     }
 }
 
+/// A block named after "after", "at", or "in": a prayer, or the night.
+fn block_after_preposition(word: &str) -> Option<BoundaryId> {
+    prayer(word).or(matches!(word, "night" | "tahajjud").then_some(BoundaryId::Night))
+}
+
 fn previous(block: BoundaryId) -> Option<BoundaryId> {
     BoundaryId::AWAKE
         .into_iter()
@@ -141,7 +146,7 @@ pub fn parse(text: &str) -> Result<Draft, String> {
         let next = words.get(i + 1).map(String::as_str);
         let mut take = 0;
         if matches!(word, "after" | "at" | "in") && draft.block.is_none() {
-            if let Some(block) = next.and_then(prayer) {
+            if let Some(block) = next.and_then(block_after_preposition) {
                 draft.block = Some(block);
                 take = 2;
             }
@@ -240,6 +245,20 @@ mod tests {
         assert_eq!(draft.title, "Call mum");
         assert_eq!(draft.target, Some(15));
         assert_eq!(draft.weekdays.unwrap().names(), ["sun"]);
+    }
+
+    #[test]
+    fn the_night_block_is_before_fajr_or_at_night() {
+        assert_eq!(
+            parse("tahajjud before fajr").unwrap().block,
+            Some(BoundaryId::Night)
+        );
+        let draft = parse("study 45m at night").unwrap();
+        assert_eq!(
+            (draft.title.as_str(), draft.block),
+            ("Study", Some(BoundaryId::Night))
+        );
+        assert_eq!(parse("night walk").unwrap().title, "Night walk");
     }
 
     #[test]

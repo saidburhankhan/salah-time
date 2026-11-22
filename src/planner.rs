@@ -52,17 +52,9 @@ impl<'a> BlockEnds<'a> {
     }
 }
 
-/// The block that activity happening now is recorded in. While sleeping it
-/// is the ended day's Isha block: a late tick still belongs to that day.
+/// The block that activity happening now is recorded in.
 fn activity_block(schedule: &Schedule) -> BlockKey {
-    if schedule.timeline.sleeping() {
-        BlockKey {
-            day: schedule.day(),
-            start: BoundaryId::Isha,
-        }
-    } else {
-        schedule.current_block()
-    }
+    schedule.current_block()
 }
 
 /// Where an entry for `item` made now belongs. A one-time item is always
@@ -411,9 +403,6 @@ pub fn start_timer(
         return Err("timers are for minutes items".into());
     }
     let schedule = schedule::resolve(config, now)?;
-    if schedule.timeline.sleeping() {
-        return Err("the day has ended; timers start again at Fajr".into());
-    }
     close_expired_timers(store, config, now)?;
     let mut timer = new_entry(&item, schedule.current_block(), EntryKind::Timer, now);
     timer.started_at = Some(now);
@@ -456,7 +445,8 @@ pub struct DayReport {
 #[derive(Clone, Debug, Serialize)]
 pub struct Today {
     pub day: NaiveDate,
-    /// The block in progress; `None` while sleeping.
+    /// The block in progress (`night` between sleep and Fajr). Always set;
+    /// optional only for compatibility with older readers.
     pub block: Option<BoundaryId>,
     /// Where `add` places a new item right now.
     pub planning_block: BlockKey,
@@ -466,7 +456,8 @@ pub struct Today {
     pub open: usize,
     /// Every item planned today.
     pub items: Vec<DayItem>,
-    /// Items planned for the coming day while sleeping.
+    /// Always empty: the night now belongs to the coming day. Kept for
+    /// compatibility with older readers.
     pub upcoming: Vec<DayItem>,
     /// Prayers marked as prayed on `day`.
     pub prayer_marks: Vec<BoundaryId>,
@@ -484,52 +475,34 @@ fn report_day(
 pub fn today(store: &Store, config: &Config, now: DateTime<Utc>) -> Result<Today, String> {
     let now = stamp(now);
     let schedule = schedule::resolve(config, now)?;
-    let day = schedule.day();
-    let sleeping = schedule.timeline.sleeping();
-    let planning = schedule.planning_block();
+    let current_block = schedule.current_block();
+    let day = current_block.day;
+    let block = current_block.start;
     let items = store.items()?;
-    let entries = store.entries_between(day, planning.day)?;
+    let entries = store.entries_between(day, day)?;
     let mut ends = BlockEnds::new(config);
-    let block = (!sleeping).then(|| schedule.current_block().start);
     let rows = report_day(
         &items,
         &entries,
         &mut ends,
         DayView {
             day,
-            current: block,
+            current: Some(block),
             ended: false,
             now,
         },
     );
-    let upcoming = if sleeping {
-        report_day(
-            &items,
-            &entries,
-            &mut ends,
-            DayView {
-                day: planning.day,
-                current: None,
-                ended: false,
-                now,
-            },
-        )
-    } else {
-        Vec::new()
-    };
-    let current = block
-        .map(|b| item::current_block_items(&rows, b))
-        .unwrap_or_default();
+    let current = item::current_block_items(&rows, block);
     let open = current.iter().filter(|r| r.state == State::Open).count();
     let prayer_marks = live_marks(store, day)?;
     Ok(Today {
         day,
-        block,
-        planning_block: planning,
+        block: Some(block),
+        planning_block: current_block,
         current,
         open,
         items: rows,
-        upcoming,
+        upcoming: Vec::new(),
         prayer_marks,
     })
 }
@@ -551,7 +524,7 @@ pub fn history(
     let now = stamp(now);
     let schedule = schedule::resolve(config, now)?;
     let today = schedule.day();
-    let current = (!schedule.timeline.sleeping()).then(|| schedule.current_block().start);
+    let current = schedule.current_block().start;
     let items = store.items()?;
     let entries = store.entries_between(first, last)?;
     let mut ends = BlockEnds::new(config);
@@ -560,9 +533,9 @@ pub fn history(
     while day <= last {
         let view = DayView {
             day,
-            current: (day == today).then_some(current).flatten(),
-            // Today ends at sleep; once sleeping, its outcome is final.
-            ended: day < today || (day == today && schedule.timeline.sleeping()),
+            current: (day == today).then_some(current),
+            // A day ends at sleep, after which the next day is today.
+            ended: day < today,
             now,
         };
         days.push(DayReport {
@@ -593,8 +566,8 @@ fn mark_prayer(
     date: Option<NaiveDate>,
     prayed: bool,
 ) -> Result<PrayerMark, String> {
-    if prayer == BoundaryId::Sleep {
-        return Err("sleep is not a prayer".into());
+    if !prayer.is_prayer() {
+        return Err(format!("{} is not a prayer", prayer.name()));
     }
     let now = stamp(now);
     let day = match date {
@@ -694,6 +667,8 @@ pub struct DayPlan {
     pub now: Option<Now>,
     pub prayers: Vec<PrayerRow>,
     pub sunrise: Option<String>,
+    /// When the night block starts: the previous evening's sleep time.
+    pub night_start: String,
     pub sleep: SleepRow,
     pub blocks: Vec<BlockPlan>,
     pub open: usize,
@@ -711,8 +686,8 @@ pub fn day_plan(
     let day = date.unwrap_or(today);
     let is_today = day == today;
     let sleeping = schedule.timeline.sleeping();
-    let current = (is_today && !sleeping).then(|| schedule.current_block().start);
-    let ended = day < today || (is_today && sleeping);
+    let current = is_today.then(|| schedule.current_block().start);
+    let ended = day < today;
     let (prayers, _) = schedule::prayers_for(config, day)?;
     let windows = schedule::day_blocks(config, day)?;
     let marks = live_marks(store, day)?;
@@ -724,6 +699,7 @@ pub fn day_plan(
     };
     let rows = windows
         .iter()
+        .filter(|window| window.key.start.is_prayer())
         .map(|window| {
             let id = window.key.start;
             PrayerRow {
@@ -780,6 +756,7 @@ pub fn day_plan(
         }),
         prayers: rows,
         sunrise: time_of("sunrise"),
+        night_start: config.sleep_time.clone(),
         sleep: SleepRow {
             time: config.sleep_time.clone(),
             passed: day < today || (is_today && sleep_end.is_some_and(|end| end <= now)),
@@ -881,7 +858,7 @@ pub fn stats(
         .into_iter()
         .filter(PrayerMark::is_live)
         .collect();
-    let prayers: Vec<PrayerStats> = BoundaryId::AWAKE
+    let prayers: Vec<PrayerStats> = BoundaryId::PRAYERS
         .into_iter()
         .map(|prayer| PrayerStats {
             prayer,
@@ -894,7 +871,7 @@ pub fn stats(
         to: last,
         days,
         marked_total: marks.len(),
-        prayer_slots: days * BoundaryId::AWAKE.len(),
+        prayer_slots: days * BoundaryId::PRAYERS.len(),
         items,
         prayers,
     })
@@ -951,13 +928,26 @@ mod tests {
     }
 
     #[test]
-    fn adding_while_sleeping_plans_the_coming_fajr_block() {
+    fn the_night_before_fajr_is_a_plannable_block_of_the_coming_day() {
         let mut store = Store::open_in_memory().unwrap();
-        let item = add(&mut store, &config(), at(21, 2, 0), titled("Pack bag")).unwrap();
-        assert_eq!((item.day, item.block), (date(21), BoundaryId::Fajr));
-        let view = today(&store, &config(), at(21, 2, 1)).unwrap();
-        assert!(view.block.is_none());
-        assert_eq!(view.upcoming.len(), 1);
+        // 23:30 on the 20th is after the default 23:00 sleep: the 21st's night.
+        let item = add(&mut store, &config(), at(20, 23, 30), titled("Tahajjud")).unwrap();
+        assert_eq!((item.day, item.block), (date(21), BoundaryId::Night));
+        let view = today(&store, &config(), at(21, 2, 0)).unwrap();
+        assert_eq!((view.day, view.block), (date(21), Some(BoundaryId::Night)));
+        assert_eq!(view.current[0].title, "Tahajjud");
+        assert_eq!(view.open, 1);
+        let timer = NewItem {
+            measure: Some(Measure::Minutes),
+            ..titled("Study")
+        };
+        let study = add(&mut store, &config(), at(21, 3, 0), timer).unwrap();
+        start_timer(&mut store, &config(), at(21, 3, 0), &study.id).unwrap();
+        let plan = day_plan(&store, &config(), at(21, 3, 30), None).unwrap();
+        assert_eq!(plan.blocks[0].start, BoundaryId::Night);
+        assert_eq!(plan.blocks[0].items.len(), 2);
+        assert_eq!(plan.now.as_ref().unwrap().block, Some(BoundaryId::Night));
+        assert!(mark(&mut store, &config(), at(21, 3, 0), BoundaryId::Night, None).is_err());
     }
 
     #[test]
@@ -1021,7 +1011,7 @@ mod tests {
             1
         );
         let entry = &store.entries().unwrap()[0];
-        let end = schedule::day_blocks(&config(), date(20)).unwrap()[0].end;
+        let end = schedule::day_blocks(&config(), date(20)).unwrap()[1].end;
         assert_eq!(entry.ended_at, Some(end));
         let view = today(&store, &config(), at(20, 15, 0)).unwrap();
         let row = view.items.iter().find(|r| r.id == quran.id).unwrap();
@@ -1116,13 +1106,13 @@ mod tests {
         move_item(&mut store, at(20, 13, 1), &b.id, BoundaryId::Asr, 0).unwrap();
         move_item(&mut store, at(20, 13, 2), &c.id, BoundaryId::Asr, 1).unwrap();
         let plan = day_plan(&store, &config(), at(20, 13, 3), None).unwrap();
-        let asr: Vec<_> = plan.blocks[2]
+        let asr: Vec<_> = plan.blocks[3]
             .items
             .iter()
             .map(|i| i.title.as_str())
             .collect();
         assert_eq!(asr, ["B", "C", "A"]);
-        assert!(plan.blocks[4].items.is_empty());
+        assert!(plan.blocks[5].items.is_empty());
     }
 
     #[test]
@@ -1200,8 +1190,9 @@ mod tests {
         );
         assert_eq!(plan.prayers.len(), 5);
         assert!(plan.prayers[0].passed && plan.prayers[1].current && !plan.prayers[2].passed);
-        assert_eq!(plan.blocks[1].items[0].title, "Email");
-        assert_eq!(plan.blocks[4].end, BoundaryId::Sleep);
+        assert_eq!(plan.blocks.len(), 6);
+        assert_eq!(plan.blocks[2].items[0].title, "Email");
+        assert_eq!(plan.blocks[5].end, BoundaryId::Sleep);
         assert_eq!(plan.open, 1);
         let past = day_plan(&store, &config(), at(20, 13, 0), Some(date(18))).unwrap();
         assert!(past.now.is_none() && past.prayers.iter().all(|p| p.passed) && past.sleep.passed);
