@@ -875,6 +875,37 @@ pub struct Stats {
     pub prayers: Vec<PrayerStats>,
     pub marked_total: usize,
     pub prayer_slots: usize,
+    /// One row per day in the range, oldest first.
+    pub daily: Vec<DayTotals>,
+    /// The range as a whole.
+    pub totals: Totals,
+}
+
+/// Everything that happened on one day, summed over its items.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct DayTotals {
+    pub day: NaiveDate,
+    /// Items planned that day.
+    pub planned: usize,
+    /// Planned items that were done.
+    pub done: usize,
+    /// Minutes spent on all items.
+    pub minutes: i64,
+    /// Counts recorded on counter items.
+    pub count: i64,
+    /// Prayers marked as prayed (0–5).
+    pub prayers: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Totals {
+    pub planned: usize,
+    pub done: usize,
+    pub minutes: i64,
+    pub count: i64,
+    pub prayers: usize,
+    /// Days with at least one item done or any time spent.
+    pub active_days: usize,
 }
 
 /// Per-item and per-prayer totals over an inclusive range of days.
@@ -936,10 +967,35 @@ pub fn stats(
             days,
         })
         .collect();
+    let daily: Vec<DayTotals> = reports
+        .iter()
+        .map(|report| DayTotals {
+            day: report.day,
+            planned: report.items.len(),
+            done: report
+                .items
+                .iter()
+                .filter(|r| r.state == State::Done)
+                .count(),
+            minutes: report.items.iter().map(|r| r.minutes).sum(),
+            count: report.items.iter().map(|r| r.count).sum(),
+            prayers: marks.iter().filter(|m| m.day == report.day).count(),
+        })
+        .collect();
+    let totals = Totals {
+        planned: daily.iter().map(|d| d.planned).sum(),
+        done: daily.iter().map(|d| d.done).sum(),
+        minutes: daily.iter().map(|d| d.minutes).sum(),
+        count: daily.iter().map(|d| d.count).sum(),
+        prayers: marks.len(),
+        active_days: daily.iter().filter(|d| d.done > 0 || d.minutes > 0).count(),
+    };
     Ok(Stats {
         from: first,
         to: last,
         days,
+        daily,
+        totals,
         marked_total: marks.len(),
         prayer_slots: days * BoundaryId::PRAYERS.len(),
         items,
@@ -1329,6 +1385,15 @@ mod tests {
         assert!(!item.series[5].planned, "Saturday is not planned");
         assert_eq!(report.prayers[2].marked_days, 1);
         assert_eq!((report.marked_total, report.prayer_slots), (1, 35));
+        assert_eq!(report.daily.len(), 7);
+        let tuesday = &report.daily[1];
+        assert_eq!(
+            (tuesday.planned, tuesday.minutes, tuesday.prayers),
+            (1, 25, 1)
+        );
+        assert_eq!(report.daily[5].planned, 0);
+        assert_eq!((report.totals.planned, report.totals.minutes), (5, 25));
+        assert_eq!((report.totals.prayers, report.totals.active_days), (1, 1));
     }
 
     #[test]

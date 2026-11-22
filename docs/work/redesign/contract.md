@@ -136,8 +136,15 @@ Default: the 30 days ending on the current day.
                     "minutes": 0, "count": 0 }, … one per day ] }
   ],
   "prayers": [ { "prayer": "fajr", "marked_days": 20, "days": 30 }, … 5 ],
-  "marked_total": 96, "prayer_slots": 150 }
+  "marked_total": 96, "prayer_slots": 150,
+  "daily": [ { "day": "2026-10-24", "planned": 4, "done": 3, "minutes": 95,
+               "count": 30, "prayers": 4 }, … one per day, oldest first ],
+  "totals": { "planned": 120, "done": 91, "minutes": 2710, "count": 640,
+              "prayers": 96, "active_days": 27 } }
 ```
+
+`--from`/`--to` select any range up to 366 days (e.g. a calendar week or
+month); `--days N` is the N days ending today.
 
 `items` lists every live repeating item (even when it has no occurrence in
 the range yet; then `planned_days` is 0) and every one-time item planned in
