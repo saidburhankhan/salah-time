@@ -1,0 +1,20 @@
+{
+  "block": "maghrib",
+  "created_at": "<instant>",
+  "day": "2031-05-12",
+  "deleted_at": null,
+  "id": "<id:1>",
+  "measure": "check",
+  "position": 0,
+  "repeat": "weekly",
+  "target": null,
+  "title": "Weekday task",
+  "updated_at": "<instant>",
+  "weekdays": [
+    "mon",
+    "tue",
+    "wed",
+    "thu",
+    "fri"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "block": "<boundary>",
+  "current": [],
+  "day": "<today>",
+  "items": [],
+  "open": 0,
+  "planning_block": {
+    "day": "<today>",
+    "start": "<boundary>"
+  },
+  "prayer_marks": [],
+  "timer": null,
+  "upcoming": []
+}

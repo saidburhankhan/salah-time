@@ -1,0 +1,49 @@
+{
+  "entries": [
+    {
+      "block": {
+        "day": "2031-05-14",
+        "start": "fajr"
+      },
+      "created_at": "<instant>",
+      "deleted_at": null,
+      "ended_at": null,
+      "id": "<id:1>",
+      "item_id": "<id:2>",
+      "kind": "minutes",
+      "started_at": null,
+      "updated_at": "<instant>",
+      "value": 20
+    }
+  ],
+  "exported_at": "<instant>",
+  "format": "salah-export",
+  "items": [
+    {
+      "block": "fajr",
+      "created_at": "<instant>",
+      "day": "2031-05-14",
+      "deleted_at": null,
+      "id": "<id:2>",
+      "measure": "minutes",
+      "position": 0,
+      "repeat": "none",
+      "target": 30,
+      "title": "Exported task",
+      "updated_at": "<instant>",
+      "weekdays": null
+    }
+  ],
+  "prayer_marks": [
+    {
+      "created_at": "<instant>",
+      "day": "2031-05-14",
+      "deleted_at": null,
+      "id": "2031-05-14:fajr",
+      "marked_at": "<instant>",
+      "prayer": "fajr",
+      "updated_at": "<instant>"
+    }
+  ],
+  "version": 2
+}

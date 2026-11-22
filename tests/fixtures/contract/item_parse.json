@@ -1,0 +1,8 @@
+{
+  "block": "isha",
+  "measure": "minutes",
+  "repeat": "daily",
+  "target": 20,
+  "title": "Read",
+  "weekdays": null
+}

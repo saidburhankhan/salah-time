@@ -1,0 +1,174 @@
+{
+  "boundaries": [
+    {
+      "current": false,
+      "id": "fajr",
+      "is_next": false,
+      "kind": "prayer",
+      "name": "Fajr",
+      "passed": false,
+      "time": "<HH:MM>"
+    },
+    {
+      "current": false,
+      "id": "sunrise",
+      "is_next": false,
+      "kind": "sunrise",
+      "name": "Sunrise",
+      "passed": false,
+      "time": "<HH:MM>"
+    },
+    {
+      "current": false,
+      "id": "dhuhr",
+      "is_next": false,
+      "kind": "prayer",
+      "name": "Dhuhr",
+      "passed": false,
+      "time": "<HH:MM>"
+    },
+    {
+      "current": false,
+      "id": "asr",
+      "is_next": false,
+      "kind": "prayer",
+      "name": "Asr",
+      "passed": false,
+      "time": "<HH:MM>"
+    },
+    {
+      "current": false,
+      "id": "maghrib",
+      "is_next": false,
+      "kind": "prayer",
+      "name": "Maghrib",
+      "passed": false,
+      "time": "<HH:MM>"
+    },
+    {
+      "current": false,
+      "id": "isha",
+      "is_next": false,
+      "kind": "prayer",
+      "name": "Isha",
+      "passed": false,
+      "time": "<HH:MM>"
+    },
+    {
+      "current": false,
+      "id": "sleep",
+      "is_next": false,
+      "kind": "sleep",
+      "name": "Sleep",
+      "passed": false,
+      "time": "<HH:MM>"
+    }
+  ],
+  "current_block": {
+    "block": {
+      "day": "<today>",
+      "start": "<boundary>"
+    },
+    "end": {
+      "date": "<today>",
+      "id": "<boundary>",
+      "kind": "<kind>",
+      "name": "<name>",
+      "time": "<HH:MM>"
+    },
+    "sleeping": false,
+    "start": {
+      "date": "<today>",
+      "id": "<boundary>",
+      "kind": "<kind>",
+      "name": "<name>",
+      "time": "<HH:MM>"
+    }
+  },
+  "date": "<today>",
+  "day": "<today>",
+  "label": "<duration>",
+  "location": "Tashkent",
+  "method": "mwl",
+  "method_name": "Muslim World League",
+  "next": {
+    "date": "<today>",
+    "id": "<boundary>",
+    "kind": "<kind>",
+    "name": "<name>",
+    "remaining": "<duration>",
+    "remaining_seconds": 0,
+    "remaining_short": "<duration>",
+    "time": "<HH:MM>"
+  },
+  "planner": {
+    "block": "<boundary>",
+    "current": [],
+    "day": "<today>",
+    "items": [],
+    "open": 0,
+    "planning_block": {
+      "day": "<today>",
+      "start": "<boundary>"
+    },
+    "prayer_marks": [],
+    "timer": null,
+    "upcoming": []
+  },
+  "planner_error": null,
+  "prayers": [
+    {
+      "current": false,
+      "id": "fajr",
+      "is_next": false,
+      "name": "Fajr",
+      "passed": false,
+      "time": "<HH:MM>"
+    },
+    {
+      "current": false,
+      "id": "sunrise",
+      "is_next": false,
+      "name": "Sunrise",
+      "passed": false,
+      "time": "<HH:MM>"
+    },
+    {
+      "current": false,
+      "id": "dhuhr",
+      "is_next": false,
+      "name": "Dhuhr",
+      "passed": false,
+      "time": "<HH:MM>"
+    },
+    {
+      "current": false,
+      "id": "asr",
+      "is_next": false,
+      "name": "Asr",
+      "passed": false,
+      "time": "<HH:MM>"
+    },
+    {
+      "current": false,
+      "id": "maghrib",
+      "is_next": false,
+      "name": "Maghrib",
+      "passed": false,
+      "time": "<HH:MM>"
+    },
+    {
+      "current": false,
+      "id": "isha",
+      "is_next": false,
+      "name": "Isha",
+      "passed": false,
+      "time": "<HH:MM>"
+    }
+  ],
+  "schema_version": 1,
+  "sleep_time": "<HH:MM>",
+  "source": "calculated",
+  "source_name": "Muslim World League",
+  "source_updated": null
+}

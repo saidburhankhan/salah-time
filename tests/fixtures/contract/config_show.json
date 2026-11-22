@@ -1,0 +1,12 @@
+{
+  "asr": "hanafi",
+  "auto_location": true,
+  "last_location_provider": null,
+  "last_location_sync": null,
+  "latitude": 41.2995,
+  "location": "Tashkent",
+  "longitude": 69.2401,
+  "method": "mwl",
+  "sleep_time": "<HH:MM>",
+  "timezone_offset": 5.0
+}

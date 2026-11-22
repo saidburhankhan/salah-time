@@ -1,0 +1,166 @@
+{
+  "daily": [
+    {
+      "count": 0,
+      "day": "<to-6>",
+      "done": 0,
+      "minutes": 0,
+      "planned": 0,
+      "prayers": 0
+    },
+    {
+      "count": 0,
+      "day": "<to-5>",
+      "done": 0,
+      "minutes": 0,
+      "planned": 0,
+      "prayers": 0
+    },
+    {
+      "count": 0,
+      "day": "<to-4>",
+      "done": 0,
+      "minutes": 0,
+      "planned": 1,
+      "prayers": 0
+    },
+    {
+      "count": 0,
+      "day": "<to-3>",
+      "done": 0,
+      "minutes": 0,
+      "planned": 1,
+      "prayers": 1
+    },
+    {
+      "count": 0,
+      "day": "<to-2>",
+      "done": 0,
+      "minutes": 15,
+      "planned": 1,
+      "prayers": 0
+    },
+    {
+      "count": 0,
+      "day": "<to-1>",
+      "done": 1,
+      "minutes": 0,
+      "planned": 1,
+      "prayers": 0
+    },
+    {
+      "count": 0,
+      "day": "<to>",
+      "done": 0,
+      "minutes": 0,
+      "planned": 1,
+      "prayers": 0
+    }
+  ],
+  "days": 7,
+  "from": "<to-6>",
+  "items": [
+    {
+      "block": "fajr",
+      "count": 0,
+      "done_days": 1,
+      "id": "<id:1>",
+      "measure": "minutes",
+      "minutes": 15,
+      "planned_days": 5,
+      "repeat": "daily",
+      "series": [
+        {
+          "count": 0,
+          "day": "<to-6>",
+          "done": false,
+          "minutes": 0,
+          "planned": false
+        },
+        {
+          "count": 0,
+          "day": "<to-5>",
+          "done": false,
+          "minutes": 0,
+          "planned": false
+        },
+        {
+          "count": 0,
+          "day": "<to-4>",
+          "done": false,
+          "minutes": 0,
+          "planned": true
+        },
+        {
+          "count": 0,
+          "day": "<to-3>",
+          "done": false,
+          "minutes": 0,
+          "planned": true
+        },
+        {
+          "count": 0,
+          "day": "<to-2>",
+          "done": false,
+          "minutes": 15,
+          "planned": true
+        },
+        {
+          "count": 0,
+          "day": "<to-1>",
+          "done": true,
+          "minutes": 0,
+          "planned": true
+        },
+        {
+          "count": 0,
+          "day": "<to>",
+          "done": false,
+          "minutes": 0,
+          "planned": true
+        }
+      ],
+      "target": 30,
+      "title": "Read Quran",
+      "weekdays": null
+    }
+  ],
+  "marked_total": 1,
+  "prayer_slots": 35,
+  "prayers": [
+    {
+      "days": 7,
+      "marked_days": 1,
+      "prayer": "fajr"
+    },
+    {
+      "days": 7,
+      "marked_days": 0,
+      "prayer": "dhuhr"
+    },
+    {
+      "days": 7,
+      "marked_days": 0,
+      "prayer": "asr"
+    },
+    {
+      "days": 7,
+      "marked_days": 0,
+      "prayer": "maghrib"
+    },
+    {
+      "days": 7,
+      "marked_days": 0,
+      "prayer": "isha"
+    }
+  ],
+  "to": "<to>",
+  "totals": {
+    "active_days": 2,
+    "count": 0,
+    "done": 1,
+    "minutes": 15,
+    "planned": 5,
+    "prayers": 1
+  }
+}

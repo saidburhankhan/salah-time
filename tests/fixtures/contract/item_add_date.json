@@ -1,0 +1,14 @@
+{
+  "block": "fajr",
+  "created_at": "<instant>",
+  "day": "2031-06-01",
+  "deleted_at": null,
+  "id": "<id:1>",
+  "measure": "check",
+  "position": 2,
+  "repeat": "none",
+  "target": null,
+  "title": "Dated task",
+  "updated_at": "<instant>",
+  "weekdays": null
+}
