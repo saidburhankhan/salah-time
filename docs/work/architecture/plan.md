@@ -39,3 +39,30 @@ plug in. Inputs: `review.md`, `proposal.md`, `review-frontends.md`,
 - [ ] No business rules duplicated in QML/C++ (recurrence, dates, ordering, timers).
 - [ ] Contract fixtures pass in Rust, app, and widget decoders.
 - [ ] All tests and strict Clippy green; installed and checked live by the user.
+
+## Worker assignment (token budget)
+
+DeepSeek (`dsh`, headless) takes mechanical, well-specified steps; Codex takes
+design-heavy or high-risk steps. Every worker gets a narrow brief with owned
+files and required checks; the lead verifies with tests and diff stats.
+
+| Step | Worker | Why |
+|---|---|---|
+| P1 contract fixtures + consumer tests | DeepSeek | Capture current outputs; mechanical |
+| P1 typed errors | Codex | Error taxonomy design |
+| P2 split planner.rs behind facade | DeepSeek | Mechanical move, tests guard it |
+| P2 Clock/IdGenerator injection | DeepSeek | Mechanical threading |
+| P2 desktop CoreClient | Codex | C++ async design |
+| P3 repository/unit-of-work | Codex | High-risk persistence |
+| P4 workspace + crate extraction | DeepSeek (lead serialises Cargo edits) | Mostly file moves |
+| P4 contract crate + v1 envelope | Codex | API design |
+| P5 adapters | DeepSeek | Moves behind defined traits |
+| P5 IANA zones | Codex | Correctness-critical time logic |
+| P6 typed models / domain projections | Codex | Cross-layer design |
+| P6 split QML (app, widget) | DeepSeek | Mechanical component extraction |
+| P7 i18n / packaging | DeepSeek | Mechanical |
+| P7 optimistic journal | Codex | Protocol semantics |
+| P8 events/outbox, daemon | Codex | Architecture-critical |
+| P8 proof integration adapter | DeepSeek | Built on defined ports |
+
+If DeepSeek's result fails review twice, the step moves to Codex.
