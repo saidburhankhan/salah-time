@@ -77,3 +77,9 @@ files and required checks; the lead verifies with tests and diff stats.
 | P8 proof integration adapter | DeepSeek | Built on defined ports |
 
 If DeepSeek's result fails review twice, the step moves to Codex.
+
+## Deferred (user decision 2026-11-22)
+
+- Export/import redesign (format v3 for the CLI, cross-device import rules)
+  waits until the app is stable and usable. Keep the current behaviour
+  working; do not extend it.
