@@ -19,6 +19,11 @@ trap cleanup EXIT
 HOME="$test_home" "$project_dir/scripts/install"
 test -x "$test_home/.local/bin/salah"
 test -f "$test_home/.config/omarchy/plugins/local.salah/manifest.json"
+if command -v qmake6 >/dev/null; then
+  "$project_dir/app/bin/test" >/dev/null
+  test -x "$test_home/.local/bin/salah-app"
+  grep -qx "Exec=$test_home/.local/bin/salah open" "$test_home/.local/share/applications/salah.desktop"
+fi
 HOME="$test_home" "$test_home/.local/bin/salah" status --json \
   | jq -e '.next.name and (.next.remaining_seconds | numbers) and (.prayers | length == 6)' >/dev/null
 
@@ -35,6 +40,17 @@ cmp -s "$plugin_source/BarWidget.qml" "$test_home/.config/omarchy/plugins/local.
 HOME="$test_home" "$project_dir/scripts/uninstall"
 test ! -e "$test_home/.local/bin/salah"
 test ! -e "$test_home/.config/omarchy/plugins/local.salah"
+test ! -e "$test_home/.local/bin/salah-app"
+test ! -e "$test_home/.local/share/applications/salah.desktop"
+
+# Install must refuse to replace a launcher entry the user owns.
+mkdir -p "$test_home/.local/share/applications"
+printf '[Desktop Entry]\nName=Mine\n' > "$test_home/.local/share/applications/salah.desktop"
+if command -v qmake6 >/dev/null; then
+  HOME="$test_home" "$project_dir/scripts/install" 2>/dev/null && exit 1
+  grep -qx 'Name=Mine' "$test_home/.local/share/applications/salah.desktop"
+fi
+rm -- "$test_home/.local/share/applications/salah.desktop"
 
 # Uninstall must preserve a plugin the user changed after installation.
 HOME="$test_home" "$project_dir/scripts/install"

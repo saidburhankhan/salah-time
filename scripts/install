@@ -11,6 +11,23 @@ install_marker="$state_dir/installed-from"
 binary_digest="$state_dir/binary.sha256"
 plugin_digest_file="$state_dir/plugin.sha256"
 
+# The desktop app is optional: it is built only when Qt's qmake6 is present.
+app_dir="$project_dir/app"
+app_targets=(
+  "$HOME/.local/bin/salah-app"
+  "$HOME/.local/share/applications/salah.desktop"
+  "$HOME/.local/share/icons/hicolor/scalable/apps/salah.svg"
+)
+app_digests="$state_dir/app.sha256"
+
+# A target this checkout installed is listed with its digest in app.sha256;
+# anything else at that path belongs to the user and is never replaced.
+owned_app_file() {
+  [[ ! -e "$1" && ! -L "$1" ]] && return 0
+  [[ -f "$app_digests" && -f "$install_marker" && "$(<"$install_marker")" == "$project_dir" ]] \
+    && grep -qxF "$(sha256sum -- "$1" | awk '{ print $1 }')  $1" "$app_digests"
+}
+
 plugin_digest() {
   tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
     -cf - -C "$1" . | sha256sum | awk '{ print $1 }'
@@ -39,6 +56,17 @@ if [[ -e "$plugin_target" || -L "$plugin_target" ]]; then
   fi
 fi
 
+build_app=""
+if command -v qmake6 >/dev/null && [[ -f "$app_dir/salah-app.pro" ]]; then
+  build_app=1
+  for target in "${app_targets[@]}"; do
+    if ! owned_app_file "$target"; then
+      printf 'Refusing to replace an existing file: %s\n' "$target" >&2
+      exit 1
+    fi
+  done
+fi
+
 printf 'Building Salah in release mode…\n'
 cargo build --locked --release --manifest-path "$project_dir/Cargo.toml"
 
@@ -46,10 +74,24 @@ mkdir -p -- "$(dirname -- "$binary_target")" "$(dirname -- "$plugin_target")" "$
 install -m 0755 -- "$binary_source" "$binary_target"
 sha256sum -- "$binary_target" | awk '{ print $1 }' > "$binary_digest"
 
-# Replace the plugin without the directory ever disappearing. A running
-# Omarchy shell that sees the plugin vanish, even briefly, drops it from the
-# bar layout, so an owned installation is updated file by file: each file is
-# renamed over its predecessor, then files no longer shipped are removed.
+if [[ -n "$build_app" ]]; then
+  printf 'Building the Salah desktop app…\n'
+  "$app_dir/bin/build" >/dev/null
+  mkdir -p -- "$(dirname -- "${app_targets[1]}")" "$(dirname -- "${app_targets[2]}")"
+  install -m 0755 -- "$app_dir/build/salah-app" "${app_targets[0]}"
+  # The launcher may not have ~/.local/bin on PATH, so use the absolute path.
+  sed "s|^Exec=salah open\$|Exec=$binary_target open|" "$app_dir/salah.desktop" > "${app_targets[1]}.tmp"
+  mv -f -- "${app_targets[1]}.tmp" "${app_targets[1]}"
+  install -m 0644 -- "$app_dir/salah.svg" "${app_targets[2]}"
+  sha256sum -- "${app_targets[@]}" > "$app_digests"
+else
+  printf 'Skipping the desktop app: qmake6 is not installed.\n'
+fi
+
+# Replace the plugin without the directory ever disappearing: an owned
+# installation is updated file by file, each file renamed over its
+# predecessor, then files no longer shipped are removed. Keeping the
+# directory stable avoids needless plugin removal and re-registration.
 update_in_place() {
   local source="$1" target="$2" relative staged
   while IFS= read -r -d '' relative; do

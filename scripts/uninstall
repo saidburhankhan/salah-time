@@ -44,7 +44,20 @@ if [[ -f "$binary_target" && -f "$binary_digest" ]]; then
     printf 'Leaving modified binary untouched: %s\n' "$binary_target" >&2
   fi
 fi
-rm -f -- "$install_marker" "$binary_digest" "$plugin_digest_file"
+# Remove desktop app files only when they still match what was installed.
+app_digests="$state_dir/app.sha256"
+if [[ -f "$app_digests" ]]; then
+  while read -r digest path; do
+    [[ -f "$path" ]] || continue
+    if [[ "$(sha256sum -- "$path" | awk '{ print $1 }')" == "$digest" ]]; then
+      rm -- "$path"
+    else
+      printf 'Leaving modified file untouched: %s\n' "$path" >&2
+    fi
+  done < "$app_digests"
+fi
+
+rm -f -- "$install_marker" "$binary_digest" "$plugin_digest_file" "$app_digests"
 rmdir --ignore-fail-on-non-empty -- "$state_dir" 2>/dev/null || true
 
 printf 'Uninstalled Salah. User settings were kept.\n'
