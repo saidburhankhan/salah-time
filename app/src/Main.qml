@@ -1,11 +1,12 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
+import QtQuick.Effects
 import QtQuick.Layouts
 
 ApplicationWindow {
     id: win
-    width: 1440; height: 900; minimumWidth: 1050; minimumHeight: 680
+    width: 1440; height: 900; minimumWidth: 960; minimumHeight: 640
     visible: true; title: qsTr("Salah"); color: "#11110f"
     Material.theme: Material.Dark; Material.accent: theme.accent; Material.roundedScale: theme.radius
     property int page: 0
@@ -32,11 +33,20 @@ ApplicationWindow {
         for(var i=0;i<blocks.length;i++) if(blocks[i].start===id) return blocks[i].items||[]
         return out
     }
-    function locationName() { var c=backend.config||{}; return c.location_name||c.name||(c.location?c.location.name:"")||qsTr("Location") }
+    function locationName() { var c=backend.config||{}; return c.location_name||c.name||(typeof c.location==="string"?c.location:(c.location?c.location.name:""))||qsTr("Location") }
     function methodName() { var c=backend.config||{}; return c.method_name||c.method||"—" }
+    function capitalized(s) { s=String(s||""); return s.charAt(0).toUpperCase()+s.slice(1) }
+    function weekdayText(days, repeat) {
+        if(repeat==="daily") return qsTr("Daily")
+        var a=days||[], key=a.join(",")
+        if(key==="mon,tue,wed,thu,fri") return qsTr("Mon–Fri")
+        if(key==="mon,tue,wed,thu,fri,sat,sun") return qsTr("Daily")
+        var names={mon:qsTr("Mon"),tue:qsTr("Tue"),wed:qsTr("Wed"),thu:qsTr("Thu"),fri:qsTr("Fri"),sat:qsTr("Sat"),sun:qsTr("Sun")}
+        return a.map(function(d){return names[d]||capitalized(d)}).join(", ")
+    }
     function detail(x) {
         var value=x.measure==="minutes"?qsTr("%1 / %2 min").arg(x.minutes||0).arg(x.target||0):x.measure==="count"?qsTr("%1 / %2").arg(x.count||0).arg(x.target||0):""
-        var repeat=x.repeat==="daily"?qsTr("daily"):x.repeat==="weekly"?(x.weekdays||[]).join(" · "):qsTr("once")
+        var repeat=x.repeat==="weekly"?weekdayText(x.weekdays,x.repeat):x.repeat==="daily"?qsTr("Daily"):qsTr("Once")
         return value ? value+"  ·  "+repeat : repeat
     }
     function calendarDate(offset) {
@@ -46,6 +56,19 @@ ApplicationWindow {
     }
     function iso(d) { return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0") }
     function isTyping() { var f=win.activeFocusItem; return f && f.inputMethodHints !== undefined }
+
+    component AppButton: Button {
+        property bool primary: false
+        implicitHeight: 42; leftPadding: 17; rightPadding: 17
+        contentItem: Text { text:parent.text; color:parent.enabled?(parent.primary?"#171612":win.text):win.muted; font.pixelSize:14; horizontalAlignment:Text.AlignHCenter; verticalAlignment:Text.AlignVCenter }
+        background: Rectangle { radius:Math.max(6,theme.radius); color:parent.enabled&&parent.primary?win.text:(parent.down?win.border:"transparent"); border.width:parent.primary?0:1; border.color:win.border }
+    }
+    component ChoiceChip: Button {
+        property bool selected: false
+        implicitHeight: 40; leftPadding:15; rightPadding:15
+        contentItem: Text { text:parent.text; color:parent.selected?"#171612":"#d6d2ca"; font.pixelSize:14; horizontalAlignment:Text.AlignHCenter; verticalAlignment:Text.AlignVCenter }
+        background: Rectangle { radius:Math.max(6,theme.radius); color:parent.selected?win.text:(parent.down?win.border:"transparent"); border.width:1; border.color:parent.selected?win.text:win.border }
+    }
 
     Shortcut { sequence: "Ctrl+1"; context: Qt.ApplicationShortcut; onActivated: page=0 }
     Shortcut { sequence: "Ctrl+2"; context: Qt.ApplicationShortcut; onActivated: page=1 }
@@ -65,7 +88,7 @@ ApplicationWindow {
     RowLayout {
         anchors.fill: parent; spacing: 0
         Rectangle {
-            Layout.preferredWidth: 240; Layout.fillHeight: true; color: "#1c1b18"
+            Layout.preferredWidth: 220; Layout.fillHeight: true; color: "#1c1b18"
             border.color: win.border; border.width: 0
             ColumnLayout { anchors.fill:parent; anchors.margins:18; spacing:8
                 RowLayout { Layout.fillWidth:true; Layout.preferredHeight:64; spacing:12
@@ -79,7 +102,7 @@ ApplicationWindow {
                     Rectangle { required property string modelData; required property int index; Layout.fillWidth:true; height:48; radius:theme.radius
                         color:win.page===index?win.card:"transparent"; border.color:win.page===index?win.border:"transparent"
                         Row { anchors.verticalCenter:parent.verticalCenter; leftPadding:14; spacing:13
-                            Label { text:index===0?"◷":index===1?"↻":"▥"; color:win.page===index?win.text:win.muted; font.pixelSize:19; width:22 }
+                            Label { text:index===0?"◷":index===1?"↻":"▥"; color:win.page===index?win.text:win.muted; font.family:win.mono; font.pixelSize:18; width:22 }
                             Label { text:modelData; color:win.page===index?win.text:"#c4c0b8"; font.pixelSize:16 }
                         }
                         MouseArea { anchors.fill:parent; onClicked:{win.page=index;if(index===2)backend.loadStats(statsRange)} }
@@ -88,14 +111,14 @@ ApplicationWindow {
                 Rectangle { Layout.fillWidth:true; height:1; color:win.border; Layout.topMargin:8; Layout.bottomMargin:8 }
                 Rectangle { Layout.fillWidth:true; height:48; radius:theme.radius; color:win.page===3?win.card:"transparent"; border.color:win.page===3?win.border:"transparent"
                     Row { anchors.verticalCenter:parent.verticalCenter; leftPadding:14; spacing:13
-                        Label { text:"⚙"; color:win.page===3?win.text:win.muted; font.pixelSize:19; width:22 }
+                        Label { text:"⌘"; color:win.page===3?win.text:win.muted; font.family:win.mono; font.pixelSize:18; width:22 }
                         Label { text:qsTr("Settings"); color:win.page===3?win.text:"#c4c0b8"; font.pixelSize:16 }
                     }
                     MouseArea { anchors.fill:parent; onClicked:win.page=3 }
                 }
                 Item { Layout.fillHeight:true }
                 RowLayout { Layout.fillWidth:true; Layout.preferredHeight:48
-                    Label { text:"⌖"; color:win.muted; font.pixelSize:20; Layout.leftMargin:12 }
+                    Label { text:"⌖"; color:win.muted; font.family:win.mono; font.pixelSize:18; Layout.leftMargin:12 }
                     Label { text:locationName(); color:"#c4c0b8"; font.pixelSize:15; Layout.fillWidth:true; elide:Text.ElideRight }
                 }
             }
@@ -114,7 +137,7 @@ ApplicationWindow {
                             }
                         }
                         Label { visible:page!==0; Layout.fillWidth:true; text:page===1?qsTr("Routines"):page===2?qsTr("Statistics"):qsTr("Settings"); color:win.text; font.pixelSize:22; font.weight:Font.DemiBold }
-                        Button { visible:page===0; text:qsTr("+  Add"); highlighted:true; onClicked:openQuick(""); font.pixelSize:15 }
+                        AppButton { visible:page===0; text:qsTr("+  Add"); primary:true; onClicked:openQuick("") }
                     }
                     Rectangle { anchors.bottom:parent.bottom; height:1; width:parent.width; color:win.border }
                 }
@@ -127,7 +150,7 @@ ApplicationWindow {
 
                 // Today
                 RowLayout { visible:page===0; Layout.fillWidth:true; Layout.fillHeight:true; spacing:26; Layout.margins:28
-                    ScrollView { id:todayScroll; Layout.fillWidth:true; Layout.fillHeight:true; Layout.minimumWidth:600; clip:true
+                    ScrollView { id:todayScroll; Layout.fillWidth:true; Layout.fillHeight:true; Layout.minimumWidth:360; clip:true
                         Column { width:todayScroll.availableWidth; spacing:10
                             Repeater { model:win.prayerIds
                                 Column {
@@ -151,13 +174,13 @@ ApplicationWindow {
                                         Rectangle { id:itemCard; required property var modelData; required property int index; width:parent.width; height:72; radius:theme.radius; color:"#1c1b18"; border.color:win.border
                                             Drag.active:drag.active; Drag.hotSpot.x:width/2; Drag.hotSpot.y:height/2; Drag.mimeData:{"text/item-id":modelData.id}
                                             DragHandler { id:drag }
-                                            RowLayout { anchors.fill:parent; anchors.margins:12; spacing:12
+                                            RowLayout { anchors.fill:parent; anchors.leftMargin:12; anchors.rightMargin:14; spacing:12
                                                 Label { text:"⠿"; color:win.muted; font.pixelSize:19 }
                                                 Rectangle { width:24;height:24;radius:Math.min(5,theme.radius);color:modelData.state==="done"?theme.accent:"transparent";border.color:modelData.state==="done"?theme.accent:"#625e55"
                                                     Label { anchors.centerIn:parent;text:"✓";visible:modelData.state==="done";color:theme.accentForeground }
                                                     MouseArea { anchors.fill:parent;onClicked:backend.toggleDone(modelData.id,modelData.state) }
                                                 }
-                                                ColumnLayout { Layout.fillWidth:true;spacing:2
+                                                ColumnLayout { Layout.fillWidth:true;spacing:4
                                                     Label { text:modelData.title;color:modelData.state==="done"?win.muted:win.text;font.pixelSize:15;font.weight:Font.Medium;Layout.fillWidth:true;elide:Text.ElideRight;textFormat:Text.PlainText }
                                                     Label { text:detail(modelData);color:win.muted;font.family:win.mono;font.pixelSize:12 }
                                                 }
@@ -168,8 +191,8 @@ ApplicationWindow {
                                             DropArea { anchors.fill:parent; onDropped:function(drop){backend.moveItem(drop.getDataAsString("text/item-id"),blockColumn.modelData,index)} }
                                         }
                                     }
-                                    Rectangle { width:parent.width;height:36;color:"transparent"
-                                        Label { anchors.left:parent.left;anchors.leftMargin:22;anchors.verticalCenter:parent.verticalCenter;text:qsTr("+  add");color:win.muted;font.pixelSize:14 }
+                                    Rectangle { width:parent.width;height:32;color:"transparent"
+                                        Label { anchors.left:parent.left;anchors.leftMargin:56;anchors.verticalCenter:parent.verticalCenter;text:qsTr("+  add");color:"#777269";font.pixelSize:13 }
                                         MouseArea { anchors.fill:parent;onClicked:openQuick(blockColumn.modelData) }
                                         DropArea { anchors.fill:parent; onDropped:function(drop){backend.moveItem(drop.getDataAsString("text/item-id"),blockColumn.modelData,blockItems(blockColumn.modelData).length)} }
                                     }
@@ -181,8 +204,8 @@ ApplicationWindow {
                             }
                         }
                     }
-                    ColumnLayout { Layout.preferredWidth:320; Layout.minimumWidth:320; Layout.maximumWidth:320; Layout.fillHeight:true; spacing:18
-                        Rectangle { Layout.fillWidth:true; height:260; radius:theme.radius; color:win.panel; border.color:win.border
+                    ColumnLayout { Layout.preferredWidth:300; Layout.minimumWidth:270; Layout.maximumWidth:320; Layout.fillHeight:true; spacing:18
+                        Rectangle { Layout.fillWidth:true; height:210; radius:theme.radius; color:win.panel; border.color:win.border
                             ColumnLayout { anchors.fill:parent;anchors.margins:22;spacing:8
                                 RowLayout { Layout.fillWidth:true
                                     Label { text:qsTr("Now");color:win.text;font.pixelSize:18;font.weight:Font.DemiBold }
@@ -192,7 +215,6 @@ ApplicationWindow {
                                 Label { Layout.alignment:Qt.AlignHCenter;text:(backend.dayPlan.now||{}).sleeping?qsTr("RESTING"):qsTr("NEXT · %1").arg(((backend.dayPlan.now||{}).next||{}).name||"—");color:win.muted;font.family:win.mono;font.pixelSize:13;font.letterSpacing:1 }
                                 Label { Layout.alignment:Qt.AlignHCenter;text:(backend.dayPlan.now||{}).sleeping?qsTr("Sleeping"):Math.floor(countdown/3600)+"h "+String(Math.floor((countdown%3600)/60)).padStart(2,"0")+"m";color:win.text;font.pixelSize:34;font.weight:Font.Medium }
                                 Label { Layout.alignment:Qt.AlignHCenter;text:qsTr("at %1").arg(((backend.dayPlan.now||{}).next||{}).time||"--:--");color:win.muted;font.family:win.mono;font.pixelSize:14 }
-                                Item { Layout.fillHeight:true }
                             }
                         }
                         Rectangle { Layout.fillWidth:true; height:360; radius:theme.radius; color:win.panel; border.color:win.border
@@ -228,7 +250,7 @@ ApplicationWindow {
                                 RowLayout { anchors.fill:parent;anchors.margins:18;spacing:24
                                     ColumnLayout { Layout.preferredWidth:270;spacing:5
                                         Label { text:modelData.title;color:win.text;font.pixelSize:17;font.weight:Font.Medium;Layout.fillWidth:true;elide:Text.ElideRight }
-                                        Label { text:String(modelData.block).toUpperCase()+"  ·  "+(modelData.repeat==="daily"?qsTr("Daily"):(modelData.weekdays||[]).join(" · "));color:win.muted;font.family:win.mono;font.pixelSize:12 }
+                                        Label { text:capitalized(modelData.block)+"  ·  "+weekdayText(modelData.weekdays,modelData.repeat);color:win.muted;font.family:win.mono;font.pixelSize:12 }
                                         Label { text:qsTr("%1 of %2 days").arg(modelData.done_days).arg(modelData.planned_days);color:"#c7c2b9";font.pixelSize:13 }
                                     }
                                     RowLayout { Layout.fillWidth:true;Layout.fillHeight:true;spacing:5
@@ -254,7 +276,7 @@ ApplicationWindow {
                     Column { width:statsScroll.availableWidth;spacing:20
                         Row { spacing:8
                             Repeater { model:[7,30]
-                                Button { required property int modelData;text:qsTr("%1 days").arg(modelData);highlighted:statsRange===modelData;onClicked:{statsRange=modelData;backend.loadStats(modelData)} }
+                                ChoiceChip { required property int modelData;text:qsTr("%1 days").arg(modelData);selected:statsRange===modelData;onClicked:{statsRange=modelData;backend.loadStats(modelData)} }
                             }
                         }
                         Rectangle { width:parent.width;height:280;radius:theme.radius;color:win.panel;border.color:win.border
@@ -276,13 +298,14 @@ ApplicationWindow {
                         }
                         Label { text:qsTr("Activities");color:win.text;font.pixelSize:18;font.weight:Font.DemiBold }
                         Repeater { model:(backend.stats.items||[]).slice().sort(function(a,b){return String(a.title).localeCompare(String(b.title))})
-                            Rectangle { required property var modelData;width:parent.width;height:76;radius:theme.radius;color:win.panel;border.color:win.border
+                            Rectangle { required property var modelData;width:parent.width;height:88;radius:theme.radius;color:win.panel;border.color:win.border
                                 RowLayout { anchors.fill:parent;anchors.margins:18
                                     ColumnLayout { Layout.fillWidth:true
                                         Label { text:modelData.title;color:win.text;font.pixelSize:15;font.weight:Font.Medium }
-                                        Label { text:String(modelData.block).toUpperCase()+"  ·  "+modelData.done_days+" / "+modelData.planned_days+" "+qsTr("days");color:win.muted;font.family:win.mono;font.pixelSize:12 }
+                                        Label { text:capitalized(modelData.block)+"  ·  "+weekdayText(modelData.weekdays,modelData.repeat);color:win.muted;font.family:win.mono;font.pixelSize:12 }
+                                        Rectangle { Layout.fillWidth:true;Layout.maximumWidth:420;height:5;radius:3;color:"#38352f"; Rectangle { width:parent.width*(modelData.planned_days?modelData.done_days/modelData.planned_days:0);height:parent.height;radius:3;color:theme.accent } }
                                     }
-                                    Label { text:modelData.measure==="minutes"?qsTr("%1 min").arg(modelData.minutes):modelData.measure==="count"?String(modelData.count):String(modelData.done_days);color:win.text;font.family:win.mono;font.pixelSize:18 }
+                                    Label { Layout.preferredWidth:120;horizontalAlignment:Text.AlignRight;text:modelData.measure==="minutes"?qsTr("%1 min").arg(modelData.minutes):modelData.measure==="count"?String(modelData.count):qsTr("%1 / %2 days").arg(modelData.done_days).arg(modelData.planned_days);color:win.text;font.family:win.mono;font.pixelSize:16 }
                                 }
                             }
                         }
@@ -297,7 +320,7 @@ ApplicationWindow {
                                 Label { text:qsTr("Sleep time");color:win.text;font.pixelSize:17;font.weight:Font.Medium }
                                 Label { text:qsTr("The end of your Isha planning block.");color:win.muted }
                                 RowLayout { TextField { id:sleepField;text:backend.config.sleep_time||"23:00";placeholderText:"HH:MM";font.family:win.mono;Layout.preferredWidth:160 }
-                                    Button { text:qsTr("Save");highlighted:true;onClicked:backend.setSleepTime(sleepField.text) }
+                                    AppButton { text:qsTr("Save");primary:true;onClicked:backend.setSleepTime(sleepField.text) }
                                 }
                             }
                         }
@@ -317,7 +340,8 @@ ApplicationWindow {
 
     // Quick add overlay
     Popup { id:quickPopup;visible:quickVisible;modal:true;focus:true;anchors.centerIn:Overlay.overlay;width:Math.min(760,win.width-80);height:245;closePolicy:Popup.NoAutoClose
-        background:Rectangle{color:"#1c1b18";radius:theme.radius;border.color:win.border}
+        Overlay.modal: Rectangle { color:"#8c000000" }
+        background:Rectangle{color:"#1c1b18";radius:Math.max(8,theme.radius);border.width:1;border.color:win.border;layer.enabled:true;layer.effect:MultiEffect{shadowEnabled:true;shadowOpacity:.4;shadowBlur:1}}
         onClosed:quickVisible=false
         ColumnLayout { anchors.fill:parent;anchors.margins:28;spacing:14
             RowLayout { Layout.fillWidth:true
@@ -327,8 +351,8 @@ ApplicationWindow {
             TextField { id:quickField;Layout.fillWidth:true;placeholderText:qsTr("e.g. read 20m after isha daily");font.pixelSize:20;onTextChanged:parseTimer.restart();onAccepted:if(text.trim()){backend.addQuick(text,quickBlock);quickVisible=false} }
             Label { Layout.fillWidth:true;text:backend.parseDraft.title?qsTr("%1 · %2 · %3 %4").arg(backend.parseDraft.title).arg(backend.parseDraft.block||qsTr("next prayer")).arg(backend.parseDraft.target||"").arg(backend.parseDraft.measure||""):qsTr("Describe what, when, and how often.");color:win.muted;font.family:win.mono;font.pixelSize:12;elide:Text.ElideRight }
             RowLayout { Layout.fillWidth:true;Item{Layout.fillWidth:true}
-                Button { text:qsTr("Edit details");onClicked:{var d=backend.parseDraft||{};d.title=d.title||quickField.text;d.block=d.block||quickBlock||"fajr";openEntry(d);quickVisible=false} }
-                Button { text:qsTr("Add  ↵");highlighted:true;enabled:quickField.text.trim()!=="";onClicked:{backend.addQuick(quickField.text,quickBlock);quickVisible=false} }
+                AppButton { text:qsTr("Edit details");onClicked:{var d=backend.parseDraft||{};d.title=d.title||quickField.text;d.block=d.block||quickBlock||"fajr";openEntry(d);quickVisible=false} }
+                AppButton { text:qsTr("Add  ↵");primary:true;enabled:quickField.text.trim()!=="";onClicked:{backend.addQuick(quickField.text,quickBlock);quickVisible=false} }
             }
         }
         Timer { id:parseTimer;interval:200;onTriggered:backend.parseQuick(quickField.text) }
@@ -337,31 +361,32 @@ ApplicationWindow {
     // Detailed entry overlay
     Popup { id:entryPopup;visible:entryVisible;modal:true;focus:true;anchors.centerIn:Overlay.overlay;width:win.width-44;height:win.height-44;closePolicy:Popup.NoAutoClose
         property string block:editItem.block||"fajr";property string measure:editItem.measure||"check";property string repeat:editItem.repeat||"none";property var days:editItem.weekdays||[];property bool confirming:false
-        background:Rectangle{color:"#151411";radius:theme.radius;border.color:win.border}
+        Overlay.modal: Rectangle { color:"#8c000000" }
+        background:Rectangle{color:"#151411";radius:Math.max(8,theme.radius);border.width:1;border.color:win.border;layer.enabled:true;layer.effect:MultiEffect{shadowEnabled:true;shadowOpacity:.4;shadowBlur:1}}
         onOpened:{block=editItem.block||"fajr";measure=editItem.measure||"check";repeat=editItem.repeat||"none";days=editItem.weekdays||[];confirming=false;titleField.text=editItem.title||"";amount.value=editItem.target||1}
         function draft(){return {id:editItem.id||"",title:titleField.text,block:block,measure:measure,target:amount.value,repeat:repeat,weekdays:days}}
         function toggleDay(d){var a=days.slice();var i=a.indexOf(d);if(i>=0)a.splice(i,1);else a.push(d);days=a}
         ColumnLayout { anchors.fill:parent;spacing:0
             RowLayout { Layout.fillWidth:true;Layout.preferredHeight:72;Layout.leftMargin:22;Layout.rightMargin:22
                 Label { text:editItem.id?qsTr("Edit entry"):qsTr("New entry");color:win.text;font.pixelSize:20;font.weight:Font.DemiBold;Layout.fillWidth:true }
-                Button { visible:!!editItem.id;text:entryPopup.confirming?qsTr("Confirm delete"):qsTr("Delete");onClicked:{if(entryPopup.confirming){backend.removeItem(editItem.id);entryVisible=false}else entryPopup.confirming=true} }
-                Button { text:qsTr("Cancel");onClicked:entryVisible=false }
-                Button { text:qsTr("Save & add another");onClicked:{backend.saveItem(entryPopup.draft());editItem=({});titleField.text=""} }
-                Button { text:qsTr("Save  ↵");highlighted:true;onClicked:{backend.saveItem(entryPopup.draft());entryVisible=false} }
+                AppButton { visible:!!editItem.id;text:entryPopup.confirming?qsTr("Confirm delete"):qsTr("Delete");onClicked:{if(entryPopup.confirming){backend.removeItem(editItem.id);entryVisible=false}else entryPopup.confirming=true} }
+                AppButton { text:qsTr("Cancel");onClicked:entryVisible=false }
+                AppButton { text:qsTr("Save & add another");onClicked:{backend.saveItem(entryPopup.draft());editItem=({});titleField.text=""} }
+                AppButton { text:qsTr("Save  ↵");primary:true;enabled:titleField.text.trim()!=="";onClicked:{backend.saveItem(entryPopup.draft());entryVisible=false} }
             }
             Rectangle { Layout.fillWidth:true;height:1;color:win.border }
             RowLayout { Layout.fillWidth:true;Layout.fillHeight:true;Layout.margins:22;spacing:26
-                ScrollView { id:entryScroll; Layout.fillWidth:true;Layout.fillHeight:true;Layout.minimumWidth:650;clip:true
+                ScrollView { id:entryScroll; Layout.fillWidth:true;Layout.fillHeight:true;Layout.minimumWidth:450;clip:true
                     Column { width:entryScroll.availableWidth;spacing:18
                         Rectangle { width:parent.width;height:108;radius:theme.radius;color:win.panel;border.color:win.border
-                            TextField { id:titleField;anchors.fill:parent;anchors.margins:22;placeholderText:qsTr("Activity title…");font.pixelSize:25;verticalAlignment:TextInput.AlignVCenter }
+                            TextField { id:titleField;anchors.fill:parent;anchors.margins:24;placeholderText:qsTr("Activity title…");font.pixelSize:28;verticalAlignment:TextInput.AlignVCenter;leftPadding:6;rightPadding:6;background:Rectangle{color:"transparent";Rectangle{anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:1;color:win.border}} }
                         }
                         Rectangle { width:parent.width;height:150;radius:theme.radius;color:win.panel;border.color:win.border
                             ColumnLayout { anchors.fill:parent;anchors.margins:22;spacing:16
                                 Label { text:qsTr("When");color:win.text;font.pixelSize:17;font.weight:Font.DemiBold }
                                 RowLayout { spacing:8
                                     Repeater { model:win.prayerIds
-                                        Button { required property string modelData;required property int index;text:win.prayerNames[index];highlighted:entryPopup.block===modelData;onClicked:entryPopup.block=modelData }
+                                        ChoiceChip { required property string modelData;required property int index;text:win.prayerNames[index];selected:entryPopup.block===modelData;onClicked:entryPopup.block=modelData }
                                     }
                                 }
                             }
@@ -371,7 +396,7 @@ ApplicationWindow {
                                 Label { text:qsTr("Measure");color:win.text;font.pixelSize:17;font.weight:Font.DemiBold }
                                 RowLayout { spacing:8
                                     Repeater { model:[{id:"check",name:qsTr("Tick")},{id:"minutes",name:qsTr("Minutes")},{id:"count",name:qsTr("Count")}]
-                                        Button { required property var modelData;text:modelData.name;highlighted:entryPopup.measure===modelData.id;onClicked:entryPopup.measure=modelData.id }
+                                        ChoiceChip { required property var modelData;text:modelData.name;selected:entryPopup.measure===modelData.id;onClicked:entryPopup.measure=modelData.id }
                                     }
                                     SpinBox { id:amount;visible:entryPopup.measure!=="check";from:1;to:999;value:1;editable:true;Layout.leftMargin:10 }
                                 }
@@ -382,26 +407,27 @@ ApplicationWindow {
                                 Label { text:qsTr("Repeat");color:win.text;font.pixelSize:17;font.weight:Font.DemiBold }
                                 RowLayout { spacing:8
                                     Repeater { model:[{id:"none",name:qsTr("Once")},{id:"daily",name:qsTr("Daily")},{id:"weekdays",name:qsTr("Weekdays")},{id:"weekly",name:qsTr("Weekly")}]
-                                        Button { required property var modelData;text:modelData.name;highlighted:(modelData.id==="weekdays"?entryPopup.repeat==="weekly"&&entryPopup.days.join(",")==="mon,tue,wed,thu,fri":entryPopup.repeat===modelData.id);onClicked:{if(modelData.id==="weekdays"){entryPopup.repeat="weekly";entryPopup.days=["mon","tue","wed","thu","fri"]}else entryPopup.repeat=modelData.id} }
+                                        ChoiceChip { required property var modelData;text:modelData.name;selected:modelData.id!=="weekdays"&&entryPopup.repeat===modelData.id;onClicked:{if(modelData.id==="weekdays"){entryPopup.repeat="weekly";entryPopup.days=["mon","tue","wed","thu","fri"]}else entryPopup.repeat=modelData.id} }
                                     }
                                 }
                                 RowLayout { visible:entryPopup.repeat==="weekly";spacing:6
                                     Repeater { model:["mon","tue","wed","thu","fri","sat","sun"]
-                                        Button { required property string modelData;text:modelData.charAt(0).toUpperCase()+modelData.slice(1);highlighted:entryPopup.days.indexOf(modelData)>=0;onClicked:entryPopup.toggleDay(modelData) }
+                                        ChoiceChip { required property string modelData;text:capitalized(modelData);selected:entryPopup.days.indexOf(modelData)>=0;onClicked:entryPopup.toggleDay(modelData) }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                ColumnLayout { Layout.preferredWidth:360;Layout.minimumWidth:360;Layout.maximumWidth:360;Layout.fillHeight:true
+                ColumnLayout { Layout.preferredWidth:340;Layout.minimumWidth:280;Layout.maximumWidth:360;Layout.fillHeight:true
                     Rectangle { Layout.fillWidth:true;height:245;radius:theme.radius;color:win.panel;border.color:win.border
                         ColumnLayout { anchors.fill:parent;anchors.margins:22;spacing:14
                             Label { text:qsTr("Preview");color:win.text;font.pixelSize:18;font.weight:Font.DemiBold }
                             Rectangle { Layout.fillWidth:true;height:1;color:win.border }
                             RowLayout { Layout.fillWidth:true;Label{text:qsTr("Next occurrence");color:win.muted;Layout.fillWidth:true}Label{text:backend.gregorianHeader(backend.selectedDay);color:win.text;font.family:win.mono} }
                             RowLayout { Layout.fillWidth:true;Label{text:qsTr("Occurrences this month");color:win.muted;Layout.fillWidth:true}Label{text:entryPopup.repeat==="daily"?30:entryPopup.repeat==="weekly"?Math.max(1,entryPopup.days.length*4):1;color:win.text;font.family:win.mono} }
-                            RowLayout { Layout.fillWidth:true;Label{text:qsTr("Amount");color:win.muted;Layout.fillWidth:true}Label{text:entryPopup.measure==="check"?qsTr("Tick"):amount.value+" "+entryPopup.measure;color:win.text;font.family:win.mono} }
+                            RowLayout { Layout.fillWidth:true;Label{text:qsTr("Schedule");color:win.muted;Layout.fillWidth:true}Label{text:weekdayText(entryPopup.days,entryPopup.repeat);color:win.text;font.family:win.mono} }
+                            RowLayout { Layout.fillWidth:true;Label{text:qsTr("Amount");color:win.muted;Layout.fillWidth:true}Label{text:entryPopup.measure==="check"?qsTr("Tick"):amount.value+(entryPopup.measure==="minutes"?qsTr(" min"):"");color:win.text;font.family:win.mono} }
                         }
                     }
                     Item { Layout.fillHeight:true }
