@@ -8,22 +8,17 @@
 
 ## Now
 
-S0 is locked (`interface.md`). No code has been changed. The architecture lead (Claude
-session `06b42b65`, interactive, its name is the raw "@docs/START.md Take role as lead…"
-prompt) is still busy finishing its step; a DeepSeek worker has uncommitted
-`app/tests/*` changes. Codex is at 100% of its 5h window and resets at 19:37 local
-(rate_limits `resets_at` 1795358253).
-
-Orchestrator survival: the `salah-revive.service` user unit runs `revive.sh` and resumes
-this session (`1e3cb88a…`) in the background after a limit cutoff (log:
-`~/.cache/salah-agents/revive.log`). The Claude status line writes
-`~/.cache/salah-agents/claude-status.json` (5h usage and reset time).
+Planning is committed (27f7020). `salah-lead` has ended, so W1 (backend) goes to Codex.
+Limits at 19:10: Claude 5h 75% (resets 22:10), 7d 22%; Codex 5h 100% (resets 19:37), 7d 16%.
+The orchestrator `salah-orch` stays lean so it outlives the workers; `salah-revive.service`
+resumes it after a limit cutoff.
 
 ## Next
 
-1. `salah-lead` (W1) committed c673a99, freed app/** and plugin/**, and has the W1 brief;
-   it waits for the user's OK before rewriting crates/**.
-2. At 19:39 (cron in `salah-orch`): dispatch `w2-brief.md` to Codex.
+- 19:39 (one-shot cron): `dispatch-codex.sh w1-brief.md w1`.
+- At :17/:57 each hour (recurring cron): check limits and progress; dispatch W2 once W1
+  has committed S2 and Codex 5h usage is below 60%; re-dispatch a dead worker; integrate
+  and verify when both are done.
 
 ## Interfaces
 
