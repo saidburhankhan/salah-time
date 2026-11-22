@@ -36,6 +36,8 @@ fn invalid_updates_fail_without_overwriting_existing_config() {
         vec!["config", "set", "--timezone-offset", "15"],
         vec!["config", "set", "--method", "made-up"],
         vec!["config", "set", "--asr", "late"],
+        vec!["config", "set", "--sleep-time", "24:00"],
+        vec!["config", "set", "--sleep-time", "9:30"],
         vec!["config", "set", "--latitude", "NaN"],
         vec!["config", "set", "--unknown", "value"],
     ] {
@@ -116,5 +118,20 @@ fn status_json_matches_the_plugin_contract() {
     assert!(value["next"]["name"].is_string());
     assert!(value["next"]["time"].is_string());
     assert!(value["next"]["remaining_seconds"].is_i64());
+    assert!(value["next"]["kind"].is_string());
+    assert!(value["current_block"]["start"]["id"].is_string());
+    assert!(value["current_block"]["end"]["id"].is_string());
+    assert!(value["current_block"]["sleeping"].is_boolean());
     assert!(value["prayers"].is_array());
+    assert!(value["boundaries"].is_array());
+}
+
+#[test]
+fn sleep_time_can_be_configured() {
+    let root = std::env::temp_dir().join(format!("salah-cli-sleep-{}", std::process::id()));
+    let path = root.join("config.json");
+    let output = run(&path, &["config", "set", "--sleep-time", "22:45"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(salah::config::load_from(&path).unwrap().sleep_time, "22:45");
+    let _ = std::fs::remove_dir_all(root);
 }

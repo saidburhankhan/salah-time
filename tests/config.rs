@@ -16,6 +16,7 @@ fn missing_config_uses_tashkent() {
     let c = load_from(&path).unwrap();
     assert_eq!(c.location, "Tashkent");
     assert_eq!(c.asr, "hanafi");
+    assert_eq!(c.sleep_time, "23:00");
 }
 
 #[test]
@@ -31,5 +32,6 @@ fn legacy_config_without_auto_location_fields_still_loads() {
     let config = load_from(&path).unwrap();
     assert!(config.auto_location);
     assert_eq!(config.last_location_sync, None);
+    assert_eq!(config.sleep_time, "23:00");
     let _ = std::fs::remove_dir_all(root);
 }

@@ -1,4 +1,5 @@
 use crate::calculation::{PrayerTime, calculate, method};
+use crate::day::{self, Boundary, Timeline};
 use crate::{config::Config, official};
 use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, Timelike, Utc};
 use serde::Serialize;
@@ -15,10 +16,35 @@ pub struct DisplayPrayer {
 pub struct NextPrayer {
     pub id: &'static str,
     pub name: &'static str,
+    pub kind: &'static str,
     pub time: String,
+    pub date: String,
     pub remaining: String,
     pub remaining_short: String,
     pub remaining_seconds: i64,
+}
+#[derive(Debug, Serialize)]
+pub struct DisplayBoundary {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub kind: &'static str,
+    pub time: String,
+    pub passed: bool,
+    pub is_next: bool,
+}
+#[derive(Debug, Serialize)]
+pub struct CurrentBlock {
+    pub start: BoundaryPoint,
+    pub end: BoundaryPoint,
+    pub sleeping: bool,
+}
+#[derive(Debug, Serialize)]
+pub struct BoundaryPoint {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub kind: &'static str,
+    pub time: String,
+    pub date: String,
 }
 #[derive(Debug, Serialize)]
 pub struct Status {
@@ -29,9 +55,12 @@ pub struct Status {
     pub source_name: &'static str,
     pub source_updated: Option<String>,
     pub date: String,
+    pub sleep_time: String,
     pub label: String,
     pub next: NextPrayer,
+    pub current_block: CurrentBlock,
     pub prayers: Vec<DisplayPrayer>,
+    pub boundaries: Vec<DisplayBoundary>,
 }
 
 pub fn build(config: &Config, utc_now: DateTime<Utc>) -> Result<Status, String> {
@@ -67,26 +96,8 @@ pub fn build(config: &Config, utc_now: DateTime<Utc>) -> Result<Status, String> 
         None => (calculated_today, "calculated", selected.name, None),
     };
     let now_seconds = now.hour() as i64 * 3600 + now.minute() as i64 * 60 + now.second() as i64;
-    if let Some(next) = today
-        .iter()
-        .find(|p| p.id != "sunrise" && p.minutes * 60 > now_seconds)
-    {
-        return Ok(finish(
-            config,
-            selected.name,
-            date,
-            today.clone(),
-            next.clone(),
-            next.minutes * 60 - now_seconds,
-            now_seconds,
-            true,
-            source,
-            source_name,
-            source_updated,
-        ));
-    }
     let tomorrow = date.succ_opt().ok_or("date overflow")?;
-    let next = calculate(
+    let tomorrow_fajr = calculate(
         tomorrow,
         config.latitude,
         config.longitude,
@@ -97,15 +108,15 @@ pub fn build(config: &Config, utc_now: DateTime<Utc>) -> Result<Status, String> 
     .into_iter()
     .find(|p| p.id == "fajr")
     .ok_or("missing fajr")?;
+    let sleep_minutes = day::parse_clock_minutes(&config.sleep_time)?;
+    let timeline = day::timeline(&today, &tomorrow_fajr, sleep_minutes, now_seconds)?;
     Ok(finish(
         config,
         selected.name,
         date,
         today,
-        next.clone(),
-        86_400 + next.minutes * 60 - now_seconds,
+        timeline,
         now_seconds,
-        false,
         source,
         source_name,
         source_updated,
@@ -120,28 +131,29 @@ fn finish(
     method_name: &'static str,
     date: NaiveDate,
     prayers: Vec<PrayerTime>,
-    next: PrayerTime,
-    remaining_seconds: i64,
+    timeline: Timeline,
     now_seconds: i64,
-    next_is_on_display_date: bool,
     source: &'static str,
     source_name: &'static str,
     source_updated: Option<String>,
 ) -> Status {
+    let next = &timeline.next;
+    let remaining_seconds = timeline.remaining_seconds;
     let remaining = format_duration(remaining_seconds, false);
     let remaining_short = format_duration(remaining_seconds, true);
-    let rows = prayers
+    let rows: Vec<DisplayPrayer> = prayers
         .into_iter()
         .map(|p| DisplayPrayer {
             id: p.id,
             name: p.name,
             time: format_minutes(p.minutes),
             passed: p.minutes * 60 <= now_seconds,
-            // After Isha, `next` is tomorrow's Fajr while the rows still
-            // describe today. Do not highlight today's already-passed Fajr.
-            is_next: next_is_on_display_date && p.id == next.id,
+            is_next: next.kind == "prayer" && next.day_offset == 0 && p.id == next.id,
         })
         .collect();
+    let boundaries = display_boundaries(&rows, &config.sleep_time, next, now_seconds);
+    let next_point = boundary_point(next, date);
+    let start_point = boundary_point(&timeline.current_start, date);
     Status {
         location: config.location.clone(),
         method: config.method.clone(),
@@ -150,16 +162,90 @@ fn finish(
         source_name,
         source_updated,
         date: format!("{:04}-{:02}-{:02}", date.year(), date.month(), date.day()),
+        sleep_time: config.sleep_time.clone(),
         label: format!("☾ {} {}", next.name, remaining_short),
         next: NextPrayer {
             id: next.id,
             name: next.name,
+            kind: next.kind,
             time: format_minutes(next.minutes),
+            date: next_point.date.clone(),
             remaining,
             remaining_short,
             remaining_seconds,
         },
+        current_block: CurrentBlock {
+            sleeping: timeline.current_start.kind == "sleep",
+            start: start_point,
+            end: next_point,
+        },
         prayers: rows,
+        boundaries,
+    }
+}
+
+/// Today's rows in chronological order: prayers, Sunrise, and the sleep
+/// boundary that ends this evening (last even when it falls after midnight).
+fn display_boundaries(
+    prayers: &[DisplayPrayer],
+    sleep_time: &str,
+    next: &Boundary,
+    now_seconds: i64,
+) -> Vec<DisplayBoundary> {
+    let mut boundaries: Vec<DisplayBoundary> = prayers
+        .iter()
+        .map(|prayer| DisplayBoundary {
+            id: prayer.id,
+            name: prayer.name,
+            kind: if prayer.id == "sunrise" {
+                "sunrise"
+            } else {
+                "prayer"
+            },
+            time: prayer.time.clone(),
+            passed: prayer.passed,
+            is_next: prayer.is_next,
+        })
+        .collect();
+    let sleep_minutes = day::parse_clock_minutes(sleep_time)
+        .expect("validated configuration has a valid sleep time");
+    let fajr_minutes = prayers
+        .iter()
+        .find(|prayer| prayer.id == "fajr")
+        .and_then(|prayer| day::parse_clock_minutes(&prayer.time).ok())
+        .unwrap_or(0);
+    let offset = day::evening_sleep_offset(sleep_minutes, fajr_minutes);
+    let sleep_key = offset * 1440 + sleep_minutes;
+    let position = boundaries
+        .iter()
+        .position(|row| day::parse_clock_minutes(&row.time).unwrap_or(i64::MAX) > sleep_key)
+        .unwrap_or(boundaries.len());
+    boundaries.insert(
+        position,
+        DisplayBoundary {
+            id: "sleep",
+            name: "Sleep",
+            kind: "sleep",
+            time: sleep_time.to_string(),
+            passed: sleep_key * 60 <= now_seconds,
+            // Highlight sleep whichever night it belongs to: the clock time is
+            // the same and it is the only sleep row.
+            is_next: next.kind == "sleep",
+        },
+    );
+    boundaries
+}
+
+fn boundary_point(boundary: &Boundary, base_date: NaiveDate) -> BoundaryPoint {
+    let date = base_date
+        .checked_add_signed(Duration::days(boundary.day_offset))
+        .unwrap_or(base_date);
+    BoundaryPoint {
+        id: boundary.id,
+        name: boundary.name,
+        kind: boundary.kind,
+        time: format_minutes(boundary.minutes),
+        date: format!("{:04}-{:02}-{:02}", date.year(), date.month(), date.day()),
     }
 }
 
@@ -207,17 +293,57 @@ mod tests {
     }
 
     #[test]
-    fn after_isha_points_to_tomorrow_without_highlighting_today() {
+    fn after_isha_points_to_sleep_without_highlighting_a_prayer() {
         let report = build(
             &Config::default(),
-            // 14:00 UTC is 19:00 in Tashkent, after Isha on this date.
+            // 14:00 UTC is 19:00 in Tashkent, after Isha and before sleep.
             Utc.with_ymd_and_hms(2026, 11, 20, 14, 0, 0).unwrap(),
         )
         .unwrap();
-        assert_eq!(report.next.id, "fajr");
+        assert_eq!(report.next.id, "sleep");
+        assert_eq!(report.next.kind, "sleep");
         assert!(report.next.remaining_seconds > 0);
-        assert!(report.next.remaining_seconds < 86_400);
         assert!(report.prayers.iter().all(|prayer| !prayer.is_next));
+        assert_eq!(report.current_block.start.id, "isha");
+        assert!(!report.current_block.sleeping);
+        assert_eq!(report.boundaries.last().unwrap().id, "sleep");
+        assert!(report.boundaries.last().unwrap().is_next);
+    }
+
+    #[test]
+    fn post_midnight_bedtime_is_next_after_isha_and_listed_last() {
+        let config = Config {
+            sleep_time: "00:30".into(),
+            ..Config::default()
+        };
+        // 14:00 UTC is 19:00 in Tashkent, after Isha.
+        let report = build(
+            &config,
+            Utc.with_ymd_and_hms(2026, 11, 20, 14, 0, 0).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report.next.id, "sleep");
+        assert_eq!(report.next.date, "2026-11-21");
+        assert_eq!(report.next.remaining_seconds, 5 * 3600 + 30 * 60);
+        assert!(!report.current_block.sleeping);
+        let last = report.boundaries.last().unwrap();
+        assert_eq!(last.id, "sleep");
+        assert!(last.is_next && !last.passed);
+        assert!(report.boundaries.iter().any(|row| row.kind == "sunrise"));
+    }
+
+    #[test]
+    fn after_sleep_is_marked_sleeping_until_tomorrows_fajr() {
+        let report = build(
+            &Config::default(),
+            // 18:30 UTC is 23:30 in Tashkent, after the default sleep boundary.
+            Utc.with_ymd_and_hms(2026, 11, 20, 18, 30, 0).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report.next.id, "fajr");
+        assert_eq!(report.next.date, "2026-11-21");
+        assert!(report.current_block.sleeping);
+        assert_eq!(report.current_block.start.id, "sleep");
     }
 
     #[test]
@@ -233,6 +359,9 @@ mod tests {
         assert!(json["next"]["name"].is_string());
         assert!(json["next"]["time"].is_string());
         assert!(json["next"]["remaining_seconds"].is_i64());
+        assert!(json["next"]["kind"].is_string());
+        assert!(json["current_block"]["sleeping"].is_boolean());
+        assert!(json["boundaries"].is_array());
         assert!(json["prayers"].is_array());
         for prayer in json["prayers"].as_array().unwrap() {
             assert!(prayer["name"].is_string());

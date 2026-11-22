@@ -35,8 +35,13 @@ BarWidget {
     : ""
   readonly property string remainingLong: formatRemaining(remainingSeconds, false)
   readonly property string remainingShort: formatRemaining(remainingSeconds, true)
+  readonly property bool sleeping: report && report.current_block
+    ? report.current_block.sleeping === true
+    : false
   readonly property string displayText: nextName !== ""
-    ? nextName + "  " + remainingShort
+    ? (sleeping
+        ? strings.t("bar.sleeping") + "  " + nextName + " " + remainingShort
+        : nextName + "  " + remainingShort)
     : (firstLoad ? strings.t("bar.loading") : "☾ —")
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color mutedForeground: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
@@ -278,7 +283,9 @@ BarWidget {
             Text {
               width: parent.width
               textFormat: Text.PlainText
-              text: strings.t("panel.nextPrayer")
+              text: root.sleeping
+                ? strings.t("panel.sleepingNext")
+                : strings.t("panel.nextBoundary")
               color: root.mutedForeground
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.caption
@@ -340,7 +347,9 @@ BarWidget {
           spacing: Style.space(2)
 
           Repeater {
-            model: root.report && root.report.prayers ? root.report.prayers : []
+            model: root.report
+              ? (root.report.boundaries || root.report.prayers || [])
+              : []
 
             Item {
               required property var modelData

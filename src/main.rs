@@ -149,6 +149,7 @@ fn set_config(args: &[String]) -> Result<(), String> {
             }
             "--method" => config.method = value.clone(),
             "--asr" => config.asr = value.clone(),
+            "--sleep-time" => config.sleep_time = value.clone(),
             "--auto-location" => {
                 config.auto_location = match value.as_str() {
                     "true" => true,
@@ -233,7 +234,7 @@ fn config_help() {
 
 fn config_set_help() {
     println!(
-        "usage: salah config set [--location NAME] [--latitude N] [--longitude N] [--timezone-offset HOURS] [--method ID] [--asr standard|hanafi] [--auto-location true|false]"
+        "usage: salah config set [--location NAME] [--latitude N] [--longitude N] [--timezone-offset HOURS] [--method ID] [--asr standard|hanafi] [--sleep-time HH:MM] [--auto-location true|false]"
     );
 }
 

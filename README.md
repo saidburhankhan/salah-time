@@ -5,6 +5,15 @@ shows the next prayer and the time remaining. Selecting it opens a compact
 daily schedule with the location, calculation method, prayer times, and a
 larger countdown.
 
+After Isha, the next boundary is the configured sleep time instead of
+tomorrow's Fajr. This makes the remaining productive part of the day visible.
+After sleep time, the widget marks the current block as sleeping and counts
+down to Fajr. Set the local 24-hour boundary with:
+
+```sh
+salah config set --sleep-time 23:00
+```
+
 The Rust binary owns calculation and settings. The Omarchy/Quickshell plugin
 only renders the bar label and popup, so the same calculation can be tested
 and queried from a terminal.
@@ -107,9 +116,10 @@ salah config show
 salah config set --help
 ```
 
-The JSON output includes the location and method, every prayer for the active
-date, the next prayer, its wall-clock time, and the remaining seconds. This
-keeps UI code free of prayer-time mathematics.
+The JSON output includes the location and method, every prayer, the ordered
+prayer/sleep boundaries, the current block, and the next boundary with its
+wall-clock time and remaining seconds. This keeps UI code free of scheduling
+mathematics.
 
 ## Calculation notice
 

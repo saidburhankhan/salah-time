@@ -13,6 +13,8 @@ pub struct Config {
     pub timezone_offset: f64,
     pub method: String,
     pub asr: String,
+    #[serde(default = "default_sleep_time")]
+    pub sleep_time: String,
     #[serde(default = "default_auto_location")]
     pub auto_location: bool,
     #[serde(default)]
@@ -25,6 +27,10 @@ const fn default_auto_location() -> bool {
     true
 }
 
+fn default_sleep_time() -> String {
+    "23:00".into()
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -34,6 +40,7 @@ impl Default for Config {
             timezone_offset: 5.0,
             method: "uzbekistan".into(),
             asr: "hanafi".into(),
+            sleep_time: default_sleep_time(),
             auto_location: true,
             last_location_sync: None,
             last_location_provider: None,
@@ -61,6 +68,8 @@ impl Config {
         if self.asr != "standard" && self.asr != "hanafi" {
             return Err("asr must be standard or hanafi".into());
         }
+        crate::day::parse_clock_minutes(&self.sleep_time)
+            .map_err(|_| "sleep time must use 24-hour HH:MM format".to_string())?;
         if let Some(timestamp) = &self.last_location_sync
             && (timestamp.len() > 64
                 || timestamp.chars().any(char::is_control)

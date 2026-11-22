@@ -1,5 +1,9 @@
 # Agent guide
 
+Lead and orchestrator sessions must begin with `docs/START.md`. Workers with a
+narrow assigned brief use this guide plus that brief and do not load unrelated
+work-item history.
+
 Salah is a small Rust prayer-time backend plus an Omarchy/Quickshell bar
 plugin. Keep it focused: show the next prayer in the bar and reveal a compact
 daily timetable when selected.

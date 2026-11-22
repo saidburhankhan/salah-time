@@ -1,7 +1,10 @@
 {
   "bar.loading": "Prayer times…",
   "bar.unavailable": "Prayer times unavailable",
+  "bar.sleeping": "Sleeping ·",
   "panel.nextPrayer": "NEXT PRAYER",
+  "panel.nextBoundary": "NEXT BOUNDARY",
+  "panel.sleepingNext": "SLEEPING · NEXT PRAYER",
   "panel.beginsIn": "Begins in %1",
   "panel.calculatedBy": "Calculated by %1",
   "panel.refresh": "Refresh",
