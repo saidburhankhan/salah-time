@@ -11,7 +11,7 @@ Reviews and proposals written (b3ffadb). Plan in `plan.md`. No code moved.
 
 ## Next
 
-S1 storage correctness (Codex): atomic mutations, read paths never write.
+S2 schema (revision, versions, changes log, applied_ops) — Codex after its limit resets (19:37).
 
 ## Verification
 
