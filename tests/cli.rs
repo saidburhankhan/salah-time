@@ -15,12 +15,28 @@ fn stderr(output: &Output) -> String {
 }
 
 #[test]
+fn help_lists_subcommands() {
+    let root = std::env::temp_dir().join(format!("salah-cli-main-help-{}", std::process::id()));
+    let path = root.join("config.json");
+    let output = run(&path, &["--help"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for command in ["status", "config", "location", "official", "methods"] {
+        assert!(
+            stdout.contains(command),
+            "missing {command} in help:\n{stdout}"
+        );
+    }
+    assert!(!path.exists());
+}
+
+#[test]
 fn config_set_help_succeeds_without_creating_a_config() {
     let root = std::env::temp_dir().join(format!("salah-cli-help-{}", std::process::id()));
     let path = root.join("config.json");
     let output = run(&path, &["config", "set", "--help"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("usage:"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Usage:"));
     assert!(!path.exists());
 }
 
