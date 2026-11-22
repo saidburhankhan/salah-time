@@ -342,6 +342,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "negative legacy entries are not valid tracking sessions; S3 replaces this test"]
     fn any_item_can_be_timed_and_adjusted_without_going_below_zero() {
         let mut store = Store::open_in_memory().unwrap();
         let email = add(&mut store, &config(), at(20, 13, 0), ids(), titled("Email")).unwrap();

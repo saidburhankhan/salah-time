@@ -114,7 +114,11 @@ pub fn stats(
     let today = schedule::resolve(config, now)?.day();
     let days = reports.len();
     let mut items: Vec<ItemStats> = Vec::new();
-    for item in store.items()?.into_iter().filter(LegacyItem::is_live) {
+    for item in store
+        .legacy_items()?
+        .into_iter()
+        .filter(LegacyItem::is_live)
+    {
         let series: Vec<DayStat> = reports
             .iter()
             .map(|report| {

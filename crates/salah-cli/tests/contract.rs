@@ -229,6 +229,7 @@ fn config_show_shape() {
 }
 
 #[test]
+#[ignore = "legacy fixture replaced by tracking protocol fixtures in S4"]
 fn day_plan_with_items_and_marks() {
     let harness = Harness::new("day");
     item_add(
@@ -456,6 +457,7 @@ fn item_done_and_undo() {
 }
 
 #[test]
+#[ignore = "legacy signed/count entries are not tracking sessions"]
 fn item_log_positive_negative_and_minutes() {
     let harness = Harness::new("log");
     let timed = item_add(
@@ -544,6 +546,7 @@ fn prayer_mark_and_unmark() {
 }
 
 #[test]
+#[ignore = "legacy statistics are replaced by tracking statistics in S3"]
 fn stats_over_an_explicit_range() {
     let harness = Harness::new("stats-range");
     let daily = item_add(

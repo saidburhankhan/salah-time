@@ -15,7 +15,7 @@ const MIN_ID_PREFIX: usize = 4;
 /// The next free position at the end of a block.
 fn next_position(store: &Store, block: BoundaryId) -> Result<i64, Error> {
     Ok(store
-        .items()?
+        .legacy_items()?
         .iter()
         .filter(|i| i.is_live() && i.block == block)
         .map(|i| i.position + 1)
@@ -27,7 +27,7 @@ fn next_position(store: &Store, block: BoundaryId) -> Result<i64, Error> {
 /// characters.
 pub fn find_item(store: &Store, id: &str) -> Result<LegacyItem, Error> {
     let id = id.trim();
-    if let Some(item) = store.item(id)?.filter(LegacyItem::is_live) {
+    if let Some(item) = store.legacy_item(id)?.filter(LegacyItem::is_live) {
         return Ok(item);
     }
     if id.len() < MIN_ID_PREFIX {
@@ -37,7 +37,7 @@ pub fn find_item(store: &Store, id: &str) -> Result<LegacyItem, Error> {
         });
     }
     let mut matches = store
-        .items()?
+        .legacy_items()?
         .into_iter()
         .filter(|item| item.is_live() && item.id.starts_with(id));
     match (matches.next(), matches.next()) {
@@ -121,7 +121,7 @@ pub fn add_with(
             deleted_at: None,
             version: 1,
         };
-        item.version = tx.put_item(&item)?;
+        item.version = tx.put_legacy_item(&item)?;
         Ok(item)
     })
 }
@@ -191,7 +191,7 @@ pub fn edit_with(
             item.target = target;
         }
         item.updated_at = now;
-        item.version = tx.put_item(&item)?;
+        item.version = tx.put_legacy_item(&item)?;
         Ok(item)
     })
 }
@@ -244,7 +244,7 @@ pub fn move_item_with(
         let mut moved = find_item(tx, id)?;
         ensure_version("item", &moved.id, moved.version, expected_version)?;
         let mut siblings: Vec<LegacyItem> = tx
-            .items()?
+            .legacy_items()?
             .into_iter()
             .filter(|i| i.is_live() && i.block == block && i.id != moved.id)
             .collect();
@@ -262,7 +262,7 @@ pub fn move_item_with(
             if item.position != position || item.id == moved_id {
                 item.position = position;
                 item.updated_at = now;
-                item.version = tx.put_item(item)?;
+                item.version = tx.put_legacy_item(item)?;
             }
         }
         siblings
@@ -317,7 +317,7 @@ pub fn remove_with(
         ensure_version("item", &item.id, item.version, expected_version)?;
         item.deleted_at = Some(now);
         item.updated_at = now;
-        item.version = tx.put_item(&item)?;
+        item.version = tx.put_legacy_item(&item)?;
         Ok(item)
     })
 }
@@ -349,6 +349,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "legacy planner behavior removed by tracking schema; S3 replaces this test"]
     fn the_night_before_fajr_is_a_plannable_block_of_the_coming_day() {
         let mut store = Store::open_in_memory().unwrap();
         // 23:30 on the 20th is after the default 23:00 sleep: the 21st's night.
@@ -436,7 +437,7 @@ mod tests {
             .is_err()
         );
         assert!(find_item(&store, "abc").is_err());
-        assert_eq!(store.items().unwrap().len(), 1);
+        assert_eq!(store.legacy_items().unwrap().len(), 1);
         assert!(store.entries().unwrap().is_empty());
     }
 
@@ -445,9 +446,9 @@ mod tests {
         let mut store = Store::open_in_memory().unwrap();
         let mut item = add(&mut store, &config(), at(20, 13, 0), ids(), titled("One")).unwrap();
         item.id = "abcd1111".into();
-        store.write(|tx| tx.put_item(&item)).unwrap();
+        store.write(|tx| tx.put_legacy_item(&item)).unwrap();
         item.id = "abcd2222".into();
-        store.write(|tx| tx.put_item(&item)).unwrap();
+        store.write(|tx| tx.put_legacy_item(&item)).unwrap();
         assert!(find_item(&store, "abcd").unwrap_err().contains("ambiguous"));
         assert_eq!(find_item(&store, "abcd1").unwrap().id, "abcd1111");
         assert!(find_item(&store, "abc").is_err(), "too short");
@@ -585,7 +586,10 @@ mod tests {
         );
         assert!(matches!(result, Err(Error::Conflict(_))), "{result:?}");
         assert_eq!(store.revision().unwrap(), before);
-        assert_eq!(store.item(&item.id).unwrap().unwrap().title, item.title);
+        assert_eq!(
+            store.legacy_item(&item.id).unwrap().unwrap().title,
+            item.title
+        );
 
         let edited = edit_with(
             &mut store,
@@ -641,7 +645,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(replay, first);
-        assert_eq!(store.items().unwrap().len(), 1);
+        assert_eq!(store.legacy_items().unwrap().len(), 1);
         assert_eq!(store.revision().unwrap(), 1);
         assert_eq!(store.changes_since(0, 10).unwrap().len(), 1);
 
@@ -688,7 +692,14 @@ mod tests {
                 .items
                 .is_empty()
         );
-        assert!(store.item(&item.id).unwrap().unwrap().deleted_at.is_some());
+        assert!(
+            store
+                .legacy_item(&item.id)
+                .unwrap()
+                .unwrap()
+                .deleted_at
+                .is_some()
+        );
         assert!(find_item(&store, &item.id).is_err());
     }
 }

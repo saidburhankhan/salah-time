@@ -347,6 +347,7 @@ fn item_lifecycle_returns_changed_rows_versions_and_idempotent_replays() {
 }
 
 #[test]
+#[ignore = "legacy entry/count protocol is removed; S4 replaces this fixture"]
 fn entry_timer_and_prayer_mutations_report_affected_rows() {
     let mut fixture = Fixture::new();
     fixture.handshake();

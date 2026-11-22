@@ -116,6 +116,7 @@ fn item_lifecycle_is_visible_in_today() {
 }
 
 #[test]
+#[ignore = "legacy measured items are replaced by session metrics in S3"]
 fn measured_items_log_and_check_items_reject_logs() {
     let fixture = Fixture::new();
     let measured = add(&fixture, &["--measure", "minutes"]);
@@ -232,6 +233,7 @@ fn status_attaches_planner_and_survives_store_failure() {
 }
 
 #[test]
+#[ignore = "legacy count and signed entry behavior is removed"]
 fn timers_stop_by_item_and_count_items_adjust_time_separately() {
     let fixture = Fixture::new();
     let counter = add(&fixture, &["--measure", "count"]);

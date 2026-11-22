@@ -231,7 +231,7 @@ impl Dispatcher {
         parse_empty(params)?;
         let items = ctx
             .store
-            .items()?
+            .legacy_items()?
             .into_iter()
             .filter(LegacyItem::is_live)
             .map(|item| ItemRecord {
@@ -447,7 +447,7 @@ impl Dispatcher {
         let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
             let item: LegacyItem = decode_result(stored)?;
             let changed_ids: Vec<String> = tx
-                .items()?
+                .legacy_items()?
                 .into_iter()
                 .filter(|item| item.is_live() && item.block == block)
                 .map(|item| item.id)
@@ -956,7 +956,7 @@ fn current_day(config: &Config, now: DateTime<Utc>) -> Result<NaiveDate, Error> 
 
 fn ensure_full_item(store: &Store, id: &str) -> Result<LegacyItem, Error> {
     store
-        .item(id)?
+        .legacy_item(id)?
         .filter(LegacyItem::is_live)
         .ok_or_else(|| Error::NotFound {
             what: "item",
@@ -1044,7 +1044,7 @@ fn find_item_rows(
         push_day(day);
     }
     for id in ids {
-        if let Some(item) = store.item(id)? {
+        if let Some(item) = store.legacy_item(id)? {
             push_day(item.day);
         }
     }

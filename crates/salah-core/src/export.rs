@@ -108,7 +108,7 @@ pub fn export(store: &Store, now: DateTime<Utc>) -> Result<Export, Error> {
         format: FORMAT.to_string(),
         version: VERSION,
         exported_at: now,
-        items: store.items()?,
+        items: store.legacy_items()?,
         entries: store.entries()?,
         prayer_marks: store.marks()?,
     })
@@ -121,7 +121,7 @@ pub fn export_legacy(store: &Store, now: DateTime<Utc>) -> Result<serde_json::Va
         "format": FORMAT,
         "version": LEGACY_VERSION,
         "exported_at": now,
-        "items": store.items()?,
+        "items": store.legacy_items()?,
         "entries": store.entries()?,
         "prayer_marks": store.marks()?,
     }))
@@ -216,7 +216,9 @@ pub fn import(store: &mut Store, data: &Export) -> Result<ImportSummary, Error> 
 pub fn import_tx(tx: &WriteTx<'_>, data: &Export) -> Result<ImportSummary, Error> {
     let exported_items: HashSet<&str> = data.items.iter().map(|item| item.id.as_str()).collect();
     for entry in &data.entries {
-        if !exported_items.contains(entry.item_id.as_str()) && tx.item(&entry.item_id)?.is_none() {
+        if !exported_items.contains(entry.item_id.as_str())
+            && tx.legacy_item(&entry.item_id)?.is_none()
+        {
             return Err(format!(
                 "entry {} references missing item {}",
                 entry.id, entry.item_id
@@ -227,13 +229,13 @@ pub fn import_tx(tx: &WriteTx<'_>, data: &Export) -> Result<ImportSummary, Error
 
     let mut summary = ImportSummary::default();
     for item in &data.items {
-        match tx.item(&item.id)? {
+        match tx.legacy_item(&item.id)? {
             None => {
-                tx.put_item_versioned(item, item.version)?;
+                tx.put_legacy_item_versioned(item, item.version)?;
                 summary.added += 1;
             }
             Some(current) if item.updated_at > current.updated_at => {
-                tx.put_item_versioned(item, item.version)?;
+                tx.put_legacy_item_versioned(item, item.version)?;
                 summary.updated += 1;
             }
             Some(_) => summary.unchanged += 1,

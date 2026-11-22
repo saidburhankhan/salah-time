@@ -71,8 +71,8 @@ fn round_trip_reproduces_every_row_including_tombstones() {
     deleted_entry.deleted_at = Some(time(5));
     source
         .write(|tx| {
-            tx.put_item(&deleted_item)?;
-            tx.put_item(&live_item)?;
+            tx.put_legacy_item(&deleted_item)?;
+            tx.put_legacy_item(&live_item)?;
             tx.put_entry(&deleted_entry)?;
             tx.put_entry(&entry("entry-live", "item-live", time(3)))
         })
@@ -99,7 +99,7 @@ fn newer_updated_at_wins_and_older_is_ignored() {
     let mut store = Store::open_in_memory().unwrap();
     let mut current = item("item", time(3));
     current.title = "Current".into();
-    store.write(|tx| tx.put_item(&current)).unwrap();
+    store.write(|tx| tx.put_legacy_item(&current)).unwrap();
 
     let mut newer = current.clone();
     newer.title = "Newer".into();
@@ -144,7 +144,7 @@ fn invalid_rows_and_headers_do_not_change_the_store() {
     for invalid in invalid_exports {
         let mut store = Store::open_in_memory().unwrap();
         store
-            .write(|tx| tx.put_item(&item("existing", time(2))))
+            .write(|tx| tx.put_legacy_item(&item("existing", time(2))))
             .unwrap();
         let before = store.items().unwrap();
         assert!(export::import(&mut store, &invalid).is_err());
@@ -188,10 +188,10 @@ fn version_three_exports_entity_versions_and_import_preserves_them() {
 
     let mut source = Store::open_in_memory().unwrap();
     let mut row = item("versioned", time(2));
-    source.write(|tx| tx.put_item(&row)).unwrap();
+    source.write(|tx| tx.put_legacy_item(&row)).unwrap();
     row.title = "Updated".into();
     row.updated_at = time(3);
-    source.write(|tx| tx.put_item(&row)).unwrap();
+    source.write(|tx| tx.put_legacy_item(&row)).unwrap();
     let mark = PrayerMark {
         id: PrayerMark::id_for(day(), BoundaryId::Asr),
         day: day(),

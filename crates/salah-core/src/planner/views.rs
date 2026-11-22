@@ -53,7 +53,7 @@ pub fn today(store: &Store, config: &Config, now: DateTime<Utc>) -> Result<Today
     let current_block = schedule.current_block();
     let day = current_block.day;
     let block = current_block.start;
-    let items = store.items()?;
+    let items = store.legacy_items()?;
     let entries = store.entries_between(day, day)?;
     let mut ends = BlockEnds::new(config);
     let rows = report_day(
@@ -109,7 +109,7 @@ pub fn history(
     let schedule = schedule::resolve(config, now)?;
     let today = schedule.day();
     let current = schedule.current_block().start;
-    let items = store.items()?;
+    let items = store.legacy_items()?;
     let entries = store.entries_between(first, last)?;
     let mut ends = BlockEnds::new(config);
     let mut days = Vec::new();
@@ -226,7 +226,7 @@ pub fn day_plan(
         })
         .collect();
     let sleep_end = windows.last().map(|w| w.end);
-    let items = store.items()?;
+    let items = store.legacy_items()?;
     let entries = store.entries_between(day, day)?;
     let mut ends = BlockEnds::new(config);
     let day_rows = report_day(
