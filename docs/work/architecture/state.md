@@ -11,7 +11,7 @@ Reviews and proposals written (b3ffadb). Plan in `plan.md`. No code moved.
 
 ## Next
 
-P1: contract fixtures (core 1 + FE 1) in parallel with typed errors (core 2).
+P2b: Clock/IdGenerator (DeepSeek) ∥ app DTO decoders (Codex); then P3 repository (Codex).
 
 ## Verification
 
