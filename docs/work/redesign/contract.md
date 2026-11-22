@@ -30,7 +30,8 @@ Enumerations:
 ```
 
 `weekdays` is `null` unless `repeat` is `weekly`. Items in a block are
-ordered by `position`.
+ordered by `position`. `minutes` (time spent, from timers and adjustments)
+is meaningful for every measure, not only `minutes` items.
 
 ## Day plan — `salah day [--date D] --json`
 
@@ -66,7 +67,8 @@ date: the current day (Fajr→Sleep). Past days: every prayer `passed`.
 ## Today — `salah item list --json`
 
 Unchanged from the MVP, plus `"prayer_marks": ["fajr", …]` for the current
-day. `block` is `"night"` between sleep and Fajr (no longer `null`);
+day, and `"timer": { "item_id": "…", "title": "Read", "started_at": "…",
+"minutes": 12 }` or `null` for the running timer. `block` is `"night"` between sleep and Fajr (no longer `null`);
 `upcoming` is always empty and kept only for compatibility. `salah status --json` embeds it as `planner`.
 
 ## Quick add
@@ -95,7 +97,14 @@ Grammar (case-insensitive, any order): `after|at <prayer>`,
   at position N (0-based) and renumbers that block. Returns the Item.
 - `salah item done|undo --json ID [--date D]`, `salah item log --json ID VALUE
   [--date D]` — `--date` records on that day (default: as before).
-- `salah item start|stop`, `salah item remove --json ID` — unchanged.
+- `salah item start|stop --json [ID]`: works for every item, whatever its
+  measure. Starting one timer stops any other. Stop + start again is
+  "pause / continue"; the minutes add up.
+- `salah item log --json ID VALUE [--date D]`: VALUE may be negative to
+  subtract (non-zero, at most 1440 either way). The unit follows the item:
+  `count` items adjust their count, all others adjust minutes. Daily totals
+  never go below 0.
+- `salah item remove --json ID` — unchanged.
 
 Item (from add/edit/move): DayItem fields without `state`, `minutes`,
 `count`, `timer_started_at`; with `day`, `created_at`, `updated_at`,
@@ -127,8 +136,9 @@ Default: the 30 days ending on the current day.
   "marked_total": 96, "prayer_slots": 150 }
 ```
 
-`items` lists every live item planned at least once in the range. Routines
-are the entries with `repeat` ≠ `none`.
+`items` lists every live repeating item (even when it has no occurrence in
+the range yet; then `planned_days` is 0) and every one-time item planned in
+the range. Routines are the entries with `repeat` ≠ `none`.
 
 ## Settings
 

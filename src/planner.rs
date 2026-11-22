@@ -375,13 +375,14 @@ pub fn log(
 ) -> Result<Entry, String> {
     let now = stamp(now);
     let item = find_item(store, id)?;
+    // Count items adjust their count; every other item records time spent.
     let kind = match item.measure {
-        Measure::Minutes => EntryKind::Minutes,
         Measure::Count => EntryKind::Count,
-        Measure::Check => return Err("this item is ticked, not measured; use `done`".into()),
+        Measure::Check | Measure::Minutes => EntryKind::Minutes,
     };
-    if !(1..=24 * 60).contains(&value) {
-        return Err("value must be between 1 and 1440".into());
+    // A negative value subtracts; daily totals are clamped at zero.
+    if value == 0 || value.abs() > 24 * 60 {
+        return Err("value must be between -1440 and 1440, and not 0".into());
     }
     let schedule = schedule::resolve(config, now)?;
     let mut entry = new_entry(&item, recorded_block(&schedule, &item, date), kind, now);
@@ -399,9 +400,6 @@ pub fn start_timer(
 ) -> Result<Entry, String> {
     let now = stamp(now);
     let item = find_item(store, id)?;
-    if item.measure != Measure::Minutes {
-        return Err("timers are for minutes items".into());
-    }
     let schedule = schedule::resolve(config, now)?;
     close_expired_timers(store, config, now)?;
     let mut timer = new_entry(&item, schedule.current_block(), EntryKind::Timer, now);
@@ -461,6 +459,17 @@ pub struct Today {
     pub upcoming: Vec<DayItem>,
     /// Prayers marked as prayed on `day`.
     pub prayer_marks: Vec<BoundaryId>,
+    /// The running timer, if any.
+    pub timer: Option<RunningTimer>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct RunningTimer {
+    pub item_id: String,
+    pub title: String,
+    pub started_at: DateTime<Utc>,
+    /// Minutes the item has today, the running session included.
+    pub minutes: i64,
 }
 
 fn report_day(
@@ -495,6 +504,14 @@ pub fn today(store: &Store, config: &Config, now: DateTime<Utc>) -> Result<Today
     let current = item::current_block_items(&rows, block);
     let open = current.iter().filter(|r| r.state == State::Open).count();
     let prayer_marks = live_marks(store, day)?;
+    let timer = rows.iter().find_map(|row| {
+        row.timer_started_at.map(|started_at| RunningTimer {
+            item_id: row.id.clone(),
+            title: row.title.clone(),
+            started_at,
+            minutes: row.minutes,
+        })
+    });
     Ok(Today {
         day,
         block: Some(block),
@@ -504,6 +521,7 @@ pub fn today(store: &Store, config: &Config, now: DateTime<Utc>) -> Result<Today
         items: rows,
         upcoming: Vec::new(),
         prayer_marks,
+        timer,
     })
 }
 
@@ -834,7 +852,9 @@ pub fn stats(
                 }
             })
             .collect();
-        if !series.iter().any(|d| d.planned) {
+        // Repeating items are always listed, even before their first
+        // occurrence; one-time items only when planned in the range.
+        if item.repeat == Repeat::None && !series.iter().any(|d| d.planned) {
             continue;
         }
         items.push(ItemStats {
@@ -1054,8 +1074,8 @@ mod tests {
             ..titled("Target")
         };
         assert!(add(&mut store, &config(), at(20, 13, 0), target).is_err());
-        assert!(log(&mut store, &config(), at(20, 13, 0), &tick.id, 5, None).is_err());
-        assert!(start_timer(&mut store, &config(), at(20, 13, 0), &tick.id).is_err());
+        assert!(log(&mut store, &config(), at(20, 13, 0), &tick.id, 0, None).is_err());
+        assert!(log(&mut store, &config(), at(20, 13, 0), &tick.id, 1441, None).is_err());
         assert!(find_item(&store, "abc").is_err());
         assert_eq!(store.items().unwrap().len(), 1);
         assert!(store.entries().unwrap().is_empty());
@@ -1259,6 +1279,70 @@ mod tests {
         assert!(!item.series[5].planned, "Saturday is not planned");
         assert_eq!(report.prayers[2].marked_days, 1);
         assert_eq!((report.marked_total, report.prayer_slots), (1, 35));
+    }
+
+    #[test]
+    fn any_item_can_be_timed_and_adjusted_without_going_below_zero() {
+        let mut store = Store::open_in_memory().unwrap();
+        let email = add(&mut store, &config(), at(20, 13, 0), titled("Email")).unwrap();
+        start_timer(&mut store, &config(), at(20, 13, 0), &email.id).unwrap();
+        let view = today(&store, &config(), at(20, 13, 12)).unwrap();
+        let timer = view.timer.unwrap();
+        assert_eq!(
+            (timer.item_id.as_str(), timer.minutes),
+            (email.id.as_str(), 12)
+        );
+        stop_timer(&mut store, &config(), at(20, 13, 12)).unwrap();
+        // Pause, then continue: the minutes add up.
+        start_timer(&mut store, &config(), at(20, 13, 30), &email.id).unwrap();
+        stop_timer(&mut store, &config(), at(20, 13, 38)).unwrap();
+        log(&mut store, &config(), at(20, 13, 40), &email.id, 5, None).unwrap();
+        log(&mut store, &config(), at(20, 13, 41), &email.id, -10, None).unwrap();
+        let view = today(&store, &config(), at(20, 13, 42)).unwrap();
+        assert!(view.timer.is_none());
+        assert_eq!(view.items[0].minutes, 12 + 8 + 5 - 10);
+        log(&mut store, &config(), at(20, 13, 43), &email.id, -100, None).unwrap();
+        let view = today(&store, &config(), at(20, 13, 44)).unwrap();
+        assert_eq!(view.items[0].minutes, 0, "clamped at zero");
+        assert_eq!(
+            view.items[0].state,
+            State::Open,
+            "time alone does not tick a check item"
+        );
+
+        let pushups = NewItem {
+            measure: Some(Measure::Count),
+            ..titled("Pushups")
+        };
+        let pushups = add(&mut store, &config(), at(20, 13, 0), pushups).unwrap();
+        log(&mut store, &config(), at(20, 13, 50), &pushups.id, 3, None).unwrap();
+        log(&mut store, &config(), at(20, 13, 51), &pushups.id, -1, None).unwrap();
+        let view = today(&store, &config(), at(20, 13, 52)).unwrap();
+        let row = view.items.iter().find(|r| r.id == pushups.id).unwrap();
+        assert_eq!((row.count, row.minutes), (2, 0));
+    }
+
+    #[test]
+    fn stats_list_routines_before_their_first_occurrence() {
+        let mut store = Store::open_in_memory().unwrap();
+        // 2026-11-22 is a Sunday; the routine starts on Monday.
+        let gym = NewItem {
+            repeat: Some(Repeat::Weekly),
+            weekdays: Some(Weekdays::parse_list("mon,wed").unwrap()),
+            ..titled("Gym")
+        };
+        add(&mut store, &config(), at(22, 13, 0), gym).unwrap();
+        add(&mut store, &config(), at(22, 13, 0), titled("Once")).unwrap();
+        let report = stats(&store, &config(), at(22, 13, 0), date(22), date(22)).unwrap();
+        let titles: Vec<_> = report
+            .items
+            .iter()
+            .map(|i| (i.title.as_str(), i.planned_days))
+            .collect();
+        assert!(titles.contains(&("Gym", 0)));
+        assert!(titles.contains(&("Once", 1)));
+        let earlier = stats(&store, &config(), at(22, 13, 0), date(20), date(21)).unwrap();
+        assert!(earlier.items.iter().all(|i| i.title != "Once"));
     }
 
     #[test]

@@ -229,7 +229,8 @@ struct ItemAddArgs {
 struct ItemLogArgs {
     /// Item id or unique id prefix
     id: String,
-    /// Minutes or count to record
+    /// Minutes (or count, for count items) to add; negative subtracts
+    #[arg(allow_negative_numbers = true)]
     value: i64,
     /// Record on this day (YYYY-MM-DD) instead of now
     #[arg(long)]

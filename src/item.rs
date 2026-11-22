@@ -316,13 +316,16 @@ pub fn day_items(
                     .iter()
                     .filter(|e| e.is_live() && e.item_id == item.id && e.block.day == view.day)
             };
+            // Adjustments can subtract, but a day never goes below zero.
             let minutes = mine()
                 .map(|e| e.minutes(view.now, block_end(e.block)))
-                .sum();
+                .sum::<i64>()
+                .max(0);
             let count = mine()
                 .filter(|e| e.kind == EntryKind::Count)
                 .filter_map(|e| e.value)
-                .sum();
+                .sum::<i64>()
+                .max(0);
             let ticked = mine().any(|e| e.kind == EntryKind::Done);
             let reached = match (item.measure, item.target) {
                 (Measure::Minutes, Some(target)) => minutes >= target,

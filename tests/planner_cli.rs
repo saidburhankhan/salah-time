@@ -132,8 +132,24 @@ fn measured_items_log_and_check_items_reject_logs() {
         15
     );
 
+    // Check items record time too, and a negative value subtracts. The
+    // widget and app send "-5" as its own argument, so it must not be read as
+    // a flag.
     let check = add(&fixture, &[]);
-    let output = fixture.run(&["item", "log", check["id"].as_str().unwrap(), "1"]);
+    let check_id = check["id"].as_str().unwrap();
+    fixture.json(&["item", "log", "--json", check_id, "20"]);
+    fixture.json(&["item", "log", "--json", check_id, "-5"]);
+    let list = fixture.json(&["item", "list", "--json"]);
+    let row = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == check_id)
+        .unwrap()
+        .clone();
+    assert_eq!(row["minutes"], 15);
+
+    let output = fixture.run(&["item", "log", check_id, "0"]);
     assert!(!output.status.success());
     assert!(stderr(&output).starts_with("salah: "));
 }

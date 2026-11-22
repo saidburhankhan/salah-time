@@ -90,8 +90,9 @@ pub fn validate(data: &Export) -> Result<(), String> {
         if !entry_ids.insert(entry.id.as_str()) {
             return Err(format!("duplicate entry id {:?}", entry.id));
         }
-        if entry.value.is_some_and(|value| value < 0) {
-            return Err(format!("entry {}: value must not be negative", entry.id));
+        // Negative values are adjustments that subtract time or count.
+        if entry.value.is_some_and(|value| value.abs() > 24 * 60) {
+            return Err(format!("entry {}: value is out of range", entry.id));
         }
         validate_times("entry", &entry.id, entry.created_at, entry.updated_at)?;
         if entry.kind == EntryKind::Timer && entry.started_at.is_none() {
