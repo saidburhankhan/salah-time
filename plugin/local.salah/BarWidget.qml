@@ -4,6 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "DragLogic.js" as DragLogic
 
 BarWidget {
   id: root
@@ -652,6 +653,8 @@ BarWidget {
       }
 
       function syncTimeline(status) {
+        // A server push during a drag is applied once the drag ends.
+        if (dragKey !== "") return
         var desired = desiredRows(status)
         var desiredKeys = ({})
         for (var k = 0; k < desired.length; k++) desiredKeys[desired[k].rowKey] = true
@@ -779,6 +782,12 @@ BarWidget {
         timelineModel.insert(addIndex, pending)
       }
 
+      function timelineRows() {
+        var rows = []
+        for (var i = 0; i < timelineModel.count; i++) rows.push(timelineModel.get(i))
+        return rows
+      }
+
       function beginDrag(key, title, pointerY) {
         if (dragKey !== "" || key.indexOf("item:") !== 0) return
         dragSnapshot = []
@@ -791,20 +800,23 @@ BarWidget {
 
       function moveDrag(pointerY) {
         if (dragKey === "") return
-        dragPointerY = Math.max(0, Math.min(timelineList.contentHeight, pointerY))
+        var height = timelineList.contentHeight
+        var outside = pointerY < 0 ? "above" : (pointerY >= height ? "below" : "")
+        dragPointerY = Math.max(0, Math.min(height, pointerY))
         var from = indexOfKey(dragKey)
-        var hit = timelineList.indexAt(Style.space(10), dragPointerY)
-        if (from < 0 || hit < 0) return
-        var hitRow = timelineModel.get(hit)
-        var slot = hit
-        var delegate = timelineList.itemAtIndex(hit)
-        if (hitRow.rowType === "header") slot = hit + 1
-        else if (hitRow.rowType === "item" && delegate && dragPointerY > delegate.y + delegate.height / 2) slot = hit + 1
-        else if (hitRow.rowType === "marker") {
-          while (slot > 0 && timelineModel.get(slot).rowType === "marker") slot--
+        if (from < 0) return
+        var hit = -1
+        var afterHit = false
+        if (outside === "") {
+          hit = timelineList.indexAt(Style.space(10), dragPointerY)
+          if (hit < 0) outside = dragPointerY <= 0 ? "above" : "below"
         }
-        var target = slot > from ? slot - 1 : slot
-        if (target !== from && target >= 0 && target < timelineModel.count)
+        if (hit >= 0) {
+          var delegate = timelineList.itemAtIndex(hit)
+          afterHit = delegate ? dragPointerY > delegate.y + delegate.height / 2 : false
+        }
+        var target = DragLogic.targetIndex(timelineRows(), dragKey, hit, afterHit, outside)
+        if (target >= 0 && target !== from && target < timelineModel.count)
           timelineModel.move(from, target, 1)
       }
 
@@ -815,11 +827,19 @@ BarWidget {
         }
       }
 
+      // Rebuild the visual order from the latest server rows. Every drop,
+      // cancel, and failed move ends here so the list can never stay in a
+      // position the server would not accept.
+      function restoreServerOrder() {
+        if (root.report) syncTimeline(root.report)
+        else restoreDragOrder()
+      }
+
       function cancelDrag() {
         if (dragKey === "") return
-        restoreDragOrder()
         dragKey = ""
         dragSnapshot = []
+        restoreServerOrder()
       }
 
       function finishDrag(inside) {
@@ -828,22 +848,24 @@ BarWidget {
           cancelDrag()
           return
         }
-        var itemIndex = indexOfKey(dragKey)
-        var block = ""
-        var blockIndex = 0
-        for (var i = itemIndex - 1; i >= 0; i--) {
-          var row = timelineModel.get(i)
-          if (row.rowType === "header") { block = row.block; break }
-          if (row.rowType === "item") blockIndex++
-        }
-        if (block === "") { cancelDrag(); return }
-        var id = timelineModel.get(itemIndex).itemId
-        timelineModel.setProperty(itemIndex, "block", block)
-        timelineModel.setProperty(itemIndex, "pending", true)
+        var key = dragKey
+        var from = indexOfKey(key)
+        var id = from >= 0 ? String(timelineModel.get(from).itemId || "") : ""
+        var target = DragLogic.destination(timelineRows(), key)
         dragKey = ""
         dragSnapshot = []
+        // Invalid final positions cancel: never send a move and never leave
+        // the row where the drag happened to stop.
+        if (id === "" || !target || target.valid !== true || target.block === "") {
+          restoreServerOrder()
+          return
+        }
+        // Show the authoritative server order while the move is in flight;
+        // the response (or changed notification) rebuilds it again.
+        restoreServerOrder()
         var opId = root.beginOp("move", "item:" + id)
-        client.moveItem(opId, id, block, blockIndex)
+        setRowPending("item:" + id, true)
+        client.moveItem(opId, id, target.block, target.index)
       }
 
       ListModel {
