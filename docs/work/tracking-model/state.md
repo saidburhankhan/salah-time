@@ -2,9 +2,7 @@
 
 ## Repository
 
-- Branch: `architecture` (other agents have uncommitted work in
-  `salah-domain/src/item.rs`, `salah-core/src/planner/`, `salah-protocol/`)
-- Dirty files from this work item: `docs/work/tracking-model/`, `docs/START.md`
+- Branch: `architecture`, clean at 009249b; the architecture work item is finished (c673a99).
 
 ## Now
 
@@ -22,8 +20,7 @@ resumes it after a limit cutoff.
 
 ## Interfaces
 
-- Implementation replaces `Item`/`Entry`/`entries` wholesale; it must start
-  after the `architecture` work item lands to avoid conflicting edits.
+- `interface.md` is the contract between W1 (crates/**) and W2 (app/**, plugin/**).
 
 ## Risks and blockers
 
