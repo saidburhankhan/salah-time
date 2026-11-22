@@ -137,7 +137,7 @@ fn handshake_is_required_and_negotiates_protocol_one() {
     assert_eq!(hello["protocol"], 1);
     assert_eq!(hello["server"], "salah 0.1.0");
     assert_eq!(hello["revision"], 0);
-    assert_eq!(hello["capabilities"], json!(["timer.v1"]));
+    assert_eq!(hello["capabilities"], json!(["timer.v1", "events.v1"]));
 
     let error = fixture.err("not.a.method", json!({}));
     assert_eq!(error.code, METHOD_NOT_FOUND);
@@ -175,6 +175,7 @@ fn every_method_rejects_invalid_params_with_a_validation_kind() {
         "config.set",
         "export",
         "import",
+        "subscribe",
     ] {
         let error = fixture.err(method, json!([]));
         assert_eq!(error.code, INVALID_PARAMS, "{method}: {error:?}");
@@ -742,5 +743,11 @@ fn every_protocol_method_has_a_happy_path_and_an_error() {
         "import",
         json!({"op_id":"op-all-import","data":exported}),
         json!({"op_id":"op-all-import-bad","data":{"format":"not-salah"}}),
+    );
+    check(
+        &mut fixture,
+        "subscribe",
+        json!({"topics":["changes"],"after_revision":0}),
+        json!({"topics":["unknown"]}),
     );
 }

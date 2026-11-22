@@ -32,6 +32,27 @@ pub struct HelloResult {
     pub revision: i64,
 }
 
+/// `subscribe` asks the transport to push `changed` notifications on this
+/// connection. The stdio transport accepts the request but cannot push, so it
+/// only returns the current revision.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct SubscribeParams {
+    /// Supported topic: `changes`. An empty list means `changes`.
+    #[serde(default)]
+    pub topics: Vec<String>,
+    /// The last revision the client already saw; returned in the result so a
+    /// reconnecting client can refetch when it has a gap.
+    #[serde(default)]
+    pub after_revision: Option<i64>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct SubscribeResult {
+    pub revision: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_revision: Option<i64>,
+}
+
 // ---------------------------------------------------------------------------
 // read results
 // ---------------------------------------------------------------------------

@@ -19,6 +19,8 @@ use std::{
     process::ExitCode,
 };
 
+mod daemon;
+
 #[derive(Parser)]
 #[command(
     name = "salah",
@@ -69,7 +71,9 @@ enum Command {
     /// Import planner data
     Import(ImportArgs),
     /// Read JSON-RPC 2.0 requests from stdin and write responses to stdout
-    Rpc,
+    Rpc(RpcArgs),
+    /// Run the single-writer JSON-RPC daemon on the user Unix socket
+    Serve(ServeArgs),
     /// List the calculation methods
     Methods,
     /// Open the Salah desktop app
@@ -331,6 +335,22 @@ struct StatusArgs {
     json: bool,
 }
 
+#[derive(Args)]
+struct RpcArgs {
+    /// Bridge stdin/stdout to a running `salah serve` instead of handling
+    /// requests in-process; an optional path overrides the standard socket
+    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
+    socket: Option<String>,
+}
+
+#[derive(Args)]
+struct ServeArgs {
+    /// Exit after this many minutes without connections when started by
+    /// systemd socket activation (0 disables idle shutdown)
+    #[arg(long, default_value_t = 5)]
+    idle_minutes: u64,
+}
+
 #[derive(Subcommand)]
 enum ConfigCommand {
     /// Show the saved configuration
@@ -451,7 +471,12 @@ fn run(cli: Cli) -> Result<(), String> {
         Some(Command::History(args)) => history_command(args, now),
         Some(Command::Export(args)) => export_command(args, now),
         Some(Command::Import(args)) => import_command(args, now),
-        Some(Command::Rpc) => rpc_command(clock.as_ref(), &ids),
+        Some(Command::Rpc(args)) => match args.socket {
+            Some(path) if path.is_empty() => daemon::bridge(None),
+            Some(path) => daemon::bridge(Some(std::path::Path::new(&path))),
+            None => rpc_command(clock.as_ref(), &ids),
+        },
+        Some(Command::Serve(args)) => daemon::serve(args.idle_minutes),
         Some(Command::Methods) => methods_command(),
         Some(Command::Open) => open_command(),
     }

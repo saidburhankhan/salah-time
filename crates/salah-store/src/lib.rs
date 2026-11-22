@@ -312,6 +312,23 @@ impl Store {
             .map_err(sqlite_error)
     }
 
+    /// SQLite's connection-local commit counter. It changes whenever another
+    /// connection commits, which lets the daemon notice direct CLI writes.
+    pub fn data_version(&self) -> Result<i64, Error> {
+        self.conn
+            .pragma_query_value(None, "data_version", |row| row.get(0))
+            .map_err(sqlite_error)
+    }
+
+    /// Sequence of the newest change row, or zero for a fresh store.
+    pub fn last_change_seq(&self) -> Result<i64, Error> {
+        self.conn
+            .query_row("SELECT COALESCE(MAX(seq), 0) FROM changes", [], |row| {
+                row.get(0)
+            })
+            .map_err(sqlite_error)
+    }
+
     /// Changes with `seq` greater than `after_seq`, oldest first.
     pub fn changes_since(&self, after_seq: i64, limit: usize) -> Result<Vec<Change>, Error> {
         let limit = limit.min(10_000) as i64;

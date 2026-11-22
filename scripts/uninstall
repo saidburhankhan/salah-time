@@ -8,6 +8,8 @@ state_dir="$HOME/.local/state/salah"
 install_marker="$state_dir/installed-from"
 binary_digest="$state_dir/binary.sha256"
 plugin_digest_file="$state_dir/plugin.sha256"
+systemd_dir="$HOME/.config/systemd/user"
+systemd_digests="$state_dir/systemd.sha256"
 
 plugin_digest() {
   tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
@@ -21,11 +23,40 @@ real_home=$(getent passwd "$(id -u)" | cut -d: -f6)
 touch_shell() {
   [[ -z "${SALAH_NO_SHELL:-}" && "$HOME" == "$real_home" ]] && command -v omarchy >/dev/null
 }
+touch_systemd() {
+  [[ -z "${SALAH_NO_SHELL:-}" && "$HOME" == "$real_home" ]] && command -v systemctl >/dev/null
+}
+
+# All installed units must still match their recorded digests before any of
+# them is stopped or removed.
+systemd_owned() {
+  [[ -f "$systemd_digests" ]] || return 1
+  local digest path
+  while read -r digest path; do
+    [[ -e "$path" ]] || continue
+    [[ "$(sha256sum -- "$path" | awk '{ print $1 }')" == "$digest" ]] || return 1
+  done < "$systemd_digests"
+}
 
 if [[ ! -f "$install_marker" || "$(<"$install_marker")" != "$project_dir" ]]; then
   printf 'Refusing to uninstall: this checkout does not own the active installation.\n' >&2
   exit 1
 fi
+
+if systemd_owned; then
+  if touch_systemd; then
+    systemctl --user disable --now salah.socket >/dev/null 2>&1 || true
+    systemctl --user stop salah.service >/dev/null 2>&1 || true
+    systemctl --user daemon-reload >/dev/null 2>&1 \
+      || printf 'warning: systemctl --user daemon-reload failed; run it yourself\n' >&2
+  fi
+  while read -r _ path; do
+    rm -f -- "$path"
+  done < "$systemd_digests"
+elif [[ -f "$systemd_digests" ]]; then
+  printf 'Leaving modified systemd units untouched: %s\n' "$systemd_dir" >&2
+fi
+rm -f -- "$systemd_digests"
 
 if [[ -d "$plugin_target" && ! -L "$plugin_target" && -f "$plugin_digest_file" \
     && "$(plugin_digest "$plugin_target")" == "$(<"$plugin_digest_file")" ]]; then

@@ -10,6 +10,10 @@ state_dir="$HOME/.local/state/salah"
 install_marker="$state_dir/installed-from"
 binary_digest="$state_dir/binary.sha256"
 plugin_digest_file="$state_dir/plugin.sha256"
+systemd_dir="$HOME/.config/systemd/user"
+socket_unit="$systemd_dir/salah.socket"
+service_unit="$systemd_dir/salah.service"
+systemd_digests="$state_dir/systemd.sha256"
 
 # The desktop app is optional: it is built only when Qt's qmake6 is present.
 app_dir="$project_dir/app"
@@ -26,6 +30,14 @@ owned_app_file() {
   [[ ! -e "$1" && ! -L "$1" ]] && return 0
   [[ -f "$app_digests" && -f "$install_marker" && "$(<"$install_marker")" == "$project_dir" ]] \
     && grep -qxF "$(sha256sum -- "$1" | awk '{ print $1 }')  $1" "$app_digests"
+}
+
+# User systemd units follow the same ownership rule as every other installed
+# file: only a path recorded with its digest by this checkout is replaced.
+owned_systemd_file() {
+  [[ ! -e "$1" && ! -L "$1" ]] && return 0
+  [[ -f "$systemd_digests" && -f "$install_marker" && "$(<"$install_marker")" == "$project_dir" ]] \
+    && grep -qxF "$(sha256sum -- "$1" | awk '{ print $1 }')  $1" "$systemd_digests"
 }
 
 plugin_digest() {
@@ -73,6 +85,14 @@ cargo build --locked --release --manifest-path "$project_dir/Cargo.toml" -p sala
 mkdir -p -- "$(dirname -- "$binary_target")" "$(dirname -- "$plugin_target")" "$state_dir"
 install -m 0755 -- "$binary_source" "$binary_target"
 sha256sum -- "$binary_target" | awk '{ print $1 }' > "$binary_digest"
+
+for target in "$socket_unit" "$service_unit"; do
+  if ! owned_systemd_file "$target"; then
+    printf 'Refusing to replace an existing systemd unit: %s\n' "$target" >&2
+    printf 'Move it elsewhere first if it is no longer needed.\n' >&2
+    exit 1
+  fi
+done
 
 if [[ -n "$build_app" ]]; then
   printf 'Building the Salah desktop app…\n'
@@ -156,6 +176,46 @@ restore_bar_place() {
   done
 }
 restore_bar_place
+
+mkdir -p -- "$systemd_dir"
+cat > "$socket_unit" <<EOF
+[Unit]
+Description=Salah single-writer daemon socket
+
+[Socket]
+ListenStream=%t/salah/salah.sock
+SocketMode=0600
+DirectoryMode=0700
+RemoveOnStop=yes
+
+[Install]
+WantedBy=default.target
+EOF
+cat > "$service_unit" <<EOF
+[Unit]
+Description=Salah single-writer JSON-RPC daemon
+Requires=salah.socket
+After=salah.socket
+
+[Service]
+Type=simple
+ExecStart=$binary_target serve
+Restart=on-failure
+RestartSec=2
+EOF
+sha256sum -- "$socket_unit" "$service_unit" > "$systemd_digests"
+
+# Only touch the live user manager for the real home, never for the test
+# suite's temporary home and never when SALAH_NO_SHELL is set.
+real_home=$(getent passwd "$(id -u)" | cut -d: -f6)
+if [[ -z "${SALAH_NO_SHELL:-}" && "$HOME" == "$real_home" ]] && command -v systemctl >/dev/null; then
+  if ! systemctl --user daemon-reload; then
+    printf 'warning: systemctl --user daemon-reload failed; run it yourself\n' >&2
+  fi
+  if ! systemctl --user enable --now salah.socket; then
+    printf 'warning: could not enable salah.socket; run systemctl --user enable --now salah.socket\n' >&2
+  fi
+fi
 
 printf 'Installed %s\n' "$binary_target"
 printf 'Installed plugin in %s\n' "$plugin_target"

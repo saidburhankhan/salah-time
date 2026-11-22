@@ -92,6 +92,22 @@ cargo run -- config set --help
 cargo run -- --help
 ```
 
+## Daemon and socket transport
+
+`salah serve` runs one long-lived, single-writer JSON-RPC 2.0 daemon and listens
+only on `$XDG_RUNTIME_DIR/salah/salah.sock` (directory `0700`, socket `0600`).
+Clients use NDJSON frames: `hello` first, then the protocol-v1 methods, plus
+`subscribe` to receive `changed` invalidation pushes. `salah rpc` remains the
+stdio transport and fallback; `salah rpc --socket` bridges stdin/stdout to a
+running daemon.
+
+The installer also writes user systemd units
+(`~/.config/systemd/user/salah.socket` and `salah.service`) so a connect starts
+the daemon on demand; `./scripts/uninstall` removes them. There is no TCP
+listener and no authentication token: same-user access is enforced by file
+permissions. See `docs/work/architecture/protocol-v1.md` for the full method
+table and notification rules.
+
 ## Automatic location
 
 Salah refreshes its location on startup and at most once every six hours.
@@ -132,10 +148,12 @@ The installer builds a release binary, copies it to `~/.local/bin/salah`, and
 copies the plugin into `~/.config/omarchy/plugins/local.salah`. When `qmake6`
 is present it also builds the desktop app, installs `~/.local/bin/salah-app`,
 and adds a "Salah" launcher entry and icon; without `qmake6` it skips the app.
-The plugin and desktop-app installation is ownership-checked: the installer
-never overwrites files it did not install, and it refuses to replace a plugin
-with the same name if that path belongs to something else or if the previously
-installed copy has local modifications.
+The plugin, desktop-app, and systemd-unit installation is ownership-checked:
+the installer never overwrites files it did not install, and it refuses to
+replace a plugin with the same name if that path belongs to something else or
+if the previously installed copy has local modifications. For the real home it
+also runs `systemctl --user daemon-reload` and enables `salah.socket`; failures
+are reported without failing the install.
 
 ```sh
 ./scripts/install

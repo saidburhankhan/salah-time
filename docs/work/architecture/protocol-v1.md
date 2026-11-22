@@ -1,9 +1,66 @@
 # Protocol v1: JSON-RPC 2.0 over NDJSON
 
-This is the transport-independent contract introduced in S3. It is served by
-`salah rpc` over stdin/stdout today and by the S4 Unix-socket daemon without
-changing a single method or DTO. The human `salah … --json` contract stays
-frozen in [`contract-v1.md`](contract-v1.md); it is not the RPC contract.
+This is the transport-independent contract introduced in S3. The same methods
+and DTOs are served over stdin/stdout by `salah rpc` and over a user-only Unix
+socket by `salah serve` (S4). The human `salah … --json` contract stays frozen
+in [`contract-v1.md`](contract-v1.md); it is not the RPC contract.
+
+## Transports
+
+### stdio
+
+`salah rpc` is the default, dependency-free transport: it reads request lines
+on stdin and writes response lines on stdout until EOF. It handles requests
+in-process, so it is the fallback when no daemon is running and the harness
+used by tests and scripts.
+
+`salah rpc --socket` is a stdio↔socket bridge: it connects to the running
+daemon and copies frames in both directions, so scripts can keep speaking
+NDJSON on stdin/stdout without knowing about Unix sockets.
+
+### Unix domain socket
+
+`salah serve` listens on:
+
+```text
+$XDG_RUNTIME_DIR/salah/salah.sock
+```
+
+`XDG_RUNTIME_DIR` is required; there is deliberately no `/tmp` fallback and the
+daemon never listens on TCP. The runtime directory is mode `0700` and the
+socket is mode `0600`, so only the same user can connect. On startup a live
+socket is detected by connecting to it; if another daemon answers, the new
+process refuses to start. A stale socket file is removed and replaced. On
+SIGTERM/SIGINT the standalone daemon removes its socket.
+
+The daemon is the single writer: every mutation is serialised through one
+writer thread, while each connection reads through its own SQLite connection.
+The single `salah` CLI never talks to the daemon, so the daemon also polls
+`PRAGMA data_version` about every 250 ms and emits `changed` when a direct CLI
+write advances the store revision.
+
+### systemd user activation
+
+`scripts/install` writes `~/.config/systemd/user/salah.socket` and
+`salah.service` (ownership-checked and digested like other installed files)
+and, for the real home only, enables the socket. The units are equivalent to:
+
+```ini
+# salah.socket
+[Socket]
+ListenStream=%t/salah/salah.sock
+SocketMode=0600
+DirectoryMode=0700
+
+# salah.service
+[Service]
+ExecStart=%h/.local/bin/salah serve
+```
+
+The service accepts systemd's `LISTEN_FDS`/`LISTEN_PID` descriptor 3 as well as
+binding the socket itself. A socket-activated instance exits after five idle
+minutes without connections (configurable with `--idle-minutes`) so systemd can
+restart it on demand; a manually started daemon stays up.
 
 ## Framing and handshake
 
@@ -25,7 +82,7 @@ frozen in [`contract-v1.md`](contract-v1.md); it is not the RPC contract.
 Any other method before `hello` fails with JSON-RPC `-32600`. The server
 supports protocol major `1`; if the client does not offer it, `hello` fails with
 `-32602`. `capabilities` is additive: clients ignore names they do not know.
-`events.v1` is reserved for S4's `changed` push.
+`events.v1` means the connection supports `subscribe` and `changed` pushes.
 
 ## Methods
 
@@ -58,6 +115,7 @@ store-wide counter, never a precondition. `changed.items` are canonical
 | `config.set` | `op_id?`, any `Config` field | `Config` | validation, config | yes with `op_id` | no |
 | `export` | — | v3 `salah-export` document | storage | — | — |
 | `import` | `data` (export document), `op_id?` | `revision`, `ImportSummary` | validation, storage | yes with `op_id` | no |
+| `subscribe` | `topics?` (`["changes"]`), `after_revision?` | `revision`, `after_revision?`; only the socket transport then pushes `changed` | validation | — | — |
 
 Ids are **full ids** over RPC. Prefix resolution remains a human-CLI
 convenience only. A missing or stale entity is `not_found` or `conflict`.
@@ -124,6 +182,19 @@ Example stale edit:
 
 ## Notifications
 
+A client subscribes after `hello`:
+
+```json
+→ {"jsonrpc":"2.0","id":4,"method":"subscribe",
+   "params":{"topics":["changes"],"after_revision":184}}
+← {"jsonrpc":"2.0","id":4,"result":{"revision":184}}
+```
+
+The stdio transport accepts `subscribe` and returns the revision but has no
+push channel. The socket daemon registers the connection and pushes every
+revision advance, including those caused by a direct `salah` CLI write to the
+same database.
+
 Notifications have no `id`:
 
 ```json
@@ -134,8 +205,10 @@ Notifications have no `id`:
 
 `changed` is an invalidation, not a patch: refetch `status.get` or `day.get`.
 `days` and `op_id` may be omitted; `scopes` is one of `items`, `entries`,
-`marks`, `config`. S3 defines these types; S4 emits them from the daemon
-together with `clock.boundary`.
+`marks`, `config`. The daemon emits these from its `data_version` watcher; a
+notification may cover more than one commit observed in the same poll, so
+clients treat its `revision` as the newest state to fetch and de-duplicate by
+revision.
 
 ## Evolution rules
 

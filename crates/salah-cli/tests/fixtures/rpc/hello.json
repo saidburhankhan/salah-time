@@ -3,7 +3,8 @@
   "jsonrpc": "2.0",
   "result": {
     "capabilities": [
-      "timer.v1"
+      "timer.v1",
+      "events.v1"
     ],
     "protocol": 1,
     "revision": 0,

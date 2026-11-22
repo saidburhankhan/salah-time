@@ -49,10 +49,49 @@ pub struct Dispatcher {
 }
 
 impl Dispatcher {
-    pub const CAPABILITIES: [&'static str; 1] = ["timer.v1"];
+    pub const CAPABILITIES: [&'static str; 2] = ["timer.v1", "events.v1"];
+
+    /// Methods that mutate the store or config. The daemon routes exactly
+    /// these through its single writer thread; everything else is read-only
+    /// and may run concurrently on a per-connection store.
+    pub const MUTATION_METHODS: [&'static str; 13] = [
+        "item.add",
+        "item.edit",
+        "item.move",
+        "item.remove",
+        "entry.done",
+        "entry.undo",
+        "entry.log",
+        "timer.start",
+        "timer.stop",
+        "prayer.mark",
+        "prayer.unmark",
+        "config.set",
+        "import",
+    ];
+
+    pub fn is_mutation(method: &str) -> bool {
+        Self::MUTATION_METHODS.contains(&method)
+    }
 
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// True after a successful `hello` on this dispatcher.
+    pub fn hello_done(&self) -> bool {
+        self.hello.is_some()
+    }
+
+    /// Marks the handshake as complete without performing it. The daemon's
+    /// writer dispatcher receives requests from connections that have already
+    /// passed their own handshake.
+    pub fn accept_hello(&mut self) {
+        self.hello = Some(Handshake {
+            protocol: PROTOCOL_VERSION,
+            client: "daemon".into(),
+            actor: None,
+        });
     }
 
     /// Parses one NDJSON line and returns the response line, if any. Blank
@@ -133,6 +172,7 @@ impl Dispatcher {
             "config.set" => self.config_set(params, ctx),
             "export" => self.export(params, ctx),
             "import" => self.import(params, ctx),
+            "subscribe" => self.subscribe(params, ctx),
             method => Err(RpcError::method_not_found(method)),
         }
     }
@@ -787,6 +827,26 @@ impl Dispatcher {
             Ok(config.clone())
         })?;
         to_value(result)
+    }
+
+    /// The stdio transport cannot push notifications, so `subscribe` only
+    /// validates the topic and returns the current revision. The socket daemon
+    /// intercepts this method to register the connection for pushes.
+    fn subscribe(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+        let params: SubscribeParams = parse_params(params)?;
+        for topic in &params.topics {
+            if topic != "changes" {
+                return Err(Error::validation(
+                    "topics",
+                    format!("unknown topic {topic:?}; supported: changes"),
+                )
+                .into());
+            }
+        }
+        to_value(SubscribeResult {
+            revision: ctx.store.revision()?,
+            after_revision: params.after_revision,
+        })
     }
 
     fn export(&mut self, params: &Value, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
