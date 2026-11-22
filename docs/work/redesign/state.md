@@ -7,18 +7,17 @@
 
 ## Now
 
-Round 2 committed and installed (ebefdc8): night block, live drag and drop
-in app and widget, optimistic updates, no rebuild on unchanged data, widget
-without the sleep-time field. App drag verified with an offscreen harness that
-drives beginDrag/updateDrag/finishDrag and reads back `salah day --json`
-(two bugs found and fixed: window-to-item mapping threw; ListModel rows reached
-C++ as empty maps so drops were never saved). Widget drag is unverified live.
+Round 3 committed and installed (b747ea2, core f960921): timers on every item
+(pause/continue), − / + adjustments (count ±1, otherwise minutes ±5, totals
+clamped at 0), running timer in the bar instead of the open count, Esc
+handling, quick-add Cancel, inline edit/delete in the widget, next-occurrence
+hints, and future routines listed in stats. Widget unverified live.
 
 ## Next
 
-1. User restarts the shell and tries the widget: drag (handle and
-   long-press), quick add, ticks, prayer marks, Before Fajr.
-2. Turn the drag harness into an app test so a broken drop fails `bin/test`.
+1. User restarts the shell and checks the widget (timers, ±, edit/delete,
+   Esc, drag).
+2. Statistics redesign by date range, then tags (new work item).
 3. Merge `sleep-boundary` and `items-mvp` into `main` once accepted.
 
 ## Interfaces
