@@ -1,7 +1,7 @@
-use crate::calculation::{PrayerTime, calculate, method};
-use crate::day::{self, Boundary, Timeline};
-use crate::{config::Config, official};
-use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, Timelike, Utc};
+use crate::config::Config;
+use crate::day::{self, Boundary};
+use crate::schedule::{self, BlockKey, Schedule};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -34,6 +34,8 @@ pub struct DisplayBoundary {
 }
 #[derive(Debug, Serialize)]
 pub struct CurrentBlock {
+    /// Stable key of the block in progress, as stored with items.
+    pub block: BlockKey,
     pub start: BoundaryPoint,
     pub end: BoundaryPoint,
     pub sleeping: bool,
@@ -48,6 +50,7 @@ pub struct BoundaryPoint {
 }
 #[derive(Debug, Serialize)]
 pub struct Status {
+    pub schema_version: u32,
     pub location: String,
     pub method: String,
     pub method_name: &'static str,
@@ -55,6 +58,8 @@ pub struct Status {
     pub source_name: &'static str,
     pub source_updated: Option<String>,
     pub date: String,
+    /// The day (Fajr→Sleep) in progress; differs from `date` after midnight.
+    pub day: String,
     pub sleep_time: String,
     pub label: String,
     pub next: NextPrayer,
@@ -63,111 +68,47 @@ pub struct Status {
     pub boundaries: Vec<DisplayBoundary>,
 }
 
-pub fn build(config: &Config, utc_now: DateTime<Utc>) -> Result<Status, String> {
-    let selected =
-        method(&config.method).ok_or_else(|| format!("unknown method: {}", config.method))?;
-    let offset = FixedOffset::east_opt((config.timezone_offset * 3600.0).round() as i32)
-        .ok_or("invalid timezone offset")?;
-    let now = utc_now.with_timezone(&offset);
-    let date = now.date_naive();
-    let calculated_today = calculate(
-        date,
-        config.latitude,
-        config.longitude,
-        config.timezone_offset,
-        selected,
-        config.asr == "hanafi",
-    );
-    let official_schedule = if config.method == "uzbekistan" {
-        official::load(date, &config.location)
-    } else {
-        None
-    };
-    let (today, source, source_name, source_updated) = match official_schedule {
-        Some(schedule) => {
-            let updated = Some(schedule.fetched_at.to_rfc3339());
-            (
-                official::prayer_times(&schedule),
-                "official",
-                "Muslim Board of Uzbekistan",
-                updated,
-            )
-        }
-        None => (calculated_today, "calculated", selected.name, None),
-    };
-    let now_seconds = now.hour() as i64 * 3600 + now.minute() as i64 * 60 + now.second() as i64;
-    let tomorrow = date.succ_opt().ok_or("date overflow")?;
-    let tomorrow_fajr = calculate(
-        tomorrow,
-        config.latitude,
-        config.longitude,
-        config.timezone_offset,
-        selected,
-        config.asr == "hanafi",
-    )
-    .into_iter()
-    .find(|p| p.id == "fajr")
-    .ok_or("missing fajr")?;
-    let sleep_minutes = day::parse_clock_minutes(&config.sleep_time)?;
-    let timeline = day::timeline(&today, &tomorrow_fajr, sleep_minutes, now_seconds)?;
-    Ok(finish(
-        config,
-        selected.name,
-        date,
-        today,
-        timeline,
-        now_seconds,
-        source,
-        source_name,
-        source_updated,
-    ))
-}
+/// Version of the `status --json` shape. Bump it only for breaking changes;
+/// new fields are additive and keep the version.
+pub const SCHEMA_VERSION: u32 = 1;
 
-// These values are the complete boundary between schedule selection and JSON
-// presentation; keeping them explicit makes tomorrow-Fajr handling auditable.
-#[allow(clippy::too_many_arguments)]
-fn finish(
-    config: &Config,
-    method_name: &'static str,
-    date: NaiveDate,
-    prayers: Vec<PrayerTime>,
-    timeline: Timeline,
-    now_seconds: i64,
-    source: &'static str,
-    source_name: &'static str,
-    source_updated: Option<String>,
-) -> Status {
-    let next = &timeline.next;
-    let remaining_seconds = timeline.remaining_seconds;
+pub fn build(config: &Config, utc_now: DateTime<Utc>) -> Result<Status, String> {
+    let schedule = schedule::resolve(config, utc_now)?;
+    let next = &schedule.timeline.next;
+    let now_seconds = schedule.now_seconds;
+    let remaining_seconds = schedule.timeline.remaining_seconds;
     let remaining = format_duration(remaining_seconds, false);
     let remaining_short = format_duration(remaining_seconds, true);
-    let rows: Vec<DisplayPrayer> = prayers
-        .into_iter()
+    let rows: Vec<DisplayPrayer> = schedule
+        .prayers
+        .iter()
         .map(|p| DisplayPrayer {
             id: p.id,
             name: p.name,
             time: format_minutes(p.minutes),
             passed: p.minutes * 60 <= now_seconds,
-            is_next: next.kind == "prayer" && next.day_offset == 0 && p.id == next.id,
+            is_next: next.kind() == "prayer" && next.day_offset == 0 && p.id == next.id.as_str(),
         })
         .collect();
     let boundaries = display_boundaries(&rows, &config.sleep_time, next, now_seconds);
-    let next_point = boundary_point(next, date);
-    let start_point = boundary_point(&timeline.current_start, date);
-    Status {
+    let next_point = boundary_point(&schedule, next);
+    let start_point = boundary_point(&schedule, &schedule.timeline.current_start);
+    Ok(Status {
+        schema_version: SCHEMA_VERSION,
         location: config.location.clone(),
         method: config.method.clone(),
-        method_name,
-        source,
-        source_name,
-        source_updated,
-        date: format!("{:04}-{:02}-{:02}", date.year(), date.month(), date.day()),
+        method_name: schedule.method_name,
+        source: schedule.source.id,
+        source_name: schedule.source.name,
+        source_updated: schedule.source.updated.clone(),
+        date: format_date(schedule.date),
+        day: format_date(schedule.day()),
         sleep_time: config.sleep_time.clone(),
-        label: format!("☾ {} {}", next.name, remaining_short),
+        label: format!("☾ {} {}", next.name(), remaining_short),
         next: NextPrayer {
-            id: next.id,
-            name: next.name,
-            kind: next.kind,
+            id: next.id.as_str(),
+            name: next.name(),
+            kind: next.kind(),
             time: format_minutes(next.minutes),
             date: next_point.date.clone(),
             remaining,
@@ -175,13 +116,14 @@ fn finish(
             remaining_seconds,
         },
         current_block: CurrentBlock {
-            sleeping: timeline.current_start.kind == "sleep",
+            sleeping: schedule.timeline.sleeping(),
+            block: schedule.current_block(),
             start: start_point,
             end: next_point,
         },
         prayers: rows,
         boundaries,
-    }
+    })
 }
 
 /// Today's rows in chronological order: prayers, Sunrise, and the sleep
@@ -230,23 +172,24 @@ fn display_boundaries(
             passed: sleep_key * 60 <= now_seconds,
             // Highlight sleep whichever night it belongs to: the clock time is
             // the same and it is the only sleep row.
-            is_next: next.kind == "sleep",
+            is_next: next.kind() == "sleep",
         },
     );
     boundaries
 }
 
-fn boundary_point(boundary: &Boundary, base_date: NaiveDate) -> BoundaryPoint {
-    let date = base_date
-        .checked_add_signed(Duration::days(boundary.day_offset))
-        .unwrap_or(base_date);
+fn boundary_point(schedule: &Schedule, boundary: &Boundary) -> BoundaryPoint {
     BoundaryPoint {
-        id: boundary.id,
-        name: boundary.name,
-        kind: boundary.kind,
+        id: boundary.id.as_str(),
+        name: boundary.name(),
+        kind: boundary.kind(),
         time: format_minutes(boundary.minutes),
-        date: format!("{:04}-{:02}-{:02}", date.year(), date.month(), date.day()),
+        date: format_date(schedule.occurs_on(boundary)),
     }
+}
+
+pub fn format_date(date: NaiveDate) -> String {
+    date.format("%Y-%m-%d").to_string()
 }
 
 pub fn format_minutes(minutes: i64) -> String {

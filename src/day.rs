@@ -1,12 +1,107 @@
 use crate::calculation::PrayerTime;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq)]
+/// A boundary that starts a block of the day. Prayers and the sleep boundary
+/// are the only boundaries; Sunrise is shown but never starts a block.
+///
+/// The serialized names are stored in the database and exports, so they must
+/// never change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BoundaryId {
+    Fajr,
+    Dhuhr,
+    Asr,
+    Maghrib,
+    Isha,
+    Sleep,
+}
+
+impl BoundaryId {
+    /// The five blocks that can hold items, in daily order. The sleeping block
+    /// that starts at `Sleep` holds none.
+    pub const AWAKE: [BoundaryId; 5] = [
+        BoundaryId::Fajr,
+        BoundaryId::Dhuhr,
+        BoundaryId::Asr,
+        BoundaryId::Maghrib,
+        BoundaryId::Isha,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BoundaryId::Fajr => "fajr",
+            BoundaryId::Dhuhr => "dhuhr",
+            BoundaryId::Asr => "asr",
+            BoundaryId::Maghrib => "maghrib",
+            BoundaryId::Isha => "isha",
+            BoundaryId::Sleep => "sleep",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            BoundaryId::Fajr => "Fajr",
+            BoundaryId::Dhuhr => "Dhuhr",
+            BoundaryId::Asr => "Asr",
+            BoundaryId::Maghrib => "Maghrib",
+            BoundaryId::Isha => "Isha",
+            BoundaryId::Sleep => "Sleep",
+        }
+    }
+
+    pub fn kind(self) -> &'static str {
+        if self == BoundaryId::Sleep {
+            "sleep"
+        } else {
+            "prayer"
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<BoundaryId> {
+        [Self::AWAKE.as_slice(), &[BoundaryId::Sleep]]
+            .concat()
+            .into_iter()
+            .find(|id| id.as_str() == value)
+    }
+
+    /// The boundary that ends the block this boundary starts.
+    pub fn next(self) -> Option<BoundaryId> {
+        match self {
+            BoundaryId::Fajr => Some(BoundaryId::Dhuhr),
+            BoundaryId::Dhuhr => Some(BoundaryId::Asr),
+            BoundaryId::Asr => Some(BoundaryId::Maghrib),
+            BoundaryId::Maghrib => Some(BoundaryId::Isha),
+            BoundaryId::Isha => Some(BoundaryId::Sleep),
+            BoundaryId::Sleep => None,
+        }
+    }
+
+    fn of_prayer(prayer: &PrayerTime) -> Option<BoundaryId> {
+        BoundaryId::parse(prayer.id).filter(|id| *id != BoundaryId::Sleep)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Boundary {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub kind: &'static str,
+    pub id: BoundaryId,
+    /// Local wall-clock minutes after midnight.
     pub minutes: i64,
+    /// Calendar day relative to the display date on which the boundary occurs.
     pub day_offset: i64,
+    /// Day (Fajr→Sleep) relative to the display date that the boundary
+    /// belongs to. A post-midnight bedtime occurs on the next calendar day but
+    /// belongs to the previous day.
+    pub owner_offset: i64,
+}
+
+impl Boundary {
+    pub fn name(&self) -> &'static str {
+        self.id.name()
+    }
+    pub fn kind(&self) -> &'static str {
+        self.id.kind()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -14,6 +109,12 @@ pub struct Timeline {
     pub next: Boundary,
     pub current_start: Boundary,
     pub remaining_seconds: i64,
+}
+
+impl Timeline {
+    pub fn sleeping(&self) -> bool {
+        self.current_start.id == BoundaryId::Sleep
+    }
 }
 
 pub fn parse_clock_minutes(value: &str) -> Result<i64, String> {
@@ -35,23 +136,21 @@ pub fn parse_clock_minutes(value: &str) -> Result<i64, String> {
     Ok(hours * 60 + minutes)
 }
 
-fn prayer_boundary(prayer: &PrayerTime, day_offset: i64) -> Boundary {
-    Boundary {
-        id: prayer.id,
-        name: prayer.name,
-        kind: "prayer",
+fn prayer_boundary(prayer: &PrayerTime, day_offset: i64) -> Option<Boundary> {
+    BoundaryId::of_prayer(prayer).map(|id| Boundary {
+        id,
         minutes: prayer.minutes,
         day_offset,
-    }
+        owner_offset: day_offset,
+    })
 }
 
-fn sleep_boundary(minutes: i64, day_offset: i64) -> Boundary {
+fn sleep_boundary(minutes: i64, owner_offset: i64, sleep_offset: i64) -> Boundary {
     Boundary {
-        id: "sleep",
-        name: "Sleep",
-        kind: "sleep",
+        id: BoundaryId::Sleep,
         minutes,
-        day_offset,
+        day_offset: owner_offset + sleep_offset,
+        owner_offset,
     }
 }
 
@@ -81,23 +180,22 @@ pub fn timeline(
     let sleep_offset = evening_sleep_offset(sleep_minutes, fajr_minutes);
     let mut candidates: Vec<Boundary> = today
         .iter()
-        .filter(|prayer| prayer.id != "sunrise")
-        .map(|prayer| prayer_boundary(prayer, 0))
+        .filter_map(|prayer| prayer_boundary(prayer, 0))
         .collect();
     // Yesterday's Isha starts the block that a post-midnight bedtime ends.
     // Today's Isha is a close approximation of yesterday's.
     if let Some(isha) = today.iter().find(|prayer| prayer.id == "isha") {
-        candidates.push(prayer_boundary(isha, -1));
+        candidates.extend(prayer_boundary(isha, -1));
     }
-    candidates.push(sleep_boundary(sleep_minutes, sleep_offset - 1));
-    candidates.push(sleep_boundary(sleep_minutes, sleep_offset));
-    candidates.push(prayer_boundary(tomorrow_fajr, 1));
+    candidates.push(sleep_boundary(sleep_minutes, -1, sleep_offset));
+    candidates.push(sleep_boundary(sleep_minutes, 0, sleep_offset));
+    candidates.extend(prayer_boundary(tomorrow_fajr, 1));
 
     let next = candidates
         .iter()
         .filter(|boundary| absolute_seconds(boundary) > now_seconds)
         .min_by_key(|boundary| absolute_seconds(boundary))
-        .cloned()
+        .copied()
         .ok_or("missing next boundary")?;
     let current_start = candidates
         .into_iter()
@@ -160,8 +258,8 @@ mod tests {
             minutes: 6 * 60,
         };
         let result = timeline(&prayers(), &tomorrow_fajr, 23 * 60, 21 * 3600).unwrap();
-        assert_eq!(result.current_start.id, "isha");
-        assert_eq!(result.next.id, "sleep");
+        assert_eq!(result.current_start.id, BoundaryId::Isha);
+        assert_eq!(result.next.id, BoundaryId::Sleep);
         assert_eq!(result.remaining_seconds, 2 * 3600);
     }
 
@@ -173,8 +271,8 @@ mod tests {
             minutes: 6 * 60,
         };
         let result = timeline(&prayers(), &tomorrow_fajr, 23 * 60, 23 * 3600 + 30 * 60).unwrap();
-        assert_eq!(result.current_start.id, "sleep");
-        assert_eq!(result.next.id, "fajr");
+        assert_eq!(result.current_start.id, BoundaryId::Sleep);
+        assert_eq!(result.next.id, BoundaryId::Fajr);
         assert_eq!(result.next.day_offset, 1);
     }
 
@@ -186,8 +284,8 @@ mod tests {
             minutes: 6 * 60,
         };
         let result = timeline(&prayers(), &tomorrow_fajr, 23 * 60, 23 * 3600).unwrap();
-        assert_eq!(result.current_start.id, "sleep");
-        assert_eq!(result.next.id, "fajr");
+        assert_eq!(result.current_start.id, BoundaryId::Sleep);
+        assert_eq!(result.next.id, BoundaryId::Fajr);
         assert_eq!(result.remaining_seconds, 7 * 3600);
     }
 
@@ -199,9 +297,9 @@ mod tests {
             minutes: 6 * 60,
         };
         let result = timeline(&prayers(), &tomorrow_fajr, 23 * 60, 2 * 3600).unwrap();
-        assert_eq!(result.current_start.id, "sleep");
+        assert_eq!(result.current_start.id, BoundaryId::Sleep);
         assert_eq!(result.current_start.day_offset, -1);
-        assert_eq!(result.next.id, "fajr");
+        assert_eq!(result.next.id, BoundaryId::Fajr);
         assert_eq!(result.next.day_offset, 0);
     }
 
@@ -216,8 +314,8 @@ mod tests {
     #[test]
     fn after_midnight_bedtime_is_next_after_isha() {
         let result = timeline(&prayers(), &fajr(), 30, 21 * 3600).unwrap();
-        assert_eq!(result.current_start.id, "isha");
-        assert_eq!(result.next.id, "sleep");
+        assert_eq!(result.current_start.id, BoundaryId::Isha);
+        assert_eq!(result.next.id, BoundaryId::Sleep);
         assert_eq!(result.next.day_offset, 1);
         assert_eq!(result.remaining_seconds, 3 * 3600 + 30 * 60);
     }
@@ -225,18 +323,40 @@ mod tests {
     #[test]
     fn after_midnight_but_before_bedtime_is_still_awake() {
         let result = timeline(&prayers(), &fajr(), 30, 10 * 60).unwrap();
-        assert_eq!(result.current_start.id, "isha");
+        assert_eq!(result.current_start.id, BoundaryId::Isha);
         assert_eq!(result.current_start.day_offset, -1);
-        assert_eq!(result.next.id, "sleep");
+        assert_eq!(result.next.id, BoundaryId::Sleep);
         assert_eq!(result.remaining_seconds, 20 * 60);
     }
 
     #[test]
     fn after_post_midnight_bedtime_is_sleeping_until_fajr() {
         let result = timeline(&prayers(), &fajr(), 30, 3600).unwrap();
-        assert_eq!(result.current_start.id, "sleep");
-        assert_eq!(result.next.id, "fajr");
+        assert_eq!(result.current_start.id, BoundaryId::Sleep);
+        assert_eq!(result.next.id, BoundaryId::Fajr);
         assert_eq!(result.next.day_offset, 0);
+    }
+
+    #[test]
+    fn post_midnight_sleep_belongs_to_the_previous_day() {
+        let result = timeline(&prayers(), &fajr(), 30, 3600).unwrap();
+        assert_eq!(result.current_start.day_offset, 0);
+        assert_eq!(result.current_start.owner_offset, -1);
+        let evening = timeline(&prayers(), &fajr(), 30, 21 * 3600).unwrap();
+        assert_eq!(evening.next.day_offset, 1);
+        assert_eq!(evening.next.owner_offset, 0);
+    }
+
+    #[test]
+    fn boundary_ids_round_trip_through_storage_names() {
+        for id in BoundaryId::AWAKE.into_iter().chain([BoundaryId::Sleep]) {
+            assert_eq!(BoundaryId::parse(id.as_str()), Some(id));
+            assert_eq!(
+                serde_json::to_string(&id).unwrap(),
+                format!("\"{}\"", id.as_str())
+            );
+        }
+        assert_eq!(BoundaryId::parse("sunrise"), None);
     }
 
     #[test]

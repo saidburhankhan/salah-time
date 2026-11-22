@@ -1,0 +1,306 @@
+//! Resolves the prayer schedule and the day's blocks for a moment in time.
+//!
+//! Status, items, and the desktop app all ask this module which block is
+//! current and when each block starts and ends, so schedule rules live in one
+//! place.
+
+use crate::calculation::{PrayerTime, calculate, method};
+use crate::config::Config;
+use crate::day::{self, Boundary, BoundaryId, Timeline};
+use crate::official;
+use chrono::{DateTime, Duration, FixedOffset, NaiveDate, TimeZone, Timelike, Utc};
+use serde::{Deserialize, Serialize};
+
+/// Identifies one block of one day. This is the anchor stored with items and
+/// entries, so its serialized shape must stay stable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct BlockKey {
+    /// The day (Fajr→Sleep), named by the civil date of its Fajr.
+    pub day: NaiveDate,
+    /// The boundary that starts the block.
+    pub start: BoundaryId,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Source {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub updated: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlockWindow {
+    pub key: BlockKey,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Schedule {
+    /// The local civil date the prayer rows describe.
+    pub date: NaiveDate,
+    pub now_seconds: i64,
+    pub method_name: &'static str,
+    pub source: Source,
+    pub prayers: Vec<PrayerTime>,
+    pub timeline: Timeline,
+}
+
+impl Schedule {
+    /// Calendar date on which a boundary occurs.
+    pub fn occurs_on(&self, boundary: &Boundary) -> NaiveDate {
+        shift(self.date, boundary.day_offset)
+    }
+
+    /// The day a boundary belongs to.
+    pub fn owner_day(&self, boundary: &Boundary) -> NaiveDate {
+        shift(self.date, boundary.owner_offset)
+    }
+
+    /// The day that is in progress. During the sleeping block this is the day
+    /// that has just ended.
+    pub fn day(&self) -> NaiveDate {
+        self.owner_day(&self.timeline.current_start)
+    }
+
+    /// The block now in progress.
+    pub fn current_block(&self) -> BlockKey {
+        BlockKey {
+            day: self.day(),
+            start: self.timeline.current_start.id,
+        }
+    }
+
+    /// Where something planned "now" belongs: the current block while awake,
+    /// otherwise the coming day's Fajr block.
+    pub fn planning_block(&self) -> BlockKey {
+        if self.timeline.sleeping() {
+            BlockKey {
+                day: shift(self.day(), 1),
+                start: BoundaryId::Fajr,
+            }
+        } else {
+            self.current_block()
+        }
+    }
+}
+
+fn shift(date: NaiveDate, days: i64) -> NaiveDate {
+    date.checked_add_signed(Duration::days(days))
+        .unwrap_or(date)
+}
+
+fn offset(config: &Config) -> Result<FixedOffset, String> {
+    FixedOffset::east_opt((config.timezone_offset * 3600.0).round() as i32)
+        .ok_or_else(|| "invalid timezone offset".into())
+}
+
+fn calculated(config: &Config, date: NaiveDate) -> Result<Vec<PrayerTime>, String> {
+    let selected =
+        method(&config.method).ok_or_else(|| format!("unknown method: {}", config.method))?;
+    Ok(calculate(
+        date,
+        config.latitude,
+        config.longitude,
+        config.timezone_offset,
+        selected,
+        config.asr == "hanafi",
+    ))
+}
+
+/// Prayer times for a civil date: the cached official timetable when it
+/// covers that date, otherwise the offline calculation.
+pub fn prayers_for(config: &Config, date: NaiveDate) -> Result<(Vec<PrayerTime>, Source), String> {
+    let selected =
+        method(&config.method).ok_or_else(|| format!("unknown method: {}", config.method))?;
+    let official_schedule = if config.method == "uzbekistan" {
+        official::load(date, &config.location)
+    } else {
+        None
+    };
+    Ok(match official_schedule {
+        Some(schedule) => (
+            official::prayer_times(&schedule),
+            Source {
+                id: "official",
+                name: "Muslim Board of Uzbekistan",
+                updated: Some(schedule.fetched_at.to_rfc3339()),
+            },
+        ),
+        None => (
+            calculated(config, date)?,
+            Source {
+                id: "calculated",
+                name: selected.name,
+                updated: None,
+            },
+        ),
+    })
+}
+
+pub fn resolve(config: &Config, utc_now: DateTime<Utc>) -> Result<Schedule, String> {
+    let selected =
+        method(&config.method).ok_or_else(|| format!("unknown method: {}", config.method))?;
+    let now = utc_now.with_timezone(&offset(config)?);
+    let date = now.date_naive();
+    let (prayers, source) = prayers_for(config, date)?;
+    let now_seconds = i64::from(now.num_seconds_from_midnight());
+    let tomorrow = date.succ_opt().ok_or("date overflow")?;
+    let tomorrow_fajr = calculated(config, tomorrow)?
+        .into_iter()
+        .find(|p| p.id == "fajr")
+        .ok_or("missing fajr")?;
+    let sleep_minutes = day::parse_clock_minutes(&config.sleep_time)?;
+    let timeline = day::timeline(&prayers, &tomorrow_fajr, sleep_minutes, now_seconds)?;
+    Ok(Schedule {
+        date,
+        now_seconds,
+        method_name: selected.name,
+        source,
+        prayers,
+        timeline,
+    })
+}
+
+/// The five awake blocks of a day with their UTC start and end instants. The
+/// Isha block ends at the sleep boundary.
+pub fn day_blocks(config: &Config, day: NaiveDate) -> Result<Vec<BlockWindow>, String> {
+    let zone = offset(config)?;
+    let (prayers, _) = prayers_for(config, day)?;
+    let sleep_minutes = day::parse_clock_minutes(&config.sleep_time)?;
+    let minutes_of = |id: BoundaryId| -> Result<i64, String> {
+        prayers
+            .iter()
+            .find(|p| p.id == id.as_str())
+            .map(|p| p.minutes)
+            .ok_or_else(|| format!("missing {}", id.as_str()))
+    };
+    let fajr = minutes_of(BoundaryId::Fajr)?;
+    let instant = |days: i64, minutes: i64| -> Result<DateTime<Utc>, String> {
+        let midnight = shift(day, days)
+            .and_hms_opt(0, 0, 0)
+            .ok_or("invalid date")?;
+        let local = zone
+            .from_local_datetime(&midnight)
+            .single()
+            .ok_or("invalid local time")?;
+        Ok((local + Duration::minutes(minutes)).with_timezone(&Utc))
+    };
+    let sleep = instant(
+        day::evening_sleep_offset(sleep_minutes, fajr),
+        sleep_minutes,
+    )?;
+    BoundaryId::AWAKE
+        .into_iter()
+        .map(|id| {
+            let start = instant(0, minutes_of(id)?)?;
+            let end = match id.next() {
+                Some(BoundaryId::Sleep) | None => sleep,
+                Some(next) => instant(0, minutes_of(next)?)?,
+            };
+            Ok(BlockWindow {
+                key: BlockKey { day, start: id },
+                start,
+                // A sleep time configured before Isha leaves an empty block
+                // rather than one that ends before it starts.
+                end: end.max(start),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tashkent() -> Config {
+        // Use a method without an official cache so tests never read the
+        // user's cached timetable.
+        Config {
+            method: "mwl".into(),
+            ..Config::default()
+        }
+    }
+
+    fn at(h: u32, m: u32, date: (i32, u32, u32)) -> DateTime<Utc> {
+        // Tashkent is UTC+5.
+        FixedOffset::east_opt(5 * 3600)
+            .unwrap()
+            .with_ymd_and_hms(date.0, date.1, date.2, h, m, 0)
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    #[test]
+    fn afternoon_belongs_to_the_same_civil_day() {
+        let schedule = resolve(&tashkent(), at(13, 0, (2026, 11, 20))).unwrap();
+        assert_eq!(
+            schedule.current_block(),
+            BlockKey {
+                day: date(2026, 11, 20),
+                start: BoundaryId::Dhuhr
+            }
+        );
+    }
+
+    #[test]
+    fn after_midnight_before_a_late_bedtime_is_still_the_previous_day() {
+        let config = Config {
+            sleep_time: "00:30".into(),
+            ..tashkent()
+        };
+        let schedule = resolve(&config, at(0, 10, (2026, 11, 21))).unwrap();
+        assert_eq!(
+            schedule.current_block(),
+            BlockKey {
+                day: date(2026, 11, 20),
+                start: BoundaryId::Isha
+            }
+        );
+    }
+
+    #[test]
+    fn sleeping_plans_into_the_coming_fajr_block() {
+        let schedule = resolve(&tashkent(), at(2, 0, (2026, 11, 21))).unwrap();
+        assert!(schedule.timeline.sleeping());
+        assert_eq!(schedule.day(), date(2026, 11, 20));
+        assert_eq!(
+            schedule.planning_block(),
+            BlockKey {
+                day: date(2026, 11, 21),
+                start: BoundaryId::Fajr
+            }
+        );
+    }
+
+    #[test]
+    fn day_blocks_are_contiguous_and_end_at_sleep() {
+        let config = Config {
+            sleep_time: "00:30".into(),
+            ..tashkent()
+        };
+        let blocks = day_blocks(&config, date(2026, 11, 20)).unwrap();
+        assert_eq!(blocks.len(), 5);
+        for pair in blocks.windows(2) {
+            assert_eq!(pair[0].end, pair[1].start);
+        }
+        assert_eq!(blocks[4].key.start, BoundaryId::Isha);
+        assert_eq!(blocks[4].end, at(0, 30, (2026, 11, 21)));
+    }
+
+    #[test]
+    fn block_key_serializes_as_stable_strings() {
+        let key = BlockKey {
+            day: date(2026, 11, 20),
+            start: BoundaryId::Asr,
+        };
+        assert_eq!(
+            serde_json::to_string(&key).unwrap(),
+            r#"{"day":"2026-11-20","start":"asr"}"#
+        );
+    }
+}
