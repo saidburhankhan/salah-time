@@ -1,4 +1,5 @@
 QT += core gui quick quickcontrols2 testlib
+DEFINES += TEST_SOURCE_DIR=\\\"$$PWD\\\"
 CONFIG += c++17 testcase
 TARGET = salah_app_tests
 TEMPLATE = app

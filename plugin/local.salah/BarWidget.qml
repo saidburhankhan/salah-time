@@ -31,6 +31,10 @@ BarWidget {
   property string quickAddBlock: ""
   property string lastStatusText: ""
   property int optimisticOpenDelta: 0
+  property int minuteTick: 0
+  property var activeAction: null
+  property var optimisticTimer: undefined
+  property double timerSnapshotMs: Date.now()
 
   readonly property string nextName: report && report.next
     ? String(report.next.name || "")
@@ -44,10 +48,21 @@ BarWidget {
   readonly property string remainingLong: formatRemaining(remainingSeconds, false)
   readonly property string remainingShort: formatRemaining(remainingSeconds, true)
   readonly property var planner: report && report.planner ? report.planner : null
-  readonly property int openCount: Math.max(0,
-    (planner ? (Number(planner.open) || 0) : 0) + optimisticOpenDelta)
+  readonly property var runningTimer: optimisticTimer !== undefined
+    ? optimisticTimer : (planner && planner.timer ? planner.timer : null)
+  readonly property int runningMinutes: {
+    minuteTick
+    if (!runningTimer) return 0
+    var base = Math.max(0, Number(runningTimer.minutes) || 0)
+    var started = Date.parse(String(runningTimer.started_at || ""))
+    if (isNaN(started)) return base
+    var thenMinutes = Math.max(0, Math.floor((timerSnapshotMs - started) / 60000))
+    var nowMinutes = Math.max(0, Math.floor((Date.now() - started) / 60000))
+    return base + Math.max(0, nowMinutes - thenMinutes)
+  }
   readonly property string displayText: localizedNextName !== ""
-    ? localizedNextName + "  " + remainingShort + (openCount > 0 ? "  · " + openCount : "")
+    ? localizedNextName + "  " + remainingShort
+        + (runningTimer ? strings.t("bar.runningTimer").arg(formatMinutes(runningMinutes)) : "")
     : (firstLoad ? strings.t("bar.loading") : strings.t("bar.unavailableShort"))
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color mutedForeground: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
@@ -68,6 +83,10 @@ BarWidget {
     return pad(hours) + ":" + pad(minutes) + ":" + pad(secs)
   }
 
+  function formatMinutes(value) {
+    return strings.t("unit.minutesShort").arg(Math.max(0, Math.floor(Number(value) || 0)))
+  }
+
   function refresh() {
     // Preserve optimistic UI while commands are queued; the last command
     // schedules the one authoritative refresh for the whole burst.
@@ -77,15 +96,18 @@ BarWidget {
 
   // Planner actions run one at a time, in order, as fixed argument lists.
   // Titles follow `--` so text starting with "-" is never read as a flag.
-  function runAction(args) {
+  function runAction(args, kind) {
     if (!actionProcess.running && pendingActions.length === 0) actionError = ""
-    pendingActions = pendingActions.concat([["salah"].concat(args)])
+    pendingActions = pendingActions.concat([{
+      "command": ["salah"].concat(args), "kind": String(kind || "")
+    }])
     runNextAction()
   }
 
   function runNextAction() {
     if (actionProcess.running || pendingActions.length === 0) return
-    actionProcess.command = pendingActions[0]
+    activeAction = pendingActions[0]
+    actionProcess.command = activeAction.command
     pendingActions = pendingActions.slice(1)
     actionProcess.running = true
   }
@@ -98,7 +120,7 @@ BarWidget {
     var content = panel.loadedContent
     if (content) content.addPendingItem(text, quickAddBlock)
     optimisticOpenDelta++
-    runAction(args.concat(["--", text]))
+    runAction(args.concat(["--", text]), "add")
   }
 
   function presetQuickAdd(block) {
@@ -159,17 +181,41 @@ BarWidget {
   function toggleTimer(row) {
     var running = String(row.timer_started_at || "") !== ""
     var content = panel.loadedContent
-    if (content) content.patchItem(String(row.id), {
-      "timer_started_at": running ? "" : new Date().toISOString()
-    })
+    if (content) content.setRunningTimer(running ? "" : String(row.id))
+    optimisticTimer = running ? null : {
+      "item_id": String(row.id), "title": String(row.title || ""),
+      "started_at": new Date().toISOString(), "minutes": Number(row.minutes) || 0
+    }
+    timerSnapshotMs = Date.now()
     if (running) runAction(["item", "stop", "--json"])
     else runAction(["item", "start", "--json", String(row.id)])
   }
 
-  function logOne(row) {
+  function adjustItem(row, delta) {
+    var amount = row.measure === "count" ? (delta < 0 ? -1 : 1) : (delta < 0 ? -5 : 5)
+    var role = row.measure === "count" ? "count" : "minutes"
+    var current = Math.max(0, Number(row[role]) || 0)
+    var next = Math.max(0, current + amount)
+    if (next === current) return
     var content = panel.loadedContent
-    if (content) content.patchItem(String(row.id), { "count": (Number(row.count) || 0) + 1 })
-    runAction(["item", "log", "--json", String(row.id), "1"])
+    var changes = {}; changes[role] = next
+    if (content) content.patchItem(String(row.id), changes)
+    runAction(["item", "log", "--json", String(row.id), String(next - current)])
+  }
+
+  function editItem(row, title) {
+    var text = String(title || "").trim()
+    if (text === "" || text === String(row.title || "")) return
+    var content = panel.loadedContent
+    if (content) content.patchItem(String(row.id), { "title": text })
+    runAction(["item", "edit", "--json", String(row.id), "--title=" + text])
+  }
+
+  function removeItem(row) {
+    var content = panel.loadedContent
+    if (content) content.removeItem(String(row.id))
+    if (row.state !== "done") optimisticOpenDelta--
+    runAction(["item", "remove", "--json", String(row.id)])
   }
 
   function itemDetail(row) {
@@ -178,6 +224,8 @@ BarWidget {
       parts.push(row.minutes + (row.target ? "/" + row.target : "") + " " + strings.t("panel.minutesShort"))
     else if (row.measure === "count")
       parts.push(row.count + (row.target ? "/" + row.target : ""))
+    else if (row.minutes > 0)
+      parts.push(row.minutes + " " + strings.t("panel.minutesShort"))
     if (row.repeat === "daily") parts.push(strings.t("repeat.daily"))
     else if (row.repeat === "weekly") parts.push(strings.t("repeat.weekly"))
     return parts.join(" · ")
@@ -225,6 +273,8 @@ BarWidget {
         return
       }
       report = parsed
+      optimisticTimer = undefined
+      timerSnapshotMs = Date.now()
       lastStatusText = text
       optimisticOpenDelta = 0
       var content = panel.loadedContent
@@ -270,6 +320,14 @@ BarWidget {
         if (root.remainingSeconds === 0) root.refresh()
       }
     }
+  }
+
+  Timer {
+    interval: 60000
+    running: root.runningTimer !== null
+    repeat: true
+    triggeredOnStart: false
+    onTriggered: root.minuteTick++
   }
 
   Timer {
@@ -335,6 +393,7 @@ BarWidget {
 
   Process {
     id: actionProcess
+    stdout: StdioCollector { id: actionStdout; waitForEnd: true }
     stderr: StdioCollector {
       id: actionStderr
       waitForEnd: true
@@ -346,7 +405,11 @@ BarWidget {
         // The next status result must reconcile the optimistic edit even when
         // the backend JSON is byte-for-byte equal to the previous result.
         root.lastStatusText = ""
+      } else if (root.activeAction && root.activeAction.kind === "add") {
+        var content = panel.loadedContent
+        if (content) content.showNextOccurrence(actionStdout.text)
       }
+      root.activeAction = null
       root.runNextAction()
       if (!actionProcess.running && root.pendingActions.length === 0) root.refresh()
     }
@@ -369,7 +432,8 @@ BarWidget {
     }
   }
 
-  implicitWidth: button.implicitWidth
+  implicitWidth: root.vertical ? button.implicitWidth
+    : Style.space(root.runningTimer ? 250 : 180)
   implicitHeight: button.implicitHeight
 
   WidgetButton {
@@ -378,6 +442,8 @@ BarWidget {
     bar: root.bar
     text: root.vertical ? strings.t("bar.symbol") : root.displayText
     labelVisible: true
+    fixedWidth: root.vertical ? -1 : root.width
+    fontFamily: root.runningTimer ? "monospace" : (root.bar ? root.bar.fontFamily : Style.font.family)
     horizontalMargin: 8.75
     verticalPadding: 8.75
     tooltipText: root.localizedNextName !== ""
@@ -409,10 +475,12 @@ BarWidget {
       property var dragSnapshot: []
       property real dragPointerY: 0
       property string dragTitle: ""
+      property string editingKey: ""
+      property string occurrenceHint: ""
       anchors.fill: parent
       implicitHeight: Math.min(dayColumn.implicitHeight,
         Math.max(Style.space(240), panel.availableCardHeight - panel.padding * 2))
-      blocked: quickField.activeFocus
+      blocked: quickField.activeFocus || editingKey !== ""
       onCloseRequested: {
         if (dragKey !== "") cancelDrag()
         else root.close()
@@ -520,6 +588,58 @@ BarWidget {
         var index = indexOfKey("item:" + id)
         if (index < 0) return
         for (var role in changes) timelineModel.setProperty(index, role, changes[role])
+      }
+
+      function removeItem(id) {
+        var index = indexOfKey("item:" + id)
+        if (index >= 0) timelineModel.remove(index)
+      }
+
+      function setRunningTimer(id) {
+        var started = new Date().toISOString()
+        for (var i = 0; i < timelineModel.count; i++) {
+          var row = timelineModel.get(i)
+          if (row.rowType === "item")
+            timelineModel.setProperty(i, "timer_started_at", row.itemId === id ? started : "")
+        }
+      }
+
+      function weekdayName(index) {
+        var keys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+        return strings.t("weekday." + keys[index])
+      }
+
+      function showNextOccurrence(raw) {
+        try {
+          var item = JSON.parse(String(raw || "").trim())
+          var today = new Date()
+          var occurs = false
+          var next = ""
+          if (item.repeat === "daily") occurs = true
+          else if (item.repeat === "weekly" && item.weekdays instanceof Array) {
+            var dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+            occurs = item.weekdays.indexOf(dayKeys[today.getDay()]) >= 0
+            for (var offset = occurs ? 0 : 1; !occurs && offset <= 7; offset++) {
+              var candidate = (today.getDay() + offset) % 7
+              if (item.weekdays.indexOf(dayKeys[candidate]) >= 0) {
+                next = weekdayName(candidate); break
+              }
+            }
+          } else if (item.day) {
+            var parts = String(item.day).split("-")
+            if (parts.length === 3) {
+              var date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
+              occurs = date.toDateString() === today.toDateString()
+              if (!occurs && date > today) next = weekdayName(date.getDay())
+            }
+          }
+          if (!occurs && next !== "") {
+            occurrenceHint = strings.t("panel.nextOccurrence").arg(String(item.title || "")).arg(next)
+            occurrenceHintTimer.restart()
+          }
+        } catch (error) {
+          // Status refresh remains authoritative if optional add metadata is malformed.
+        }
       }
 
       function togglePrayerOptimistic(id) {
@@ -635,6 +755,13 @@ BarWidget {
         }
       }
 
+
+      Timer {
+        id: occurrenceHintTimer
+        interval: 5000
+        onTriggered: keyCatcher.occurrenceHint = ""
+      }
+
       Component.onCompleted: if (root.report) syncTimeline(root.report)
 
       Flickable {
@@ -723,6 +850,8 @@ BarWidget {
 
               Keys.onEscapePressed: function(event) {
                 root.clearQuickAddPreset()
+                text = ""
+                focus = false
                 event.accepted = true
               }
             }
@@ -732,6 +861,18 @@ BarWidget {
               width: parent.width
               textFormat: Text.PlainText
               text: strings.t("panel.addingTo").arg(root.prayerName(root.quickAddBlock, root.quickAddBlock))
+              color: root.mutedForeground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+
+
+            Text {
+              visible: keyCatcher.occurrenceHint !== ""
+              width: parent.width
+              textFormat: Text.PlainText
+              text: keyCatcher.occurrenceHint
               color: root.mutedForeground
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.caption
@@ -815,6 +956,17 @@ BarWidget {
                 required property bool pending
                 readonly property bool dragging: keyCatcher.dragKey === rowKey
                 readonly property bool done: state === "done"
+                property bool editing: false
+                property bool confirmingDelete: false
+                property string editText: title
+                readonly property int elapsedMinutes: {
+                  root.minuteTick
+                  var started = Date.parse(timer_started_at)
+                  if (isNaN(started)) return Math.max(0, minutes)
+                  var thenMinutes = Math.max(0, Math.floor((root.timerSnapshotMs - started) / 60000))
+                  var nowMinutes = Math.max(0, Math.floor((Date.now() - started) / 60000))
+                  return Math.max(0, minutes + nowMinutes - thenMinutes)
+                }
                 readonly property var itemData: ({
                   "id": itemId, "title": title, "block": block, "state": state,
                   "measure": measure, "target": target, "minutes": minutes,
@@ -932,8 +1084,15 @@ BarWidget {
                   anchors.fill: parent
                   anchors.leftMargin: Style.space(28)
                   radius: Style.cornerRadius
-                  color: itemMouse.containsMouse
+                  color: rowHover.containsMouse
                     ? Style.hoverFillFor(root.foreground, Commons.Color.accent) : "transparent"
+
+                  MouseArea {
+                    id: rowHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
+                  }
 
                   Text {
                     id: dragGlyph
@@ -1004,7 +1163,7 @@ BarWidget {
                   MouseArea {
                     id: itemMouse
                     anchors.left: itemCheck.left
-                    anchors.right: itemAction.left
+                    anchors.right: controlRow.left
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     hoverEnabled: true
@@ -1036,12 +1195,13 @@ BarWidget {
                   Column {
                     anchors.left: itemCheck.right
                     anchors.leftMargin: Style.space(9)
-                    anchors.right: itemAction.left
+                    anchors.right: controlRow.left
                     anchors.rightMargin: Style.space(6)
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 0
 
                     Text {
+                      visible: !flatRow.editing
                       width: parent.width
                       textFormat: Text.PlainText
                       text: flatRow.title
@@ -1052,8 +1212,34 @@ BarWidget {
                       elide: Text.ElideRight
                     }
 
+                    TextField {
+                      id: titleEditor
+                      visible: flatRow.editing
+                      width: parent.width
+                      height: Style.space(26)
+                      foreground: root.foreground
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.bodySmall
+                      horizontalPadding: Style.space(4)
+                      verticalPadding: 0
+                      maximumLength: 200
+                      text: flatRow.editText
+                      onAccepted: {
+                        root.editItem(flatRow.itemData, text)
+                        flatRow.editing = false
+                        keyCatcher.editingKey = ""
+                        keyCatcher.forceActiveFocus()
+                      }
+                      Keys.onEscapePressed: function(event) {
+                        flatRow.editing = false
+                        keyCatcher.editingKey = ""
+                        keyCatcher.forceActiveFocus()
+                        event.accepted = true
+                      }
+                    }
+
                     Text {
-                      visible: text !== ""
+                      visible: !flatRow.editing && text !== ""
                       width: parent.width
                       textFormat: Text.PlainText
                       text: flatRow.pending ? strings.t("panel.pending") : root.itemDetail(flatRow.itemData)
@@ -1064,25 +1250,107 @@ BarWidget {
                     }
                   }
 
-                  Button {
-                    id: itemAction
-                    visible: !flatRow.pending && flatRow.measure !== "check"
+                  Row {
+                    id: controlRow
+                    visible: !flatRow.pending && !flatRow.editing
                     anchors.right: parent.right
                     anchors.rightMargin: Style.space(3)
                     anchors.verticalCenter: parent.verticalCenter
-                    width: visible ? Style.space(40) : 0
-                    height: Style.space(28)
-                    text: flatRow.measure === "count" ? strings.t("panel.logOne")
-                      : (flatRow.timer_started_at !== "" ? strings.t("panel.stop") : strings.t("panel.start"))
-                    tooltipText: flatRow.measure === "count" ? strings.t("panel.logOneHint")
-                      : (flatRow.timer_started_at !== "" ? strings.t("panel.stopTimer") : strings.t("panel.startTimer"))
-                    foreground: root.foreground
-                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                    horizontalPadding: Style.space(5)
-                    verticalPadding: Style.space(2)
-                    bordered: true
-                    onClicked: flatRow.measure === "count"
-                      ? root.logOne(flatRow.itemData) : root.toggleTimer(flatRow.itemData)
+                    spacing: Style.space(1)
+
+                    Button {
+                      visible: rowHover.containsMouse || activeFocus
+                      width: visible ? Style.space(22) : 0
+                      height: Style.space(26)
+                      text: strings.t("panel.decrease")
+                      tooltipText: flatRow.measure === "count"
+                        ? strings.t("panel.decreaseCount") : strings.t("panel.decreaseMinutes")
+                      foreground: root.mutedForeground
+                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                      horizontalPadding: 0
+                      verticalPadding: 0
+                      onClicked: root.adjustItem(flatRow.itemData, -1)
+                    }
+                    Button {
+                      visible: rowHover.containsMouse || activeFocus
+                      width: visible ? Style.space(22) : 0
+                      height: Style.space(26)
+                      text: strings.t("panel.increase")
+                      tooltipText: flatRow.measure === "count"
+                        ? strings.t("panel.increaseCount") : strings.t("panel.increaseMinutes")
+                      foreground: root.mutedForeground
+                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                      horizontalPadding: 0
+                      verticalPadding: 0
+                      onClicked: root.adjustItem(flatRow.itemData, 1)
+                    }
+                    Button {
+                      width: flatRow.timer_started_at !== "" ? Style.space(54) : Style.space(30)
+                      height: Style.space(26)
+                      text: flatRow.timer_started_at !== ""
+                        ? strings.t("panel.pauseWithTime").arg(root.formatMinutes(flatRow.elapsedMinutes))
+                        : strings.t("panel.start")
+                      tooltipText: flatRow.timer_started_at !== ""
+                        ? strings.t("panel.pauseTimer") : strings.t("panel.startTimer")
+                      foreground: root.foreground
+                      fontFamily: "monospace"
+                      horizontalPadding: Style.space(3)
+                      verticalPadding: 0
+                      bordered: true
+                      onClicked: root.toggleTimer(flatRow.itemData)
+                    }
+                    Button {
+                      visible: rowHover.containsMouse || activeFocus
+                      width: visible ? Style.space(22) : 0
+                      height: Style.space(26)
+                      text: strings.t("panel.editSymbol")
+                      tooltipText: strings.t("panel.editTitle")
+                      foreground: root.mutedForeground
+                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                      horizontalPadding: 0
+                      verticalPadding: 0
+                      onClicked: {
+                        flatRow.editing = true
+                        keyCatcher.editingKey = flatRow.rowKey
+                        flatRow.editText = flatRow.title
+                        titleEditor.forceActiveFocus()
+                        titleEditor.selectAll()
+                      }
+                    }
+                    Button {
+                      visible: rowHover.containsMouse || activeFocus || flatRow.confirmingDelete
+                      width: visible ? (flatRow.confirmingDelete ? Style.space(102) : Style.space(22)) : 0
+                      height: Style.space(26)
+                      text: flatRow.confirmingDelete ? strings.t("panel.confirmDelete") : strings.t("panel.deleteSymbol")
+                      tooltipText: flatRow.confirmingDelete ? "" : strings.t("panel.deleteItem")
+                      foreground: root.mutedForeground
+                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                      horizontalPadding: Style.space(2)
+                      verticalPadding: 0
+                      onClicked: flatRow.confirmingDelete = true
+                    }
+                    Button {
+                      visible: flatRow.confirmingDelete
+                      width: visible ? Style.space(28) : 0
+                      height: Style.space(26)
+                      text: strings.t("panel.yes")
+                      foreground: root.foreground
+                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                      horizontalPadding: 0
+                      verticalPadding: 0
+                      onClicked: root.removeItem(flatRow.itemData)
+                    }
+                    Button {
+                      visible: flatRow.confirmingDelete
+                      width: visible ? Style.space(28) : 0
+                      height: Style.space(26)
+                      text: strings.t("panel.no")
+                      foreground: root.foreground
+                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                      horizontalPadding: 0
+                      verticalPadding: 0
+                      onClicked: flatRow.confirmingDelete = false
+                    }
                   }
                 }
 

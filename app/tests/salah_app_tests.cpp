@@ -2,6 +2,9 @@
 #include <QFile>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QQmlComponent>
+#include <QQmlContext>
+#include <QQmlEngine>
 #include <QtTest>
 #include "backend.h"
 #include "theme.h"
@@ -17,7 +20,7 @@ class SalahAppTests : public QObject {
 if [ "$5" = "slow" ]; then sleep 2; printf '{}\n'; exit 0; fi
 if [ "$1 $2" = "item done" ]; then sleep 1; printf '{}\n'; exit 0; fi
 if [ "$1" = "day" ]; then
- printf '%s\n' '{"day":"2026-11-22","is_today":true,"now":{"block":"dhuhr","sleeping":false,"next":{"id":"asr","name":"Asr","time":"15:18","remaining_seconds":7200}},"prayers":[{"id":"fajr","name":"Fajr","time":"05:58","marked":true},{"id":"dhuhr","name":"Dhuhr","time":"12:11","current":true},{"id":"asr","name":"Asr","time":"15:18"},{"id":"maghrib","name":"Maghrib","time":"17:00"},{"id":"isha","name":"Isha","time":"18:20"}],"sunrise":"07:16","sleep":{"time":"23:00"},"night_start":"23:00","blocks":[{"start":"night","end":"fajr","items":[{"id":"n1","title":"Tahajjud","block":"night","repeat":"daily","weekdays":null,"measure":"check","target":null,"position":0,"state":"open","minutes":0,"count":0,"timer_started_at":null}]},{"start":"fajr","end":"dhuhr","items":[{"id":"a1","title":"Read","block":"fajr","repeat":"daily","weekdays":null,"measure":"minutes","target":20,"position":0,"state":"done","minutes":15,"count":0,"timer_started_at":null}]},{"start":"dhuhr","end":"asr","items":[]},{"start":"asr","end":"maghrib","items":[]},{"start":"maghrib","end":"isha","items":[]},{"start":"isha","end":"sleep","items":[]}],"open":1}'
+ printf '%s\n' '{"day":"2026-11-22","is_today":true,"now":{"block":"dhuhr","sleeping":false,"next":{"id":"asr","name":"Asr","time":"15:18","remaining_seconds":7200}},"prayers":[{"id":"fajr","name":"Fajr","time":"05:58","marked":true},{"id":"dhuhr","name":"Dhuhr","time":"12:11","current":true},{"id":"asr","name":"Asr","time":"15:18"},{"id":"maghrib","name":"Maghrib","time":"17:00"},{"id":"isha","name":"Isha","time":"18:20"}],"sunrise":"07:16","sleep":{"time":"23:00"},"night_start":"23:00","blocks":[{"start":"night","end":"fajr","items":[{"id":"n1","title":"Tahajjud","block":"night","repeat":"daily","weekdays":null,"measure":"check","target":null,"position":0,"state":"open","minutes":3,"count":0,"timer_started_at":"2026-11-22T08:00:00Z"}]},{"start":"fajr","end":"dhuhr","items":[{"id":"a1","title":"Read","block":"fajr","repeat":"daily","weekdays":null,"measure":"minutes","target":20,"position":0,"state":"done","minutes":15,"count":0,"timer_started_at":null}]},{"start":"dhuhr","end":"asr","items":[]},{"start":"asr","end":"maghrib","items":[]},{"start":"maghrib","end":"isha","items":[]},{"start":"isha","end":"sleep","items":[]}],"open":1}'
 elif [ "$1" = "stats" ]; then
  printf '%s\n' '{"from":"2026-11-09","to":"2026-11-22","days":14,"items":[{"id":"a1","title":"Read","block":"fajr","repeat":"daily","weekdays":null,"measure":"minutes","target":20,"planned_days":14,"done_days":9,"minutes":180,"count":0,"series":[]}],"prayers":[{"prayer":"fajr","marked_days":10,"days":14}],"marked_total":10,"prayer_slots":70}'
 elif [ "$1 $2" = "config show" ]; then printf '%s\n' '{' '  "location": "Tashkent",' '  "method": "uzbekistan",' '  "sleep_time": "23:00"' '}'
@@ -74,6 +77,38 @@ private slots:
         const auto blocks=b.dayPlan().value("blocks").toList();
         QCOMPARE(blocks.at(1).toMap().value("items").toList().first().toMap().value("state").toString(),QString("open"));
         QVERIFY(b.busy());
+    }
+    void adjustmentArgumentsAndClamp() {
+        QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
+        b.reload(); QTRY_COMPARE(spy.size(),3);
+        b.adjustItem("a1","minutes",-5); b.adjustItem("a1","minutes",5); b.adjustItem("n1","count",1);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json a1 -5"),3000);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json a1 5"),3000);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json n1 1"),3000);
+        b.selectDay("2026-11-23");
+        b.adjustItem("a1","minutes",5); b.adjustItem("a1","minutes",-5);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json a1 5 --date 2026-11-23"),3000);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json a1 -5 --date 2026-11-23"),3000);
+    }
+    void timerStartStopsAnotherOptimistically() {
+        QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
+        b.reload(); QTRY_COMPARE(spy.size(),3); b.toggleTimer("a1",false);
+        const auto blocks=b.dayPlan().value("blocks").toList();
+        QVERIFY(blocks.at(0).toMap().value("items").toList().first().toMap().value("timer_started_at").toString().isEmpty());
+        QVERIFY(!blocks.at(1).toMap().value("items").toList().first().toMap().value("timer_started_at").toString().isEmpty());
+    }
+    void escapeFunctionClosesTopOverlay() {
+        QTemporaryDir dir; Backend backend(nullptr,fake(dir)); Theme theme(dir.path());
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend",&backend); engine.rootContext()->setContextProperty("theme",&theme);
+        QQmlComponent component(&engine,QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/Main.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString())); root->setProperty("visible",false);
+        root->setProperty("quickVisible",true); root->setProperty("helpVisible",true);
+        QVariant result; QVERIFY(QMetaObject::invokeMethod(root.data(),"closeTopOverlay",Q_RETURN_ARG(QVariant,result))); QVERIFY(result.toBool());
+        QCOMPARE(root->property("helpVisible").toBool(),false); QCOMPARE(root->property("quickVisible").toBool(),true);
+        QVERIFY(QMetaObject::invokeMethod(root.data(),"closeTopOverlay",Q_RETURN_ARG(QVariant,result)));
+        QCOMPARE(root->property("quickVisible").toBool(),false);
+        QVERIFY(QMetaObject::invokeMethod(root.data(),"closeTopOverlay",Q_RETURN_ARG(QVariant,result))); QVERIFY(!result.toBool());
     }
     void hijriHeaderFormatting() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); const QString h=b.hijriHeader("2026-11-22");

@@ -14,6 +14,8 @@ ApplicationWindow {
     property bool quickVisible: false
     property bool entryVisible: false
     property bool helpVisible: false
+    property string toastText: ""
+    property double timerNow: Date.now()
     property string quickBlock: ""
     property var editItem: ({})
     property int statsRange: 7
@@ -28,7 +30,7 @@ ApplicationWindow {
     readonly property color text: "#f1efe9"
     readonly property string mono: "monospace"
 
-    function openQuick(block) { quickBlock=block||""; quickVisible=true; quickField.text=""; quickField.forceActiveFocus() }
+    function openQuick(block) { quickBlock=block||""; backend.parseQuick(""); quickVisible=true; quickField.text=""; quickField.forceActiveFocus() }
     function openEntry(item) { editItem=item||({}); entryVisible=true }
     function blockItems(id) {
         var out=[]; var blocks=backend.dayPlan.blocks||[]
@@ -47,9 +49,40 @@ ApplicationWindow {
         return a.map(function(d){return names[d]||capitalized(d)}).join(", ")
     }
     function detail(x) {
-        var value=x.measure==="minutes"?qsTr("%1 / %2 min").arg(x.minutes||0).arg(x.target||0):x.measure==="count"?qsTr("%1 / %2").arg(x.count||0).arg(x.target||0):""
+        var value=x.measure==="minutes"?qsTr("%1 / %2 min").arg(runningMinutes(x)).arg(x.target||0):x.measure==="count"?qsTr("%1 / %2").arg(x.count||0).arg(x.target||0):(runningMinutes(x)>0?qsTr("%1 min").arg(runningMinutes(x)):"")
         var repeat=x.repeat==="weekly"?weekdayText(x.weekdays,x.repeat):x.repeat==="daily"?qsTr("Daily"):qsTr("Once")
         return value ? value+"  ·  "+repeat : repeat
+    }
+    function runningMinutes(x) {
+        var total=Number(x.minutes||0), started=String(x.timer_started_at||"")
+        if(started) { var ms=Date.parse(started); if(!isNaN(ms)) total+=Math.max(0,Math.floor((timerNow-ms)/60000)) }
+        return total
+    }
+    function weekdayId(d) { return ["sun","mon","tue","wed","thu","fri","sat"][d.getDay()] }
+    function nextOccurrence(item, fromIso) {
+        var d=Date.fromLocaleString(Qt.locale(),fromIso,"yyyy-MM-dd"), repeat=item.repeat||"none", days=item.weekdays||[]
+        if(repeat==="none"||repeat==="daily") return d
+        for(var i=0;i<14;i++){if(days.indexOf(weekdayId(d))>=0)return d;d=new Date(d.getFullYear(),d.getMonth(),d.getDate()+1)}
+        return d
+    }
+    function occursOn(item, dayIso) {
+        if((item.repeat||"none")==="none"||(item.repeat||"none")==="daily") return true
+        var d=Date.fromLocaleString(Qt.locale(),dayIso,"yyyy-MM-dd")
+        return (item.weekdays||[]).indexOf(weekdayId(d))>=0
+    }
+    function shortDate(d) { return Qt.locale("en_US").toString(d,"ddd d MMM") }
+    function maybeToast(item) {
+        if(occursOn(item,backend.selectedDay))return
+        var start=Date.fromLocaleString(Qt.locale(),backend.selectedDay,"yyyy-MM-dd");start=new Date(start.getFullYear(),start.getMonth(),start.getDate()+1)
+        toastText=String(item.title||qsTr("Item"))+qsTr(" — next %1").arg(shortDate(nextOccurrence(item,iso(start))));toastTimer.restart()
+    }
+    function closeTopOverlay() {
+        if(entryVisible&&entryPopup.confirming){entryPopup.confirming=false;return true}
+        if(helpVisible){helpVisible=false;return true}
+        if(entryVisible){entryVisible=false;return true}
+        if(quickVisible){quickVisible=false;return true}
+        if(dragging){finishDrag(true);return true}
+        return false
     }
     function joinedDetail(block, schedule) {
         var parts=[]
@@ -172,10 +205,12 @@ ApplicationWindow {
     Shortcut { sequence: "T"; context: Qt.ApplicationShortcut; enabled: !isTyping(); onActivated: backend.jumpToday() }
     Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: helpVisible=!helpVisible }
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: !isTyping(); onActivated: Qt.quit() }
-    Timer { interval:1000; running:true; repeat:true; onTriggered: if(countdown>0) countdown-- }
+    Shortcut { sequence: "Ctrl+Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
+    Shortcut { sequence: "Ctrl+W"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
+    Timer { interval:1000; running:true; repeat:true; onTriggered:{if(countdown>0)countdown--;timerNow=Date.now()} }
     Timer { interval:60000; running:true; repeat:true; onTriggered: backend.reload() }
     Connections { target:backend; function onChanged(){ if(backend.dayPlan.now&&backend.dayPlan.now.next) countdown=backend.dayPlan.now.next.remaining_seconds||0; syncTimeline() } }
-    Shortcut { sequence:"Escape"; context:Qt.ApplicationShortcut; enabled:dragging; onActivated:finishDrag(true) }
+    Shortcut { sequence:"Escape"; context:Qt.ApplicationShortcut; onActivated:closeTopOverlay() }
     onActiveChanged: if(active) backend.reload()
 
     RowLayout {
@@ -279,8 +314,9 @@ ApplicationWindow {
                                                     Label { text:payload.title||"";color:payload.state==="done"?win.muted:win.text;font.pixelSize:15;font.weight:Font.Medium;Layout.fillWidth:true;elide:Text.ElideRight;textFormat:Text.PlainText }
                                                     Label { text:detail(payload);color:win.muted;font.family:win.mono;font.pixelSize:12 }
                                                 }
-                                                ToolButton { visible:payload.measure==="minutes"&&backend.selectedDay===backend.todayDay;text:payload.timer_started_at?"■":"▶";onClicked:backend.toggleTimer(payload.id,!!payload.timer_started_at) }
-                                                ToolButton { visible:payload.measure==="count";text:"+1";onClicked:backend.logOne(payload.id) }
+                                                ToolButton { text:"−";enabled:(payload.measure==="count"?(payload.count||0):runningMinutes(payload))>0;onClicked:backend.adjustItem(payload.id,payload.measure,payload.measure==="count"?-1:-5) }
+                                                ToolButton { text:"+";onClicked:backend.adjustItem(payload.id,payload.measure,payload.measure==="count"?1:5) }
+                                                ToolButton { text:payload.timer_started_at?qsTr("⏸︎  %1 min").arg(runningMinutes(payload)):"▶︎";onClicked:backend.toggleTimer(payload.id,!!payload.timer_started_at) }
                                             }
                                             MouseArea { anchors.fill:parent; acceptedButtons:Qt.LeftButton; onDoubleClicked:openEntry(payload); z:-1 }
                             }
@@ -341,7 +377,7 @@ ApplicationWindow {
                                     ColumnLayout { Layout.preferredWidth:270;spacing:5
                                         Label { text:modelData.title;color:win.text;font.pixelSize:17;font.weight:Font.Medium;Layout.fillWidth:true;elide:Text.ElideRight }
                                         Label { text:joinedDetail(modelData.block,weekdayText(modelData.weekdays,modelData.repeat));color:win.muted;font.family:win.mono;font.pixelSize:12 }
-                                        Label { text:qsTr("%1 of %2 days").arg(modelData.done_days).arg(modelData.planned_days);color:"#c7c2b9";font.pixelSize:13 }
+                                        Label { text:modelData.planned_days===0?qsTr("Starts %1").arg(shortDate(nextOccurrence(modelData,backend.todayDay))):qsTr("%1 of %2 days").arg(modelData.done_days).arg(modelData.planned_days);color:"#c7c2b9";font.pixelSize:13 }
                                     }
                                     RowLayout { Layout.fillWidth:true;Layout.fillHeight:true;spacing:5
                                         Repeater { model:modelData.series||[]
@@ -438,11 +474,12 @@ ApplicationWindow {
                 Label { text:quickBlock?qsTr("QUICK ADD · %1").arg(quickBlock.toUpperCase()):qsTr("QUICK ADD");color:win.muted;font.family:win.mono;font.pixelSize:12;font.letterSpacing:1.5;Layout.fillWidth:true }
                 Label { text:"Ctrl K";color:win.muted;font.family:win.mono }
             }
-            TextField { id:quickField;Layout.fillWidth:true;placeholderText:qsTr("e.g. read 20m after isha daily");font.pixelSize:20;onTextChanged:parseTimer.restart();onAccepted:if(text.trim()){backend.addQuick(text,quickBlock);quickVisible=false} }
+            TextField { id:quickField;Layout.fillWidth:true;placeholderText:qsTr("e.g. read 20m after isha daily");font.pixelSize:20;onTextChanged:parseTimer.restart();onAccepted:if(text.trim()){var d=backend.parseDraft||{};d.title=d.title||text;maybeToast(d);backend.addQuick(text,quickBlock);quickVisible=false} }
             Label { Layout.fillWidth:true;text:backend.parseDraft.title?qsTr("%1 · %2 · %3 %4").arg(backend.parseDraft.title).arg(backend.parseDraft.block||qsTr("next prayer")).arg(backend.parseDraft.target||"").arg(backend.parseDraft.measure||""):qsTr("Describe what, when, and how often.");color:win.muted;font.family:win.mono;font.pixelSize:12;elide:Text.ElideRight }
             RowLayout { Layout.fillWidth:true;Item{Layout.fillWidth:true}
+                AppButton { text:qsTr("Cancel");onClicked:quickVisible=false }
                 AppButton { text:qsTr("Edit details");onClicked:{var d=backend.parseDraft||{};d.title=d.title||quickField.text;d.block=d.block||quickBlock||"fajr";openEntry(d);quickVisible=false} }
-                AppButton { text:qsTr("Add  ↵");primary:true;enabled:quickField.text.trim()!=="";onClicked:{backend.addQuick(quickField.text,quickBlock);quickVisible=false} }
+                AppButton { text:qsTr("Add  ↵");primary:true;enabled:quickField.text.trim()!=="";onClicked:{var d=backend.parseDraft||{};d.title=d.title||quickField.text;maybeToast(d);backend.addQuick(quickField.text,quickBlock);quickVisible=false} }
             }
         }
         Timer { id:parseTimer;interval:200;onTriggered:backend.parseQuick(quickField.text) }
@@ -463,8 +500,8 @@ ApplicationWindow {
                 Label { text:editItem.id?qsTr("Edit entry"):qsTr("New entry");color:win.text;font.pixelSize:20;font.weight:Font.DemiBold;Layout.fillWidth:true }
                 AppButton { visible:!!editItem.id;text:entryPopup.confirming?qsTr("Confirm delete"):qsTr("Delete");onClicked:{if(entryPopup.confirming){backend.removeItem(editItem.id);entryVisible=false}else entryPopup.confirming=true} }
                 AppButton { text:qsTr("Cancel");onClicked:entryVisible=false }
-                AppButton { text:qsTr("Save & add another");onClicked:{backend.saveItem(entryPopup.draft());editItem=({});titleField.text=""} }
-                AppButton { text:qsTr("Save  ↵");primary:true;enabled:titleField.text.trim()!=="";onClicked:{backend.saveItem(entryPopup.draft());entryVisible=false} }
+                AppButton { text:qsTr("Save & add another");onClicked:{var d=entryPopup.draft();maybeToast(d);backend.saveItem(d);editItem=({});titleField.text=""} }
+                AppButton { text:qsTr("Save  ↵");primary:true;enabled:titleField.text.trim()!=="";onClicked:{var d=entryPopup.draft();maybeToast(d);backend.saveItem(d);entryVisible=false} }
             }
             Rectangle { Layout.fillWidth:true;height:1;color:win.border }
             RowLayout { Layout.fillWidth:true;Layout.fillHeight:true;Layout.margins:22;spacing:26
@@ -473,7 +510,7 @@ ApplicationWindow {
                         Rectangle { width:parent.width;height:108;radius:theme.radius;color:win.panel;border.color:win.border
                             Item { anchors.fill:parent;anchors.margins:24
                                 Text { anchors.left:parent.left;anchors.verticalCenter:parent.verticalCenter;text:qsTr("Activity title…");color:win.muted;font.pixelSize:24;visible:titleField.text.length===0 }
-                                TextInput { id:titleField;anchors.left:parent.left;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;color:win.text;selectionColor:theme.accent;selectedTextColor:theme.accentForeground;font.pixelSize:28;clip:true }
+                                TextInput { id:titleField;anchors.left:parent.left;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;color:win.text;selectionColor:theme.accent;selectedTextColor:theme.accentForeground;font.pixelSize:28;clip:true;onAccepted:if(text.trim()){var d=entryPopup.draft();maybeToast(d);backend.saveItem(d);entryVisible=false} }
                                 Rectangle { anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:1;color:win.border }
                             }
                         }
@@ -532,13 +569,17 @@ ApplicationWindow {
         }
     }
 
-    Popup { visible:helpVisible;modal:true;focus:true;anchors.centerIn:Overlay.overlay;width:440;height:390;closePolicy:Popup.CloseOnEscape|Popup.CloseOnPressOutside
+    Popup { visible:helpVisible;modal:true;focus:true;anchors.centerIn:Overlay.overlay;width:460;height:430;closePolicy:Popup.NoAutoClose
         background:Rectangle{color:win.panel;radius:theme.radius;border.color:win.border}
         ColumnLayout { anchors.fill:parent;anchors.margins:26;spacing:12
             Label { text:qsTr("Keyboard shortcuts");color:win.text;font.pixelSize:20;font.weight:Font.DemiBold }
-            Repeater { model:[["Ctrl 1",qsTr("Today")],["Ctrl 2",qsTr("Routines")],["Ctrl 3",qsTr("Statistics")],["Ctrl 4",qsTr("Settings")],["Ctrl K",qsTr("Quick add")],["← / →",qsTr("Previous / next day")],["T",qsTr("Today")],["?",qsTr("This help")],["Q",qsTr("Quit")]]
+            Repeater { model:[["Ctrl 1",qsTr("Today")],["Ctrl 2",qsTr("Routines")],["Ctrl 3",qsTr("Statistics")],["Ctrl 4",qsTr("Settings")],["Ctrl K",qsTr("Quick add")],["Enter",qsTr("Submit form")],["Esc",qsTr("Close top overlay / cancel drag")],["← / →",qsTr("Previous / next day")],["T",qsTr("Today")],["?",qsTr("This help")],["Ctrl Q / W",qsTr("Quit")],["Q",qsTr("Quit outside text fields")]]
                 RowLayout { required property var modelData;Layout.fillWidth:true;Label{text:modelData[0];color:theme.accent;font.family:win.mono;Layout.preferredWidth:100}Label{text:modelData[1];color:win.text;Layout.fillWidth:true} }
             }
         }
     }
+    Rectangle { visible:toastText!=="";z:2000;anchors.horizontalCenter:parent.horizontalCenter;anchors.bottom:parent.bottom;anchors.bottomMargin:28;width:toastLabel.implicitWidth+36;height:48;radius:theme.radius;color:"#302e28";border.color:win.border
+        Label { id:toastLabel;anchors.centerIn:parent;text:toastText;color:win.text;textFormat:Text.PlainText }
+    }
+    Timer { id:toastTimer;interval:3500;onTriggered:toastText="" }
 }
