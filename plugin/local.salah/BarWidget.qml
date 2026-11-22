@@ -26,6 +26,8 @@ BarWidget {
   property string lastLocationSync: ""
   property bool firstLoad: true
   property bool popoutSwitchClosing: false
+  property string actionError: ""
+  property var pendingActions: []
 
   readonly property string nextName: report && report.next
     ? String(report.next.name || "")
@@ -38,10 +40,19 @@ BarWidget {
   readonly property bool sleeping: report && report.current_block
     ? report.current_block.sleeping === true
     : false
+  readonly property var planner: report && report.planner ? report.planner : null
+  readonly property int openCount: planner ? (Number(planner.open) || 0) : 0
+  // While sleeping the list shows what is planned for the coming Fajr block.
+  readonly property var blockItems: planner
+    ? (sleeping ? (planner.upcoming || []) : (planner.current || []))
+    : []
+  readonly property string blockName: report && report.current_block && !sleeping
+    ? String(report.current_block.start.name || "")
+    : strings.t("panel.fajrTomorrow")
   readonly property string displayText: nextName !== ""
     ? (sleeping
         ? strings.t("bar.sleeping") + "  " + nextName + " " + remainingShort
-        : nextName + "  " + remainingShort)
+        : nextName + "  " + remainingShort + (openCount > 0 ? "  · " + openCount : ""))
     : (firstLoad ? strings.t("bar.loading") : "☾ —")
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color mutedForeground: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
@@ -64,6 +75,59 @@ BarWidget {
 
   function refresh() {
     if (!statusProcess.running) statusProcess.running = true
+  }
+
+  // Planner actions run one at a time, in order, as fixed argument lists.
+  // Titles follow `--` so text starting with "-" is never read as a flag.
+  function runAction(args) {
+    pendingActions = pendingActions.concat([["salah"].concat(args)])
+    runNextAction()
+  }
+
+  function runNextAction() {
+    if (actionProcess.running || pendingActions.length === 0) return
+    actionProcess.command = pendingActions[0]
+    pendingActions = pendingActions.slice(1)
+    actionProcess.running = true
+  }
+
+  function addItem(title) {
+    var text = String(title || "").trim()
+    if (text === "") return
+    runAction(["item", "add", "--json", "--", text])
+  }
+
+  function toggleItem(row) {
+    runAction(["item", row.state === "done" ? "undo" : "done", "--json", String(row.id)])
+  }
+
+  function toggleTimer(row) {
+    if (row.timer_started_at) runAction(["item", "stop", "--json"])
+    else runAction(["item", "start", "--json", String(row.id)])
+  }
+
+  function logOne(row) {
+    runAction(["item", "log", "--json", String(row.id), "1"])
+  }
+
+  function setSleepTime(value) {
+    var text = String(value || "").trim()
+    if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(text)) {
+      actionError = strings.t("panel.sleepFormat")
+      return
+    }
+    runAction(["config", "set", "--sleep-time", text])
+  }
+
+  function itemDetail(row) {
+    var parts = []
+    if (row.measure === "minutes")
+      parts.push(row.minutes + (row.target ? " / " + row.target : "") + " " + strings.t("panel.minutesShort"))
+    else if (row.measure === "count")
+      parts.push(row.count + (row.target ? " / " + row.target : ""))
+    if (row.block && report && report.current_block && row.block !== report.current_block.start.id)
+      parts.push(strings.t("panel.carried"))
+    return parts.join(" · ")
   }
 
   function syncLocation(force) {
@@ -204,6 +268,23 @@ BarWidget {
   }
 
   Process {
+    id: actionProcess
+    stderr: StdioCollector {
+      id: actionStderr
+      waitForEnd: true
+    }
+    onExited: function(exitCode) {
+      if (exitCode === 0) root.actionError = ""
+      else {
+        var detail = String(actionStderr.text || "").trim().replace(/[\r\n]+/g, " ")
+        root.actionError = detail === "" ? strings.t("panel.commandFailed") : detail.slice(0, 240)
+      }
+      root.refresh()
+      root.runNextAction()
+    }
+  }
+
+  Process {
     id: statusProcess
     command: ["salah", "status", "--json"]
     stdout: StdioCollector {
@@ -254,6 +335,8 @@ BarWidget {
     content: PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      // Let the inline editors receive keys while they have focus.
+      blocked: addField.activeFocus || sleepField.activeFocus
       implicitHeight: contentColumn.implicitHeight
       onCloseRequested: root.close()
       onTabRequested: function(direction) {
@@ -334,6 +417,156 @@ BarWidget {
           fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
           bordered: true
           onClicked: root.syncLocation(true)
+        }
+
+        PanelSeparator {
+          visible: root.report !== null
+          foreground: root.foreground
+        }
+
+        Column {
+          id: blockSection
+          visible: root.report !== null
+          width: parent.width
+          spacing: Style.space(4)
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: strings.t("panel.thisBlock").arg(root.blockName)
+            color: root.mutedForeground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1.2
+            elide: Text.ElideRight
+          }
+
+          Repeater {
+            model: root.blockItems
+
+            Item {
+              id: itemRow
+              required property var modelData
+              readonly property bool done: modelData.state === "done"
+              width: blockSection.width
+              height: Style.space(34)
+
+              Rectangle {
+                anchors.fill: parent
+                radius: Math.min(Style.cornerRadius, Style.space(6))
+                color: rowMouse.containsMouse
+                  ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+                  : "transparent"
+              }
+
+              MouseArea {
+                id: rowMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.toggleItem(itemRow.modelData)
+              }
+
+              Text {
+                id: tick
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                text: itemRow.done ? "☑" : "☐"
+                color: itemRow.done ? root.mutedForeground : root.foreground
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.body
+              }
+
+              Column {
+                anchors.left: tick.right
+                anchors.leftMargin: Style.space(8)
+                anchors.right: actionButton.left
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+
+                Text {
+                  width: parent.width
+                  textFormat: Text.PlainText
+                  text: String(itemRow.modelData.title || "")
+                  color: itemRow.done ? root.mutedForeground : root.foreground
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.body
+                  font.strikeout: itemRow.done
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  visible: text !== ""
+                  width: parent.width
+                  textFormat: Text.PlainText
+                  text: root.itemDetail(itemRow.modelData)
+                  color: root.mutedForeground
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                }
+              }
+
+              Button {
+                id: actionButton
+                visible: itemRow.modelData.measure !== "check" && !root.sleeping
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: visible ? Style.space(44) : 0
+                text: itemRow.modelData.measure === "count"
+                  ? "+1"
+                  : (itemRow.modelData.timer_started_at ? "■" : "▶")
+                foreground: root.foreground
+                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                bordered: true
+                onClicked: itemRow.modelData.measure === "count"
+                  ? root.logOne(itemRow.modelData)
+                  : root.toggleTimer(itemRow.modelData)
+              }
+            }
+          }
+
+          Text {
+            visible: root.blockItems.length === 0
+            width: parent.width
+            textFormat: Text.PlainText
+            text: root.report && root.report.planner_error
+              ? strings.t("panel.plannerUnavailable")
+              : strings.t("panel.nothingPlanned")
+            color: root.mutedForeground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          TextField {
+            id: addField
+            width: parent.width
+            placeholderText: strings.t("panel.addPlaceholder").arg(root.blockName)
+            foreground: root.foreground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            maximumLength: 200
+            onAccepted: {
+              root.addItem(text)
+              text = ""
+            }
+          }
+
+          Text {
+            visible: root.actionError !== ""
+            width: parent.width
+            textFormat: Text.PlainText
+            text: root.actionError
+            color: root.mutedForeground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WrapAnywhere
+            maximumLineCount: 3
+            elide: Text.ElideRight
+          }
         }
 
         PanelSeparator {
@@ -433,6 +666,47 @@ BarWidget {
 
         PanelSeparator {
           foreground: root.foreground
+        }
+
+        Item {
+          visible: root.report !== null
+          width: parent.width
+          implicitHeight: sleepField.implicitHeight
+
+          Text {
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: strings.t("panel.sleepTime")
+            color: root.mutedForeground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+          }
+
+          TextField {
+            id: sleepField
+            anchors.right: parent.right
+            width: Style.space(72)
+            horizontalAlignment: TextInput.AlignHCenter
+            maximumLength: 5
+            inputMethodHints: Qt.ImhDigitsOnly
+            foreground: root.foreground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            // Show the saved sleep time unless the user is editing it.
+            function showSaved() {
+              if (!activeFocus) text = String(root.report ? root.report.sleep_time || "" : "")
+            }
+            Component.onCompleted: showSaved()
+            onActiveFocusChanged: showSaved()
+            Connections {
+              target: root
+              function onReportChanged() { sleepField.showSaved() }
+            }
+            onAccepted: {
+              root.setSleepTime(text)
+              focus = false
+            }
+          }
         }
 
         Text {

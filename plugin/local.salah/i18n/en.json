@@ -18,5 +18,14 @@
   "panel.refreshNow": "Refresh location and official times",
   "panel.usingSavedLocation": "Using the saved location. %1",
   "panel.autoLocation": "Auto · %1",
-  "panel.networkLocationNotice": "Approximate network location. geo.omarchy.org, then ipapi.co as fallback, receives your public IP; a VPN can affect the result."
+  "panel.networkLocationNotice": "Approximate network location. geo.omarchy.org, then ipapi.co as fallback, receives your public IP; a VPN can affect the result.",
+  "panel.thisBlock": "THIS BLOCK · %1",
+  "panel.fajrTomorrow": "Fajr tomorrow",
+  "panel.nothingPlanned": "Nothing planned. Type below and press Enter.",
+  "panel.plannerUnavailable": "Planner data is unavailable.",
+  "panel.addPlaceholder": "Add to %1…",
+  "panel.minutesShort": "min",
+  "panel.carried": "carried",
+  "panel.sleepTime": "Sleep time",
+  "panel.sleepFormat": "Sleep time must use 24-hour HH:MM."
 }
