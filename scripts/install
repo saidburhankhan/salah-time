@@ -215,6 +215,9 @@ if [[ -z "${SALAH_NO_SHELL:-}" && "$HOME" == "$real_home" ]] && command -v syste
   if ! systemctl --user enable --now salah.socket; then
     printf 'warning: could not enable salah.socket; run systemctl --user enable --now salah.socket\n' >&2
   fi
+  # A daemon from the previous install keeps running the old binary;
+  # restart it if it is running (socket activation starts it otherwise).
+  systemctl --user try-restart salah.service >/dev/null 2>&1 || true
 fi
 
 printf 'Installed %s\n' "$binary_target"
