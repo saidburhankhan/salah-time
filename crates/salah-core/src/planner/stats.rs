@@ -3,7 +3,7 @@ use crate::config::Config;
 use chrono::{DateTime, NaiveDate, Utc};
 use salah_domain::day::BoundaryId;
 use salah_domain::error::Error;
-use salah_domain::item::{Item, Measure, PrayerMark, Repeat, State, Weekdays};
+use salah_domain::item::{LegacyItem, LegacyMeasure, PrayerMark, Repeat, State, Weekdays};
 use salah_prayer::schedule;
 use salah_store::Store;
 use serde::Serialize;
@@ -24,7 +24,7 @@ pub struct ItemStats {
     pub block: BoundaryId,
     pub repeat: Repeat,
     pub weekdays: Option<Weekdays>,
-    pub measure: Measure,
+    pub measure: LegacyMeasure,
     pub target: Option<i64>,
     pub planned_days: usize,
     pub done_days: usize,
@@ -114,7 +114,7 @@ pub fn stats(
     let today = schedule::resolve(config, now)?.day();
     let days = reports.len();
     let mut items: Vec<ItemStats> = Vec::new();
-    for item in store.items()?.into_iter().filter(Item::is_live) {
+    for item in store.items()?.into_iter().filter(LegacyItem::is_live) {
         let series: Vec<DayStat> = reports
             .iter()
             .map(|report| {
@@ -270,7 +270,7 @@ mod tests {
         let read = NewItem {
             repeat: Some(Repeat::Weekly),
             weekdays: Some(Weekdays::WORKWEEK),
-            measure: Some(Measure::Minutes),
+            measure: Some(LegacyMeasure::Minutes),
             date: Some(date(16)),
             ..titled("Read")
         };
@@ -331,7 +331,7 @@ mod tests {
             at(20, 13, 0),
             ids(),
             NewItem {
-                measure: Some(Measure::Minutes),
+                measure: Some(LegacyMeasure::Minutes),
                 target: Some(30),
                 ..titled("Read")
             },

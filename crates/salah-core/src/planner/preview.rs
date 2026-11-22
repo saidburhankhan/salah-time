@@ -4,7 +4,8 @@ use chrono::{Datelike, NaiveDate};
 use salah_domain::day::BoundaryId;
 use salah_domain::error::Error;
 use salah_domain::item::{
-    Measure, Repeat, Weekdays, next_occurrence, schedule_text, validate_block, validate_repeat,
+    LegacyMeasure, Repeat, Weekdays, next_occurrence, schedule_text, validate_block,
+    validate_repeat,
 };
 use serde::Serialize;
 
@@ -25,14 +26,14 @@ pub fn preview(
     block: BoundaryId,
     repeat: Repeat,
     weekdays: Option<Weekdays>,
-    measure: Measure,
+    measure: LegacyMeasure,
     target: Option<i64>,
     date: NaiveDate,
 ) -> Result<Preview, Error> {
     validate_block(block)?;
     validate_repeat(repeat, weekdays)?;
     if let Some(target) = target {
-        if measure == Measure::Check {
+        if measure == LegacyMeasure::Check {
             return Err("a target needs a minutes or count item".into());
         }
         if target <= 0 {
@@ -94,7 +95,7 @@ mod tests {
             BoundaryId::Fajr,
             repeat,
             weekdays,
-            Measure::Check,
+            LegacyMeasure::Check,
             None,
             day,
         )
@@ -142,7 +143,7 @@ mod tests {
                 BoundaryId::Sleep,
                 Repeat::Daily,
                 None,
-                Measure::Check,
+                LegacyMeasure::Check,
                 None,
                 date(2026, 11, 20)
             )
@@ -153,7 +154,7 @@ mod tests {
                 BoundaryId::Fajr,
                 Repeat::Weekly,
                 None,
-                Measure::Check,
+                LegacyMeasure::Check,
                 None,
                 date(2026, 11, 20)
             )

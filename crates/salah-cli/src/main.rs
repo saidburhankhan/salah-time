@@ -6,7 +6,7 @@ use salah_core::{
 };
 use salah_domain::{
     day::BoundaryId,
-    item::{Measure, Repeat, State, Weekdays},
+    item::{LegacyMeasure, Repeat, State, Weekdays},
     runtime::{Clock, FixedClock, IdGenerator, SystemClock, UuidV4},
 };
 use salah_prayer::{calculation::METHODS, official, schedule};
@@ -108,7 +108,7 @@ enum ItemCommand {
 
 #[derive(Args)]
 struct ItemStopArgs {
-    /// Item id or unique id prefix; without it, stop whichever timer runs
+    /// LegacyItem id or unique id prefix; without it, stop whichever timer runs
     id: Option<String>,
     /// Print machine-readable JSON
     #[arg(long)]
@@ -124,7 +124,7 @@ struct JsonArgs {
 
 #[derive(Args)]
 struct ItemIdArgs {
-    /// Item id or unique id prefix
+    /// LegacyItem id or unique id prefix
     id: String,
     /// Print machine-readable JSON
     #[arg(long)]
@@ -133,7 +133,7 @@ struct ItemIdArgs {
 
 #[derive(Args)]
 struct ItemDateArgs {
-    /// Item id or unique id prefix
+    /// LegacyItem id or unique id prefix
     id: String,
     /// Record on this day (YYYY-MM-DD) instead of now
     #[arg(long)]
@@ -155,7 +155,7 @@ struct ItemParseArgs {
 
 #[derive(Args)]
 struct ItemMoveArgs {
-    /// Item id or unique id prefix
+    /// LegacyItem id or unique id prefix
     id: String,
     /// Target prayer block
     #[arg(long)]
@@ -250,7 +250,7 @@ struct ItemAddArgs {
 
 #[derive(Args)]
 struct ItemLogArgs {
-    /// Item id or unique id prefix
+    /// LegacyItem id or unique id prefix
     id: String,
     /// Minutes (or count, for count items) to add; negative subtracts
     #[arg(allow_negative_numbers = true)]
@@ -268,7 +268,7 @@ struct ItemLogArgs {
 
 #[derive(Args)]
 struct ItemEditArgs {
-    /// Item id or unique id prefix
+    /// LegacyItem id or unique id prefix
     id: String,
     /// Replacement title
     #[arg(long)]
@@ -597,7 +597,7 @@ fn parse_block(value: &str) -> Result<BoundaryId, String> {
     Ok(block)
 }
 
-fn parse_measure(value: Option<String>) -> Result<Option<Measure>, String> {
+fn parse_measure(value: Option<String>) -> Result<Option<LegacyMeasure>, String> {
     value
         .map(|value| {
             serde_json::from_value(serde_json::Value::String(value.clone()))
@@ -820,7 +820,7 @@ type EntryOperation = fn(
     DateTime<Utc>,
     &dyn IdGenerator,
     &str,
-) -> Result<salah_domain::item::Entry, salah_domain::error::Error>;
+) -> Result<salah_domain::item::LegacyEntry, salah_domain::error::Error>;
 
 fn write_entry(
     store: &mut Store,

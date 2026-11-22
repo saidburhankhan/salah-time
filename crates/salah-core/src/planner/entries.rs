@@ -4,19 +4,19 @@ use crate::config::Config;
 use chrono::{DateTime, NaiveDate, Utc};
 use salah_domain::day::BlockKey;
 use salah_domain::error::Error;
-use salah_domain::item::{Entry, EntryKind, Item, Measure};
+use salah_domain::item::{LegacyEntry, LegacyEntryKind, LegacyItem, LegacyMeasure};
 use salah_domain::runtime::IdGenerator;
 use salah_prayer::schedule;
 use salah_store::Store;
 
 pub(super) fn new_entry(
-    item: &Item,
+    item: &LegacyItem,
     block: BlockKey,
-    kind: EntryKind,
+    kind: LegacyEntryKind,
     now: DateTime<Utc>,
     ids: &dyn IdGenerator,
-) -> Entry {
-    Entry {
+) -> LegacyEntry {
+    LegacyEntry {
         id: ids.new_id(),
         item_id: item.id.clone(),
         block,
@@ -39,7 +39,7 @@ pub fn done(
     ids: &dyn IdGenerator,
     id: &str,
     date: Option<NaiveDate>,
-) -> Result<Entry, Error> {
+) -> Result<LegacyEntry, Error> {
     done_with(store, config, now, ids, id, date, Mutation::default())
 }
 
@@ -51,13 +51,13 @@ pub fn done_with(
     id: &str,
     date: Option<NaiveDate>,
     mutation: Mutation<'_>,
-) -> Result<Entry, Error> {
+) -> Result<LegacyEntry, Error> {
     let now = stamp(now);
     let schedule = schedule::resolve(config, now)?;
     write_mutation(store, config, now, mutation, |tx| {
         let item = find_item(tx, id)?;
         let block = recorded_block(&schedule, &item, date);
-        let mut entry = new_entry(&item, block, EntryKind::Done, now, ids);
+        let mut entry = new_entry(&item, block, LegacyEntryKind::Done, now, ids);
         entry.version = tx.put_entry(&entry)?;
         Ok(entry)
     })
@@ -87,10 +87,10 @@ pub fn undo_with(
     write_mutation(store, config, now, mutation, |tx| {
         let item = find_item(tx, id)?;
         let day = recorded_block(&schedule, &item, date).day;
-        let ticks: Vec<Entry> = tx
+        let ticks: Vec<LegacyEntry> = tx
             .entries_between(day, day)?
             .into_iter()
-            .filter(|e| e.is_live() && e.item_id == item.id && e.kind == EntryKind::Done)
+            .filter(|e| e.is_live() && e.item_id == item.id && e.kind == LegacyEntryKind::Done)
             .collect();
         for mut tick in ticks.iter().cloned() {
             tick.deleted_at = Some(now);
@@ -110,7 +110,7 @@ pub fn log(
     id: &str,
     value: i64,
     date: Option<NaiveDate>,
-) -> Result<Entry, Error> {
+) -> Result<LegacyEntry, Error> {
     log_with(
         store,
         config,
@@ -133,7 +133,7 @@ pub fn log_with(
     value: i64,
     date: Option<NaiveDate>,
     mutation: Mutation<'_>,
-) -> Result<Entry, Error> {
+) -> Result<LegacyEntry, Error> {
     // Count items adjust their count; every other item records time spent.
     record(store, config, now, ids, id, (None, value), date, mutation)
 }
@@ -147,7 +147,7 @@ pub fn log_count(
     id: &str,
     value: i64,
     date: Option<NaiveDate>,
-) -> Result<Entry, Error> {
+) -> Result<LegacyEntry, Error> {
     log_count_with(
         store,
         config,
@@ -170,14 +170,14 @@ pub fn log_count_with(
     value: i64,
     date: Option<NaiveDate>,
     mutation: Mutation<'_>,
-) -> Result<Entry, Error> {
+) -> Result<LegacyEntry, Error> {
     record(
         store,
         config,
         now,
         ids,
         id,
-        (Some(EntryKind::Count), value),
+        (Some(LegacyEntryKind::Count), value),
         date,
         mutation,
     )
@@ -193,7 +193,7 @@ pub fn adjust_time(
     id: &str,
     value: i64,
     date: Option<NaiveDate>,
-) -> Result<Entry, Error> {
+) -> Result<LegacyEntry, Error> {
     adjust_time_with(
         store,
         config,
@@ -216,14 +216,14 @@ pub fn adjust_time_with(
     value: i64,
     date: Option<NaiveDate>,
     mutation: Mutation<'_>,
-) -> Result<Entry, Error> {
+) -> Result<LegacyEntry, Error> {
     record(
         store,
         config,
         now,
         ids,
         id,
-        (Some(EntryKind::Minutes), value),
+        (Some(LegacyEntryKind::Minutes), value),
         date,
         mutation,
     )
@@ -236,10 +236,10 @@ fn record(
     now: DateTime<Utc>,
     ids: &dyn IdGenerator,
     id: &str,
-    (kind, value): (Option<EntryKind>, i64),
+    (kind, value): (Option<LegacyEntryKind>, i64),
     date: Option<NaiveDate>,
     mutation: Mutation<'_>,
-) -> Result<Entry, Error> {
+) -> Result<LegacyEntry, Error> {
     let now = stamp(now);
     // A negative value subtracts; daily totals are clamped at zero.
     if value == 0 || value.abs() > 24 * 60 {
@@ -249,8 +249,8 @@ fn record(
     write_mutation(store, config, now, mutation, |tx| {
         let item = find_item(tx, id)?;
         let kind = kind.unwrap_or(match item.measure {
-            Measure::Count => EntryKind::Count,
-            Measure::Check | Measure::Minutes => EntryKind::Minutes,
+            LegacyMeasure::Count => LegacyEntryKind::Count,
+            LegacyMeasure::Check | LegacyMeasure::Minutes => LegacyEntryKind::Minutes,
         });
         let mut entry = new_entry(
             &item,

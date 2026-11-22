@@ -4,7 +4,7 @@
 use crate::planner::NewItem;
 use salah_domain::day::BoundaryId;
 use salah_domain::error::Error;
-use salah_domain::item::{Measure, Repeat, Weekdays, validate_title, weekday_index};
+use salah_domain::item::{LegacyMeasure, Repeat, Weekdays, validate_title, weekday_index};
 use serde::Serialize;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -13,7 +13,7 @@ pub struct Draft {
     pub block: Option<BoundaryId>,
     pub repeat: Repeat,
     pub weekdays: Option<Weekdays>,
-    pub measure: Measure,
+    pub measure: LegacyMeasure,
     pub target: Option<i64>,
 }
 
@@ -138,7 +138,7 @@ pub fn parse(text: &str) -> Result<Draft, Error> {
         block: None,
         repeat: Repeat::None,
         weekdays: None,
-        measure: Measure::Check,
+        measure: LegacyMeasure::Check,
         target: None,
     };
     let mut i = 0;
@@ -160,21 +160,21 @@ pub fn parse(text: &str) -> Result<Draft, Error> {
             draft.block = Some(block);
             take = 1;
         } else if let Some(minutes) = duration(word).filter(|_| draft.target.is_none()) {
-            draft.measure = Measure::Minutes;
+            draft.measure = LegacyMeasure::Minutes;
             draft.target = Some(minutes);
             take = 1;
         } else if let Some(count) = times(word).filter(|_| draft.target.is_none()) {
-            draft.measure = Measure::Count;
+            draft.measure = LegacyMeasure::Count;
             draft.target = Some(count);
             take = 1;
         } else if let (Some(n), Some(unit)) = (is_number(word), next) {
             if draft.target.is_none() {
                 if let Some(minutes) = duration(&format!("{n}{unit}")) {
-                    draft.measure = Measure::Minutes;
+                    draft.measure = LegacyMeasure::Minutes;
                     draft.target = Some(minutes);
                     take = 2;
                 } else if matches!(unit, "times" | "time" | "x") {
-                    draft.measure = Measure::Count;
+                    draft.measure = LegacyMeasure::Count;
                     draft.target = Some(n);
                     take = 2;
                 }
@@ -226,7 +226,10 @@ mod tests {
         assert_eq!(draft.title, "Read");
         assert_eq!(draft.block, Some(BoundaryId::Isha));
         assert_eq!(draft.repeat, Repeat::Daily);
-        assert_eq!((draft.measure, draft.target), (Measure::Minutes, Some(20)));
+        assert_eq!(
+            (draft.measure, draft.target),
+            (LegacyMeasure::Minutes, Some(20))
+        );
     }
 
     #[test]
@@ -239,7 +242,10 @@ mod tests {
 
         let draft = parse("pushups 30 times every mon, wed and fri").unwrap();
         assert_eq!(draft.title, "Pushups");
-        assert_eq!((draft.measure, draft.target), (Measure::Count, Some(30)));
+        assert_eq!(
+            (draft.measure, draft.target),
+            (LegacyMeasure::Count, Some(30))
+        );
         assert_eq!(draft.weekdays.unwrap().names(), ["mon", "wed", "fri"]);
 
         let draft = parse("call mum 15 min on sundays").unwrap();
@@ -268,7 +274,7 @@ mod tests {
         assert_eq!(draft.title, "Pay the electricity bill");
         assert_eq!(draft.block, None);
         assert_eq!(draft.repeat, Repeat::None);
-        assert_eq!(draft.measure, Measure::Check);
+        assert_eq!(draft.measure, LegacyMeasure::Check);
     }
 
     #[test]

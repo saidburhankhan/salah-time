@@ -4,7 +4,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use salah_domain::day::BoundaryId;
 use salah_domain::error::Error;
 use salah_domain::item::{
-    Item, Measure, Repeat, Weekdays, validate_block, validate_repeat, validate_title,
+    LegacyItem, LegacyMeasure, Repeat, Weekdays, validate_block, validate_repeat, validate_title,
 };
 use salah_domain::runtime::IdGenerator;
 use salah_prayer::schedule;
@@ -25,9 +25,9 @@ fn next_position(store: &Store, block: BoundaryId) -> Result<i64, Error> {
 
 /// Finds a live item by its full id or a unique prefix of at least four
 /// characters.
-pub fn find_item(store: &Store, id: &str) -> Result<Item, Error> {
+pub fn find_item(store: &Store, id: &str) -> Result<LegacyItem, Error> {
     let id = id.trim();
-    if let Some(item) = store.item(id)?.filter(Item::is_live) {
+    if let Some(item) = store.item(id)?.filter(LegacyItem::is_live) {
         return Ok(item);
     }
     if id.len() < MIN_ID_PREFIX {
@@ -57,7 +57,7 @@ pub struct NewItem {
     pub block: Option<BoundaryId>,
     pub repeat: Option<Repeat>,
     pub weekdays: Option<Weekdays>,
-    pub measure: Option<Measure>,
+    pub measure: Option<LegacyMeasure>,
     pub target: Option<i64>,
     /// Day to plan on (one-time) or start from (repeating). Defaults to the
     /// day being planned now.
@@ -70,7 +70,7 @@ pub fn add(
     now: DateTime<Utc>,
     ids: &dyn IdGenerator,
     request: NewItem,
-) -> Result<Item, Error> {
+) -> Result<LegacyItem, Error> {
     add_with(store, config, now, ids, request, Mutation::default())
 }
 
@@ -81,13 +81,13 @@ pub fn add_with(
     ids: &dyn IdGenerator,
     request: NewItem,
     mutation: Mutation<'_>,
-) -> Result<Item, Error> {
+) -> Result<LegacyItem, Error> {
     let now = stamp(now);
     let schedule = schedule::resolve(config, now)?;
     let planning = schedule.planning_block();
-    let measure = request.measure.unwrap_or(Measure::Check);
+    let measure = request.measure.unwrap_or(LegacyMeasure::Check);
     if let Some(target) = request.target {
-        if measure == Measure::Check {
+        if measure == LegacyMeasure::Check {
             return Err("a target needs --measure minutes or count".into());
         }
         if target <= 0 {
@@ -106,7 +106,7 @@ pub fn add_with(
     let block = validate_block(request.block.unwrap_or(default_block))?;
     let title = validate_title(&request.title)?;
     write_mutation(store, config, now, mutation, |tx| {
-        let mut item = Item {
+        let mut item = LegacyItem {
             id: ids.new_id(),
             title: title.clone(),
             block,
@@ -133,7 +133,7 @@ pub struct ItemChanges {
     pub target: Option<Option<i64>>,
     pub repeat: Option<Repeat>,
     pub weekdays: Option<Weekdays>,
-    pub measure: Option<Measure>,
+    pub measure: Option<LegacyMeasure>,
 }
 
 pub fn edit(
@@ -142,7 +142,7 @@ pub fn edit(
     now: DateTime<Utc>,
     id: &str,
     changes: ItemChanges,
-) -> Result<Item, Error> {
+) -> Result<LegacyItem, Error> {
     edit_with(store, config, now, id, changes, Mutation::default())
 }
 
@@ -153,7 +153,7 @@ pub fn edit_with(
     id: &str,
     changes: ItemChanges,
     mutation: Mutation<'_>,
-) -> Result<Item, Error> {
+) -> Result<LegacyItem, Error> {
     let now = stamp(now);
     let expected_version = mutation.expected_version;
     write_mutation(store, config, now, mutation, |tx| {
@@ -177,7 +177,7 @@ pub fn edit_with(
         validate_repeat(item.repeat, item.weekdays)?;
         if let Some(measure) = changes.measure {
             item.measure = measure;
-            if measure == Measure::Check {
+            if measure == LegacyMeasure::Check {
                 item.target = None;
             }
         }
@@ -185,7 +185,7 @@ pub fn edit_with(
             if target.is_some_and(|t| t <= 0) {
                 return Err("target must be positive".into());
             }
-            if target.is_some() && item.measure == Measure::Check {
+            if target.is_some() && item.measure == LegacyMeasure::Check {
                 return Err("a target needs a minutes or count item".into());
             }
             item.target = target;
@@ -215,7 +215,7 @@ pub fn move_item(
     id: &str,
     block: BoundaryId,
     index: usize,
-) -> Result<Item, Error> {
+) -> Result<LegacyItem, Error> {
     move_item_with(
         store,
         config,
@@ -236,14 +236,14 @@ pub fn move_item_with(
     block: BoundaryId,
     position: MovePosition,
     mutation: Mutation<'_>,
-) -> Result<Item, Error> {
+) -> Result<LegacyItem, Error> {
     let now = stamp(now);
     let block = validate_block(block)?;
     let expected_version = mutation.expected_version;
     write_mutation(store, config, now, mutation, |tx| {
         let mut moved = find_item(tx, id)?;
         ensure_version("item", &moved.id, moved.version, expected_version)?;
-        let mut siblings: Vec<Item> = tx
+        let mut siblings: Vec<LegacyItem> = tx
             .items()?
             .into_iter()
             .filter(|i| i.is_live() && i.block == block && i.id != moved.id)
@@ -274,7 +274,7 @@ pub fn move_item_with(
 
 /// Resolves an anchor id against the siblings read inside the move
 /// transaction, so no read-then-write gap remains.
-fn resolve_move_index(siblings: &[Item], position: &MovePosition) -> Result<usize, Error> {
+fn resolve_move_index(siblings: &[LegacyItem], position: &MovePosition) -> Result<usize, Error> {
     match position {
         MovePosition::Index(index) => Ok(*index),
         MovePosition::After(anchor) | MovePosition::Before(anchor) => {
@@ -299,7 +299,7 @@ pub fn remove(
     config: &Config,
     now: DateTime<Utc>,
     id: &str,
-) -> Result<Item, Error> {
+) -> Result<LegacyItem, Error> {
     remove_with(store, config, now, id, Mutation::default())
 }
 
@@ -309,7 +309,7 @@ pub fn remove_with(
     now: DateTime<Utc>,
     id: &str,
     mutation: Mutation<'_>,
-) -> Result<Item, Error> {
+) -> Result<LegacyItem, Error> {
     let now = stamp(now);
     let expected_version = mutation.expected_version;
     write_mutation(store, config, now, mutation, |tx| {
@@ -366,7 +366,7 @@ mod tests {
         assert_eq!(view.current[0].title, "Tahajjud");
         assert_eq!(view.open, 1);
         let timer = NewItem {
-            measure: Some(Measure::Minutes),
+            measure: Some(LegacyMeasure::Minutes),
             ..titled("Study")
         };
         let study = add(&mut store, &config(), at(21, 3, 0), ids(), timer).unwrap();

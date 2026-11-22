@@ -2,7 +2,7 @@ use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use salah_core::export::{self, Export, FORMAT, MAX_BYTES, VERSION};
 use salah_domain::day::BlockKey;
 use salah_domain::day::BoundaryId;
-use salah_domain::item::{Entry, EntryKind, Item, Measure, Repeat};
+use salah_domain::item::{LegacyEntry, LegacyEntryKind, LegacyItem, LegacyMeasure, Repeat};
 use salah_store::Store;
 
 fn time(hour: u32) -> DateTime<Utc> {
@@ -13,14 +13,14 @@ fn day() -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 11, 20).unwrap()
 }
 
-fn item(id: &str, updated_at: DateTime<Utc>) -> Item {
-    Item {
+fn item(id: &str, updated_at: DateTime<Utc>) -> LegacyItem {
+    LegacyItem {
         id: id.into(),
         title: "Read Quran".into(),
         block: BoundaryId::Fajr,
         repeat: Repeat::Daily,
         weekdays: None,
-        measure: Measure::Minutes,
+        measure: LegacyMeasure::Minutes,
         target: Some(20),
         position: 0,
         day: day(),
@@ -31,15 +31,15 @@ fn item(id: &str, updated_at: DateTime<Utc>) -> Item {
     }
 }
 
-fn entry(id: &str, item_id: &str, updated_at: DateTime<Utc>) -> Entry {
-    Entry {
+fn entry(id: &str, item_id: &str, updated_at: DateTime<Utc>) -> LegacyEntry {
+    LegacyEntry {
         id: id.into(),
         item_id: item_id.into(),
         block: BlockKey {
             day: day(),
             start: BoundaryId::Fajr,
         },
-        kind: EntryKind::Timer,
+        kind: LegacyEntryKind::Timer,
         value: None,
         started_at: Some(time(2)),
         ended_at: Some(time(3)),
@@ -50,7 +50,7 @@ fn entry(id: &str, item_id: &str, updated_at: DateTime<Utc>) -> Entry {
     }
 }
 
-fn data(items: Vec<Item>, entries: Vec<Entry>) -> Export {
+fn data(items: Vec<LegacyItem>, entries: Vec<LegacyEntry>) -> Export {
     Export {
         format: FORMAT.into(),
         version: VERSION,

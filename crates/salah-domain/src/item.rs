@@ -10,6 +10,8 @@ use crate::error::Error;
 use chrono::{DateTime, Datelike, NaiveDate, Utc, Weekday};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+pub use crate::tracking::Item;
+
 pub const TITLE_MAX_CHARS: usize = 200;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,7 +101,7 @@ impl<'de> Deserialize<'de> for Weekdays {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Measure {
+pub enum LegacyMeasure {
     Check,
     Minutes,
     Count,
@@ -107,7 +109,7 @@ pub enum Measure {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum EntryKind {
+pub enum LegacyEntryKind {
     Done,
     Minutes,
     Count,
@@ -115,7 +117,7 @@ pub enum EntryKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Item {
+pub struct LegacyItem {
     pub id: String,
     pub title: String,
     /// The block the item is planned in.
@@ -124,7 +126,7 @@ pub struct Item {
     /// The days a weekly item applies on; `None` unless `repeat` is weekly.
     #[serde(default)]
     pub weekdays: Option<Weekdays>,
-    pub measure: Measure,
+    pub measure: LegacyMeasure,
     /// Minutes or count that completes the item for a day, if any.
     pub target: Option<i64>,
     /// Order within the block, ascending.
@@ -144,12 +146,12 @@ pub struct Item {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Entry {
+pub struct LegacyEntry {
     pub id: String,
     pub item_id: String,
     /// The block the entry happened in.
     pub block: BlockKey,
-    pub kind: EntryKind,
+    pub kind: LegacyEntryKind,
     /// Minutes or count for `minutes`/`count` entries.
     pub value: Option<i64>,
     pub started_at: Option<DateTime<Utc>>,
@@ -222,7 +224,7 @@ pub fn validate_block(block: BoundaryId) -> Result<BoundaryId, Error> {
     Ok(block)
 }
 
-impl Item {
+impl LegacyItem {
     pub fn is_live(&self) -> bool {
         self.deleted_at.is_none()
     }
@@ -320,15 +322,15 @@ pub fn schedule_text(repeat: Repeat, weekdays: Option<Weekdays>) -> String {
 
 /// Locale-neutral display detail for a day row.
 pub fn detail_text(
-    measure: Measure,
+    measure: LegacyMeasure,
     target: Option<i64>,
     minutes: i64,
     count: i64,
     schedule: &str,
 ) -> String {
     let progress = match (measure, target) {
-        (Measure::Minutes, Some(target)) => Some(format!("{minutes} / {target} min")),
-        (Measure::Count, Some(target)) => Some(format!("{count} / {target}")),
+        (LegacyMeasure::Minutes, Some(target)) => Some(format!("{minutes} / {target} min")),
+        (LegacyMeasure::Count, Some(target)) => Some(format!("{count} / {target}")),
         _ => None,
     };
     match progress {
@@ -337,13 +339,13 @@ pub fn detail_text(
     }
 }
 
-impl Entry {
+impl LegacyEntry {
     pub fn is_live(&self) -> bool {
         self.deleted_at.is_none()
     }
 
     pub fn is_running_timer(&self) -> bool {
-        self.is_live() && self.kind == EntryKind::Timer && self.ended_at.is_none()
+        self.is_live() && self.kind == LegacyEntryKind::Timer && self.ended_at.is_none()
     }
 
     /// Whole minutes this entry contributes. A running timer counts up to
@@ -353,8 +355,8 @@ impl Entry {
             return 0;
         }
         match self.kind {
-            EntryKind::Minutes => self.value.unwrap_or(0),
-            EntryKind::Timer => {
+            LegacyEntryKind::Minutes => self.value.unwrap_or(0),
+            LegacyEntryKind::Timer => {
                 let Some(start) = self.started_at else {
                     return 0;
                 };
@@ -396,7 +398,7 @@ pub struct DayItem {
     pub block: BoundaryId,
     pub repeat: Repeat,
     pub weekdays: Option<Weekdays>,
-    pub measure: Measure,
+    pub measure: LegacyMeasure,
     pub target: Option<i64>,
     pub position: i64,
     pub state: State,
@@ -439,8 +441,8 @@ pub struct DayView {
 /// Every item planned on a day, with its state derived from the entries.
 /// `block_end` gives the end instant of a block, used to cap running timers.
 pub fn day_items(
-    items: &[Item],
-    entries: &[Entry],
+    items: &[LegacyItem],
+    entries: &[LegacyEntry],
     view: DayView,
     mut block_end: impl FnMut(BlockKey) -> Option<DateTime<Utc>>,
 ) -> Vec<DayItem> {
@@ -459,14 +461,14 @@ pub fn day_items(
                 .sum::<i64>()
                 .max(0);
             let count = mine()
-                .filter(|e| e.kind == EntryKind::Count)
+                .filter(|e| e.kind == LegacyEntryKind::Count)
                 .filter_map(|e| e.value)
                 .sum::<i64>()
                 .max(0);
-            let ticked = mine().any(|e| e.kind == EntryKind::Done);
+            let ticked = mine().any(|e| e.kind == LegacyEntryKind::Done);
             let reached = match (item.measure, item.target) {
-                (Measure::Minutes, Some(target)) => minutes >= target,
-                (Measure::Count, Some(target)) => count >= target,
+                (LegacyMeasure::Minutes, Some(target)) => minutes >= target,
+                (LegacyMeasure::Count, Some(target)) => count >= target,
                 _ => false,
             };
             let state = if ticked || reached {
@@ -539,8 +541,8 @@ mod tests {
     fn d(day: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 11, day).unwrap()
     }
-    fn item(id: &str, block: BoundaryId, repeat: Repeat, measure: Measure) -> Item {
-        Item {
+    fn item(id: &str, block: BoundaryId, repeat: Repeat, measure: LegacyMeasure) -> LegacyItem {
+        LegacyItem {
             id: id.into(),
             title: id.into(),
             block,
@@ -556,8 +558,8 @@ mod tests {
             version: 1,
         }
     }
-    fn entry(item_id: &str, block: BoundaryId, kind: EntryKind) -> Entry {
-        Entry {
+    fn entry(item_id: &str, block: BoundaryId, kind: LegacyEntryKind) -> LegacyEntry {
+        LegacyEntry {
             id: format!("{item_id}-{kind:?}"),
             item_id: item_id.into(),
             block: BlockKey {
@@ -586,11 +588,21 @@ mod tests {
     #[test]
     fn open_items_carry_forward_within_the_day() {
         let items = [
-            item("early", BoundaryId::Fajr, Repeat::None, Measure::Check),
-            item("done", BoundaryId::Fajr, Repeat::None, Measure::Check),
-            item("later", BoundaryId::Isha, Repeat::None, Measure::Check),
+            item(
+                "early",
+                BoundaryId::Fajr,
+                Repeat::None,
+                LegacyMeasure::Check,
+            ),
+            item("done", BoundaryId::Fajr, Repeat::None, LegacyMeasure::Check),
+            item(
+                "later",
+                BoundaryId::Isha,
+                Repeat::None,
+                LegacyMeasure::Check,
+            ),
         ];
-        let entries = [entry("done", BoundaryId::Fajr, EntryKind::Done)];
+        let entries = [entry("done", BoundaryId::Fajr, LegacyEntryKind::Done)];
         let rows = day_items(
             &items,
             &entries,
@@ -606,25 +618,30 @@ mod tests {
 
     #[test]
     fn unfinished_items_are_missed_after_the_day_ends() {
-        let items = [item("a", BoundaryId::Dhuhr, Repeat::None, Measure::Check)];
+        let items = [item(
+            "a",
+            BoundaryId::Dhuhr,
+            Repeat::None,
+            LegacyMeasure::Check,
+        )];
         let rows = day_items(&items, &[], view(None, true, t(23, 0)), |_| None);
         assert_eq!(rows[0].state, State::Missed);
     }
 
     #[test]
     fn daily_items_apply_from_their_first_day_only() {
-        let daily = item("q", BoundaryId::Fajr, Repeat::Daily, Measure::Minutes);
+        let daily = item("q", BoundaryId::Fajr, Repeat::Daily, LegacyMeasure::Minutes);
         assert!(!daily.applies_to(d(19)));
         assert!(daily.applies_to(d(20)) && daily.applies_to(d(25)));
-        let once = item("o", BoundaryId::Fajr, Repeat::None, Measure::Check);
+        let once = item("o", BoundaryId::Fajr, Repeat::None, LegacyMeasure::Check);
         assert!(!once.applies_to(d(21)));
     }
 
     #[test]
     fn running_timer_is_capped_at_its_block_end() {
-        let mut quran = item("q", BoundaryId::Fajr, Repeat::Daily, Measure::Minutes);
+        let mut quran = item("q", BoundaryId::Fajr, Repeat::Daily, LegacyMeasure::Minutes);
         quran.target = Some(30);
-        let mut timer = entry("q", BoundaryId::Fajr, EntryKind::Timer);
+        let mut timer = entry("q", BoundaryId::Fajr, LegacyEntryKind::Timer);
         timer.started_at = Some(t(6, 40));
         let rows = day_items(
             &[quran],
@@ -639,9 +656,9 @@ mod tests {
 
     #[test]
     fn reaching_a_target_completes_the_item() {
-        let mut pushups = item("p", BoundaryId::Asr, Repeat::Daily, Measure::Count);
+        let mut pushups = item("p", BoundaryId::Asr, Repeat::Daily, LegacyMeasure::Count);
         pushups.target = Some(50);
-        let mut first = entry("p", BoundaryId::Asr, EntryKind::Count);
+        let mut first = entry("p", BoundaryId::Asr, LegacyEntryKind::Count);
         first.value = Some(30);
         let mut second = first.clone();
         second.id = "p2".into();
@@ -658,10 +675,10 @@ mod tests {
 
     #[test]
     fn deleted_items_and_entries_are_ignored() {
-        let mut gone = item("g", BoundaryId::Fajr, Repeat::None, Measure::Check);
+        let mut gone = item("g", BoundaryId::Fajr, Repeat::None, LegacyMeasure::Check);
         gone.deleted_at = Some(t(1, 0));
-        let keep = item("k", BoundaryId::Fajr, Repeat::None, Measure::Check);
-        let mut undone = entry("k", BoundaryId::Fajr, EntryKind::Done);
+        let keep = item("k", BoundaryId::Fajr, Repeat::None, LegacyMeasure::Check);
+        let mut undone = entry("k", BoundaryId::Fajr, LegacyEntryKind::Done);
         undone.deleted_at = Some(t(2, 0));
         let rows = day_items(
             &[gone, keep],
@@ -675,7 +692,7 @@ mod tests {
 
     #[test]
     fn weekly_items_apply_on_their_weekdays_only() {
-        let mut weekly = item("w", BoundaryId::Asr, Repeat::Weekly, Measure::Check);
+        let mut weekly = item("w", BoundaryId::Asr, Repeat::Weekly, LegacyMeasure::Check);
         weekly.weekdays = Some(Weekdays::WORKWEEK);
         // 2026-11-20 is a Friday; 21 Saturday; 23 Monday.
         assert!(weekly.applies_to(d(20)));
@@ -703,29 +720,29 @@ mod tests {
 
     #[test]
     fn schedule_and_detail_text_are_locale_neutral() {
-        let mut daily = item("d", BoundaryId::Fajr, Repeat::Daily, Measure::Minutes);
+        let mut daily = item("d", BoundaryId::Fajr, Repeat::Daily, LegacyMeasure::Minutes);
         daily.target = Some(30);
         assert_eq!(daily.schedule_text(), "Daily");
         assert_eq!(daily.detail_text(20, 0), "20 / 30 min · Daily");
 
-        let mut weekly = item("w", BoundaryId::Asr, Repeat::Weekly, Measure::Check);
+        let mut weekly = item("w", BoundaryId::Asr, Repeat::Weekly, LegacyMeasure::Check);
         weekly.weekdays = Some(Weekdays::WORKWEEK);
         assert_eq!(weekly.schedule_text(), "Mon–Fri");
         assert_eq!(weekly.detail_text(0, 0), "Mon–Fri");
 
-        let mut custom = item("c", BoundaryId::Asr, Repeat::Weekly, Measure::Count);
+        let mut custom = item("c", BoundaryId::Asr, Repeat::Weekly, LegacyMeasure::Count);
         custom.weekdays = Some(Weekdays::parse_list("mon,wed,fri").unwrap());
         custom.target = Some(10);
         assert_eq!(custom.schedule_text(), "Mon, Wed, Fri");
         assert_eq!(custom.detail_text(0, 3), "3 / 10 · Mon, Wed, Fri");
 
-        let once = item("o", BoundaryId::Fajr, Repeat::None, Measure::Check);
+        let once = item("o", BoundaryId::Fajr, Repeat::None, LegacyMeasure::Check);
         assert_eq!(once.schedule_text(), "Once");
     }
 
     #[test]
     fn next_occurrence_crosses_month_and_year_boundaries() {
-        let mut weekly = item("w", BoundaryId::Fajr, Repeat::Weekly, Measure::Check);
+        let mut weekly = item("w", BoundaryId::Fajr, Repeat::Weekly, LegacyMeasure::Check);
         weekly.weekdays = Some(Weekdays::parse_list("mon").unwrap());
         // 2026-12-31 is a Thursday; the next Monday is 2027-01-04.
         assert_eq!(
@@ -738,7 +755,7 @@ mod tests {
             NaiveDate::from_ymd_opt(2026, 11, 30)
         );
         // From before a daily item's first day, that first day wins.
-        let daily = item("d", BoundaryId::Fajr, Repeat::Daily, Measure::Check);
+        let daily = item("d", BoundaryId::Fajr, Repeat::Daily, LegacyMeasure::Check);
         assert_eq!(
             daily.next_occurrence(NaiveDate::from_ymd_opt(2026, 11, 1).unwrap()),
             NaiveDate::from_ymd_opt(2026, 11, 20)
@@ -747,8 +764,8 @@ mod tests {
 
     #[test]
     fn carried_and_timer_snapshots_are_projected() {
-        let morning = item("a", BoundaryId::Fajr, Repeat::None, Measure::Minutes);
-        let mut timer = entry("a", BoundaryId::Fajr, EntryKind::Timer);
+        let morning = item("a", BoundaryId::Fajr, Repeat::None, LegacyMeasure::Minutes);
+        let mut timer = entry("a", BoundaryId::Fajr, LegacyEntryKind::Timer);
         timer.started_at = Some(t(6, 0));
         let rows = day_items(
             &[morning],

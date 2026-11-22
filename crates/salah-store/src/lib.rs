@@ -8,7 +8,9 @@ use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use salah_domain::day::BlockKey;
 use salah_domain::error::Error;
-use salah_domain::item::{Entry, EntryKind, Item, Measure, PrayerMark, Repeat, Weekdays};
+use salah_domain::item::{
+    LegacyEntry, LegacyEntryKind, LegacyItem, LegacyMeasure, PrayerMark, Repeat, Weekdays,
+};
 use serde::{Serialize, de::DeserializeOwned};
 use std::cell::{Cell, RefCell};
 use std::ops::Deref;
@@ -196,14 +198,14 @@ fn parse_enum<T: DeserializeOwned>(text: &str) -> rusqlite::Result<T> {
     })
 }
 
-fn item_from(row: &Row) -> rusqlite::Result<Item> {
-    Ok(Item {
+fn item_from(row: &Row) -> rusqlite::Result<LegacyItem> {
+    Ok(LegacyItem {
         id: row.get("id")?,
         title: row.get("title")?,
         block: parse_enum(&row.get::<_, String>("block")?)?,
         repeat: parse_enum::<Repeat>(&row.get::<_, String>("repeat")?)?,
         weekdays: row.get::<_, Option<u8>>("weekdays")?.map(Weekdays),
-        measure: parse_enum::<Measure>(&row.get::<_, String>("measure")?)?,
+        measure: parse_enum::<LegacyMeasure>(&row.get::<_, String>("measure")?)?,
         target: row.get("target")?,
         position: row.get("position")?,
         day: parse_day(&row.get::<_, String>("day")?)?,
@@ -227,15 +229,15 @@ fn mark_from(row: &Row) -> rusqlite::Result<PrayerMark> {
     })
 }
 
-fn entry_from(row: &Row) -> rusqlite::Result<Entry> {
-    Ok(Entry {
+fn entry_from(row: &Row) -> rusqlite::Result<LegacyEntry> {
+    Ok(LegacyEntry {
         id: row.get("id")?,
         item_id: row.get("item_id")?,
         block: BlockKey {
             day: parse_day(&row.get::<_, String>("day")?)?,
             start: parse_enum(&row.get::<_, String>("block")?)?,
         },
-        kind: parse_enum::<EntryKind>(&row.get::<_, String>("kind")?)?,
+        kind: parse_enum::<LegacyEntryKind>(&row.get::<_, String>("kind")?)?,
         value: row.get("value")?,
         started_at: parse_opt_time(row.get("started_at")?)?,
         ended_at: parse_opt_time(row.get("ended_at")?)?,
@@ -491,14 +493,14 @@ impl Store {
         )
     }
 
-    pub fn item(&self, id: &str) -> Result<Option<Item>, Error> {
+    pub fn item(&self, id: &str) -> Result<Option<LegacyItem>, Error> {
         self.conn
             .query_row("SELECT * FROM items WHERE id = ?1", [id], item_from)
             .optional()
             .map_err(sqlite_error)
     }
 
-    pub fn entry(&self, id: &str) -> Result<Option<Entry>, Error> {
+    pub fn entry(&self, id: &str) -> Result<Option<LegacyEntry>, Error> {
         self.conn
             .query_row("SELECT * FROM entries WHERE id = ?1", [id], entry_from)
             .optional()
@@ -506,12 +508,12 @@ impl Store {
     }
 
     /// Every item, deleted ones included, oldest first.
-    pub fn items(&self) -> Result<Vec<Item>, Error> {
+    pub fn items(&self) -> Result<Vec<LegacyItem>, Error> {
         self.query("SELECT * FROM items ORDER BY created_at, id", [], item_from)
     }
 
     /// Every entry, deleted ones included, oldest first.
-    pub fn entries(&self) -> Result<Vec<Entry>, Error> {
+    pub fn entries(&self) -> Result<Vec<LegacyEntry>, Error> {
         self.query(
             "SELECT * FROM entries ORDER BY created_at, id",
             [],
@@ -520,7 +522,11 @@ impl Store {
     }
 
     /// Entries whose block lies in the inclusive day range.
-    pub fn entries_between(&self, first: NaiveDate, last: NaiveDate) -> Result<Vec<Entry>, Error> {
+    pub fn entries_between(
+        &self,
+        first: NaiveDate,
+        last: NaiveDate,
+    ) -> Result<Vec<LegacyEntry>, Error> {
         self.query(
             "SELECT * FROM entries WHERE day BETWEEN ?1 AND ?2 ORDER BY created_at, id",
             [
@@ -531,7 +537,7 @@ impl Store {
         )
     }
 
-    pub fn running_timers(&self) -> Result<Vec<Entry>, Error> {
+    pub fn running_timers(&self) -> Result<Vec<LegacyEntry>, Error> {
         self.query(
             "SELECT * FROM entries
              WHERE kind = 'timer' AND ended_at IS NULL AND deleted_at IS NULL",
@@ -693,7 +699,7 @@ impl WriteTx<'_> {
         }
     }
 
-    fn write_item(&self, item: &Item, explicit: Option<i64>) -> Result<i64, Error> {
+    fn write_item(&self, item: &LegacyItem, explicit: Option<i64>) -> Result<i64, Error> {
         let (version, op) = self.version_for("items", &item.id, item.deleted_at, explicit)?;
         self.store
             .conn
@@ -730,17 +736,17 @@ impl WriteTx<'_> {
         Ok(version)
     }
 
-    pub fn put_item(&self, item: &Item) -> Result<i64, Error> {
+    pub fn put_item(&self, item: &LegacyItem) -> Result<i64, Error> {
         self.write_item(item, None)
     }
 
     /// Stores a row with an imported version instead of bumping the local one.
     /// The version still never moves backwards for an existing row.
-    pub fn put_item_versioned(&self, item: &Item, version: i64) -> Result<i64, Error> {
+    pub fn put_item_versioned(&self, item: &LegacyItem, version: i64) -> Result<i64, Error> {
         self.write_item(item, Some(version))
     }
 
-    fn write_entry(&self, entry: &Entry, explicit: Option<i64>) -> Result<i64, Error> {
+    fn write_entry(&self, entry: &LegacyEntry, explicit: Option<i64>) -> Result<i64, Error> {
         let (version, op) = self.version_for("entries", &entry.id, entry.deleted_at, explicit)?;
         self.store
             .conn
@@ -775,11 +781,11 @@ impl WriteTx<'_> {
         Ok(version)
     }
 
-    pub fn put_entry(&self, entry: &Entry) -> Result<i64, Error> {
+    pub fn put_entry(&self, entry: &LegacyEntry) -> Result<i64, Error> {
         self.write_entry(entry, None)
     }
 
-    pub fn put_entry_versioned(&self, entry: &Entry, version: i64) -> Result<i64, Error> {
+    pub fn put_entry_versioned(&self, entry: &LegacyEntry, version: i64) -> Result<i64, Error> {
         self.write_entry(entry, Some(version))
     }
 
@@ -834,14 +840,14 @@ mod tests {
     fn day() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 11, 20).unwrap()
     }
-    fn sample_item() -> Item {
-        Item {
+    fn sample_item() -> LegacyItem {
+        LegacyItem {
             id: "item-1".into(),
             title: "Read Quran".into(),
             block: BoundaryId::Fajr,
             repeat: Repeat::Weekly,
             weekdays: Some(Weekdays::WORKWEEK),
-            measure: Measure::Minutes,
+            measure: LegacyMeasure::Minutes,
             target: Some(20),
             position: 3,
             day: day(),
@@ -851,15 +857,15 @@ mod tests {
             version: 1,
         }
     }
-    fn sample_entry() -> Entry {
-        Entry {
+    fn sample_entry() -> LegacyEntry {
+        LegacyEntry {
             id: "entry-1".into(),
             item_id: "item-1".into(),
             block: BlockKey {
                 day: day(),
                 start: BoundaryId::Fajr,
             },
-            kind: EntryKind::Timer,
+            kind: LegacyEntryKind::Timer,
             value: None,
             started_at: Some(t(2)),
             ended_at: None,

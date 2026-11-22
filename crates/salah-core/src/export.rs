@@ -2,7 +2,8 @@ use chrono::{DateTime, Utc};
 use salah_domain::day::BoundaryId;
 use salah_domain::error::Error;
 use salah_domain::item::{
-    Entry, EntryKind, Item, PrayerMark, validate_block, validate_repeat, validate_title,
+    LegacyEntry, LegacyEntryKind, LegacyItem, PrayerMark, validate_block, validate_repeat,
+    validate_title,
 };
 use salah_store::{Store, WriteTx};
 use serde::{Deserialize, Serialize, Serializer};
@@ -23,8 +24,8 @@ pub struct Export {
     pub format: String,
     pub version: u32,
     pub exported_at: DateTime<Utc>,
-    pub items: Vec<Item>,
-    pub entries: Vec<Entry>,
+    pub items: Vec<LegacyItem>,
+    pub entries: Vec<LegacyEntry>,
     #[serde(default)]
     pub prayer_marks: Vec<PrayerMark>,
 }
@@ -32,14 +33,14 @@ pub struct Export {
 #[derive(Serialize)]
 struct VersionedItemRef<'a> {
     #[serde(flatten)]
-    item: &'a Item,
+    item: &'a LegacyItem,
     version: i64,
 }
 
 #[derive(Serialize)]
 struct VersionedEntryRef<'a> {
     #[serde(flatten)]
-    entry: &'a Entry,
+    entry: &'a LegacyEntry,
     version: i64,
 }
 
@@ -181,7 +182,7 @@ pub fn validate(data: &Export) -> Result<(), Error> {
             return Err(format!("entry {}: value is out of range", entry.id).into());
         }
         validate_times("entry", &entry.id, entry.created_at, entry.updated_at)?;
-        if entry.kind == EntryKind::Timer && entry.started_at.is_none() {
+        if entry.kind == LegacyEntryKind::Timer && entry.started_at.is_none() {
             return Err(format!("entry {}: timer requires started_at", entry.id).into());
         }
         if let (Some(started), Some(ended)) = (entry.started_at, entry.ended_at)

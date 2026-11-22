@@ -36,7 +36,7 @@ use crate::config::Config;
 use chrono::{DateTime, NaiveDate, SubsecRound, Utc};
 use salah_domain::day::BlockKey;
 use salah_domain::error::Error;
-use salah_domain::item::{self, DayItem, DayView, Entry, Item, Repeat};
+use salah_domain::item::{self, DayItem, DayView, LegacyEntry, LegacyItem, Repeat};
 use salah_prayer::schedule::{self, Schedule};
 use salah_store::{Store, WriteTx};
 use serde::de::DeserializeOwned;
@@ -83,7 +83,7 @@ fn activity_block(schedule: &Schedule) -> BlockKey {
 
 /// Where an entry for `item` made now belongs. A one-time item is always
 /// recorded on its own day so a late tick still completes it.
-fn entry_block(schedule: &Schedule, item: &Item) -> BlockKey {
+fn entry_block(schedule: &Schedule, item: &LegacyItem) -> BlockKey {
     let now = activity_block(schedule);
     match item.repeat {
         Repeat::None if item.day != now.day => BlockKey {
@@ -96,7 +96,7 @@ fn entry_block(schedule: &Schedule, item: &Item) -> BlockKey {
 
 /// The block an entry recorded "on `date`" belongs to: the item's own block
 /// that day. Without a date, the rules of `entry_block` apply.
-fn recorded_block(schedule: &Schedule, item: &Item, date: Option<NaiveDate>) -> BlockKey {
+fn recorded_block(schedule: &Schedule, item: &LegacyItem, date: Option<NaiveDate>) -> BlockKey {
     match date {
         Some(day) => BlockKey {
             day,
@@ -107,8 +107,8 @@ fn recorded_block(schedule: &Schedule, item: &Item, date: Option<NaiveDate>) -> 
 }
 
 fn report_day(
-    items: &[Item],
-    entries: &[Entry],
+    items: &[LegacyItem],
+    entries: &[LegacyEntry],
     ends: &mut BlockEnds,
     view: DayView,
 ) -> Vec<DayItem> {
@@ -179,14 +179,14 @@ trait StoredResult: Serialize + DeserializeOwned {
 #[derive(Serialize, Deserialize)]
 struct VersionedItem {
     #[serde(flatten)]
-    row: Item,
+    row: LegacyItem,
     version: i64,
 }
 
 #[derive(Serialize, Deserialize)]
 struct VersionedEntry {
     #[serde(flatten)]
-    row: Entry,
+    row: LegacyEntry,
     version: i64,
 }
 
@@ -197,7 +197,7 @@ struct VersionedMark {
     version: i64,
 }
 
-impl StoredResult for Item {
+impl StoredResult for LegacyItem {
     fn to_stored_json(&self) -> Result<String, Error> {
         serde_json::to_string(&VersionedItem {
             row: self.clone(),
@@ -216,7 +216,7 @@ impl StoredResult for Item {
     }
 }
 
-impl StoredResult for Entry {
+impl StoredResult for LegacyEntry {
     fn to_stored_json(&self) -> Result<String, Error> {
         serde_json::to_string(&VersionedEntry {
             row: self.clone(),
@@ -254,7 +254,7 @@ impl StoredResult for salah_domain::item::PrayerMark {
     }
 }
 
-impl StoredResult for Vec<Entry> {
+impl StoredResult for Vec<LegacyEntry> {
     fn to_stored_json(&self) -> Result<String, Error> {
         let rows: Vec<VersionedEntry> = self
             .iter()

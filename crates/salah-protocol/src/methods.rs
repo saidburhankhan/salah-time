@@ -10,7 +10,9 @@ use salah_core::planner::{
 use salah_core::quick::Draft;
 use salah_core::status::Status;
 use salah_domain::day::BoundaryId;
-use salah_domain::item::{DayItem, Entry, Item, Measure, PrayerMark, Repeat, Weekdays};
+use salah_domain::item::{
+    DayItem, LegacyEntry, LegacyItem, LegacyMeasure, PrayerMark, Repeat, Weekdays,
+};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -65,14 +67,14 @@ pub struct SubscribeResult {
 #[derive(Clone, Debug, Serialize)]
 pub struct ItemRecord {
     #[serde(flatten)]
-    pub item: Item,
+    pub item: LegacyItem,
     pub version: i64,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct EntryRecord {
     #[serde(flatten)]
-    pub entry: Entry,
+    pub entry: LegacyEntry,
     pub version: i64,
 }
 
@@ -440,7 +442,7 @@ pub struct PreviewParams {
     pub repeat: Repeat,
     #[serde(default)]
     pub weekdays: Option<Weekdays>,
-    pub measure: Measure,
+    pub measure: LegacyMeasure,
     #[serde(default)]
     pub target: Option<i64>,
     pub date: NaiveDate,
@@ -464,7 +466,7 @@ pub struct ItemAddParams {
     #[serde(default)]
     pub weekdays: Option<Weekdays>,
     #[serde(default)]
-    pub measure: Option<Measure>,
+    pub measure: Option<LegacyMeasure>,
     #[serde(default)]
     pub target: Option<i64>,
     #[serde(default)]
@@ -489,7 +491,7 @@ pub struct ItemEditParams {
     #[serde(default)]
     pub weekdays: Option<Weekdays>,
     #[serde(default)]
-    pub measure: Option<Measure>,
+    pub measure: Option<LegacyMeasure>,
 }
 
 impl ItemEditParams {

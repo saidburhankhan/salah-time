@@ -10,7 +10,7 @@ use salah_core::config::Config;
 use salah_core::export::{self, ImportSummary};
 use salah_core::{Store, WriteTx, planner, quick, status};
 use salah_domain::error::Error;
-use salah_domain::item::{Entry, Item, PrayerMark};
+use salah_domain::item::{LegacyEntry, LegacyItem, PrayerMark};
 use salah_domain::runtime::{Clock, IdGenerator};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -233,7 +233,7 @@ impl Dispatcher {
             .store
             .items()?
             .into_iter()
-            .filter(Item::is_live)
+            .filter(LegacyItem::is_live)
             .map(|item| ItemRecord {
                 version: item.version,
                 item,
@@ -343,7 +343,7 @@ impl Dispatcher {
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
         let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
-            let item: Item = decode_result(stored)?;
+            let item: LegacyItem = decode_result(stored)?;
             let rows = find_item_rows(
                 tx,
                 &config,
@@ -381,7 +381,7 @@ impl Dispatcher {
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
         let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
-            let item: Item = decode_result(stored)?;
+            let item: LegacyItem = decode_result(stored)?;
             let rows = find_item_rows(
                 tx,
                 &config,
@@ -445,7 +445,7 @@ impl Dispatcher {
         let now = ctx.clock.now();
         let block = params.block;
         let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
-            let item: Item = decode_result(stored)?;
+            let item: LegacyItem = decode_result(stored)?;
             let changed_ids: Vec<String> = tx
                 .items()?
                 .into_iter()
@@ -488,7 +488,7 @@ impl Dispatcher {
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
         let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
-            let item: Item = decode_result(stored)?;
+            let item: LegacyItem = decode_result(stored)?;
             result_value(MutationResult {
                 revision: tx.revision()?,
                 op_id: params.op_id.clone(),
@@ -525,7 +525,7 @@ impl Dispatcher {
         let now = ctx.clock.now();
         let date = params.date;
         let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
-            let entry: Entry = decode_result(stored)?;
+            let entry: LegacyEntry = decode_result(stored)?;
             let day = date.unwrap_or(entry.block.day);
             let rows = find_item_rows(
                 tx,
@@ -612,7 +612,7 @@ impl Dispatcher {
         let value = params.value;
         let kind = params.kind;
         let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
-            let entry: Entry = decode_result(stored)?;
+            let entry: LegacyEntry = decode_result(stored)?;
             let day = date.unwrap_or(entry.block.day);
             let rows = find_item_rows(
                 tx,
@@ -725,7 +725,7 @@ impl Dispatcher {
         let config = ctx.config.load()?;
         let now = ctx.clock.now();
         let mut recorder = |tx: &WriteTx<'_>, stored: &str| -> Result<Value, Error> {
-            let entries: Vec<Entry> = decode_result(stored)?;
+            let entries: Vec<LegacyEntry> = decode_result(stored)?;
             let day = current_day(&config, now)?;
             let mut ids = Vec::new();
             let mut seen = HashSet::new();
@@ -954,10 +954,10 @@ fn current_day(config: &Config, now: DateTime<Utc>) -> Result<NaiveDate, Error> 
         .map_err(|error| Error::Internal(format!("status day: {error}")))
 }
 
-fn ensure_full_item(store: &Store, id: &str) -> Result<Item, Error> {
+fn ensure_full_item(store: &Store, id: &str) -> Result<LegacyItem, Error> {
     store
         .item(id)?
-        .filter(Item::is_live)
+        .filter(LegacyItem::is_live)
         .ok_or_else(|| Error::NotFound {
             what: "item",
             id: id.to_string(),
@@ -1003,7 +1003,7 @@ fn stored_rpc_result(store: &Store, op_id: &str) -> Result<Value, Error> {
     })
 }
 
-fn entry_record(entry: &Entry) -> EntryRecord {
+fn entry_record(entry: &LegacyEntry) -> EntryRecord {
     EntryRecord {
         version: entry.version,
         entry: entry.clone(),

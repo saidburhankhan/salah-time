@@ -6,7 +6,7 @@
 
 use salah_core::config::Config;
 use salah_domain::day::BoundaryId;
-use salah_domain::item::EntryKind;
+use salah_domain::item::LegacyEntryKind;
 use salah_store::Store;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -320,7 +320,7 @@ fn concurrent_mutations_keep_timers_and_entry_counts_correct() {
         let logged = entries
             .iter()
             .filter(|entry| {
-                entry.is_live() && entry.item_id == *id && entry.kind == EntryKind::Minutes
+                entry.is_live() && entry.item_id == *id && entry.kind == LegacyEntryKind::Minutes
             })
             .count();
         assert_eq!(

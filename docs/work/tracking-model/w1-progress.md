@@ -7,3 +7,25 @@
 - Verification: `cargo test --locked --offline -p salah-domain` passed (24 tests); `cargo clippy --offline -p salah-domain --all-targets -- -D warnings` passed; `git diff --check` passed. Full `./scripts/test` passed through the earlier suites but all 8 daemon tests failed because this managed sandbox rejects Unix-socket creation with `Operation not permitted`.
 - Deviations from interface.md: temporary/incomplete only—new tracking types were added alongside, rather than replacing, legacy Measure/Entry/Item fields. No locked contract file was edited.
 - Remaining risks: Git write permission is required for mandated slice commits; Unix-socket permission is required for complete verification; S2–S4 remain unimplemented.
+
+CHECKPOINT S1: tracking: replace domain entities with tracking model
+
+Files:
+- crates/salah-domain/src/tracking.rs
+- crates/salah-domain/src/item.rs
+- crates/salah-store/src/lib.rs
+- crates/salah-core/src/export.rs
+- crates/salah-core/src/quick.rs
+- crates/salah-core/src/planner/entries.rs
+- crates/salah-core/src/planner/items.rs
+- crates/salah-core/src/planner/mod.rs
+- crates/salah-core/src/planner/preview.rs
+- crates/salah-core/src/planner/stats.rs
+- crates/salah-core/src/planner/timers.rs
+- crates/salah-protocol/src/dispatcher.rs
+- crates/salah-protocol/src/methods.rs
+- crates/salah-cli/src/main.rs
+- crates/salah-cli/tests/concurrency.rs
+- crates/salah-cli/tests/export.rs
+
+Verification: all non-daemon workspace tests passed; strict Clippy passed; formatting, shell syntax, plugin validation, and `git diff --check` passed. Socket-dependent daemon tests intentionally not run. S2 should delete the explicitly named `Legacy*` compatibility implementation as the new repository replaces its callers.

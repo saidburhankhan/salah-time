@@ -4,7 +4,7 @@ use super::{BlockEnds, Mutation, StoredResult, VersionedEntry, stamp, write_muta
 use crate::config::Config;
 use chrono::{DateTime, Utc};
 use salah_domain::error::Error;
-use salah_domain::item::{Entry, EntryKind};
+use salah_domain::item::{LegacyEntry, LegacyEntryKind};
 use salah_domain::runtime::IdGenerator;
 use salah_prayer::schedule;
 use salah_store::{Store, WriteTx};
@@ -19,7 +19,7 @@ pub fn close_expired_timers(
 ) -> Result<usize, Error> {
     let now = stamp(now);
     let mut ends = BlockEnds::new(config);
-    let expired: Vec<(Entry, DateTime<Utc>)> = tx
+    let expired: Vec<(LegacyEntry, DateTime<Utc>)> = tx
         .running_timers()?
         .into_iter()
         .filter_map(|timer| {
@@ -39,8 +39,8 @@ pub fn close_expired_timers(
 /// affected rows.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StartedTimer {
-    pub timer: Entry,
-    pub stopped: Vec<Entry>,
+    pub timer: LegacyEntry,
+    pub stopped: Vec<LegacyEntry>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -73,7 +73,7 @@ impl StoredResult for StartedTimer {
             // Rows written before the stopped-timer list was added contain a
             // single entry; replay them as a start that displaced nothing.
             return Ok(Self {
-                timer: Entry::from_stored_json(text)?,
+                timer: LegacyEntry::from_stored_json(text)?,
                 stopped: Vec::new(),
             });
         };
@@ -101,7 +101,7 @@ pub fn start_timer(
     now: DateTime<Utc>,
     ids: &dyn IdGenerator,
     id: &str,
-) -> Result<Entry, Error> {
+) -> Result<LegacyEntry, Error> {
     start_timer_with(store, config, now, ids, id, Mutation::default())
 }
 
@@ -112,7 +112,7 @@ pub fn start_timer_with(
     ids: &dyn IdGenerator,
     id: &str,
     mutation: Mutation<'_>,
-) -> Result<Entry, Error> {
+) -> Result<LegacyEntry, Error> {
     start_timer_with_stopped(store, config, now, ids, id, mutation).map(|started| started.timer)
 }
 
@@ -129,7 +129,13 @@ pub fn start_timer_with_stopped(
     let schedule = schedule::resolve(config, now)?;
     write_mutation(store, config, now, mutation, |tx| {
         let item = find_item(tx, id)?;
-        let mut timer = new_entry(&item, schedule.current_block(), EntryKind::Timer, now, ids);
+        let mut timer = new_entry(
+            &item,
+            schedule.current_block(),
+            LegacyEntryKind::Timer,
+            now,
+            ids,
+        );
         timer.started_at = Some(now);
         let stopped = stop_running(tx, now)?;
         timer.version = tx.put_entry(&timer)?;
@@ -137,7 +143,7 @@ pub fn start_timer_with_stopped(
     })
 }
 
-fn stop_running(tx: &WriteTx<'_>, now: DateTime<Utc>) -> Result<Vec<Entry>, Error> {
+fn stop_running(tx: &WriteTx<'_>, now: DateTime<Utc>) -> Result<Vec<LegacyEntry>, Error> {
     let mut stopped = Vec::new();
     for mut timer in tx.running_timers()? {
         timer.ended_at = Some(now);
@@ -154,7 +160,7 @@ pub fn stop_item_timer(
     config: &Config,
     now: DateTime<Utc>,
     id: &str,
-) -> Result<Vec<Entry>, Error> {
+) -> Result<Vec<LegacyEntry>, Error> {
     stop_item_timer_with(store, config, now, id, Mutation::default())
 }
 
@@ -164,7 +170,7 @@ pub fn stop_item_timer_with(
     now: DateTime<Utc>,
     id: &str,
     mutation: Mutation<'_>,
-) -> Result<Vec<Entry>, Error> {
+) -> Result<Vec<LegacyEntry>, Error> {
     let now = stamp(now);
     write_mutation(store, config, now, mutation, |tx| {
         let item = find_item(tx, id)?;
@@ -186,7 +192,7 @@ pub fn stop_timer(
     store: &mut Store,
     config: &Config,
     now: DateTime<Utc>,
-) -> Result<Vec<Entry>, Error> {
+) -> Result<Vec<LegacyEntry>, Error> {
     stop_timer_with(store, config, now, Mutation::default())
 }
 
@@ -195,7 +201,7 @@ pub fn stop_timer_with(
     config: &Config,
     now: DateTime<Utc>,
     mutation: Mutation<'_>,
-) -> Result<Vec<Entry>, Error> {
+) -> Result<Vec<LegacyEntry>, Error> {
     let now = stamp(now);
     write_mutation(store, config, now, mutation, |tx| stop_running(tx, now))
 }
@@ -207,7 +213,7 @@ mod tests {
     use crate::planner::test_support::{at, config, date, ids, titled};
     use crate::planner::{Mutation, add, day_plan, history, log, stats, stop_timer_with, today};
     use salah_domain::day::BoundaryId;
-    use salah_domain::item::{Measure, Repeat, State};
+    use salah_domain::item::{LegacyMeasure, Repeat, State};
 
     #[test]
     fn a_running_timer_stops_at_the_end_of_its_block() {
@@ -221,7 +227,7 @@ mod tests {
                 title: "Quran".into(),
                 block: Some(BoundaryId::Fajr),
                 repeat: Some(Repeat::Daily),
-                measure: Some(Measure::Minutes),
+                measure: Some(LegacyMeasure::Minutes),
                 target: Some(500),
                 ..NewItem::default()
             },
@@ -256,7 +262,7 @@ mod tests {
                 title: "Quran".into(),
                 block: Some(BoundaryId::Fajr),
                 repeat: Some(Repeat::Daily),
-                measure: Some(Measure::Minutes),
+                measure: Some(LegacyMeasure::Minutes),
                 target: Some(500),
                 ..NewItem::default()
             },
@@ -285,7 +291,7 @@ mod tests {
         let mut store = Store::open_in_memory().unwrap();
         let minutes = |title: &str| NewItem {
             title: title.into(),
-            measure: Some(Measure::Minutes),
+            measure: Some(LegacyMeasure::Minutes),
             ..NewItem::default()
         };
         let a = add(&mut store, &config(), at(20, 13, 0), ids(), minutes("A")).unwrap();
@@ -309,7 +315,7 @@ mod tests {
             at(20, 13, 0),
             ids(),
             NewItem {
-                measure: Some(Measure::Minutes),
+                measure: Some(LegacyMeasure::Minutes),
                 ..titled("Email")
             },
         )
@@ -392,7 +398,7 @@ mod tests {
         );
 
         let pushups = NewItem {
-            measure: Some(Measure::Count),
+            measure: Some(LegacyMeasure::Count),
             ..titled("Pushups")
         };
         let pushups = add(&mut store, &config(), at(20, 13, 0), ids(), pushups).unwrap();
