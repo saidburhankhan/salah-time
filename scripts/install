@@ -83,6 +83,8 @@ printf 'Building Salah in release mode…\n'
 cargo build --locked --release --manifest-path "$project_dir/Cargo.toml" -p salah-cli
 
 mkdir -p -- "$(dirname -- "$binary_target")" "$(dirname -- "$plugin_target")" "$state_dir"
+previous_binary=""
+[[ -f "$binary_target" ]] && previous_binary=$(sha256sum -- "$binary_target" | awk '{ print $1 }')
 install -m 0755 -- "$binary_source" "$binary_target"
 sha256sum -- "$binary_target" | awk '{ print $1 }' > "$binary_digest"
 
@@ -215,9 +217,14 @@ if [[ -z "${SALAH_NO_SHELL:-}" && "$HOME" == "$real_home" ]] && command -v syste
   if ! systemctl --user enable --now salah.socket; then
     printf 'warning: could not enable salah.socket; run systemctl --user enable --now salah.socket\n' >&2
   fi
-  # A daemon from the previous install keeps running the old binary;
-  # restart it if it is running (socket activation starts it otherwise).
-  systemctl --user try-restart salah.service >/dev/null 2>&1 || true
+  # A daemon from the previous install keeps running the old binary, so
+  # restart it, but only when the binary changed, and only after the shell
+  # has reloaded the updated widget: restarting it under the old widget code
+  # closed its socket mid-reload and crashed Quickshell.
+  if [[ "$(sha256sum -- "$binary_target" | awk '{ print $1 }')" != "$previous_binary" ]]; then
+    sleep 3
+    systemctl --user try-restart salah.service >/dev/null 2>&1 || true
+  fi
 fi
 
 printf 'Installed %s\n' "$binary_target"
