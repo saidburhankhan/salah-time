@@ -47,7 +47,8 @@ public:
     Q_INVOKABLE void removeItem(const QString &id);
     Q_INVOKABLE void moveItem(const QString &id, const QString &block, int index);
     Q_INVOKABLE void toggleDone(const QString &id, const QString &state);
-    Q_INVOKABLE void adjustItem(const QString &id, const QString &measure, int amount);
+    Q_INVOKABLE void adjustMinutes(const QString &id, int amount);
+    Q_INVOKABLE void adjustCount(const QString &id, int amount);
     Q_INVOKABLE void toggleTimer(const QString &id, bool running);
     Q_INVOKABLE void togglePrayer(const QString &prayer, bool marked);
     Q_INVOKABLE void setSleepTime(const QString &time);

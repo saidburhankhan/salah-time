@@ -49,7 +49,7 @@ ApplicationWindow {
         return a.map(function(d){return names[d]||capitalized(d)}).join(", ")
     }
     function detail(x) {
-        var value=x.measure==="minutes"?qsTr("%1 / %2 min").arg(runningMinutes(x)).arg(x.target||0):x.measure==="count"?qsTr("%1 / %2").arg(x.count||0).arg(x.target||0):(runningMinutes(x)>0?qsTr("%1 min").arg(runningMinutes(x)):"")
+        var value=x.measure==="minutes"?qsTr("%1 / %2 min").arg(runningMinutes(x)).arg(x.target||0):""
         var repeat=x.repeat==="weekly"?weekdayText(x.weekdays,x.repeat):x.repeat==="daily"?qsTr("Daily"):qsTr("Once")
         return value ? value+"  ·  "+repeat : repeat
     }
@@ -282,7 +282,8 @@ ApplicationWindow {
                         move: Transition { NumberAnimation { properties:"y"; duration:120; easing.type:Easing.OutCubic } }
                         displaced: Transition { NumberAnimation { properties:"y"; duration:120; easing.type:Easing.OutCubic } }
                         delegate: Item { id:rowDelegate; required property int index; required property string kind; required property string block; required property var payload; required property string key
-                            width:todayList.width; height:kind==="header"?60:kind==="item"?72:kind==="add"?32:26
+                            width:todayList.width; height:kind==="header"?60:kind==="item"?82:kind==="add"?32:26
+                            property string correctionError: ""
                             Rectangle { visible:kind==="header"; anchors.fill:parent; radius:theme.radius; color:win.card; border.color:win.border
                                         RowLayout { anchors.fill:parent; anchors.leftMargin:18; anchors.rightMargin:16; spacing:14
                                             Rectangle { visible:block!=="night"; width:28;height:28;radius:14;color:payload.marked?theme.accent:"transparent";border.width:2;border.color:payload.marked?theme.accent:win.text
@@ -314,9 +315,22 @@ ApplicationWindow {
                                                     Label { text:payload.title||"";color:payload.state==="done"?win.muted:win.text;font.pixelSize:15;font.weight:Font.Medium;Layout.fillWidth:true;elide:Text.ElideRight;textFormat:Text.PlainText }
                                                     Label { text:detail(payload);color:win.muted;font.family:win.mono;font.pixelSize:12 }
                                                 }
-                                                ToolButton { text:"−";enabled:(payload.measure==="count"?(payload.count||0):runningMinutes(payload))>0;onClicked:backend.adjustItem(payload.id,payload.measure,payload.measure==="count"?-1:-5) }
-                                                ToolButton { text:"+";onClicked:backend.adjustItem(payload.id,payload.measure,payload.measure==="count"?1:5) }
-                                                ToolButton { text:payload.timer_started_at?qsTr("⏸︎  %1 min").arg(runningMinutes(payload)):"▶︎";onClicked:backend.toggleTimer(payload.id,!!payload.timer_started_at) }
+                                                RowLayout { visible:payload.measure==="count";spacing:3
+                                                    RoundButton { text:"−";flat:true;Layout.preferredWidth:30;Layout.preferredHeight:30;enabled:(payload.count||0)>0;onClicked:backend.adjustCount(payload.id,-1) }
+                                                    Label { text:payload.target?qsTr("%1 / %2").arg(payload.count||0).arg(payload.target):String(payload.count||0);color:win.text;font.family:win.mono;font.pixelSize:14;horizontalAlignment:Text.AlignHCenter;Layout.minimumWidth:payload.target?58:28 }
+                                                    RoundButton { text:"+";flat:true;Layout.preferredWidth:30;Layout.preferredHeight:30;onClicked:backend.adjustCount(payload.id,1) }
+                                                }
+                                                Button { flat:true;text:payload.timer_started_at?qsTr("❚❚ %1m").arg(runningMinutes(payload)):qsTr("▶︎ %1m").arg(runningMinutes(payload));font.family:win.mono;onClicked:backend.toggleTimer(payload.id,!!payload.timer_started_at) }
+                                                ColumnLayout { spacing:1
+                                                    Rectangle { Layout.preferredWidth:42;Layout.preferredHeight:36;radius:7;color:"transparent";border.color:correctionError?"#ef8068":win.border
+                                                        TextField { id:correctionInput;anchors.fill:parent;anchors.margins:1;color:win.text;font.family:win.mono;font.pixelSize:14;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter;placeholderText:"±";inputMethodHints:Qt.ImhFormattedNumbersOnly;background:null;padding:2
+                                                            onAccepted:{var raw=text.trim(),n=Number(raw);if(!/^[+-]?\d+$/.test(raw)||n===0||n < -1440||n > 1440){correctionError=qsTr("Use ±1–1440");correctionErrorTimer.restart()}else{backend.adjustMinutes(payload.id,n);text=""}}
+                                                            Keys.onEscapePressed:function(event){text="";correctionError="";focus=false;event.accepted=true}
+                                                        }
+                                                    }
+                                                    Label { visible:correctionError!=="";text:correctionError;color:"#ef8068";font.pixelSize:9;Layout.alignment:Qt.AlignHCenter }
+                                                }
+                                                Timer { id:correctionErrorTimer;interval:2200;onTriggered:correctionError="" }
                                             }
                                             MouseArea { anchors.fill:parent; acceptedButtons:Qt.LeftButton; onDoubleClicked:openEntry(payload); z:-1 }
                             }
@@ -386,8 +400,9 @@ ApplicationWindow {
                                             }
                                         }
                                     }
-                                    ColumnLayout { Layout.preferredWidth:90
-                                        Label { text:modelData.measure==="minutes"?qsTr("%1 min").arg(modelData.minutes):modelData.measure==="count"?String(modelData.count):String(modelData.done_days);color:win.text;font.family:win.mono;font.pixelSize:18;Layout.alignment:Qt.AlignRight }
+                                    ColumnLayout { Layout.preferredWidth:120
+                                        Label { text:qsTr("%1 min").arg(modelData.minutes||0);color:win.text;font.family:win.mono;font.pixelSize:16;Layout.alignment:Qt.AlignRight }
+                                        Label { visible:modelData.measure==="count";text:qsTr("%1 count").arg(modelData.count||0);color:win.text;font.family:win.mono;font.pixelSize:14;Layout.alignment:Qt.AlignRight }
                                         Label { text:qsTr("total");color:win.muted;Layout.alignment:Qt.AlignRight }
                                     }
                                 }
@@ -431,7 +446,10 @@ ApplicationWindow {
                                         Label { text:joinedDetail(modelData.block,weekdayText(modelData.weekdays,modelData.repeat));color:win.muted;font.family:win.mono;font.pixelSize:12 }
                                         Rectangle { Layout.fillWidth:true;Layout.maximumWidth:420;height:5;radius:3;color:"#38352f"; Rectangle { width:parent.width*(modelData.planned_days?modelData.done_days/modelData.planned_days:0);height:parent.height;radius:3;color:theme.accent } }
                                     }
-                                    Label { Layout.preferredWidth:120;horizontalAlignment:Text.AlignRight;text:modelData.measure==="minutes"?qsTr("%1 min").arg(modelData.minutes):modelData.measure==="count"?String(modelData.count):qsTr("%1 / %2 days").arg(modelData.done_days).arg(modelData.planned_days);color:win.text;font.family:win.mono;font.pixelSize:16 }
+                                    ColumnLayout { Layout.preferredWidth:150
+                                        Label { text:qsTr("%1 min").arg(modelData.minutes||0);color:win.text;font.family:win.mono;font.pixelSize:16;Layout.alignment:Qt.AlignRight }
+                                        Label { visible:modelData.measure==="count";text:qsTr("%1 count").arg(modelData.count||0);color:win.muted;font.family:win.mono;font.pixelSize:12;Layout.alignment:Qt.AlignRight }
+                                    }
                                 }
                             }
                         }
@@ -486,22 +504,24 @@ ApplicationWindow {
     }
 
     // Detailed entry overlay
-    Popup { id:entryPopup;visible:entryVisible;modal:true;focus:true;anchors.centerIn:Overlay.overlay
+    Popup { id:entryPopup;objectName:"entryPopup";visible:entryVisible;modal:true;focus:true;anchors.centerIn:Overlay.overlay
         width:Math.min(1100,win.width-48);height:Math.min(820,win.height-48);padding:0;closePolicy:Popup.NoAutoClose
-        property string block:editItem.block||"fajr";property string measure:editItem.measure||"check";property string repeat:editItem.repeat||"none";property var days:editItem.weekdays||[];property bool confirming:false
+        property string block:editItem.block||"fajr";property string kind:editItem.measure==="count"?"counter":"task";property string repeat:editItem.repeat||"none";property var days:editItem.weekdays||[];property bool confirming:false
+        readonly property bool weeklyValid:repeat!=="weekly"||days.length>0
         Overlay.modal: Rectangle { color:"#d9000000" }
         background:null
-        onOpened:{block=editItem.block||"fajr";measure=editItem.measure||"check";repeat=editItem.repeat||"none";days=editItem.weekdays||[];confirming=false;titleField.text=editItem.title||"";amount.value=editItem.target||1}
-        function draft(){return {id:editItem.id||"",title:titleField.text,block:block,measure:measure,target:amount.value,repeat:repeat,weekdays:days}}
+        onOpened:{block=editItem.block||"fajr";kind=editItem.measure==="count"?"counter":"task";repeat=editItem.repeat||"none";days=editItem.weekdays||[];confirming=false;titleField.text=editItem.title||"";goalField.text=editItem.target?String(editItem.target):""}
+        function draft(){var goal=Number(goalField.text);return {id:editItem.id||"",title:titleField.text,block:block,measure:kind==="counter"?"count":goal>0?"minutes":"check",target:goal>0?goal:0,repeat:repeat,weekdays:repeat==="weekly"?days:[]}}
         function toggleDay(d){var a=days.slice();var i=a.indexOf(d);if(i>=0)a.splice(i,1);else a.push(d);days=a}
+        function selectRepeat(id){if(id==="weekdays"){repeat="weekly";days=["mon","tue","wed","thu","fri"]}else{repeat=id;if(id==="weekly"&&days.length===0){var selected=Date.fromLocaleString(Qt.locale(),backend.selectedDay,"yyyy-MM-dd");days=[weekdayId(selected)]}}}
         Rectangle { anchors.fill:parent;color:"#151411";radius:Math.max(8,theme.radius);border.width:1;border.color:win.border }
         ColumnLayout { anchors.fill:parent;anchors.margins:1;spacing:0
             RowLayout { Layout.fillWidth:true;Layout.preferredHeight:72;Layout.leftMargin:22;Layout.rightMargin:22
                 Label { text:editItem.id?qsTr("Edit entry"):qsTr("New entry");color:win.text;font.pixelSize:20;font.weight:Font.DemiBold;Layout.fillWidth:true }
                 AppButton { visible:!!editItem.id;text:entryPopup.confirming?qsTr("Confirm delete"):qsTr("Delete");onClicked:{if(entryPopup.confirming){backend.removeItem(editItem.id);entryVisible=false}else entryPopup.confirming=true} }
                 AppButton { text:qsTr("Cancel");onClicked:entryVisible=false }
-                AppButton { text:qsTr("Save & add another");onClicked:{var d=entryPopup.draft();maybeToast(d);backend.saveItem(d);editItem=({});titleField.text=""} }
-                AppButton { text:qsTr("Save  ↵");primary:true;enabled:titleField.text.trim()!=="";onClicked:{var d=entryPopup.draft();maybeToast(d);backend.saveItem(d);entryVisible=false} }
+                AppButton { text:qsTr("Save & add another");enabled:titleField.text.trim()!==""&&entryPopup.weeklyValid;onClicked:{var d=entryPopup.draft();maybeToast(d);backend.saveItem(d);editItem=({});titleField.text=""} }
+                AppButton { text:qsTr("Save  ↵");primary:true;enabled:titleField.text.trim()!==""&&entryPopup.weeklyValid;onClicked:{var d=entryPopup.draft();maybeToast(d);backend.saveItem(d);entryVisible=false} }
             }
             Rectangle { Layout.fillWidth:true;height:1;color:win.border }
             RowLayout { Layout.fillWidth:true;Layout.fillHeight:true;Layout.margins:22;spacing:26
@@ -510,7 +530,7 @@ ApplicationWindow {
                         Rectangle { width:parent.width;height:108;radius:theme.radius;color:win.panel;border.color:win.border
                             Item { anchors.fill:parent;anchors.margins:24
                                 Text { anchors.left:parent.left;anchors.verticalCenter:parent.verticalCenter;text:qsTr("Activity title…");color:win.muted;font.pixelSize:24;visible:titleField.text.length===0 }
-                                TextInput { id:titleField;anchors.left:parent.left;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;color:win.text;selectionColor:theme.accent;selectedTextColor:theme.accentForeground;font.pixelSize:28;clip:true;onAccepted:if(text.trim()){var d=entryPopup.draft();maybeToast(d);backend.saveItem(d);entryVisible=false} }
+                                TextInput { id:titleField;anchors.left:parent.left;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;color:win.text;selectionColor:theme.accent;selectedTextColor:theme.accentForeground;font.pixelSize:28;clip:true;onAccepted:if(text.trim()&&entryPopup.weeklyValid){var d=entryPopup.draft();maybeToast(d);backend.saveItem(d);entryVisible=false} }
                                 Rectangle { anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:1;color:win.border }
                             }
                         }
@@ -526,12 +546,13 @@ ApplicationWindow {
                         }
                         Rectangle { width:parent.width;height:160;radius:theme.radius;color:win.panel;border.color:win.border
                             ColumnLayout { anchors.fill:parent;anchors.margins:22;spacing:14
-                                Label { text:qsTr("Measure");color:win.text;font.pixelSize:17;font.weight:Font.DemiBold }
+                                Label { text:qsTr("Kind");color:win.text;font.pixelSize:17;font.weight:Font.DemiBold }
                                 RowLayout { spacing:8
-                                    Repeater { model:[{id:"check",name:qsTr("Tick")},{id:"minutes",name:qsTr("Minutes")},{id:"count",name:qsTr("Count")}]
-                                        ChoiceChip { required property var modelData;text:modelData.name;selected:entryPopup.measure===modelData.id;onClicked:entryPopup.measure=modelData.id }
+                                    Repeater { model:[{id:"task",name:qsTr("Task")},{id:"counter",name:qsTr("Counter")}]
+                                        ChoiceChip { required property var modelData;text:modelData.name;selected:entryPopup.kind===modelData.id;onClicked:entryPopup.kind=modelData.id }
                                     }
-                                    SpinBox { id:amount;visible:entryPopup.measure!=="check";from:1;to:999;value:1;editable:true;Layout.leftMargin:10 }
+                                    Label { text:entryPopup.kind==="task"?qsTr("Time goal (min)"):qsTr("Goal");color:win.muted;Layout.leftMargin:10 }
+                                    TextField { id:goalField;Layout.preferredWidth:110;placeholderText:qsTr("Optional");font.family:win.mono;inputMethodHints:Qt.ImhDigitsOnly;validator:IntValidator{bottom:1;top:99999} }
                                 }
                             }
                         }
@@ -540,7 +561,7 @@ ApplicationWindow {
                                 Label { text:qsTr("Repeat");color:win.text;font.pixelSize:17;font.weight:Font.DemiBold }
                                 RowLayout { spacing:8
                                     Repeater { model:[{id:"none",name:qsTr("Once")},{id:"daily",name:qsTr("Daily")},{id:"weekdays",name:qsTr("Weekdays")},{id:"weekly",name:qsTr("Weekly")}]
-                                        ChoiceChip { required property var modelData;text:modelData.name;selected:modelData.id!=="weekdays"&&entryPopup.repeat===modelData.id;onClicked:{if(modelData.id==="weekdays"){entryPopup.repeat="weekly";entryPopup.days=["mon","tue","wed","thu","fri"]}else entryPopup.repeat=modelData.id} }
+                                        ChoiceChip { required property var modelData;text:modelData.name;selected:modelData.id!=="weekdays"&&entryPopup.repeat===modelData.id;onClicked:entryPopup.selectRepeat(modelData.id) }
                                     }
                                 }
                                 RowLayout { visible:entryPopup.repeat==="weekly";spacing:6
@@ -548,6 +569,7 @@ ApplicationWindow {
                                         ChoiceChip { required property string modelData;text:capitalized(modelData);selected:entryPopup.days.indexOf(modelData)>=0;onClicked:entryPopup.toggleDay(modelData) }
                                     }
                                 }
+                                Label { visible:entryPopup.repeat==="weekly"&&entryPopup.days.length===0;text:qsTr("Pick at least one day");color:win.muted;font.pixelSize:12 }
                             }
                         }
                     }
@@ -560,7 +582,7 @@ ApplicationWindow {
                             RowLayout { Layout.fillWidth:true;Label{text:qsTr("Next occurrence");color:win.muted;Layout.fillWidth:true}Label{text:backend.gregorianHeader(backend.selectedDay);color:win.text;font.family:win.mono} }
                             RowLayout { Layout.fillWidth:true;Label{text:qsTr("Occurrences this month");color:win.muted;Layout.fillWidth:true}Label{text:entryPopup.repeat==="daily"?30:entryPopup.repeat==="weekly"?Math.max(1,entryPopup.days.length*4):1;color:win.text;font.family:win.mono} }
                             RowLayout { Layout.fillWidth:true;Label{text:qsTr("Schedule");color:win.muted;Layout.fillWidth:true}Label{text:weekdayText(entryPopup.days,entryPopup.repeat);color:win.text;font.family:win.mono} }
-                            RowLayout { Layout.fillWidth:true;Label{text:qsTr("Amount");color:win.muted;Layout.fillWidth:true}Label{text:entryPopup.measure==="check"?qsTr("Tick"):amount.value+(entryPopup.measure==="minutes"?qsTr(" min"):"");color:win.text;font.family:win.mono} }
+                            RowLayout { Layout.fillWidth:true;Label{text:entryPopup.kind==="task"?qsTr("Time goal"):qsTr("Goal");color:win.muted;Layout.fillWidth:true}Label{text:goalField.text?(goalField.text+(entryPopup.kind==="task"?qsTr(" min"):"")):qsTr("None");color:win.text;font.family:win.mono} }
                         }
                     }
                     Item { Layout.fillHeight:true }

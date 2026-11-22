@@ -61,8 +61,8 @@ BarWidget {
     return base + Math.max(0, nowMinutes - thenMinutes)
   }
   readonly property string displayText: localizedNextName !== ""
-    ? localizedNextName + "  " + remainingShort
-        + (runningTimer ? strings.t("bar.runningTimer").arg(formatMinutes(runningMinutes)) : "")
+    ? strings.t("bar.nextStatus").arg(localizedNextName).arg(remainingShort)
+        .arg(runningTimer ? strings.t("bar.runningTimer").arg(formatMinutes(runningMinutes)) : "")
     : (firstLoad ? strings.t("bar.loading") : strings.t("bar.unavailableShort"))
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color mutedForeground: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
@@ -80,7 +80,7 @@ BarWidget {
       if (minutes > 0) return strings.t("unit.minutesShort").arg(minutes)
       return strings.t("unit.secondsShort").arg(secs)
     }
-    return pad(hours) + ":" + pad(minutes) + ":" + pad(secs)
+    return strings.t("unit.clock").arg(pad(hours)).arg(pad(minutes)).arg(pad(secs))
   }
 
   function formatMinutes(value) {
@@ -187,20 +187,31 @@ BarWidget {
       "started_at": new Date().toISOString(), "minutes": Number(row.minutes) || 0
     }
     timerSnapshotMs = Date.now()
-    if (running) runAction(["item", "stop", "--json"])
+    if (running) runAction(["item", "stop", "--json", String(row.id)])
     else runAction(["item", "start", "--json", String(row.id)])
   }
 
-  function adjustItem(row, delta) {
-    var amount = row.measure === "count" ? (delta < 0 ? -1 : 1) : (delta < 0 ? -5 : 5)
-    var role = row.measure === "count" ? "count" : "minutes"
-    var current = Math.max(0, Number(row[role]) || 0)
+  function adjustCount(row, delta) {
+    var amount = delta < 0 ? -1 : 1
+    var current = Math.max(0, Number(row.count) || 0)
     var next = Math.max(0, current + amount)
-    if (next === current) return
     var content = panel.loadedContent
-    var changes = {}; changes[role] = next
-    if (content) content.patchItem(String(row.id), changes)
-    runAction(["item", "log", "--json", String(row.id), String(next - current)])
+    if (content) content.patchItem(String(row.id), { "count": next })
+    runAction(["item", "log", "--json", String(row.id), String(amount)])
+  }
+
+  function correctMinutes(row, amount) {
+    var current = Math.max(0, Number(row.minutes) || 0)
+    var next = Math.max(0, current + amount)
+    var content = panel.loadedContent
+    if (content) content.patchItem(String(row.id), { "minutes": next })
+    if (runningTimer && String(runningTimer.item_id || "") === String(row.id)) {
+      optimisticTimer = {
+        "item_id": String(row.id), "title": String(runningTimer.title || row.title || ""),
+        "started_at": String(runningTimer.started_at || row.timer_started_at || ""), "minutes": next
+      }
+    }
+    runAction(["item", "log", "--json", "--minutes", String(row.id), String(amount)])
   }
 
   function editItem(row, title) {
@@ -221,14 +232,10 @@ BarWidget {
   function itemDetail(row) {
     var parts = []
     if (row.measure === "minutes")
-      parts.push(row.minutes + (row.target ? "/" + row.target : "") + " " + strings.t("panel.minutesShort"))
-    else if (row.measure === "count")
-      parts.push(row.count + (row.target ? "/" + row.target : ""))
-    else if (row.minutes > 0)
-      parts.push(row.minutes + " " + strings.t("panel.minutesShort"))
+      parts.push(strings.t("panel.timeProgress").arg(row.minutes).arg(row.target))
     if (row.repeat === "daily") parts.push(strings.t("repeat.daily"))
     else if (row.repeat === "weekly") parts.push(strings.t("repeat.weekly"))
-    return parts.join(" · ")
+    return parts.join(strings.t("panel.detailSeparator"))
   }
 
   function syncLocation(force) {
@@ -447,7 +454,7 @@ BarWidget {
     horizontalMargin: 8.75
     verticalPadding: 8.75
     tooltipText: root.localizedNextName !== ""
-      ? root.localizedNextName + " · " + root.nextTime + " · " + root.remainingLong
+      ? strings.t("bar.tooltip").arg(root.localizedNextName).arg(root.nextTime).arg(root.remainingLong)
       : strings.t("bar.unavailable")
     pressFeedbackButtons: Qt.NoButton
     onPressed: function(mouseButton) {
@@ -463,7 +470,7 @@ BarWidget {
     bar: root.bar
     open: false
     focusTarget: loadedContent
-    contentWidth: fittedContentWidth(Style.space(400))
+    contentWidth: fittedContentWidth(Style.space(520))
     contentHeight: fittedContentHeight(loadedContentHeight)
 
     content: PanelKeyCatcher {
@@ -959,6 +966,7 @@ BarWidget {
                 property bool editing: false
                 property bool confirmingDelete: false
                 property string editText: title
+                property string correctionError: ""
                 readonly property int elapsedMinutes: {
                   root.minuteTick
                   var started = Date.parse(timer_started_at)
@@ -974,7 +982,7 @@ BarWidget {
                 })
                 width: ListView.view.width
                 height: rowType === "header" ? Style.space(40)
-                  : (rowType === "item" ? Style.space(38)
+                  : (rowType === "item" ? Style.space(42)
                     : (rowType === "marker" ? Style.space(24) : Style.space(27)))
                 opacity: dragging ? 0 : (pending ? 0.5 : (passed && !current ? 0.58 : 1))
 
@@ -1242,7 +1250,9 @@ BarWidget {
                       visible: !flatRow.editing && text !== ""
                       width: parent.width
                       textFormat: Text.PlainText
-                      text: flatRow.pending ? strings.t("panel.pending") : root.itemDetail(flatRow.itemData)
+                      text: flatRow.pending ? strings.t("panel.pending")
+                        : (flatRow.correctionError !== ""
+                            ? flatRow.correctionError : root.itemDetail(flatRow.itemData))
                       color: root.mutedForeground
                       font.family: root.bar ? root.bar.fontFamily : Style.font.family
                       font.pixelSize: Style.font.caption
@@ -1258,46 +1268,113 @@ BarWidget {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Style.space(1)
 
-                    Button {
-                      visible: rowHover.containsMouse || activeFocus
-                      width: visible ? Style.space(22) : 0
+                    Row {
+                      visible: flatRow.measure === "count"
                       height: Style.space(26)
-                      text: strings.t("panel.decrease")
-                      tooltipText: flatRow.measure === "count"
-                        ? strings.t("panel.decreaseCount") : strings.t("panel.decreaseMinutes")
-                      foreground: root.mutedForeground
-                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                      horizontalPadding: 0
-                      verticalPadding: 0
-                      onClicked: root.adjustItem(flatRow.itemData, -1)
+                      spacing: 0
+
+                      Button {
+                        width: Style.space(24)
+                        height: parent.height
+                        text: strings.t("panel.decrease")
+                        tooltipText: strings.t("panel.decreaseCount")
+                        foreground: root.mutedForeground
+                        fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                        horizontalPadding: 0
+                        verticalPadding: 0
+                        onClicked: root.adjustCount(flatRow.itemData, -1)
+                      }
+                      Row {
+                        width: flatRow.target > 0 ? Style.space(54) : Style.space(32)
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Style.space(2)
+
+                        Text {
+                          anchors.verticalCenter: parent.verticalCenter
+                          textFormat: Text.PlainText
+                          text: String(flatRow.count)
+                          color: root.foreground
+                          font.family: "monospace"
+                          font.pixelSize: Style.font.caption
+                        }
+                        Text {
+                          visible: flatRow.target > 0
+                          anchors.verticalCenter: parent.verticalCenter
+                          textFormat: Text.PlainText
+                          text: strings.t("panel.countGoal").arg(flatRow.target)
+                          color: root.mutedForeground
+                          font.family: "monospace"
+                          font.pixelSize: Style.font.caption
+                        }
+                      }
+                      Button {
+                        width: Style.space(24)
+                        height: parent.height
+                        text: strings.t("panel.increase")
+                        tooltipText: strings.t("panel.increaseCount")
+                        foreground: root.mutedForeground
+                        fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                        horizontalPadding: 0
+                        verticalPadding: 0
+                        onClicked: root.adjustCount(flatRow.itemData, 1)
+                      }
                     }
                     Button {
-                      visible: rowHover.containsMouse || activeFocus
-                      width: visible ? Style.space(22) : 0
+                      visible: flatRow.elapsedMinutes > 0 || flatRow.timer_started_at !== ""
+                        || rowHover.containsMouse || activeFocus
+                      width: visible ? Style.space(62) : 0
                       height: Style.space(26)
-                      text: strings.t("panel.increase")
-                      tooltipText: flatRow.measure === "count"
-                        ? strings.t("panel.increaseCount") : strings.t("panel.increaseMinutes")
-                      foreground: root.mutedForeground
-                      fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                      horizontalPadding: 0
-                      verticalPadding: 0
-                      onClicked: root.adjustItem(flatRow.itemData, 1)
-                    }
-                    Button {
-                      width: flatRow.timer_started_at !== "" ? Style.space(54) : Style.space(30)
-                      height: Style.space(26)
-                      text: flatRow.timer_started_at !== ""
-                        ? strings.t("panel.pauseWithTime").arg(root.formatMinutes(flatRow.elapsedMinutes))
-                        : strings.t("panel.start")
+                      text: (flatRow.timer_started_at !== ""
+                          ? strings.t("panel.pauseWithTime") : strings.t("panel.startWithTime"))
+                        .arg(root.formatMinutes(flatRow.elapsedMinutes))
                       tooltipText: flatRow.timer_started_at !== ""
                         ? strings.t("panel.pauseTimer") : strings.t("panel.startTimer")
                       foreground: root.foreground
                       fontFamily: "monospace"
-                      horizontalPadding: Style.space(3)
+                      horizontalPadding: 0
                       verticalPadding: 0
                       bordered: true
                       onClicked: root.toggleTimer(flatRow.itemData)
+                    }
+                    TextField {
+                      id: correctionField
+                      visible: rowHover.containsMouse || activeFocus || text !== ""
+                        || flatRow.correctionError !== ""
+                      width: visible ? Style.space(38) : 0
+                      height: Style.space(26)
+                      placeholderText: strings.t("panel.correctionPlaceholder")
+                      foreground: root.mutedForeground
+                      font.family: "monospace"
+                      font.pixelSize: Style.font.caption
+                      horizontalPadding: Style.space(3)
+                      verticalPadding: 0
+                      maximumLength: 5
+                      onAccepted: {
+                        var raw = String(text).trim()
+                        var value = Number(raw)
+                        if (!/^[+-]?\d+$/.test(raw) || value === 0 || value < -1440 || value > 1440) {
+                          flatRow.correctionError = strings.t("panel.correctionError")
+                          correctionErrorTimer.restart()
+                          return
+                        }
+                        root.correctMinutes(flatRow.itemData, value)
+                        text = ""
+                        flatRow.correctionError = ""
+                        focus = false
+                        keyCatcher.forceActiveFocus()
+                      }
+                      Keys.onEscapePressed: function(event) {
+                        text = ""
+                        flatRow.correctionError = ""
+                        focus = false
+                        keyCatcher.forceActiveFocus()
+                        event.accepted = true
+                      }
+                      Timer {
+                        id: correctionErrorTimer
+                        interval: 2500
+                        onTriggered: flatRow.correctionError = ""
+                      }
                     }
                     Button {
                       visible: rowHover.containsMouse || activeFocus

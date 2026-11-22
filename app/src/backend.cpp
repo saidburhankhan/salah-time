@@ -184,7 +184,8 @@ void Backend::saveItem(const QVariantMap &item) {
     const QStringList days = item.value("weekdays").toStringList();
     if (!days.isEmpty()) args << "--days" << days.join(',');
     args << "--measure" << item.value("measure", "check").toString();
-    if (item.value("measure").toString() != "check") args << "--target" << QString::number(item.value("target", 1).toInt());
+    const int target = item.value("target").toInt();
+    if (item.value("measure").toString() != "check" && target > 0) args << "--target" << QString::number(target);
     else if (!id.isEmpty()) args << "--no-target";
     if (id.isEmpty()) {
         if (item.value("repeat").toString() == "none" && m_selected != m_today) args << "--date" << selectedDay();
@@ -203,9 +204,14 @@ void Backend::moveItem(const QString &id, const QString &block, int index) {
     enqueue({"item", "move", "--json", id, "--block", block, "--index", QString::number(requestedIndex)}, {}, true);
 }
 void Backend::toggleDone(const QString &id, const QString &state) { mutateItem(id,[state](QVariantMap &x){x["state"]=state=="done"?"open":"done";}); QStringList args{"item", state == "done" ? "undo" : "done", "--json", id}; args << dateArguments(); enqueue(args, {}, true); }
-void Backend::adjustItem(const QString &id, const QString &measure, int amount) {
-    const QString field = measure == "count" ? QStringLiteral("count") : QStringLiteral("minutes");
-    mutateItem(id, [field, amount](QVariantMap &x) { x[field] = qMax(0, x.value(field).toInt() + amount); });
+void Backend::adjustMinutes(const QString &id, int amount) {
+    mutateItem(id, [amount](QVariantMap &x) { x["minutes"] = qMax(0, x.value("minutes").toInt() + amount); });
+    QStringList args{"item", "log", "--json", "--minutes", id, QString::number(amount)};
+    if (m_selected.isValid() && m_selected != m_today) args << dateArguments();
+    enqueue(args, {}, true);
+}
+void Backend::adjustCount(const QString &id, int amount) {
+    mutateItem(id, [amount](QVariantMap &x) { x["count"] = qMax(0, x.value("count").toInt() + amount); });
     QStringList args{"item", "log", "--json", id, QString::number(amount)};
     if (m_selected.isValid() && m_selected != m_today) args << dateArguments();
     enqueue(args, {}, true);

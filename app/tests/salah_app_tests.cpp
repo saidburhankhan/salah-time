@@ -81,14 +81,15 @@ private slots:
     void adjustmentArgumentsAndClamp() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
         b.reload(); QTRY_COMPARE(spy.size(),3);
-        b.adjustItem("a1","minutes",-5); b.adjustItem("a1","minutes",5); b.adjustItem("n1","count",1);
-        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json a1 -5"),3000);
-        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json a1 5"),3000);
+        b.adjustMinutes("a1",-10); b.adjustMinutes("a1",5); b.adjustCount("n1",1); b.adjustCount("n1",-1);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json --minutes a1 -10"),3000);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json --minutes a1 5"),3000);
         QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json n1 1"),3000);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json n1 -1"),3000);
         b.selectDay("2026-11-23");
-        b.adjustItem("a1","minutes",5); b.adjustItem("a1","minutes",-5);
-        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json a1 5 --date 2026-11-23"),3000);
-        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json a1 -5 --date 2026-11-23"),3000);
+        b.adjustMinutes("a1",5); b.adjustMinutes("a1",-5);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json --minutes a1 5 --date 2026-11-23"),3000);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item log --json --minutes a1 -5 --date 2026-11-23"),3000);
     }
     void timerStartStopsAnotherOptimistically() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
@@ -96,6 +97,8 @@ private slots:
         const auto blocks=b.dayPlan().value("blocks").toList();
         QVERIFY(blocks.at(0).toMap().value("items").toList().first().toMap().value("timer_started_at").toString().isEmpty());
         QVERIFY(!blocks.at(1).toMap().value("items").toList().first().toMap().value("timer_started_at").toString().isEmpty());
+        b.toggleTimer("a1",true);
+        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item stop --json a1"),3000);
     }
     void escapeFunctionClosesTopOverlay() {
         QTemporaryDir dir; Backend backend(nullptr,fake(dir)); Theme theme(dir.path());
@@ -109,6 +112,18 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(root.data(),"closeTopOverlay",Q_RETURN_ARG(QVariant,result)));
         QCOMPARE(root->property("quickVisible").toBool(),false);
         QVERIFY(QMetaObject::invokeMethod(root.data(),"closeTopOverlay",Q_RETURN_ARG(QVariant,result))); QVERIFY(!result.toBool());
+    }
+    void weeklyGuardAndDefaultDay() {
+        QTemporaryDir dir; Backend backend(nullptr,fake(dir)); Theme theme(dir.path());
+        backend.reload(); QSignalSpy spy(&backend,&Backend::requestFinished); QTRY_VERIFY_WITH_TIMEOUT(spy.size()>=3,3000);
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend",&backend); engine.rootContext()->setContextProperty("theme",&theme);
+        QQmlComponent component(&engine,QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/Main.qml")));
+        QScopedPointer<QObject> root(component.create()); QVERIFY2(root,qPrintable(component.errorString())); root->setProperty("visible",false);
+        QObject *entry=root->findChild<QObject *>("entryPopup"); QVERIFY(entry);
+        entry->setProperty("days",QVariantList{});
+        QVERIFY(QMetaObject::invokeMethod(entry,"selectRepeat",Q_ARG(QVariant,QVariant("weekly"))));
+        QCOMPARE(entry->property("days").toList(),QVariantList({"sun"})); QVERIFY(entry->property("weeklyValid").toBool());
+        entry->setProperty("days",QVariantList{}); QVERIFY(!entry->property("weeklyValid").toBool());
     }
     void hijriHeaderFormatting() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); const QString h=b.hijriHeader("2026-11-22");
