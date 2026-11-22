@@ -230,3 +230,30 @@ fn status_attaches_planner_and_survives_store_failure() {
     assert!(status["planner"].is_null());
     assert!(status["planner_error"].is_string());
 }
+
+#[test]
+fn timers_stop_by_item_and_count_items_adjust_time_separately() {
+    let fixture = Fixture::new();
+    let counter = add(&fixture, &["--measure", "count"]);
+    let id = counter["id"].as_str().unwrap();
+    fixture.json(&["item", "start", "--json", id]);
+    // The app stops a specific item's timer by id.
+    let stopped = fixture.json(&["item", "stop", "--json", id]);
+    assert_eq!(stopped.as_array().unwrap().len(), 1);
+    assert_eq!(stopped[0]["item_id"], id);
+    fixture.json(&["item", "log", "--json", id, "2"]);
+    fixture.json(&["item", "log", "--json", "--minutes", id, "15"]);
+    fixture.json(&["item", "log", "--json", "--minutes", id, "-5"]);
+    let list = fixture.json(&["item", "list", "--json"]);
+    let row = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == id)
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (row["count"].as_i64(), row["minutes"].as_i64()),
+        (Some(2), Some(10))
+    );
+}

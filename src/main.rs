@@ -84,12 +84,21 @@ enum ItemCommand {
     Log(ItemLogArgs),
     /// Start an item's timer
     Start(ItemIdArgs),
-    /// Stop the running timer
-    Stop(JsonArgs),
+    /// Stop the running timer, or only this item's timer
+    Stop(ItemStopArgs),
     /// Edit an item
     Edit(ItemEditArgs),
     /// Remove an item
     Remove(ItemIdArgs),
+}
+
+#[derive(Args)]
+struct ItemStopArgs {
+    /// Item id or unique id prefix; without it, stop whichever timer runs
+    id: Option<String>,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -232,6 +241,9 @@ struct ItemLogArgs {
     /// Minutes (or count, for count items) to add; negative subtracts
     #[arg(allow_negative_numbers = true)]
     value: i64,
+    /// Adjust time spent in minutes, even for a count item
+    #[arg(long)]
+    minutes: bool,
     /// Record on this day (YYYY-MM-DD) instead of now
     #[arg(long)]
     date: Option<String>,
@@ -625,7 +637,11 @@ fn item_command(command: ItemCommand) -> Result<(), String> {
         ItemCommand::Log(args) => {
             planner::close_expired_timers(&mut store, &config, now)?;
             let date = optional_date(args.date.as_deref())?;
-            let entry = planner::log(&mut store, &config, now, &args.id, args.value, date)?;
+            let entry = if args.minutes {
+                planner::adjust_time(&mut store, &config, now, &args.id, args.value, date)?
+            } else {
+                planner::log(&mut store, &config, now, &args.id, args.value, date)?
+            };
             if args.json {
                 json(&entry)
             } else {
@@ -643,7 +659,10 @@ fn item_command(command: ItemCommand) -> Result<(), String> {
         ),
         ItemCommand::Stop(args) => {
             planner::close_expired_timers(&mut store, &config, now)?;
-            let entries = planner::stop_timer(&mut store, &config, now)?;
+            let entries = match args.id.as_deref() {
+                Some(id) => planner::stop_item_timer(&mut store, &config, now, id)?,
+                None => planner::stop_timer(&mut store, &config, now)?,
+            };
             if args.json {
                 json(&entries)
             } else {

@@ -97,10 +97,13 @@ Grammar (case-insensitive, any order): `after|at <prayer>`,
   at position N (0-based) and renumbers that block. Returns the Item.
 - `salah item done|undo --json ID [--date D]`, `salah item log --json ID VALUE
   [--date D]` — `--date` records on that day (default: as before).
-- `salah item start|stop --json [ID]`: works for every item, whatever its
+- `salah item start --json ID` / `salah item stop --json [ID]`: works for
+  every item, whatever its
   measure. Starting one timer stops any other. Stop + start again is
-  "pause / continue"; the minutes add up.
-- `salah item log --json ID VALUE [--date D]`: VALUE may be negative to
+  "pause / continue"; the minutes add up. `stop ID` stops only that item's
+  timer; `stop` alone stops whichever runs.
+- `salah item log --json [--minutes] ID VALUE [--date D]`: `--minutes`
+  always adjusts time spent (also on count items). VALUE may be negative to
   subtract (non-zero, at most 1440 either way). The unit follows the item:
   `count` items adjust their count, all others adjust minutes. Daily totals
   never go below 0.
@@ -144,3 +147,10 @@ the range. Routines are the entries with `repeat` ≠ `none`.
 
 `salah config show` (JSON) and `salah config set --sleep-time HH:MM` etc.,
 unchanged.
+
+## Presentation of measures (UI)
+
+Users see two kinds of item: **Task** and **Counter**. Every item tracks time
+spent (timer + typed correction). Stored measures map as: Task without goal =
+`check`; Task with a time goal = `minutes` + `target`; Counter = `count`
+(+ optional `target`). The UI never offers "Minutes" as a separate kind.

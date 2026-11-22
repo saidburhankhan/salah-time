@@ -373,19 +373,45 @@ pub fn log(
     value: i64,
     date: Option<NaiveDate>,
 ) -> Result<Entry, String> {
-    let now = stamp(now);
     let item = find_item(store, id)?;
     // Count items adjust their count; every other item records time spent.
     let kind = match item.measure {
         Measure::Count => EntryKind::Count,
         Measure::Check | Measure::Minutes => EntryKind::Minutes,
     };
+    record(store, config, now, &item, kind, value, date)
+}
+
+/// Adds (or, when negative, subtracts) minutes of time spent on any item,
+/// including count items, whose `log` adjusts the count instead.
+pub fn adjust_time(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    id: &str,
+    value: i64,
+    date: Option<NaiveDate>,
+) -> Result<Entry, String> {
+    let item = find_item(store, id)?;
+    record(store, config, now, &item, EntryKind::Minutes, value, date)
+}
+
+fn record(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    item: &Item,
+    kind: EntryKind,
+    value: i64,
+    date: Option<NaiveDate>,
+) -> Result<Entry, String> {
+    let now = stamp(now);
     // A negative value subtracts; daily totals are clamped at zero.
     if value == 0 || value.abs() > 24 * 60 {
         return Err("value must be between -1440 and 1440, and not 0".into());
     }
     let schedule = schedule::resolve(config, now)?;
-    let mut entry = new_entry(&item, recorded_block(&schedule, &item, date), kind, now);
+    let mut entry = new_entry(item, recorded_block(&schedule, item, date), kind, now);
     entry.value = Some(value);
     store.put_entry(&entry)?;
     Ok(entry)
@@ -421,6 +447,30 @@ fn stop_running(store: &Store, now: DateTime<Utc>) -> Result<Vec<Entry>, String>
         stopped.push(timer);
     }
     Ok(stopped)
+}
+
+/// Stops `id`'s timer if it is running; other timers keep running.
+pub fn stop_item_timer(
+    store: &mut Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    id: &str,
+) -> Result<Vec<Entry>, String> {
+    let now = stamp(now);
+    let item = find_item(store, id)?;
+    close_expired_timers(store, config, now)?;
+    store.transaction(|store| {
+        let mut stopped = Vec::new();
+        for mut timer in store.running_timers()? {
+            if timer.item_id == item.id {
+                timer.ended_at = Some(now);
+                timer.updated_at = now;
+                store.put_entry(&timer)?;
+                stopped.push(timer);
+            }
+        }
+        Ok(stopped)
+    })
 }
 
 /// Stops the running timer, if any.
