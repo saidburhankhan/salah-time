@@ -119,3 +119,11 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   0c must also: an RPC test of stats.table group "tag" on the v4 fixture before/after migrating
   (incl. the moved-task case). Goals/reviews write code must validate numbers and YYYY-MM-DD dates
   (review week = a Monday) since SQLite CHECKs don't enforce types.
+- 23:5x committed 3adab2c (C7 task 1, app resource drawer, Claude Sonnet; 76 app tests; screenshots
+  checked). Tree clean. Phase 3 and all review fixes are committed, NOT installed (install gate above).
+  Queue for the 03:12 Codex window:
+  C8 --resume (Astra): 0b (stats.get `blocks` via block_minutes) + 0c (tags on tasks; RPC test of
+  tag totals before/after 005), then goals.
+  After 0c: C9 0 (app tags, Astra/Sol) and C10 0 (widget tags, Sol) in parallel.
+  Then the install: full scripts/test, live-copy migration diff, screenshots, ./scripts/install.
+  Polish leftovers: Backlog heading dots in project colour; FilterBar task search box height.
