@@ -149,3 +149,11 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   must run from this checkout (ownership marker), and crates/ holds C8's goals WIP. At CHECKPOINT 1:
   verify + commit, stop the workers, full scripts/test, live-copy diff, ./scripts/install, restart.
   C9 → task 2 (Goals UI) against C8's draft fixtures; C10 → task 1 (goal chips); both stop after it.
+- 03:36 Codex 5h cap (window 03:12–03:36; weekly 31→47%). Next window 08:13. Reset NOT used.
+- 03:38 INSTALLED 8000b64 (phase 3 + R2/R3 fixes + 0b + tags on tasks in backend/app/widget):
+  C8 WIP stashed for a clean tree, scripts/test passed (226 tests + install/uninstall in scratch
+  home), ./scripts/install, daemon restarted, WIP restored. Live DB v3→v5, backups
+  bak-v3/bak-v4 kept (bak-v1 rotated out); integrity/FK ok; item_tags 3 rows; tag totals equal the
+  live-copy run (arabic 182/12, dmbs 68/3, No tag 0/3; total 250 min / 18 sessions).
+  Claude Opus now holds C8 task 1 (goals) + the 0c review nits. C9 task 2 and C10 task 1 wait for
+  CHECKPOINT 1 (then Sonnet, or Codex at 08:13).
