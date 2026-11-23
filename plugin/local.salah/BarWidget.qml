@@ -63,7 +63,9 @@ BarWidget {
   readonly property var runningTimer: report && report.running ? report.running : null
   readonly property int runningMinutes: runningTimer
     ? SessionLogic.elapsedMinutes(runningTimer.started_at, countdownNowMs) : 0
-  readonly property string runningElapsedText: formatDuration(runningMinutes)
+  readonly property string runningElapsedText: runningTimer
+    ? SessionLogic.clockText(SessionLogic.elapsedSeconds(runningTimer.started_at, countdownNowMs)) : ""
+
   readonly property var runningItem: runningTimer ? plannerItem(runningTimer.item_id) : null
   readonly property var runningProject: runningTimer
     ? SessionLogic.findProject(projects, runningTimer.project_id) : null
@@ -1079,6 +1081,8 @@ BarWidget {
               text: root.runningElapsedText
               color: root.foreground
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              // Tabular digits keep the ticking clock the same width.
+              font.features: { "tnum": 1 }
               font.pixelSize: Style.font.body
               font.bold: true
             }

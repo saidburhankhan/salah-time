@@ -180,9 +180,24 @@ function logTargets(items, projects) {
   return targets
 }
 
-// Whole minutes a running session has been going, from its started_at.
-function elapsedMinutes(startedAt, nowMs) {
+// Whole seconds a running session has been going, from its started_at.
+function elapsedSeconds(startedAt, nowMs) {
   var started = Date.parse(text(startedAt))
   if (isNaN(started)) return 0
-  return Math.max(0, Math.floor((Number(nowMs) - started) / 60000))
+  return Math.max(0, Math.floor((Number(nowMs) - started) / 1000))
+}
+
+// Whole minutes a running session has been going, from its started_at.
+function elapsedMinutes(startedAt, nowMs) {
+  return Math.floor(elapsedSeconds(startedAt, nowMs) / 60)
+}
+
+// A running timer as a clock with two digits per field, so the text keeps
+// its width while it ticks: "09:05" under an hour, then "01:02:03".
+function clockText(totalSeconds) {
+  var total = Math.max(0, Math.floor(Number(totalSeconds) || 0))
+  function pad(value) { return value < 10 ? "0" + value : String(value) }
+  var hours = Math.floor(total / 3600)
+  var clock = pad(Math.floor((total % 3600) / 60)) + ":" + pad(total % 60)
+  return hours > 0 ? pad(hours) + ":" + clock : clock
 }
