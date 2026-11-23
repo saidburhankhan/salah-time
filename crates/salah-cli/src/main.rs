@@ -3,6 +3,7 @@ use chrono::{DateTime, FixedOffset, Local as LocalTime, Utc};
 use clap::{Args, Parser, Subcommand};
 use epics::EpicCommand;
 use local::Local;
+use resources::ResourceCommand;
 use salah_core::{config::load, location};
 use salah_domain::runtime::{Clock, FixedClock, SystemClock, UuidV4};
 use salah_prayer::{calculation::METHODS, official};
@@ -19,6 +20,7 @@ mod epics;
 mod local;
 mod render;
 mod reports;
+mod resources;
 mod tracking;
 
 #[derive(Parser)]
@@ -74,6 +76,11 @@ enum Command {
     Epic {
         #[command(subcommand)]
         command: EpicCommand,
+    },
+    /// Manage notes, links and reminders on tasks and epics
+    Resource {
+        #[command(subcommand)]
+        command: ResourceCommand,
     },
     /// Manage tags
     Tag {
@@ -251,6 +258,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Some(Command::Project { command }) => tracking::project(&mut local()?, command),
         Some(Command::Backlog { command }) => backlog::backlog(&mut local()?, command),
         Some(Command::Epic { command }) => epics::epic(&mut local()?, command),
+        Some(Command::Resource { command }) => resources::resource(&mut local()?, command),
         Some(Command::Tag { command }) => tracking::tag(&mut local()?, command),
         Some(Command::Metric { command }) => tracking::metric(&mut local()?, command),
         Some(Command::Day(args)) => tracking::day(&mut local()?, args),

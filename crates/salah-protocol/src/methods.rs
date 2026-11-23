@@ -14,6 +14,7 @@ use salah_core::stats::table::Group;
 use salah_domain::day::BoundaryId;
 use salah_domain::epic::{Epic, EpicStatus};
 use salah_domain::item::{PrayerMark, Repeat, Weekdays};
+use salah_domain::resource::Resource;
 use salah_domain::tracking::{Metric, Tag};
 use serde::{Deserialize, Serialize};
 
@@ -370,6 +371,7 @@ pub struct Changed {
     pub sessions: Vec<SessionView>,
     pub projects: Vec<ProjectView>,
     pub epics: Vec<Epic>,
+    pub resources: Vec<Resource>,
     pub tags: Vec<Tag>,
     pub metrics: Vec<Metric>,
     pub marks: Vec<PrayerMark>,

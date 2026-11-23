@@ -1,5 +1,5 @@
-//! `salah backlog`: one-time tasks without a day or block, and scheduling
-//! them into a day's block.
+//! `salah backlog`: one-time tasks without a day or block, scheduling them
+//! into a day's block, and moving them back.
 
 use crate::local::Local;
 use crate::render;
@@ -15,6 +15,16 @@ pub enum BacklogCommand {
     Add(BacklogAddArgs),
     /// Give a task a day and a block
     Schedule(BacklogScheduleArgs),
+    /// Take a one-time task out of its day and into the backlog
+    Move(BacklogMoveArgs),
+}
+
+#[derive(Args)]
+pub struct BacklogMoveArgs {
+    /// Item id or unique prefix
+    id: String,
+    #[command(flatten)]
+    output: Output,
 }
 
 #[derive(Args)]
@@ -88,6 +98,11 @@ pub fn backlog(local: &mut Local<'_>, command: BacklogCommand) -> Result<(), Str
                 .set("day", a.date)
                 .set("block", Value::from(a.block));
             let result = local.mutate("item.schedule", params.done())?;
+            print(&a.output, &result, render::mutation)
+        }
+        BacklogCommand::Move(a) => {
+            let params = Params::default().set("id", local.item_id(&a.id)?);
+            let result = local.mutate("item.backlog", params.done())?;
             print(&a.output, &result, render::mutation)
         }
     }

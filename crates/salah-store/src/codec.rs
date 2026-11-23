@@ -57,7 +57,10 @@ pub(crate) fn get_timestamp(row: &Row, column: &str) -> rusqlite::Result<DateTim
         .map_err(invalid)
 }
 
-fn get_optional_timestamp(row: &Row, column: &str) -> rusqlite::Result<Option<DateTime<Utc>>> {
+pub(crate) fn get_optional_timestamp(
+    row: &Row,
+    column: &str,
+) -> rusqlite::Result<Option<DateTime<Utc>>> {
     let text: Option<String> = row.get(column)?;
     text.map(|text| {
         DateTime::parse_from_rfc3339(&text)
@@ -72,7 +75,7 @@ pub(crate) fn get_day(row: &Row, column: &str) -> rusqlite::Result<NaiveDate> {
     NaiveDate::parse_from_str(&text, "%Y-%m-%d").map_err(invalid)
 }
 
-fn get_name<T: DeserializeOwned>(row: &Row, column: &str) -> rusqlite::Result<T> {
+pub(crate) fn get_name<T: DeserializeOwned>(row: &Row, column: &str) -> rusqlite::Result<T> {
     let text: String = row.get(column)?;
     serde_json::from_value(serde_json::Value::String(text)).map_err(invalid)
 }

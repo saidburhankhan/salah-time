@@ -144,6 +144,11 @@
             "name": "Quran"
           },
           "repeat": "daily",
+          "resources": {
+            "links": 0,
+            "notes": 0,
+            "reminders": 0
+          },
           "schedule_text": "Daily",
           "sessions": [
             {
@@ -208,6 +213,11 @@
           "position": 1,
           "project": null,
           "repeat": "none",
+          "resources": {
+            "links": 0,
+            "notes": 0,
+            "reminders": 0
+          },
           "schedule_text": "Once",
           "sessions": [],
           "title": "Walk",
@@ -267,6 +277,11 @@
             "name": "Quran"
           },
           "repeat": "daily",
+          "resources": {
+            "links": 0,
+            "notes": 0,
+            "reminders": 0
+          },
           "schedule_text": "Daily",
           "sessions": [
             {
@@ -331,6 +346,11 @@
           "position": 1,
           "project": null,
           "repeat": "none",
+          "resources": {
+            "links": 0,
+            "notes": 0,
+            "reminders": 0
+          },
           "schedule_text": "Once",
           "sessions": [],
           "title": "Walk",
@@ -416,6 +436,7 @@
         "unit": "pages"
       }
     ],
+    "reminders": [],
     "running": {
       "block": "fajr",
       "day": "2031-05-14",

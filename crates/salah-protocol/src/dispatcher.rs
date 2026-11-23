@@ -6,7 +6,7 @@
 use crate::error::RpcError;
 use crate::message::{MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response, SERVER_NAME};
 use crate::methods::{HelloParams, HelloResult};
-use crate::{reads, writes};
+use crate::{reads, resources, writes};
 use chrono::{DateTime, Utc};
 use salah_core::{Store, config::Config};
 use salah_domain::error::Error;
@@ -59,6 +59,7 @@ const METHODS: &[(&str, Kind, Handler)] = &[
     ("day.get", Kind::Read, reads::day),
     ("items.list", Kind::Read, reads::items),
     ("backlog.list", Kind::Read, reads::backlog),
+    ("resources.list", Kind::Read, resources::list),
     ("stats.get", Kind::Read, reads::stats),
     ("stats.table", Kind::Read, reads::stats_table),
     ("stats.series", Kind::Read, reads::stats_series),
@@ -77,6 +78,9 @@ const METHODS: &[(&str, Kind, Handler)] = &[
     ("item.remove", Kind::Write, writes::item_remove),
     ("item.schedule", Kind::Write, writes::item_schedule),
     ("item.backlog", Kind::Write, writes::item_backlog),
+    ("resource.add", Kind::Write, resources::add),
+    ("resource.edit", Kind::Write, resources::edit),
+    ("resource.remove", Kind::Write, resources::remove),
     ("epic.add", Kind::Write, writes::epic_add),
     ("epic.edit", Kind::Write, writes::epic_edit),
     ("epic.remove", Kind::Write, writes::epic_remove),

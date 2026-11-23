@@ -163,6 +163,7 @@
       }
     ],
     "prompt": [],
+    "reminders": [],
     "running": null,
     "schema_version": 1,
     "sleep_time": "23:00",

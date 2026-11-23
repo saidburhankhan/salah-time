@@ -49,6 +49,7 @@ pub fn mutation(result: &Value) -> String {
         };
         lines.push(format!("session {}  {minutes}", short(&session["id"])));
     }
+    lines.extend(rows(&changed["resources"]).iter().map(resource_line));
     for (kind, list) in [
         ("project", &changed["projects"]),
         ("epic", &changed["epics"]),
@@ -83,6 +84,29 @@ pub fn mutation(result: &Value) -> String {
     } else {
         lines.join("\n")
     }
+}
+
+pub fn resources(result: &Value) -> String {
+    rows(result)
+        .iter()
+        .map(resource_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn resource_line(resource: &Value) -> String {
+    let kind = text(&resource["kind"]);
+    let mut line = format!("{kind} {}", text(&resource["id"]));
+    for field in ["title", "body", "url", "remind_at"] {
+        if let Some(value) = resource[field].as_str() {
+            line.push_str("  ");
+            line.push_str(value);
+        }
+    }
+    if resource["done"] == true {
+        line.push_str("  (done)");
+    }
+    line
 }
 
 pub fn items(result: &Value) -> String {

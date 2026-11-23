@@ -208,6 +208,17 @@ mod tests {
             json!({"project_id":project, "name":"Chapter"}),
             &["epics"],
         );
+        let resource = call(
+            "resource.add",
+            json!({"epic_id":epic,"kind":"note","body":"Outline"}),
+            &["resources"],
+        );
+        call(
+            "resource.edit",
+            json!({"id":resource,"body":"Second draft"}),
+            &["resources"],
+        );
+        call("resource.remove", json!({"id":resource}), &["resources"]);
         call(
             "epic.edit",
             json!({"id":epic, "status":"finished"}),

@@ -177,3 +177,67 @@ Fixtures: existing ones only gain `backlog: false` and `epic: null`
 - `docs/work/architecture/protocol-v1.md`, `docs/work/tracking-ui/c5-progress.md`
 
 CHECKPOINT 1: Backlog for one-time tasks (add, schedule, back to backlog, reorder, list) kept out of every plan; finished epics take no new tasks; an epic brings its project; sessions.list names the epic
+
+## Resources and CLI (2–4)
+
+Items and epics can each own notes, links and reminders. Add and list require
+exactly one live parent. Resource writes use the existing revision, version
+and op ID machinery and publish the `resources` scope. Day and backlog rows
+count live notes and links and open reminders. Status includes open reminders
+on live parents at or before the request instant, sorted by `remind_at` then ID.
+A reminder due at the request instant appears with `overdue: false`.
+
+`salah resource list|add` takes `--item` or `--epic`.
+`salah resource edit <id> --done` completes a reminder and `--undone` reopens it.
+`salah resource remove <id>` soft-deletes a resource.
+`salah backlog move <id>` sends `item.backlog`.
+The daemon integration harness now shares setup between the method and transport
+test modules.
+
+### Verification
+
+`cargo test --offline --workspace --no-fail-fast` passed 198 tests, including
+all 19 stdio RPC tests. The sandbox denied Unix socket setup for the eight
+daemon tests below.
+
+- `methods::every_protocol_method_has_a_success_and_an_error_over_the_socket`
+- `transport::a_second_daemon_refuses_to_steal_the_live_socket`
+- `transport::a_stale_socket_file_is_replaced_and_sigterm_removes_it`
+- `transport::clock_boundary_is_pushed_when_the_next_boundary_changes`
+- `transport::concurrent_writers_keep_revisions_gapless`
+- `transport::rpc_socket_bridges_stdio_to_the_daemon`
+- `transport::socket_permissions_and_handshake`
+- `transport::subscribers_receive_changed_for_socket_and_plain_cli_writes`
+
+`cargo clippy --offline --all-targets -- -D warnings`, `cargo fmt --check` and
+`git diff --check` passed. Existing fixtures gained only fields.
+
+### Files
+
+- `crates/salah-cli/src/{backlog,main,render,resources}.rs`,
+  `crates/salah-cli/src/daemon/events.rs`
+- `crates/salah-cli/tests/{daemon,rpc,tracking_cli}.rs`,
+  `crates/salah-cli/tests/daemon/{methods,transport}.rs`,
+  `crates/salah-cli/tests/rpc/resources.rs`
+- New fixtures in `crates/salah-cli/tests/fixtures/rpc/`:
+  `resource_add_link.json`, `resource_add_reminder.json`, `resource_edit_done.json`,
+  `resources_list.json`, `status_reminders.json`
+- Updated fixtures in `crates/salah-cli/tests/fixtures/rpc/`:
+  `day_tracking.json`, `epic_add.json`, `epic_edit_finish.json`, `item_add.json`,
+  `item_add_backlog.json`, `item_add_quick.json`, `item_add_quick_tomorrow.json`,
+  `item_backlog.json`, `item_edit.json`, `item_edit_metrics.json`, `item_move.json`,
+  `item_remove.json`, `item_schedule.json`, `metric_add.json`, `metric_edit.json`,
+  `prayer_mark.json`, `project_add.json`, `project_edit.json`, `session_bump.json`,
+  `session_edit.json`, `session_edit_remove_note.json`, `session_log.json`,
+  `session_log_epic.json`, `session_log_tick.json`, `session_log_tick_stops_timer.json`,
+  `session_note.json`, `session_remove.json`, `session_start.json`, `session_stop.json`,
+  `session_stop_done.json`, `session_stop_minutes.json`, `status.json`,
+  `status_running.json`, `status_stale.json`, `tag_add.json`, `tag_edit.json`,
+  `tag_remove.json`
+- `crates/salah-core/src/{lib,resources,status}.rs`, `crates/salah-core/src/day/view.rs`
+- `crates/salah-domain/src/resource.rs`
+- `crates/salah-protocol/src/{dispatcher,lib,message,methods,resources,writes}.rs`
+- `crates/salah-store/src/{codec,lib,resources,write}.rs`
+- `docs/work/architecture/protocol-v1.md`, `docs/work/tracking-ui/c5-progress.md`
+
+CHECKPOINT 2-4: Add item and epic resources, due reminders, resource CLI and backlog move

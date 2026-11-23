@@ -61,7 +61,7 @@ fn replayable<T: Serialize>(
 }
 
 /// A replayable mutation whose result is `{revision, op_id, changed}`.
-fn mutate(
+pub(crate) fn mutate(
     store: &mut Store,
     method: &str,
     op_id: &str,

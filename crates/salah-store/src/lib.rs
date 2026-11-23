@@ -5,7 +5,7 @@ mod epics;
 mod migrations;
 mod read;
 pub mod reports;
-mod resources;
+pub mod resources;
 mod write;
 
 pub use write::WriteTx;
@@ -284,8 +284,12 @@ mod tests {
                  ('n2','i','note','b',NULL,NULL,1,'t','t',NULL,1),
                  ('l1','i','link',NULL,'https://x',NULL,2,'t','t',NULL,1),
                  ('r1','i','reminder',NULL,NULL,'2031-05-14T10:00:00Z',3,'t','t',NULL,1),
+                 ('r2','i','reminder',NULL,NULL,'2031-05-14T09:00:00Z',5,'t','t',NULL,1),
                  ('gone','i','link',NULL,'https://y',NULL,4,'t','t','t',1);",
             )
+            .unwrap();
+        s.conn
+            .execute("UPDATE resources SET done = 1 WHERE id = 'r2'", [])
             .unwrap();
         let counts = s.item_resource_counts().unwrap();
         assert_eq!(

@@ -12,10 +12,12 @@ use salah_domain::{
     day::{BlockKey, BoundaryId},
     error::Error,
     item::{Repeat, Weekdays},
+    resource::ResourceCounts,
     tracking::{DayBlock, DayClock, DayPlanLine, Item, Project, Session},
 };
 use salah_prayer::schedule;
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 pub use salah_domain::tracking::ProjectRef;
 
@@ -43,6 +45,8 @@ pub struct DayRow {
     pub next_occurrence: Option<NaiveDate>,
     /// `"20 / 30 min · Daily"`, `"20 min · Daily"`, or the schedule alone.
     pub detail_text: String,
+    /// The item's live notes and links and its open reminders.
+    pub resources: ResourceCounts,
 }
 
 /// A prayer block with its capacity and the work planned and done in it.
@@ -238,6 +242,7 @@ struct Ledger {
     items: Vec<Item>,
     projects: Vec<Project>,
     sessions: Vec<Session>,
+    resources: BTreeMap<String, ResourceCounts>,
 }
 
 impl Ledger {
@@ -273,6 +278,7 @@ impl Ledger {
                 .into_iter()
                 .filter(Session::is_live)
                 .collect(),
+            resources: store.item_resource_counts()?,
         })
     }
 
@@ -362,6 +368,7 @@ impl Ledger {
             next_occurrence: item.next_occurrence(self.day),
             schedule_text,
             detail_text,
+            resources: self.resources.get(&item.id).copied().unwrap_or_default(),
         })
     }
 }

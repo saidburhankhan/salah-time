@@ -60,6 +60,11 @@
               "name": "Quran"
             },
             "repeat": "daily",
+            "resources": {
+              "links": 0,
+              "notes": 0,
+              "reminders": 0
+            },
             "schedule_text": "Daily",
             "sessions": [
               {
@@ -123,6 +128,11 @@
             "position": 1,
             "project": null,
             "repeat": "none",
+            "resources": {
+              "links": 0,
+              "notes": 0,
+              "reminders": 0
+            },
             "schedule_text": "Once",
             "sessions": [
               {

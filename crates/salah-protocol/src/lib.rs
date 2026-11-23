@@ -11,6 +11,7 @@ pub mod error;
 pub mod message;
 pub mod methods;
 mod reads;
+mod resources;
 mod writes;
 
 pub use dispatcher::{ConfigRepository, Context, Dispatcher};

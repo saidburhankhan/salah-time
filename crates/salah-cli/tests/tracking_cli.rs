@@ -90,6 +90,60 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
+#[test]
+fn resource_commands_list_add_edit_and_remove() {
+    let fixture = Fixture::new();
+    let task = fixture.added("items", &["backlog", "add", "Read", "--json"]);
+    let reminder = fixture.added(
+        "resources",
+        &[
+            "resource",
+            "add",
+            "--item",
+            &task[..8],
+            "--kind",
+            "reminder",
+            "--remind-at",
+            "2031-05-14T04:00:00Z",
+            "--title",
+            "Read now",
+            "--json",
+        ],
+    );
+    let listed = fixture.run(&["resource", "list", "--item", &task]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    let list = String::from_utf8_lossy(&listed.stdout);
+    assert!(list.contains(&reminder) && list.contains("Read now"));
+
+    let done = fixture.json(&["resource", "edit", &reminder, "--done", "--json"]);
+    assert_eq!(done["changed"]["resources"][0]["done"], true);
+    let reopened = fixture.json(&["resource", "edit", &reminder, "--undone", "--json"]);
+    assert_eq!(reopened["changed"]["resources"][0]["done"], false);
+    let removed = fixture.json(&["resource", "remove", &reminder, "--json"]);
+    assert_eq!(removed["changed"]["deleted"][0], reminder);
+    let list = fixture.json(&["resource", "list", "--item", &task, "--json"]);
+    assert_eq!(list, serde_json::json!([]));
+
+    let project = fixture.added("projects", &["project", "add", "Reading", "--json"]);
+    let epic = fixture.added(
+        "epics",
+        &["epic", "add", "Part 1", "--project", &project, "--json"],
+    );
+    fixture.json(&[
+        "resource", "add", "--epic", &epic, "--kind", "note", "--body", "Outline", "--json",
+    ]);
+    assert_eq!(
+        fixture.json(&["resource", "list", "--epic", &epic, "--json"])[0]["body"],
+        "Outline"
+    );
+    assert!(
+        !fixture
+            .run(&["resource", "list", "--item", &task, "--epic", &epic])
+            .status
+            .success()
+    );
+}
+
 fn day_rows(day: &Value) -> Vec<Value> {
     day["blocks"]
         .as_array()
@@ -610,6 +664,10 @@ fn quick_items_join_the_epic_project_and_backlog_tasks_get_scheduled() {
     assert_eq!(scheduled["changed"]["items"][0]["day"], "2031-05-15");
     let listed = fixture.json(&["backlog", "list", "--json"]);
     assert_eq!(listed.as_array().unwrap().len(), 1);
+    let moved = fixture.run(&["backlog", "move", &task]);
+    assert!(String::from_utf8_lossy(&moved.stdout).contains("Read notes  (backlog)"));
+    let listed = fixture.json(&["backlog", "list", "--json"]);
+    assert_eq!(listed.as_array().unwrap().len(), 2);
     let items = fixture.run(&["item", "list"]);
     assert!(String::from_utf8_lossy(&items.stdout).contains("backlog  Call"));
 }

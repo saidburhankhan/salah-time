@@ -585,3 +585,5 @@ mod phase2;
 mod quick;
 #[path = "rpc/reports.rs"]
 mod reports;
+#[path = "rpc/resources.rs"]
+mod resources;

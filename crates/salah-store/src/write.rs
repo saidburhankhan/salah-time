@@ -487,7 +487,7 @@ impl WriteTx<'_> {
         )
     }
 
-    fn execute(&self, sql: &str, params: impl rusqlite::Params) -> Result<(), Error> {
+    pub(crate) fn execute(&self, sql: &str, params: impl rusqlite::Params) -> Result<(), Error> {
         self.store
             .conn
             .prepare_cached(sql)
@@ -497,7 +497,7 @@ impl WriteTx<'_> {
     }
 
     /// The version an upsert writes and the change operation it represents.
-    fn next_version(
+    pub(crate) fn next_version(
         &self,
         table: &str,
         id: &str,
@@ -538,7 +538,13 @@ impl WriteTx<'_> {
         Ok(revision)
     }
 
-    fn log_change(&self, entity: &str, id: &str, op: &str, version: i64) -> Result<i64, Error> {
+    pub(crate) fn log_change(
+        &self,
+        entity: &str,
+        id: &str,
+        op: &str,
+        version: i64,
+    ) -> Result<i64, Error> {
         let revision = self.revision_for_write()?;
         self.execute(
             "INSERT INTO changes (revision, entity, entity_id, op, version, at, op_id)

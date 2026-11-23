@@ -5,6 +5,7 @@ use crate::sessions::{self, PromptMetric, SessionView};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use salah_domain::day::{self, BlockKey, Boundary};
 use salah_domain::error::Error;
+use salah_domain::resource::DueReminder;
 use salah_prayer::schedule::{self, Schedule};
 use serde::Serialize;
 
@@ -80,6 +81,8 @@ pub struct Status {
     pub running: Option<SessionView>,
     /// The metrics to ask for when `running` stops.
     pub prompt: Vec<PromptMetric>,
+    /// Open reminders due at or before the request instant, oldest first.
+    pub reminders: Vec<DueReminder>,
 }
 
 impl Status {
@@ -120,6 +123,10 @@ impl Status {
                 self.running = running;
                 self.prompt = prompt;
             }
+            Err(error) => errors.push(error.to_string()),
+        }
+        match store.due_reminders(now) {
+            Ok(reminders) => self.reminders = reminders,
             Err(error) => errors.push(error.to_string()),
         }
         self.planner_error = (!errors.is_empty()).then(|| errors.join("; "));
@@ -186,6 +193,7 @@ pub fn build(config: &Config, utc_now: DateTime<Utc>) -> Result<Status, Error> {
         planner_error: None,
         running: None,
         prompt: Vec::new(),
+        reminders: Vec::new(),
     })
 }
 

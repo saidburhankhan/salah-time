@@ -95,10 +95,14 @@ store-wide counter, never a precondition.
 | Method | Params | Result | Errors | Idempotent | Version-checked |
 |---|---|---|---|---|---|
 | `hello` | `protocol[]`, `client`, `actor?` | `protocol`, `server`, `capabilities`, `revision` | protocol | — | — |
-| `status.get` | — | `Status`: prayer projection, `planner` (today's rows), `running: SessionView\|null`, `prompt: [PromptMetric]` | config, source, storage | — | — |
+| `status.get` | — | `Status`: prayer projection, `planner` (today's rows), `running: SessionView\|null`, `prompt: [PromptMetric]`, `reminders: [DueReminder]` | config, source, storage | — | — |
 | `day.get` | `date?` | `DayPlan`: prayers, blocks with `capacity_minutes`/`planned_minutes`/`actual_minutes`/`unplanned_minutes` and rows, `open`, `fulfilment` | validation, source, storage | — | — |
 | `items.list` | — | `[ItemView]`, the backlog last | storage | — | — |
 | `backlog.list` | `project_id?`, `tag_id?` (each also `"none"`) | `[ItemView + project: {id,name,color,tag_ids}\|null + resources: {notes,links,reminders}]` in backlog order | not_found, storage | — | — |
+| `resources.list` | Exactly one of `item_id` or `epic_id` | `[Resource]` in position order | validation, not_found, storage | — | — |
+| `resource.add` | `op_id`, exactly one of `item_id` or `epic_id`, `kind`, `title?`, `body?`, `url?`, `remind_at?` | mutation result (`changed.resources`) | validation, not_found, storage | yes | no |
+| `resource.edit` | `op_id`, `id`, `title?`, `body?`, `url?`, `remind_at?`, `done?`, `expected_version?` | mutation result (`changed.resources`) | validation, not_found, conflict, storage | yes | yes |
+| `resource.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`) | not_found, conflict, storage | yes | yes |
 | `stats.get` | `from,to` or `days?` (default 30, max 730), `tag_id?`, `project_id?`, `epic_id?`, `item_id?` (each also `"none"`), `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}` | `range`, `filter`, `days` (with `unplanned_minutes`, nullable `fulfilment_ratio`), `series` (minutes first), `projects`, `epics`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
 | `stats.table` | `stats.get`'s range and filter (including the session bounds), `group?` (`week` default, `day`, `project`, `epic`, `tag`, `item`) | `range`, `filter`, `group`, `columns`, `rows`, `totals` | validation, not_found, storage | — | — |
 | `stats.series` | `stats.get`'s range and filter (including the session bounds), `interval?` (`day` default, `week`), `split?` (`project`, `epic`, `tag`, `item`), `measures: [id]` (required, non-empty: `minutes`, `sessions`, a metric id or `distractions_per_hour`) | `range`, `filter`, `interval`, `split`, `periods`, `series` | validation (empty `measures`, range over 730 days), not_found (unknown measure), storage | — | — |
@@ -145,7 +149,7 @@ shapes for clients.
 
 A mutation result is `{revision, op_id, changed}`. `changed` always carries
 every list — `items` (`ItemView`: the stored item plus `schedule_text` and
-`next_occurrence`), `sessions` (`SessionView`), `projects`, `epics`, `tags`, `metrics`,
+`next_occurrence`), `sessions` (`SessionView`), `projects`, `epics`, `resources`, `tags`, `metrics`,
 `marks`, and `deleted` (removed ids) — so clients never guard for a missing key.
 
 ## Shapes
@@ -189,8 +193,25 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   reject repeating items (`validation`, field `repeat`). `item.move` with `block:
   null` reorders the backlog; a move between the backlog and a block, `item.edit`
   of a backlog item's `block`, or a repeat on it is a `validation` error.
-  `backlog.list` filters by project and by the project's tags; its `resources`
-  counts the item's live resources of each kind.
+  `backlog.list` filters by project and by the project's tags.
+- A `Resource` carries `id`, `item_id`, `epic_id`, `kind`, `title`, `body`,
+  `url`, `remind_at`, `done`, `position`, and sync fields (`created_at`, `updated_at`,
+  `deleted_at`, `version`). One parent ID is null. The other names a live item or
+  epic when adding or listing resources. The parent and kind are fixed at creation.
+  A `note` requires a nonblank `body`, a `link` requires an absolute HTTP(S) `url`,
+  and a `reminder` requires an RFC 3339 `remind_at`. New reminders start with
+  `done: false`. Editing `done` on a reminder completes or reopens it. Omitted
+  edit fields keep their values, and `null` clears optional content. Removal
+  soft-deletes the resource.
+- Day and backlog rows carry `resources: {notes, links, reminders}`. Each count
+  includes live resources directly on the item, with reminders counted while open.
+- `status.get.reminders` contains open reminders on live items and epics at or
+  before the request instant, oldest first. Each `DueReminder` has `id`,
+  `item_id`, `item_title`, `epic_id`, `epic_name`, `title`, `remind_at` and
+  `overdue`. The other parent's fields are null. `remind_at` is a UTC instant and
+  `overdue` is true when it is strictly earlier than the request instant.
+  Fixtures are `resources_list.json`, `resource_add_link.json`,
+  `resource_add_reminder.json`, `resource_edit_done.json` and `status_reminders.json`.
 - `ItemView` and day rows expose `metric_ids` and the effective `metrics` list.
   `metric_ids: null` inherits the project's active asked metrics. Without a project it
   inherits focus, quality, and distractions. An explicit list selects only those metrics
@@ -453,7 +474,7 @@ Notifications have no `id`:
 
 `changed` is an invalidation, not a patch: refetch `status.get` or `day.get`.
 `days` and `op_id` may be omitted; each scope is one of `items`, `sessions`,
-`projects`, `epics`, `tags`, `metrics`, `marks`, `config`. The daemon emits these from its `data_version` watcher; a
+`projects`, `epics`, `resources`, `tags`, `metrics`, `marks`, `config`. The daemon emits these from its `data_version` watcher; a
 notification may cover more than one commit observed in the same poll, so
 clients treat its `revision` as the newest state to fetch and de-duplicate by
 revision.
