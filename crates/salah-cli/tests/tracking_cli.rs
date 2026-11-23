@@ -1,11 +1,14 @@
 //! The human CLI end to end: every tracking subcommand runs the real binary
 //! against a temporary store and goes through the protocol dispatcher.
 
+use chrono::{DateTime, Days};
 use salah_core::config::Config;
+use salah_store::Store;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 /// Inside the Fajr block of 2031-05-14 in the default location.
@@ -143,6 +146,89 @@ fn items_are_planned_edited_moved_and_removed() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn item_edit_catches_up_a_400_day_gap_in_one_bounded_write() {
+    let fixture = Fixture::new();
+    let daily_item = |title| {
+        fixture.added(
+            "items",
+            &[
+                "item",
+                "add",
+                title,
+                "--repeat",
+                "daily",
+                "--planned-minutes",
+                "10",
+                "--json",
+            ],
+        )
+    };
+    let id = daily_item("Read");
+    for _ in 1..24 {
+        daily_item("Practice");
+    }
+
+    let first = DateTime::parse_from_rfc3339(NOW).unwrap();
+    let later = first + Days::new(400);
+    let today = later.date_naive();
+    let store = Store::open(&fixture.data).unwrap();
+    let revision = store.revision().unwrap();
+    assert!(
+        store
+            .written_days(first.date_naive(), today)
+            .unwrap()
+            .is_empty()
+    );
+
+    let start = Instant::now();
+    fixture.json_at(
+        &later.to_rfc3339(),
+        &["item", "edit", &id, "--planned-minutes", "45", "--json"],
+    );
+    let elapsed = start.elapsed();
+    eprintln!("400-day catch-up with 24 daily items took {elapsed:?}");
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "catch-up took {elapsed:?}"
+    );
+
+    let written = store
+        .written_days(first.date_naive(), today + Days::new(1))
+        .unwrap();
+    let oldest = today - Days::new(366);
+    let yesterday = today - Days::new(1);
+    assert_eq!(written.len(), 366);
+    assert_eq!(written.first(), Some(&oldest));
+    assert_eq!(written.last(), Some(&yesterday));
+    for day in [oldest, yesterday] {
+        let plan = store.day_plan(day).unwrap();
+        assert_eq!(plan.len(), 24);
+        assert!(plan.iter().all(|line| line.planned_minutes == Some(10)));
+    }
+    assert_eq!(store.item(&id).unwrap().unwrap().planned_minutes, Some(45));
+    assert_eq!(store.revision().unwrap(), revision + 1);
+
+    // A failed edit rolls back the snapshots it would have frozen.
+    let next = later + Days::new(5);
+    let failed = fixture.run_at(
+        &next.to_rfc3339(),
+        &["item", "edit", &id, "--planned-minutes", "0", "--json"],
+    );
+    assert!(!failed.status.success());
+    assert!(stderr(&failed).contains("planned_minutes"));
+    assert!(
+        store
+            .written_days(today, next.date_naive())
+            .unwrap()
+            .is_empty()
+    );
+    assert!(store.day_blocks(today).unwrap().is_empty());
+    assert!(store.day_plan(today).unwrap().is_empty());
+    assert!(store.day_clock(today).unwrap().is_none());
+    assert_eq!(store.revision().unwrap(), revision + 1);
 }
 
 #[test]

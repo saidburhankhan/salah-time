@@ -169,9 +169,11 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   items and are never stored. Once a day is past, its blocks and plan are
   written once (from the items that existed by its end, with their project
   then) and marked written, so an empty plan stays empty. A past day's prayer
-  times and sleep time come from its stored blocks. Item writes first freeze
-  every unwritten past day, so later edits never reach them. Snapshots are not
-  entities: they neither bump the revision nor appear in `changed`.
+  times and sleep time come from its stored blocks. An item write freezes
+  unwritten days from the earliest item start date through yesterday, up to
+  the preceding 366 days, in the same transaction as the item change.
+  Reads of older unwritten days use the recorded item and configuration
+  history. Snapshot writes leave the revision and `changed` list untouched.
 - `item.add` rejects a `date` before today.
 - A bare `session.stop` pauses the timer and records its elapsed minutes. `session.log`
   with minutes records timed work. Either operation accepts an empty or partial values map.

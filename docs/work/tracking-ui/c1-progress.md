@@ -87,3 +87,19 @@ The stdio RPC regression starts a timer at 09:30 with Sleep at 00:30 the next ci
 - `docs/work/architecture/protocol-v1.md`, `docs/work/tracking-ui/c1-progress.md`
 
 CHECKPOINT 3: Report stale running timers at their planning-day Sleep cutoff
+
+## Task 4 — snapshot catch-up cost
+
+Item add, edit, move, and remove pass their open write transaction to `freeze_past` in `crates/salah-core/src/items.rs` (lines 132, 181, 228, and 269). The lower bound in `crates/salah-core/src/day/snapshot.rs:110` limits catch-up to the preceding 366 days. The store commits or rolls back the snapshots and item change together in `crates/salah-store/src/lib.rs:167`.
+
+A new CLI regression seeds 24 daily items in a file-backed SQLite store, advances 400 days, then times an item edit through commit. Five debug runs took 208–214 ms against a one-second limit. The test checks the exact snapshot range, the original plan at both ends, and a single revision increment. An invalid edit five days later rolls back that catch-up, including day markers, clock, blocks, and plan. The existing implementation met the target.
+
+132 non-socket Rust tests passed. All eight tests in `crates/salah-cli/tests/daemon.rs` failed at Unix socket setup in the full workspace run under sandbox restrictions. Strict Clippy, formatting, and diff checks passed.
+
+### Checkpoint files
+
+- `crates/salah-cli/tests/tracking_cli.rs`
+- `docs/work/architecture/protocol-v1.md`
+- `docs/work/tracking-ui/c1-progress.md`
+
+CHECKPOINT 4: Verify bounded, atomic snapshot catch-up after a 400-day gap
