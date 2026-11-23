@@ -21,7 +21,7 @@ in place (the user has live data now: never drop or rewrite it). One CHECKPOINT 
 (2)-(4). Checks: `cargo test --offline --workspace` (socket tests fail in your sandbox; say which),
 `cargo clippy --offline --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check`.
 
-Also: `stats.get` filters accept `"none"` for project/tag/item (and epic), like `stats.table`.
+Also: `stats.get`/`stats.table`/`sessions.list` already accept `"none"` and the duration/metric filters (8c7adfa); add `epic_id` (incl. `"none"`) to that shared filter.
 
 Epics are optional everywhere and existing projects, tasks, routines, sessions and fixtures must
 keep working unchanged; read plan.md "Optional everywhere" and "Statistics show the gaps" first.
