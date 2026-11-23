@@ -12,7 +12,7 @@ backend worker's notes), and the existing stats code in `crates/salah-core/src/s
 
 Tasks:
 1. `stats.get`: `item_id?` filter; any from/to range up to 730 days (validation error beyond).
-2. `session.stop` `done?: bool` (stop with values + tick in one write, replay-safe like the
+2. `session.stop` `minutes?` override (plan.md) and `done?: bool` (stop with values + tick in one write, replay-safe like the
    existing tick-stops-timer path).
 3. `stats.table` as specified, computed in core/SQL, with tests for each group, weighting,
    tag double counting, empty weeks, filters, and archived metrics (archived metrics with data in

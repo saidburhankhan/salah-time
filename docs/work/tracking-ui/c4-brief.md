@@ -14,7 +14,8 @@ selectedFill/selectedBorder/selectedText, and how screenshots are rendered with
 
 Tasks, in order, one CHECKPOINT each:
 1. Today: Pause opens the optional-metrics panel with Save / Save & Done (as plan.md says);
-   Save & Done hidden for a session without an item.
+   Save & Done hidden for a session without an item. The panel shows "Worked" with the elapsed
+   minutes editable plus −5/−15/−30 chips; send `minutes` only when changed.
 2. Stats filters: separate Tags, Projects (narrowed by tag) and Tasks (narrowed by project)
    lists; range presets 7/28/90 plus Custom with from/to date pickers; every request carries
    the filter.

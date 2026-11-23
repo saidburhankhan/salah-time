@@ -134,6 +134,14 @@ the required and optional metrics, and see results in charts. Both surfaces stay
 - `session.stop` params gain `done?: bool`: stop the timer with the given values/note, then
   record a tick (no values) for its item in the same write. `done` on a session without an item
   is a `validation` error. The mutation result lists both sessions.
+- `session.stop` params also gain `minutes?: int` (1..the clamped elapsed minutes): overrides the
+  computed minutes, for a timer the user forgot to pause. Above the elapsed time → `validation`.
+  Fixture `session_stop_minutes.json`.
+- **Forgot to pause:** the pause panel shows "Worked" with the elapsed minutes in an editable field
+  and −5 / −15 / −30 chips; Save sends `minutes` only when it was changed. Already-stopped
+  sessions keep their Edit (minutes) in both surfaces.
+- **Notes:** a session's note is shown wherever its sessions are listed (app session rows already
+  do; the widget's opened row must too).
 - New fixtures: `stats_table_week.json`, `stats_table_project.json`, `stats_item_filter.json`,
   `session_stop_done.json`.
 

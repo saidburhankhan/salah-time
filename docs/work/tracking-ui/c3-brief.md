@@ -13,7 +13,7 @@ Task: Pause (row button and the running card's Pause) opens the session panel in
 mode: the session's item/project metrics (or focus and quality without a project) and a note, all
 optional, with Cancel, **Save** (`session.stop` with the filled values/note; empty = plain stop)
 and **Save & Done** (`session.stop` with `done: true`; for a session without an item, hide it).
-Keep the existing done panel and Log panel as they are. Add node checks in
+The pause panel also shows "Worked" with the elapsed minutes in an editable field plus −5/−15/−30 chips; send `minutes` only when changed (plan.md). Show each session's note in the opened row's session list. Keep the existing done panel and Log panel as they are. Add node checks in
 `plugin/local.salah/tests/session_logic_test.js` for any new pure logic (params built for Save
 vs Save & Done, empty values). Update the CLI fallback in SalahClient (`salah session stop --done`).
 Keep the dark theme tokens (no light fills) and `Text.PlainText` on dynamic strings.
