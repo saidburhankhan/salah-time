@@ -133,6 +133,31 @@ private:
     QHash<QLocalSocket *, QByteArray> m_buffers;
     Handler m_handler;
 };
+
+// Fixtures for rendering the pages even when the sandbox cannot bind a socket.
+class TrackingUiPreviewBackend : public Backend {
+    Q_OBJECT
+    Q_PROPERTY(bool offlineMode READ previewOfflineMode CONSTANT)
+    Q_PROPERTY(QVariantList projects READ previewProjects CONSTANT)
+    Q_PROPERTY(QVariantList tags READ previewTags CONSTANT)
+    Q_PROPERTY(QVariantList epics READ previewEpics CONSTANT)
+    Q_PROPERTY(QVariantList metrics READ previewMetrics CONSTANT)
+    Q_PROPERTY(QVariantList trackingItems MEMBER m_previewTasks CONSTANT)
+    Q_PROPERTY(QVariantList backlogItems MEMBER m_previewBacklog CONSTANT)
+public:
+    TrackingUiPreviewBackend(const QString &program, const QString &socketPath,
+                             const QJsonArray &tasks, const QJsonArray &backlog)
+        : Backend(nullptr, program, 3000, socketPath),
+          m_previewTasks(tasks.toVariantList()), m_previewBacklog(backlog.toVariantList()) {}
+    bool previewOfflineMode() const { return false; }
+    QVariantList previewProjects() const { return TrackingFixture::projects().toVariantList(); }
+    QVariantList previewTags() const { return TrackingFixture::tags().toVariantList(); }
+    QVariantList previewEpics() const { return TrackingFixture::epics().toVariantList(); }
+    QVariantList previewMetrics() const { return TrackingFixture::metrics().toVariantList(); }
+private:
+    const QVariantList m_previewTasks;
+    const QVariantList m_previewBacklog;
+};
 }
 
 class SalahAppTests : public QObject {
@@ -3231,6 +3256,90 @@ fi
             row("b4", "Review Juz 30", "quran", "Quran", "#7a6a4f", "e-juz", 30, 2, 0),
             row("b5", "Call the bank", "", "", "", "", 15, 0, 0)};
     }
+    void taskTagFilterScreens() {
+        QTemporaryDir dir;
+        const QJsonArray tasks{
+            QJsonObject{{"id", "read"}, {"title", "Read Quran"}, {"project_id", "quran"}, {"epic_id", "e-juz"}},
+            QJsonObject{{"id", "study"}, {"title", "Deep study"}, {"project_id", "study"}, {"epic_id", "e-grammar"}},
+            QJsonObject{{"id", "walk"}, {"title", "Morning walk"}}};
+        TrackingUiPreviewBackend backend(fake(dir), daemon_path(dir), tasks, backlogRows());
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        window->resize(1280, 820);
+        window->setProperty("page", 2);
+
+        auto *stats = findByName(window, "statsScroll");
+        QVERIFY(stats);
+        auto *bar = stats->property("filterBar").value<QQuickItem *>();
+        QVERIFY(bar);
+        qreal previousY = -1;
+        for (const char *name : {"statsRangeList", "statsProjectList", "statsEpicList",
+                                 "statsTaskList", "statsTagList", "statsMetricList"}) {
+            auto *list = qobject_cast<QQuickItem *>(findItemByName(bar, name));
+            QVERIFY2(list && list->isVisible(), name);
+            const qreal y = list->mapToItem(bar, QPointF()).y();
+            QVERIFY2(y > previousY, name);
+            previousY = y;
+        }
+        auto *search = findItemByName(bar, "statsTaskSearch");
+        auto *allTasks = findItemByName(bar, "statsTaskAll");
+        QVERIFY(search && allTasks);
+        QCOMPARE(search->property("height").toReal(), allTasks->property("height").toReal());
+        auto *searchBackground = search->property("background").value<QQuickItem *>();
+        auto *chipBackground = allTasks->property("background").value<QQuickItem *>();
+        QVERIFY(searchBackground && chipBackground);
+        QCOMPARE(searchBackground->height(), chipBackground->height());
+        QCOMPARE(bar->property("projectChoices").toList().size(), 3);
+        auto click = [bar](const QString &name) {
+            auto *chip = findItemByName(bar, name);
+            return chip && chip->property("visible").toBool() && QMetaObject::invokeMethod(chip, "clicked");
+        };
+        QVERIFY(QMetaObject::invokeMethod(bar, "setFilter", Q_ARG(QVariant, QVariant("project")),
+                                          Q_ARG(QVariant, QVariant("quran"))));
+        QVERIFY(click("statsTag_learning"));
+        QCOMPARE(bar->property("projectId").toString(), QString("quran"));
+        QCOMPARE(bar->property("projectChoices").toList().size(), 3);
+        waitForBackendIdle(backend);
+        backend.dismissError();
+        shotWindow(window, "stats-task-tag-filters.png");
+        QVERIFY(click("statsProject_none"));
+        QVariant query;
+        QVERIFY(QMetaObject::invokeMethod(bar, "query", Q_RETURN_ARG(QVariant, query)));
+        QCOMPARE(query.toMap().value("tag_id").toString(), QString("learning"));
+        QCOMPARE(query.toMap().value("project_id").toString(), QString("none"));
+
+        window->setProperty("page", 3);
+        auto *settings = findByName(window, "settingsPage");
+        QVERIFY(settings);
+        settings->setProperty("section", "projects");
+        auto *projects = findByName(window, "projectsSettings");
+        QVERIFY(projects);
+        QVERIFY(hasVisualText(window, "Default tags for new tasks"));
+        waitForBackendIdle(backend);
+        backend.dismissError();
+        shotWindow(window, "settings-project-default-tags.png");
+
+        window->setProperty("page", 5);
+        QTRY_COMPARE(visualNamed(window, "backlogProjectDot_quran").size(), 1);
+        auto *dot = visualNamed(window, "backlogProjectDot_quran").first();
+        QCOMPARE(dot->property("color").value<QColor>(), QColor("#4c8bf5"));
+        QCOMPARE(dot->property("width").toReal(), 10.0);
+        QCOMPARE(dot->property("height").toReal(), 10.0);
+        shotWindow(window, "backlog-project-dots.png");
+        auto *tag = visualNamed(window, "backlogTag_learning").value(0);
+        auto *unassigned = visualNamed(window, "backlogProject_none").value(0);
+        QVERIFY(unassigned && QMetaObject::invokeMethod(unassigned, "clicked"));
+        QVERIFY(tag && QMetaObject::invokeMethod(tag, "clicked"));
+        QVERIFY(unassigned->property("visible").toBool());
+        QVERIFY(unassigned->property("selected").toBool());
+    }
     void backlogRequestsFollowCanonicalFixtures() {
         for (const char *name : {"item_add_backlog", "item_schedule", "item_backlog"})
             QVERIFY2(Dto::decode<Dto::MutationResult>(fixture(name)), name);
@@ -3587,8 +3696,8 @@ fi
         QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("tag")), Q_ARG(QVariant, QVariant("learning"))));
         waitForBackendIdle(backend);
         QCOMPARE(lastRequest(daemon, "stats.get").value("params").toObject().value("tag_id").toString(), QString("learning"));
-        // Projects are narrowed by the tag, tasks by the project.
-        QCOMPARE(stats->property("projectChoices").toList().size(), 1);
+        // The project choices stay available while a tag is selected.
+        QCOMPARE(stats->property("projectChoices").toList().size(), 3);
         QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("project")), Q_ARG(QVariant, QVariant("study"))));
         waitForBackendIdle(backend);
         QCOMPARE(stats->property("taskChoices").toList().size(), 2);

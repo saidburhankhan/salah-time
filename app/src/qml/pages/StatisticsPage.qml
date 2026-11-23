@@ -4,10 +4,8 @@ import QtQuick.Layouts
 import "../controls"
 import "../statistics"
 
-// Statistics: one filter bar (range, tags, projects, tasks, metrics) over
-// three tabs that show the same filtered sessions as Charts, a general Table
-// or the Notes list. The filter stays when the tab changes; the tab is
-// remembered.
+// Statistics shares one filter bar across Charts, Table and Notes and
+// remembers the active tab.
 ScrollView {
     id: statsPage
     objectName: "statsScroll"

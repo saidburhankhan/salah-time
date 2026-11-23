@@ -364,7 +364,7 @@ RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
                     Label {
-                        text: qsTr("Tags")
+                        text: qsTr("Default tags for new tasks")
                         color: projects.win.muted
                         font.pixelSize: 13
                     }

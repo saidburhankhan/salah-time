@@ -12,10 +12,6 @@ ColumnLayout {
     property string tagId: ""
     property string projectId: ""
     property var dragRows: []
-    readonly property var projectChoices: (backend.projects || []).filter(function(project) {
-        var tags = project.tag_ids || []
-        return tagId === "" || (tagId === "none" ? tags.length === 0 : tags.indexOf(tagId) >= 0)
-    })
     readonly property var liveRows: groupRows(backend.backlogItems, backend.epics, backend.tags)
     readonly property var rows: win.backlogDrag.active ? dragRows : liveRows
 
@@ -34,11 +30,6 @@ ColumnLayout {
 
     function selectTag(id) {
         tagId = id
-        if ((id !== "" && id !== "none" && projectId === "none")
-                || (projectId !== "" && projectId !== "none" && !projectChoices.some(function(p) {
-                    return p.id === projectId
-                })))
-            projectId = ""
         load()
     }
 
@@ -75,7 +66,8 @@ ColumnLayout {
                 return (project.tag_ids || []).indexOf(tag.id) >= 0
             }).map(function(tag) { return tag.name }) : []
             rows.push({ kind: "project", title: project ? project.name : qsTr("No project"),
-                        color: project ? project.color : "", tags: tagNames.join(" · ") })
+                        projectId: project ? project.id : "", color: project ? project.color : "",
+                        tags: tagNames.join(" · ") })
             var byEpic = new Map(epics.map(function(epic) { return [epic.id, epic] }))
             var orderedEpics = Array.from(group.epics.keys()).sort(function(a, b) {
                 if (!a) return 1
@@ -164,9 +156,8 @@ ColumnLayout {
             Layout.fillWidth: true
             spacing: 6
             Repeater {
-                model: [{ id: "", name: qsTr("All projects") }].concat(
-                    page.tagId === "" || page.tagId === "none" ? [{ id: "none", name: qsTr("No project") }] : [],
-                    page.projectChoices)
+                model: [{ id: "", name: qsTr("All projects") }, { id: "none", name: qsTr("No project") }]
+                    .concat(backend.projects || [])
                 ChoiceChip {
                     required property var modelData
                     objectName: "backlogProject_" + modelData.id
@@ -225,10 +216,11 @@ ColumnLayout {
             height: 38
             spacing: 9
             Rectangle {
-                Layout.preferredWidth: 9
-                Layout.preferredHeight: 9
+                objectName: "backlogProjectDot_" + entry.projectId
+                implicitWidth: 10
+                implicitHeight: 10
                 radius: 5
-                color: entry.color || page.win.muted
+                color: page.win.projectById(entry.projectId)?.color || entry.color || page.win.muted
             }
             Label {
                 text: entry.title

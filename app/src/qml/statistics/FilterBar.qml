@@ -1,12 +1,12 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Controls.Basic as Basic
 import QtQuick.Layouts
 import "../controls"
 
 // The one filter bar of the Statistics page, shared by its Charts, Table and
-// Notes tabs: range (7/28/90 days or Custom), Tags, Projects (narrowed by the
-// tag), Tasks (narrowed by the project) and Metrics (a duration range and a
-// min–max range per metric, shown as removable chips). Every field is
+// Notes tabs: Range, Projects, Epics, Tasks, Tags and Metrics. Duration and
+// metric ranges are shown as removable chips. Every field is
 // optional. `edited()` fires after any change; `query()` is the request filter.
 ColumnLayout {
     id: bar
@@ -36,7 +36,7 @@ ColumnLayout {
         return String(task.title || "").toLowerCase().includes(taskSearch.trim().toLowerCase())
     })
     readonly property var projectChoices: (backend.projects || []).filter(function(p) {
-        return !p.archived && (tagId === "" || (p.tag_ids || []).indexOf(tagId) >= 0)
+        return !p.archived
     })
     // The epics of the shown projects, narrowed by the chosen project.
     readonly property var epicChoices: {
@@ -48,22 +48,11 @@ ColumnLayout {
             return allowed[project] === true && (projectId === "" || project === projectId)
         })
     }
-    readonly property var taskChoices: {
-        var allowed = {}
-        for (var i = 0; i < projectChoices.length; i++)
-            allowed[String(projectChoices[i].id)] = true
-        return (backend.trackingItems || []).filter(function(item) {
-            var project = String(item.project_id || "")
-            var epic = String(item.epic_id || "")
-            if (epicId === "none" && epic !== "")
-                return false
-            if (epicId !== "" && epicId !== "none" && epic !== epicId)
-                return false
-            if (projectId !== "")
-                return projectId === "none" ? project === "" : project === projectId
-            return tagId === "" || allowed[project] === true
-        })
-    }
+    readonly property var taskChoices: (backend.trackingItems || []).filter(function(item) {
+        var project = String(item.project_id || "none")
+        var epic = String(item.epic_id || "none")
+        return (projectId === "" || project === projectId) && (epicId === "" || epic === epicId)
+    })
     // Focus, quality, distractions and, with a project chosen, its own
     // metrics; otherwise every active metric.
     readonly property var metricChoices: {
@@ -156,29 +145,15 @@ ColumnLayout {
             q.values = values
         return q
     }
-    function epicFits(id) {
-        return id === "" || id === "none" || epicChoices.some(function(e) { return String(e.id) === id })
-    }
     function epicLabel(epic) {
         var name = String(epic.name || "")
         return projectId === "" ? win.projectName(epic.project_id) + " · " + name : name
     }
     // kind: "" (clear everything), "tag", "project", "epic" or "item".
-    // Choosing a wider filter drops a narrower one that no longer fits.
+    // A project or epic change can make a selected task unavailable.
     function setFilter(kind, id) {
         if (kind === "tag") {
             tagId = id
-            var fits = projectChoices.some(function(p) { return String(p.id) === projectId })
-            if (projectId !== "" && !fits) {
-                projectId = ""
-                epicId = ""
-                itemId = ""
-            } else {
-                if (!epicFits(epicId))
-                    epicId = ""
-                if (itemId !== "" && !taskChoices.some(function(t) { return String(t.id) === itemId }))
-                    itemId = ""
-            }
         } else if (kind === "project") {
             projectId = id
             epicId = ""
@@ -319,6 +294,7 @@ ColumnLayout {
     }
 
     RowLayout {
+        objectName: "statsRangeList"
         Layout.fillWidth: true
         spacing: 8
         RowTitle {
@@ -380,36 +356,6 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: 8
         RowTitle {
-            text: qsTr("TAGS")
-        }
-        Flow {
-            objectName: "statsTagList"
-            Layout.fillWidth: true
-            spacing: 8
-            ChoiceChip {
-                win: bar.win
-                text: qsTr("All")
-                selected: bar.tagId === ""
-                onClicked: bar.setFilter("tag", "")
-            }
-            Repeater {
-                model: backend.tags || []
-                ChoiceChip {
-                    required property var modelData
-                    win: bar.win
-                    text: String(modelData.name || "")
-                    dotColor: String(modelData.color || "transparent")
-                    selected: bar.tagId === String(modelData.id)
-                    onClicked: bar.setFilter("tag", String(modelData.id))
-                }
-            }
-        }
-    }
-
-    RowLayout {
-        Layout.fillWidth: true
-        spacing: 8
-        RowTitle {
             text: qsTr("PROJECTS")
         }
         Flow {
@@ -424,7 +370,6 @@ ColumnLayout {
             }
             ChoiceChip {
                 objectName: "statsProject_none"
-                visible: bar.tagId === ""
                 win: bar.win
                 text: qsTr("No project")
                 selected: bar.projectId === "none"
@@ -491,11 +436,27 @@ ColumnLayout {
         }
         ColumnLayout {
             Layout.fillWidth: true
-            TextField {
+            Basic.TextField {
+                id: taskSearchField
                 objectName: "statsTaskSearch"
                 Layout.preferredWidth: 240
+                Layout.preferredHeight: allTasksChip.implicitHeight
+                topInset: allTasksChip.topInset
+                bottomInset: allTasksChip.bottomInset
                 placeholderText: qsTr("Search tasks")
                 text: bar.taskSearch
+                font.pixelSize: 14
+                leftPadding: 14
+                rightPadding: 14
+                color: bar.win.text
+                placeholderTextColor: bar.win.muted
+                selectionColor: bar.win.selectedFillPressed
+                selectedTextColor: bar.win.selectedText
+                background: Rectangle {
+                    radius: Math.max(6, theme.radius)
+                    color: bar.win.panel
+                    border.color: taskSearchField.activeFocus ? bar.win.selectedBorder : bar.win.border
+                }
                 onTextEdited: bar.taskSearch = text
             }
             ScrollView {
@@ -510,6 +471,8 @@ ColumnLayout {
                     width: taskScroll.availableWidth
                     spacing: 8
                     ChoiceChip {
+                        id: allTasksChip
+                        objectName: "statsTaskAll"
                         win: bar.win
                         text: qsTr("All")
                         selected: bar.itemId === ""
@@ -526,6 +489,37 @@ ColumnLayout {
                             onClicked: bar.setFilter("item", String(modelData.id))
                         }
                     }
+                }
+            }
+        }
+    }
+
+    RowLayout {
+        Layout.fillWidth: true
+        spacing: 8
+        RowTitle {
+            text: qsTr("TAGS")
+        }
+        Flow {
+            objectName: "statsTagList"
+            Layout.fillWidth: true
+            spacing: 8
+            ChoiceChip {
+                win: bar.win
+                text: qsTr("All")
+                selected: bar.tagId === ""
+                onClicked: bar.setFilter("tag", "")
+            }
+            Repeater {
+                model: backend.tags || []
+                ChoiceChip {
+                    required property var modelData
+                    objectName: "statsTag_" + modelData.id
+                    win: bar.win
+                    text: String(modelData.name || "")
+                    dotColor: String(modelData.color || "transparent")
+                    selected: bar.tagId === String(modelData.id)
+                    onClicked: bar.setFilter("tag", String(modelData.id))
                 }
             }
         }
