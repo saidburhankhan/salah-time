@@ -164,3 +164,7 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   created_at (stats_table_week.json focus last digit) — fix later with a stable order.
   Claude Sonnet now holds C9 task 2 (app Goals UI, app/) and C10 task 1 (goal chips, plugin/).
   08:13 Codex: C8 (Astra) tasks 2 insights → 3 reviews → 4 CLI; C9/C10 continue after the Sonnets.
+- 04:0x committed 020abdb (C10 task 1 goal chips, Claude Sonnet + orchestrator fix; render ok).
+  Queue for C8 at 08:13 (before insights): additive GoalView `scope_label` (item title / epic name /
+  project name; null for all-work) so clients never show an unresolved scope; widget and app read it.
+  C9 task 2 (app Goals UI) still with Claude Sonnet.
