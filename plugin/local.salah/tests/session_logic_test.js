@@ -125,7 +125,8 @@ same(logic.elapsedSeconds("2031-05-14T04:30:00Z", Date.parse("2031-05-14T04:39:0
   "elapsed seconds count from started_at")
 same(logic.clockText(545), "09:05", "under an hour: two-digit minutes and seconds")
 same(logic.clockText(5), "00:05", "seconds alone still keep two digits per field")
-same(logic.clockText(3723), "01:02:03", "an hour or more adds two-digit hours")
+same(logic.clockText(3723), "62:03", "no hours: minutes keep counting past 60")
+same(logic.clockText(6005), "100:05", "past 99 minutes")
 same(logic.clockText(-4), "00:00", "never negative")
 
 console.log("1.." + checks)

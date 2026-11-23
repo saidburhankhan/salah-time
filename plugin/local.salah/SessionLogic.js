@@ -192,12 +192,11 @@ function elapsedMinutes(startedAt, nowMs) {
   return Math.floor(elapsedSeconds(startedAt, nowMs) / 60)
 }
 
-// A running timer as a clock with two digits per field, so the text keeps
-// its width while it ticks: "09:05" under an hour, then "01:02:03".
+// A running timer as minutes:seconds, never hours, because sessions are
+// counted in minutes: "09:05", "47:30", "100:05". Two digits at least per
+// field keep the text the same width while it ticks.
 function clockText(totalSeconds) {
   var total = Math.max(0, Math.floor(Number(totalSeconds) || 0))
   function pad(value) { return value < 10 ? "0" + value : String(value) }
-  var hours = Math.floor(total / 3600)
-  var clock = pad(Math.floor((total % 3600) / 60)) + ":" + pad(total % 60)
-  return hours > 0 ? pad(hours) + ":" + clock : clock
+  return pad(Math.floor(total / 60)) + ":" + pad(total % 60)
 }
