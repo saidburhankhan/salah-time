@@ -26,6 +26,7 @@ pub struct SessionScope<'a> {
     pub from: NaiveDate,
     pub to: NaiveDate,
     pub project: Option<Choice<'a>>,
+    pub epic: Option<Choice<'a>>,
     /// `Unassigned`: the session's project has no live tag (or there is no project).
     pub tag: Option<Choice<'a>>,
     pub item: Option<Choice<'a>>,
@@ -67,6 +68,7 @@ pub struct SessionPage<'a> {
 pub struct ReportSession {
     pub session: Session,
     pub project: Option<ProjectRef>,
+    pub epic_name: Option<String>,
     pub item: Option<ItemRef>,
 }
 
@@ -133,6 +135,11 @@ impl Query {
                  AND pt.tag_id = ?)",
                 [text(id)],
             ),
+            None => {}
+        }
+        match scope.epic {
+            Some(Choice::Unassigned) => query.push("s.epic_id IS NULL", []),
+            Some(Choice::Is(id)) => query.push("s.epic_id = ?", [text(id)]),
             None => {}
         }
         match scope.item {
@@ -220,8 +227,9 @@ impl Store {
         };
         let sql = format!(
             "WITH matched AS ({}) SELECT s.*, p.name AS project_name, p.color AS project_color,
-             i.title AS item_title, v.metric_id, v.value FROM matched s
+             e.name AS epic_name, i.title AS item_title, v.metric_id, v.value FROM matched s
              LEFT JOIN projects p ON p.id = s.project_id LEFT JOIN items i ON i.id = s.item_id
+             LEFT JOIN epics e ON e.id = s.epic_id
              LEFT JOIN session_values v ON v.session_id = s.id ORDER BY {order}, v.metric_id",
             query.sql
         );
@@ -309,6 +317,7 @@ fn report_row(row: &rusqlite::Row) -> rusqlite::Result<ReportSession> {
     Ok(ReportSession {
         session,
         project,
+        epic_name: row.get("epic_name")?,
         item,
     })
 }

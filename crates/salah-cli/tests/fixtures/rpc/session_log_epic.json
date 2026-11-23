@@ -1,0 +1,38 @@
+{
+  "id": 10,
+  "jsonrpc": "2.0",
+  "result": {
+    "changed": {
+      "deleted": [],
+      "epics": [],
+      "items": [],
+      "marks": [],
+      "metrics": [],
+      "projects": [],
+      "sessions": [
+        {
+          "block": "fajr",
+          "day": "2031-05-13",
+          "ended_at": null,
+          "epic_id": "<id:1>",
+          "id": "<id:3>",
+          "item_id": null,
+          "minutes": 30,
+          "note": null,
+          "notes": [],
+          "project_id": "<id:2>",
+          "running": false,
+          "stale": false,
+          "started_at": null,
+          "values": {
+            "focus": 4.0
+          },
+          "version": 1
+        }
+      ],
+      "tags": []
+    },
+    "op_id": "log",
+    "revision": 5
+  }
+}

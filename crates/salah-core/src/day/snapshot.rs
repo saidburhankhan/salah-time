@@ -187,6 +187,7 @@ fn planned_lines(items: Vec<Item>, day: NaiveDate, end: DateTime<Utc>) -> Vec<Da
             block: item.block,
             item_id: item.id,
             project_id: item.project_id,
+            epic_id: item.epic_id,
             planned_minutes: item.planned_minutes,
         })
         .collect();

@@ -28,6 +28,7 @@ pub struct Target {
     pub item_id: Option<String>,
     #[serde(default)]
     pub project_id: Option<String>,
+    pub epic_id: Option<String>,
 }
 
 /// Metric values keyed by metric id, as clients send them.
@@ -73,6 +74,7 @@ pub struct SessionView {
     pub id: String,
     pub item_id: Option<String>,
     pub project_id: Option<String>,
+    pub epic_id: Option<String>,
     pub day: NaiveDate,
     pub block: BoundaryId,
     pub started_at: Option<DateTime<Utc>>,
@@ -143,6 +145,7 @@ impl SessionView {
             id: session.id.clone(),
             item_id: session.item_id.clone(),
             project_id: session.project_id.clone(),
+            epic_id: session.epic_id.clone(),
             day: session.block.day,
             block: session.block.start,
             started_at: session.started_at,
@@ -235,12 +238,12 @@ pub fn start(
     ids: &dyn IdGenerator,
     target: Target,
 ) -> Result<Session, Error> {
-    let (item_id, project_id) = resolve(tx, target)?;
+    let target = resolve(tx, target)?;
     if running(tx)?.is_some() {
         return Err(Error::Conflict("a session is already running".into()));
     }
     let block = schedule::resolve(config, now)?.current_block();
-    let mut session = new_session(ids.new_id(), now, item_id, project_id, block);
+    let mut session = new_session(ids.new_id(), now, target, block);
     session.started_at = Some(now);
     session.version = tx.put_session(&session)?;
     Ok(session)
@@ -274,7 +277,7 @@ pub fn log_with_changes(
         Some(id) => Some(items::find(tx, id)?.block),
         None => None,
     };
-    let (item_id, project_id) = resolve(tx, new.target)?;
+    let target = resolve(tx, new.target)?;
     let schedule = schedule::resolve(config, now)?;
     let current = schedule.current_block();
     let start = match (new.block, new.date, item_block) {
@@ -286,7 +289,7 @@ pub fn log_with_changes(
         day: new.date.unwrap_or(current.day),
         start: validate_block(start)?,
     };
-    let mut session = new_session(ids.new_id(), now, item_id, project_id, block);
+    let mut session = new_session(ids.new_id(), now, target, block);
     session.minutes = new.minutes.map(|m| minutes("minutes", m)).transpose()?;
     session.values = checked_values(tx, new.values, &[])?;
     session.note = note(new.note)?;
@@ -365,17 +368,12 @@ pub fn find(store: &Store, id: &str) -> Result<Session, Error> {
         .ok_or_else(|| not_found("session", id))
 }
 
-fn new_session(
-    id: String,
-    now: DateTime<Utc>,
-    item_id: Option<String>,
-    project_id: Option<String>,
-    block: BlockKey,
-) -> Session {
+fn new_session(id: String, now: DateTime<Utc>, target: Target, block: BlockKey) -> Session {
     Session {
         id,
-        item_id,
-        project_id,
+        item_id: target.item_id,
+        project_id: target.project_id,
+        epic_id: target.epic_id,
         block,
         started_at: None,
         ended_at: None,
@@ -389,25 +387,48 @@ fn new_session(
     }
 }
 
-/// The item and project a session records; the item's project wins.
-fn resolve(store: &Store, target: Target) -> Result<(Option<String>, Option<String>), Error> {
-    match (target.item_id, target.project_id) {
-        (Some(item_id), given) => {
-            let item = items::find(store, &item_id)?;
-            if given.is_some() && given != item.project_id {
+/// Resolve ownership once when the session is created.
+fn resolve(store: &Store, mut target: Target) -> Result<Target, Error> {
+    if let Some(id) = &target.item_id {
+        let item = items::find(store, id)?;
+        if target.project_id.is_some() && target.project_id != item.project_id {
+            return Err(Error::validation(
+                "project_id",
+                "project_id does not match the item's project",
+            ));
+        }
+        if target.epic_id.is_some() && target.epic_id != item.epic_id {
+            return Err(Error::validation(
+                "epic_id",
+                "epic_id does not match the item's epic",
+            ));
+        }
+        target.project_id = item.project_id;
+        target.epic_id = item.epic_id;
+    } else {
+        if let Some(id) = &target.epic_id {
+            let epic = crate::epics::find(store, id)?;
+            if target
+                .project_id
+                .as_ref()
+                .is_some_and(|p| *p != epic.project_id)
+            {
                 return Err(Error::validation(
                     "project_id",
-                    "project_id does not match the item's project",
+                    "project_id does not match the epic's project",
                 ));
             }
-            Ok((Some(item.id), item.project_id))
+            target.project_id = Some(epic.project_id);
         }
-        (None, Some(project_id)) => Ok((None, Some(projects::active(store, &project_id)?.id))),
-        (None, None) => Err(Error::validation(
-            "item_id",
-            "a session needs an item_id or a project_id",
-        )),
+        let project = target.project_id.as_deref().ok_or_else(|| {
+            Error::validation(
+                "item_id",
+                "a session needs an item_id, epic_id or project_id",
+            )
+        })?;
+        projects::active(store, project)?;
     }
+    Ok(target)
 }
 
 /// Validates supplied samples and preserves previously recorded archived values.

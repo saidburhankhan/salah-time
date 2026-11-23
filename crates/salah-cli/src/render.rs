@@ -44,6 +44,7 @@ pub fn mutation(result: &Value) -> String {
     }
     for (kind, list) in [
         ("project", &changed["projects"]),
+        ("epic", &changed["epics"]),
         ("tag", &changed["tags"]),
         ("metric", &changed["metrics"]),
     ] {
@@ -107,6 +108,24 @@ pub fn projects(result: &Value) -> String {
                 text(&project["color"]),
                 text(&project["name"]),
                 metrics.join(", "),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Epics with their status and recorded work.
+pub fn epics(result: &Value) -> String {
+    rows(result)
+        .iter()
+        .map(|epic| {
+            format!(
+                "{}  {:<8} {}  {} min in {} sessions",
+                short(&epic["id"]),
+                text(&epic["status"]),
+                text(&epic["name"]),
+                epic["total_minutes"],
+                epic["sessions"],
             )
         })
         .collect::<Vec<_>>()

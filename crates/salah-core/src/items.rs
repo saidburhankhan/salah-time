@@ -30,6 +30,7 @@ pub struct NewItem {
     pub repeat: Option<Repeat>,
     pub weekdays: Option<Weekdays>,
     pub project_id: Option<String>,
+    pub epic_id: Option<String>,
     pub metric_ids: Option<Vec<String>>,
     pub planned_minutes: Option<i64>,
     /// The day of a one-time item or the first day of a repeating one.
@@ -50,6 +51,8 @@ pub struct ItemChanges {
     /// `null` detaches the project; an absent field keeps it.
     #[serde(default, deserialize_with = "nullable")]
     pub project_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "nullable")]
+    pub epic_id: Option<Option<String>>,
     /// `null` inherits, an empty list asks for nothing, an absent field keeps the selection.
     #[serde(default, deserialize_with = "nullable")]
     pub metric_ids: Option<Option<Vec<String>>>,
@@ -159,6 +162,7 @@ pub fn add(
         id: ids.new_id(),
         title: validate_title(&new.title)?,
         project_id,
+        epic_id: new.epic_id,
         metric_ids,
         block,
         repeat,
@@ -216,6 +220,11 @@ pub fn edit(
     }
     // A new project resets the selection unless the same edit chooses one,
     // which is then checked against the new project.
+    if let Some(epic_id) = changes.epic_id {
+        item.epic_id = epic_id;
+    } else if item.project_id != previous_project {
+        item.epic_id = None;
+    }
     match changes.metric_ids {
         Some(ids) => item.metric_ids = checked_metric_ids(tx, item.project_id.as_deref(), ids)?,
         None if item.project_id != previous_project => item.metric_ids = None,

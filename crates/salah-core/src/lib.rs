@@ -7,6 +7,7 @@
 
 pub mod config;
 pub mod day;
+pub mod epics;
 pub mod items;
 pub mod location;
 pub mod marks;

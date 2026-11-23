@@ -3,6 +3,7 @@
 
 use chrono::NaiveDate;
 use salah_core::config::Config;
+use salah_core::epics::{EpicChanges, NewEpic};
 use salah_core::items::{ItemChanges, ItemView};
 use salah_core::metrics::{MetricChanges, NewMetric};
 use salah_core::projects::{NewProject, ProjectChanges, ProjectView};
@@ -11,6 +12,7 @@ use salah_core::stats::measures::Measures;
 use salah_core::stats::series::{Interval, Split};
 use salah_core::stats::table::Group;
 use salah_domain::day::BoundaryId;
+use salah_domain::epic::{Epic, EpicStatus};
 use salah_domain::item::{PrayerMark, Repeat, Weekdays};
 use salah_domain::tracking::{Metric, Tag};
 use serde::{Deserialize, Serialize};
@@ -70,6 +72,8 @@ pub struct ScopeParams {
     pub tag_id: Option<String>,
     #[serde(default)]
     pub project_id: Option<String>,
+    #[serde(default)]
+    pub epic_id: Option<String>,
     #[serde(default)]
     pub item_id: Option<String>,
 }
@@ -155,6 +159,8 @@ pub struct ItemAddParams {
     #[serde(default)]
     pub project_id: Option<String>,
     #[serde(default)]
+    pub epic_id: Option<String>,
+    #[serde(default)]
     pub metric_ids: Option<Vec<String>>,
     #[serde(default)]
     pub planned_minutes: Option<i64>,
@@ -205,6 +211,28 @@ pub struct PrayerParams {
     pub date: Option<NaiveDate>,
     #[serde(default)]
     pub expected_version: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct EpicsListParams {
+    pub project_id: Option<String>,
+    pub status: Option<EpicStatus>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct EpicAddParams {
+    pub op_id: String,
+    #[serde(flatten)]
+    pub epic: NewEpic,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct EpicEditParams {
+    pub op_id: String,
+    pub id: String,
+    pub expected_version: Option<i64>,
+    #[serde(flatten)]
+    pub changes: EpicChanges,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -318,6 +346,7 @@ pub struct Changed {
     pub items: Vec<ItemView>,
     pub sessions: Vec<SessionView>,
     pub projects: Vec<ProjectView>,
+    pub epics: Vec<Epic>,
     pub tags: Vec<Tag>,
     pub metrics: Vec<Metric>,
     pub marks: Vec<PrayerMark>,

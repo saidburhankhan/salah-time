@@ -154,6 +154,13 @@ struct Fixtures {
 }
 
 impl Fixtures {
+    /// Reserve existing placeholder IDs when an additive field displays an entity earlier.
+    fn with_ids(ids: &[&str]) -> Self {
+        let mut fixtures = Self::default();
+        fixtures.normalise(&mut json!(ids));
+        fixtures
+    }
+
     /// Checks `response` against fixture `name` and returns its real result.
     fn check(&mut self, name: &str, response: Value) -> Value {
         let mut stable = response.clone();
@@ -568,7 +575,11 @@ fn a_timer_becomes_stale_only_after_its_own_sleep_boundary() {
     assert!(status["result"]["running"].is_null());
 }
 
+#[path = "rpc/epics.rs"]
+mod epics;
 #[path = "rpc/phase2.rs"]
 mod phase2;
+#[path = "rpc/quick.rs"]
+mod quick;
 #[path = "rpc/reports.rs"]
 mod reports;

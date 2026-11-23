@@ -31,6 +31,7 @@ fn on_project(id: &str) -> Target {
     Target {
         item_id: None,
         project_id: Some(id.into()),
+        epic_id: None,
     }
 }
 
@@ -99,6 +100,7 @@ fn a_log_without_minutes_is_a_tick_and_copies_the_item_project() {
                     target: Target {
                         item_id: Some(item.id.clone()),
                         project_id: None,
+                        epic_id: None,
                     },
                     date: Some(date(19)),
                     values: rated(5.0, 5.0),

@@ -163,7 +163,7 @@ fn v4_rolls_back_the_rebuild_if_a_v3_reference_is_broken() {
     assert!(
         error
             .to_string()
-            .contains("violates a foreign key in item_history"),
+            .contains("violates a foreign key in item_history (rowid 1, parent items, fkid 0)"),
         "{error}"
     );
     assert_eq!(user_version(&conn).unwrap(), 3);
@@ -182,4 +182,35 @@ fn v4_rolls_back_the_rebuild_if_a_v3_reference_is_broken() {
     let store = Store::open(&db.path).unwrap();
     assert_eq!(store.version().unwrap(), 4);
     assert_preserved(&store.conn, &repaired);
+}
+
+#[test]
+fn full_upgrade_from_v1_keeps_exactly_the_v1_v2_and_v3_backups() {
+    let db = Database::new("phase3-rotation");
+    let mut seed = db.at(1, false);
+    let older = ["salah.db.bak-v1-10", "salah.db.bak-v1-20"].map(|name| db.root.join(name));
+    for path in &older {
+        seed.backup(rusqlite::MAIN_DB, path, None).unwrap();
+    }
+    let before = original_rows(&seed);
+
+    crate::migrations::apply(&mut seed, Some(&db.path)).unwrap();
+    assert_eq!(user_version(&seed).unwrap(), 4);
+    assert_preserved(&seed, &before);
+    for path in &older {
+        assert!(!path.exists(), "{} was not rotated out", path.display());
+    }
+    let backups = db.backups();
+    let versions: Vec<i64> = backups
+        .iter()
+        .map(|path| user_version(&Connection::open(path).unwrap()).unwrap())
+        .collect();
+    assert_eq!(versions, [1, 2, 3]);
+    // Each copy is the database as it stood before its own step.
+    assert_preserved(&db.backup(1), &before);
+    assert_preserved(&db.backup(2), &before);
+    let v3 = db.backup(3);
+    assert_preserved(&v3, &before);
+    assert!(!v3.table_exists(None, "epics").unwrap());
+    assert!(v3.table_exists(None, "session_notes").unwrap());
 }

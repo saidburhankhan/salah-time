@@ -4,6 +4,7 @@
   "result": {
     "changed": {
       "deleted": [],
+      "epics": [],
       "items": [],
       "marks": [],
       "metrics": [],
@@ -13,6 +14,7 @@
           "block": "fajr",
           "day": "2031-05-14",
           "ended_at": null,
+          "epic_id": null,
           "id": "<id:9>",
           "item_id": "<id:4>",
           "minutes": null,
@@ -31,6 +33,7 @@
           "block": "fajr",
           "day": "2031-05-14",
           "ended_at": "2031-05-14T04:55:00Z",
+          "epic_id": null,
           "id": "<id:10>",
           "item_id": "<id:4>",
           "minutes": 1,

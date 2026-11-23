@@ -396,6 +396,7 @@ mod tests {
                     crate::sessions::Target {
                         item_id: None,
                         project_id: Some(project.clone()),
+                        epic_id: None,
                     },
                 )
             })

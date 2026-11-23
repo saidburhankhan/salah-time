@@ -31,6 +31,7 @@ pub enum Group {
     Week,
     Day,
     Project,
+    Epic,
     Tag,
     Item,
 }
@@ -106,6 +107,7 @@ pub fn table(store: &Store, range: Range, filter: Filter, group: Group) -> Resul
         Group::Week => dated(&everything, weeks(&range)),
         Group::Day => dated(&everything, days(&range)),
         Group::Project => keyed(&sessions, |s| vec![project_key(s)]),
+        Group::Epic => keyed(&sessions, |s| vec![epic_key(s)]),
         Group::Tag => keyed(&sessions, |s| tag_keys(s, &tags)),
         Group::Item => keyed(&sessions, |s| vec![item_key(s)]),
     };
@@ -365,6 +367,17 @@ pub(super) fn project_key(s: &ReportSession) -> Key {
             color: Some(project.color.clone()),
         },
         None => Key::none("No project"),
+    }
+}
+
+pub(super) fn epic_key(s: &ReportSession) -> Key {
+    match (&s.session.epic_id, &s.epic_name) {
+        (Some(id), Some(name)) => Key {
+            key: id.clone(),
+            label: name.clone(),
+            color: s.project.as_ref().map(|p| p.color.clone()),
+        },
+        _ => Key::none("No epic"),
     }
 }
 

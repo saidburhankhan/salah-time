@@ -120,15 +120,21 @@ fn scope(
     let filter = Filter {
         tag_id: params.tag_id,
         project_id: params.project_id,
+        epic_id: params.epic_id,
         item_id: params.item_id,
         measures,
     };
     Ok((range, filter))
 }
 
-pub(crate) fn item_parse(call: Call<'_>, _: &mut Context<'_>) -> Result<Value, RpcError> {
+pub(crate) fn item_parse(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let params: ParseParams = parse(call.params)?;
-    to_value(quick::parse(&params.text)?)
+    let mut draft = quick::parse(&params.text)?;
+    // Only a named day needs the tracking day, so other text parses without config.
+    if draft.names_a_day() {
+        draft = draft.on(day::current(&ctx.config.load()?, ctx.now())?);
+    }
+    to_value(draft)
 }
 
 /// Previews a draft's recurrence without touching the store.
@@ -140,6 +146,17 @@ pub(crate) fn item_preview(call: Call<'_>, _: &mut Context<'_>) -> Result<Value,
         p.weekdays,
         p.planned_minutes,
         p.date,
+    )?)
+}
+
+pub(crate) fn epics(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let params: crate::methods::EpicsListParams = parse(call.params)?;
+    let today = day::current(&ctx.config.load()?, ctx.now())?;
+    to_value(salah_core::epics::list(
+        ctx.store,
+        params.project_id.as_deref(),
+        params.status,
+        today,
     )?)
 }
 

@@ -128,6 +128,22 @@ impl WriteTx<'_> {
         Ok(())
     }
 
+    pub fn put_epic(&self, epic: &salah_domain::epic::Epic) -> Result<i64, Error> {
+        let (version, op) = self.next_version("epics", &epic.id, epic.deleted_at)?;
+        self.execute(
+            "INSERT INTO epics
+                (id, project_id, name, note, status, finished_at, position, created_at, updated_at, deleted_at, version)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+             ON CONFLICT(id) DO UPDATE SET name=excluded.name, note=excluded.note,
+                status=excluded.status, finished_at=excluded.finished_at, updated_at=excluded.updated_at,
+                deleted_at=excluded.deleted_at, version=excluded.version",
+            params![epic.id, epic.project_id, epic.name, epic.note, codec::name(&epic.status),
+                    epic.finished_at.map(codec::timestamp), epic.position, codec::timestamp(epic.created_at),
+                    codec::timestamp(epic.updated_at), epic.deleted_at.map(codec::timestamp), version],
+        )?;
+        self.log_change("epics", &epic.id, op, version)
+    }
+
     pub fn put_tag(&self, tag: &Tag) -> Result<i64, Error> {
         let (version, op) = self.next_version("tags", &tag.id, tag.deleted_at)?;
         self.execute(
@@ -209,12 +225,27 @@ impl WriteTx<'_> {
     }
 
     pub fn put_item(&self, item: &Item) -> Result<i64, Error> {
+        if let Some(id) = &item.epic_id {
+            let epic = self
+                .epic(id)?
+                .filter(|e| e.deleted_at.is_none())
+                .ok_or_else(|| Error::NotFound {
+                    what: "epic",
+                    id: id.clone(),
+                })?;
+            if Some(&epic.project_id) != item.project_id.as_ref() {
+                return Err(Error::validation(
+                    "epic_id",
+                    "the epic must belong to the item's project",
+                ));
+            }
+        }
         let (version, op) = self.next_version("items", &item.id, item.deleted_at)?;
         self.execute(
             "INSERT INTO items
                  (id, title, project_id, block, repeat, weekdays, start_day, planned_minutes,
-                  position, created_at, updated_at, deleted_at, version, metrics_custom)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                  position, created_at, updated_at, deleted_at, version, metrics_custom, epic_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
              ON CONFLICT (id) DO UPDATE SET
                  title = excluded.title,
                  project_id = excluded.project_id,
@@ -227,7 +258,8 @@ impl WriteTx<'_> {
                  updated_at = excluded.updated_at,
                  deleted_at = excluded.deleted_at,
                  version = excluded.version,
-                 metrics_custom = excluded.metrics_custom",
+                 metrics_custom = excluded.metrics_custom,
+                 epic_id = excluded.epic_id",
             params![
                 item.id,
                 item.title,
@@ -243,6 +275,7 @@ impl WriteTx<'_> {
                 item.deleted_at.map(codec::timestamp),
                 version,
                 item.metric_ids.is_some(),
+                item.epic_id,
             ],
         )?;
         self.execute("DELETE FROM item_metrics WHERE item_id = ?1", [&item.id])?;
@@ -262,11 +295,9 @@ impl WriteTx<'_> {
         self.execute(
             "INSERT INTO sessions
                  (id, item_id, project_id, day, block, started_at, ended_at, minutes, note,
-                  created_at, updated_at, deleted_at, version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                  created_at, updated_at, deleted_at, version, epic_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT (id) DO UPDATE SET
-                 item_id = excluded.item_id,
-                 project_id = excluded.project_id,
                  day = excluded.day,
                  block = excluded.block,
                  started_at = excluded.started_at,
@@ -290,6 +321,7 @@ impl WriteTx<'_> {
                 codec::timestamp(session.updated_at),
                 session.deleted_at.map(codec::timestamp),
                 version,
+                session.epic_id,
             ],
         )?;
         self.execute(
@@ -429,14 +461,15 @@ impl WriteTx<'_> {
         }
         for line in plan {
             self.execute(
-                "INSERT INTO day_plan (day, block, item_id, project_id, planned_minutes)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO day_plan (day, block, item_id, project_id, planned_minutes, epic_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     codec::day(line.day),
                     codec::name(&line.block),
                     line.item_id,
                     line.project_id,
                     line.planned_minutes,
+                    line.epic_id,
                 ],
             )?;
         }

@@ -203,6 +203,17 @@ mod tests {
             json!({"name":"Book","metrics":[],"tag_ids":[tag]}),
             &["projects"],
         );
+        let epic = call(
+            "epic.add",
+            json!({"project_id":project, "name":"Chapter"}),
+            &["epics"],
+        );
+        call(
+            "epic.edit",
+            json!({"id":epic, "status":"finished"}),
+            &["epics"],
+        );
+        call("epic.remove", json!({"id":epic}), &["epics"]);
         call(
             "project.edit",
             json!({"id":project,"note":"Read"}),

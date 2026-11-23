@@ -437,3 +437,114 @@ fn stats_table_and_sessions_list_print_the_rpc_json() {
     assert!(!bad.status.success());
     assert!(stderr(&bad).contains("limit"), "{}", stderr(&bad));
 }
+
+#[test]
+fn epics_are_added_assigned_reported_and_finished() {
+    let fixture = Fixture::new();
+    let project = fixture.added("projects", &["project", "add", "Book", "--json"]);
+    let epic = fixture.added(
+        "epics",
+        &[
+            "epic",
+            "add",
+            "Chapter 1",
+            "--project",
+            &project,
+            "--note",
+            "Draft",
+            "--json",
+        ],
+    );
+    let item = fixture.added(
+        "items",
+        &[
+            "item",
+            "add",
+            "Write",
+            "--project",
+            &project,
+            "--epic",
+            &epic,
+            "--json",
+        ],
+    );
+    let logged = fixture.json(&[
+        "session",
+        "log",
+        "--epic",
+        &epic,
+        "--minutes",
+        "20",
+        "--json",
+    ]);
+    let session = &logged["changed"]["sessions"][0];
+    assert_eq!(
+        (&session["project_id"], &session["epic_id"]),
+        (&Value::from(project.as_str()), &Value::from(epic.as_str()))
+    );
+    fixture.json(&[
+        "session",
+        "log",
+        "--item",
+        &item,
+        "--minutes",
+        "10",
+        "--json",
+    ]);
+    fixture.json(&[
+        "session",
+        "log",
+        "--project",
+        &project,
+        "--minutes",
+        "5",
+        "--json",
+    ]);
+
+    let listed = fixture.json(&["epic", "list", "--project", &project, "--json"]);
+    assert_eq!(listed[0]["total_minutes"], 30);
+    let human = fixture.run(&["epic", "list"]);
+    let human = String::from_utf8_lossy(&human.stdout);
+    assert!(
+        human.contains("active") && human.contains("Chapter 1  30 min in 2 sessions"),
+        "{human}"
+    );
+    let table = fixture.json(&["stats", "table", "--days", "1", "--group", "epic"]);
+    assert_eq!(table["rows"][0]["key"], epic.as_str());
+    assert_eq!(table["rows"][1]["key"], "none");
+    assert_eq!(table["rows"][1]["minutes"], 5);
+    let outside = fixture.json(&["stats", "--days", "1", "--epic", "none", "--json"]);
+    assert_eq!(outside["totals"]["minutes"], 5);
+
+    let removed = fixture.run(&["epic", "remove", &epic]);
+    assert!(!removed.status.success());
+    assert!(
+        stderr(&removed).contains("finish it instead"),
+        "{}",
+        stderr(&removed)
+    );
+    let finished = fixture.json(&["epic", "finish", &epic, "--json"]);
+    assert!(finished["changed"]["epics"][0]["finished_at"].is_string());
+    let reopened = fixture.json(&["epic", "reopen", &epic, "--json"]);
+    assert_eq!(reopened["changed"]["epics"][0]["status"], "active");
+    let edited = fixture.json(&[
+        "epic",
+        "edit",
+        &epic,
+        "--name",
+        "One",
+        "--no-note",
+        "--json",
+    ]);
+    assert!(edited["changed"]["epics"][0]["note"].is_null());
+    let detached = fixture.json(&["item", "edit", &item, "--no-epic", "--json"]);
+    assert!(detached["changed"]["items"][0]["epic_id"].is_null());
+
+    let spare = fixture.added(
+        "epics",
+        &["epic", "add", "Spare", "--project", &project, "--json"],
+    );
+    let output = fixture.run(&["epic", "remove", &spare]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("removed "));
+}

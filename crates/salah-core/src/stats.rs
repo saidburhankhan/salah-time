@@ -31,6 +31,7 @@ const MINUTES_SERIES: &str = "minutes";
 pub struct Filter {
     pub tag_id: Option<String>,
     pub project_id: Option<String>,
+    pub epic_id: Option<String>,
     pub item_id: Option<String>,
     /// Narrows the aggregated sessions by minutes and metric values.
     #[serde(flatten)]
@@ -90,6 +91,12 @@ pub(crate) fn report_scope<'a>(
         project: choice(&filter.project_id, &|id| {
             projects::find(store, id).map(drop)
         })?,
+        epic: choice(&filter.epic_id, &|id| {
+            store
+                .epic(id)?
+                .map(drop)
+                .ok_or_else(|| crate::guard::not_found("epic", id))
+        })?,
         tag: choice(&filter.tag_id, &|id| tags::find(store, id).map(drop))?,
         item: choice(&filter.item_id, &|id| match store.item(id)? {
             Some(_) => Ok(()),
@@ -106,6 +113,7 @@ pub struct Stats {
     pub days: Vec<DayStat>,
     pub series: Vec<Series>,
     pub projects: Vec<ProjectStat>,
+    pub epics: Vec<EpicStat>,
     pub tags: Vec<TagStat>,
     pub blocks: Vec<BlockStat>,
     pub totals: Totals,
@@ -142,7 +150,17 @@ pub struct Point {
 pub struct ProjectStat {
     pub id: String,
     pub name: String,
-    pub color: String,
+    pub color: Option<String>,
+    pub minutes: i64,
+    pub sessions: i64,
+    pub metrics: BTreeMap<String, f64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct EpicStat {
+    pub id: String,
+    pub name: String,
+    pub project_id: Option<String>,
     pub minutes: i64,
     pub sessions: i64,
     pub metrics: BTreeMap<String, f64>,
@@ -202,6 +220,7 @@ pub fn stats(
         tags: ledger.tag_stats(),
         blocks: ledger.block_stats(),
         totals: ledger.totals(),
+        epics: ledger.epic_stats,
         range,
         filter,
     })
@@ -211,9 +230,10 @@ pub fn stats(
 struct Ledger {
     days: Vec<(NaiveDate, Snapshot)>,
     sessions: Vec<Session>,
+    epic_stats: Vec<EpicStat>,
     scope: Scope,
     metrics: Vec<Metric>,
-    projects: Vec<projects::ProjectView>,
+    projects: Vec<salah_domain::tracking::Project>,
     tags: Vec<Tag>,
 }
 
@@ -229,6 +249,13 @@ impl Ledger {
         if days.is_empty() {
             return Err(Error::validation("from", "the range is empty"));
         }
+        let metrics: Vec<_> = store
+            .metrics()?
+            .into_iter()
+            .filter(|m| m.deleted_at.is_none())
+            .collect();
+        let projects = store.projects()?;
+        let epic_stats = epic_breakdown(&sessions, &metrics, &projects);
         let sessions = sessions.into_iter().map(|s| s.session).collect();
         let days = days
             .into_iter()
@@ -238,12 +265,9 @@ impl Ledger {
             days,
             sessions,
             scope,
-            metrics: store
-                .metrics()?
-                .into_iter()
-                .filter(|m| m.deleted_at.is_none())
-                .collect(),
-            projects: projects::list(store, None)?,
+            metrics,
+            epic_stats,
+            projects,
             tags: tags::list(store)?,
         })
     }
@@ -266,7 +290,13 @@ impl Ledger {
                     let lines = snapshot
                         .plan
                         .iter()
-                        .filter(|line| self.scope.keeps(line.project_id.as_deref(), &line.item_id))
+                        .filter(|line| {
+                            self.scope.keeps(
+                                line.project_id.as_deref(),
+                                line.epic_id.as_deref(),
+                                &line.item_id,
+                            )
+                        })
                         .cloned()
                         .collect::<Vec<_>>();
                     Fulfilment::of(&lines, &sessions)
@@ -320,37 +350,28 @@ impl Ledger {
 
     /// Projects with at least one session, each metric rolled up its own way.
     fn project_stats(&self) -> Vec<ProjectStat> {
+        let mut groups = BTreeMap::<_, Vec<_>>::new();
+        for session in &self.sessions {
+            groups
+                .entry(session.project_id.as_deref())
+                .or_default()
+                .push(session);
+        }
+        // Keep the existing project order. The final bucket is work without a project.
         self.projects
             .iter()
-            .filter_map(|view| {
-                let project = &view.project;
-                let mine: Vec<&Session> = self
-                    .sessions
-                    .iter()
-                    .filter(|s| s.project_id.as_deref() == Some(project.id.as_str()))
-                    .collect();
-                if mine.is_empty() {
-                    return None;
-                }
-                let recorded: BTreeSet<&str> = mine
-                    .iter()
-                    .flat_map(|s| s.values.iter().map(|v| v.metric_id.as_str()))
-                    .collect();
-                let metrics = self
-                    .metrics
-                    .iter()
-                    .filter(|m| recorded.contains(m.id.as_str()))
-                    .filter_map(|m| {
-                        Some((m.id.clone(), rollup(m.rollup, mine.iter().copied(), &m.id)?))
-                    })
-                    .collect();
+            .map(Some)
+            .chain(std::iter::once(None))
+            .filter_map(|project| {
+                let id = project.map(|p| p.id.as_str());
+                let mine = groups.remove(&id)?;
                 Some(ProjectStat {
-                    id: project.id.clone(),
-                    name: project.name.clone(),
-                    color: project.color.clone(),
+                    id: id.unwrap_or(NONE).to_owned(),
+                    name: project.map_or("No project", |p| &p.name).to_owned(),
+                    color: project.map(|p| p.color.clone()),
                     minutes: total_minutes(mine.iter().copied()),
                     sessions: mine.len() as i64,
-                    metrics,
+                    metrics: recorded_metrics(&self.metrics, &mine),
                 })
             })
             .collect()
@@ -363,8 +384,8 @@ impl Ledger {
                 let tagged: BTreeSet<&str> = self
                     .projects
                     .iter()
-                    .filter(|p| p.project.tag_ids.contains(&tag.id))
-                    .map(|p| p.project.id.as_str())
+                    .filter(|p| p.tag_ids.contains(&tag.id))
+                    .map(|p| p.id.as_str())
                     .collect();
                 TagStat {
                     id: tag.id.clone(),
@@ -416,6 +437,66 @@ impl Ledger {
     }
 }
 
+fn recorded_metrics(metrics: &[Metric], sessions: &[&Session]) -> BTreeMap<String, f64> {
+    metrics
+        .iter()
+        .filter_map(|m| {
+            Some((
+                m.id.clone(),
+                rollup(m.rollup, sessions.iter().copied(), &m.id)?,
+            ))
+        })
+        .collect()
+}
+
+/// Each project's epics (most minutes first) and then its "No epic" bucket, in
+/// project order, with work without a project last.
+fn epic_breakdown(
+    sessions: &[ReportSession],
+    metrics: &[Metric],
+    projects: &[salah_domain::tracking::Project],
+) -> Vec<EpicStat> {
+    let mut groups = BTreeMap::<_, Vec<_>>::new();
+    for row in sessions {
+        groups
+            .entry((
+                row.session.project_id.as_deref(),
+                row.session.epic_id.as_deref(),
+                row.epic_name.as_deref(),
+            ))
+            .or_default()
+            .push(&row.session);
+    }
+    let mut stats: Vec<EpicStat> = groups
+        .into_iter()
+        .map(|((project, epic, name), sessions)| EpicStat {
+            id: epic.unwrap_or(NONE).to_owned(),
+            name: name.unwrap_or("No epic").to_owned(),
+            project_id: project.map(str::to_owned),
+            minutes: total_minutes(sessions.iter().copied()),
+            sessions: sessions.len() as i64,
+            metrics: recorded_metrics(metrics, &sessions),
+        })
+        .collect();
+    let rank = |project: Option<&str>| {
+        project.map_or(projects.len(), |id| {
+            projects
+                .iter()
+                .position(|p| p.id == id)
+                .unwrap_or(projects.len())
+        })
+    };
+    stats.sort_by(|a, b| {
+        (rank(a.project_id.as_deref()), a.project_id.is_none())
+            .cmp(&(rank(b.project_id.as_deref()), b.project_id.is_none()))
+            .then((a.id == NONE).cmp(&(b.id == NONE)))
+            .then(b.minutes.cmp(&a.minutes))
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    stats
+}
+
 /// A metric's values over `sessions`, summed or minute-weighted; `None`
 /// when no session recorded it.
 pub(crate) fn rollup<'a>(
@@ -454,6 +535,7 @@ impl Pick {
 /// not apply: they narrow sessions, never the plan.
 struct Scope {
     project: Option<Pick>,
+    epic: Option<Pick>,
     tag: Option<Pick>,
     item: Option<Pick>,
     /// Each project's live tag ids.
@@ -464,6 +546,7 @@ impl Scope {
     fn new(store: &Store, scope: &SessionScope<'_>) -> Result<Self, Error> {
         Ok(Self {
             project: Pick::of(scope.project),
+            epic: Pick::of(scope.epic),
             tag: Pick::of(scope.tag),
             item: Pick::of(scope.item),
             tags: store
@@ -475,15 +558,18 @@ impl Scope {
     }
 
     fn narrows_plan(&self) -> bool {
-        self.project.is_some() || self.tag.is_some() || self.item.is_some()
+        self.project.is_some() || self.epic.is_some() || self.tag.is_some() || self.item.is_some()
     }
 
     /// Plan lines always name a task, so `none` for tasks keeps no line.
-    fn keeps(&self, project_id: Option<&str>, item_id: &str) -> bool {
+    fn keeps(&self, project_id: Option<&str>, epic_id: Option<&str>, item_id: &str) -> bool {
         let tags = project_id.and_then(|id| self.tags.get(id));
         self.project.as_ref().is_none_or(|pick| match pick {
             Pick::Unassigned => project_id.is_none(),
             Pick::Is(id) => project_id == Some(id.as_str()),
+        }) && self.epic.as_ref().is_none_or(|pick| match pick {
+            Pick::Unassigned => epic_id.is_none(),
+            Pick::Is(id) => epic_id == Some(id.as_str()),
         }) && self.tag.as_ref().is_none_or(|pick| match pick {
             Pick::Unassigned => tags.is_none_or(Vec::is_empty),
             Pick::Is(id) => tags.is_some_and(|tags| tags.contains(id)),
@@ -511,6 +597,7 @@ mod tests {
                 target: Target {
                     item_id: None,
                     project_id: Some(project_id.into()),
+                    epic_id: None,
                 },
                 minutes,
                 values: Values::from([("focus".into(), focus), ("quality".into(), 3.0)]),
@@ -637,6 +724,7 @@ mod tests {
                         target: Target {
                             item_id: Some(read.id.clone()),
                             project_id: None,
+                            epic_id: None,
                         },
                         minutes: Some(25),
                         values: Values::from([("focus".into(), 4.0), ("quality".into(), 3.0)]),
@@ -651,6 +739,7 @@ mod tests {
                     Target {
                         item_id: None,
                         project_id: Some(quran.id.clone()),
+                        epic_id: None,
                     },
                 )
             })

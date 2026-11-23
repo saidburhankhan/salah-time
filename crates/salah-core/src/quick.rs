@@ -2,6 +2,7 @@
 //! item draft. Words that are not part of a recognised phrase form the title.
 
 use crate::items::NewItem;
+use chrono::{Days, NaiveDate};
 use salah_domain::day::BoundaryId;
 use salah_domain::error::Error;
 use salah_domain::item::{Repeat, Weekdays, validate_title, weekday_index};
@@ -14,9 +15,28 @@ pub struct Draft {
     pub repeat: Repeat,
     pub weekdays: Option<Weekdays>,
     pub planned_minutes: Option<i64>,
+    /// The tracking day named by "today" or "tomorrow"; `null` when the text
+    /// names no day. Set by [`Draft::on`].
+    pub start_day: Option<NaiveDate>,
+    /// Days after today that the text names, until resolved.
+    #[serde(skip)]
+    days_ahead: Option<u64>,
 }
 
 impl Draft {
+    /// Whether the text names a day that [`Draft::on`] must resolve.
+    pub fn names_a_day(&self) -> bool {
+        self.days_ahead.is_some()
+    }
+
+    /// Resolves "today"/"tomorrow" against the current tracking day.
+    pub fn on(mut self, today: NaiveDate) -> Self {
+        self.start_day = self
+            .days_ahead
+            .and_then(|days| today.checked_add_days(Days::new(days)));
+        self
+    }
+
     pub fn into_new_item(self) -> NewItem {
         NewItem {
             title: self.title,
@@ -24,6 +44,7 @@ impl Draft {
             repeat: Some(self.repeat),
             weekdays: self.weekdays,
             planned_minutes: self.planned_minutes,
+            date: self.start_day,
             ..NewItem::default()
         }
     }
@@ -73,6 +94,15 @@ fn duration(word: &str) -> Option<i64> {
     let (hours, rest) = word.split_once('h')?;
     let minutes = rest.strip_suffix('m').unwrap_or(rest);
     Some(digits(hours)? * 60 + digits(minutes)?)
+}
+
+/// "today" or "tomorrow" as days after the current tracking day.
+fn days_ahead(word: &str) -> Option<u64> {
+    match word {
+        "today" => Some(0),
+        "tomorrow" => Some(1),
+        _ => None,
+    }
 }
 
 fn is_number(word: &str) -> Option<i64> {
@@ -129,6 +159,8 @@ pub fn parse(text: &str) -> Result<Draft, Error> {
         repeat: Repeat::None,
         weekdays: None,
         planned_minutes: None,
+        start_day: None,
+        days_ahead: None,
     };
     let mut i = 0;
     while i < words.len() {
@@ -158,6 +190,9 @@ pub fn parse(text: &str) -> Result<Draft, Error> {
                 draft.planned_minutes = Some(minutes);
                 take = 2;
             }
+        } else if let Some(days) = days_ahead(word).filter(|_| draft.days_ahead.is_none()) {
+            draft.days_ahead = Some(days);
+            take = 1;
         } else if matches!(word, "daily" | "everyday") {
             draft.repeat = Repeat::Daily;
             take = 1;
@@ -262,5 +297,36 @@ mod tests {
     fn a_line_without_a_title_is_rejected() {
         assert!(parse("20m after isha daily").is_err());
         assert!(parse("   ").is_err());
+        assert!(parse("tomorrow after fajr").is_err());
+    }
+
+    #[test]
+    fn today_and_tomorrow_name_the_day_and_leave_the_title() {
+        let today = NaiveDate::from_ymd_opt(2028, 2, 28).unwrap();
+        let draft = parse("call mum tomorrow 15m after asr").unwrap();
+        assert_eq!(draft.title, "Call mum");
+        assert_eq!(draft.block, Some(BoundaryId::Asr));
+        assert_eq!(draft.planned_minutes, Some(15));
+        assert!(draft.names_a_day());
+        assert_eq!(draft.start_day, None);
+        let draft = draft.on(today);
+        assert_eq!(draft.start_day, NaiveDate::from_ymd_opt(2028, 2, 29));
+        assert_eq!(
+            draft.into_new_item().date,
+            NaiveDate::from_ymd_opt(2028, 2, 29)
+        );
+
+        let draft = parse("Today, read").unwrap().on(today);
+        assert_eq!(
+            (draft.title.as_str(), draft.start_day),
+            ("Read", Some(today))
+        );
+        // Only the first named day counts; the other stays in the title.
+        assert_eq!(parse("read today tomorrow").unwrap().title, "Read tomorrow");
+        // A word that only starts with it is part of the title.
+        let draft = parse("review today's notes").unwrap();
+        assert_eq!(draft.title, "Review today's notes");
+        assert!(!draft.names_a_day());
+        assert_eq!(draft.on(today).start_day, None);
     }
 }

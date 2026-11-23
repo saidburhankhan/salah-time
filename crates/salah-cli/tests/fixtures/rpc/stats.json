@@ -98,7 +98,30 @@
         "unplanned_minutes": 20
       }
     ],
+    "epics": [
+      {
+        "id": "none",
+        "metrics": {
+          "<id:1>": 6.0,
+          "focus": 3.0,
+          "quality": 4.0
+        },
+        "minutes": 45,
+        "name": "No epic",
+        "project_id": "<id:3>",
+        "sessions": 2
+      },
+      {
+        "id": "none",
+        "metrics": {},
+        "minutes": 0,
+        "name": "No epic",
+        "project_id": null,
+        "sessions": 1
+      }
+    ],
     "filter": {
+      "epic_id": null,
       "item_id": null,
       "minutes_max": null,
       "minutes_min": null,
@@ -118,6 +141,14 @@
         "minutes": 45,
         "name": "Quran",
         "sessions": 2
+      },
+      {
+        "color": null,
+        "id": "none",
+        "metrics": {},
+        "minutes": 0,
+        "name": "No project",
+        "sessions": 1
       }
     ],
     "range": {

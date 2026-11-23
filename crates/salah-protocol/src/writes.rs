@@ -10,7 +10,9 @@ use salah_core::config::Config;
 use salah_core::items::{ItemView, MovePosition, NewItem};
 use salah_core::projects::ProjectView;
 use salah_core::sessions::SessionView;
-use salah_core::{Store, WriteTx, day, items, marks, metrics, projects, quick, sessions, tags};
+use salah_core::{
+    Store, WriteTx, day, epics, items, marks, metrics, projects, quick, sessions, tags,
+};
 use salah_domain::error::Error;
 use salah_domain::tracking::{Item, Project, Session};
 use serde::Serialize;
@@ -120,7 +122,7 @@ pub(crate) fn item_add(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, R
     let today = day::current(&config, now)?;
     mutate(ctx.store, call.method, &p.op_id, |tx| {
         let mut new = match (&p.quick_text, &p.title) {
-            (Some(text), _) => quick::parse(text)?.into_new_item(),
+            (Some(text), _) => quick::parse(text)?.on(today).into_new_item(),
             (None, Some(title)) => NewItem {
                 title: title.clone(),
                 ..NewItem::default()
@@ -140,8 +142,9 @@ pub(crate) fn item_add(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, R
         new.weekdays = p.weekdays.or(new.weekdays);
         new.planned_minutes = p.planned_minutes.or(new.planned_minutes);
         new.project_id = p.project_id.clone();
+        new.epic_id = p.epic_id.clone();
         new.metric_ids = p.metric_ids.clone();
-        new.date = p.date;
+        new.date = p.date.or(new.date);
         let item = items::add(tx, &config, now, ids, new)?;
         item_views(tx, today, vec![item])
     })
@@ -205,6 +208,47 @@ pub(crate) fn item_remove(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value
         Ok(removed(
             items::remove(tx, &config, now, &p.id, p.expected_version)?.id,
         ))
+    })
+}
+
+pub(crate) fn epic_add(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: EpicAddParams = parse(call.params)?;
+    let (now, ids) = (ctx.now(), ctx.ids);
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
+        Ok(Changed {
+            epics: vec![epics::add(tx, now, ids, p.epic.clone())?],
+            ..Changed::default()
+        })
+    })
+}
+
+pub(crate) fn epic_edit(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: EpicEditParams = parse(call.params)?;
+    let now = ctx.now();
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
+        Ok(Changed {
+            epics: vec![epics::edit(
+                tx,
+                now,
+                &p.id,
+                p.changes.clone(),
+                p.expected_version,
+            )?],
+            ..Changed::default()
+        })
+    })
+}
+
+pub(crate) fn epic_remove(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: RemoveParams = parse(call.params)?;
+    let now = ctx.now();
+    let config = ctx.config.load()?;
+    let today = day::current(&config, now)?;
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
+        let affected = epics::remove(tx, &config, now, &p.id, p.expected_version)?;
+        let mut changed = item_views(tx, today, affected)?;
+        changed.deleted.push(p.id.clone());
+        Ok(changed)
     })
 }
 

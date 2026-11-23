@@ -21,6 +21,9 @@ pub struct ReportScope {
     /// Tag id, or `none` for work without a tag
     #[arg(long, value_name = "ID")]
     tag: Option<String>,
+    /// Epic id, or `none` for work outside any epic
+    #[arg(long, value_name = "ID")]
+    epic: Option<String>,
     /// Item id or unique prefix, or `none` for work without a task
     #[arg(long, value_name = "ID")]
     item: Option<String>,
@@ -51,7 +54,7 @@ pub struct MeasureArgs {
 
 #[derive(Subcommand)]
 pub enum StatsCommand {
-    /// The general table: one row per week, day, project, tag or task
+    /// The general table: one row per week, day, project, epic, tag or task
     Table(StatsTableArgs),
     /// Trend lines: one point per day or week, one series per measure and split key
     Series(StatsSeriesArgs),
@@ -64,7 +67,7 @@ pub struct StatsSeriesArgs {
     /// day (default) or week
     #[arg(long)]
     interval: Option<String>,
-    /// project, tag or item: one series per key (top 8 plus Other)
+    /// project, epic, tag or item: one series per key (top 8 plus Other)
     #[arg(long)]
     split: Option<String>,
     /// minutes, sessions, a metric id or distractions_per_hour, repeatable
@@ -78,7 +81,7 @@ pub struct StatsSeriesArgs {
 pub struct StatsTableArgs {
     #[command(flatten)]
     scope: ReportScope,
-    /// week (default), day, project, tag or item
+    /// week (default), day, project, epic, tag or item
     #[arg(long)]
     group: Option<String>,
     #[command(flatten)]
@@ -124,6 +127,7 @@ fn scope(local: &Local<'_>, scope: ReportScope) -> Result<Map<String, Value>, St
         ("days", scope.days.map(Value::from)),
         ("project_id", scope.project.map(Value::from)),
         ("tag_id", scope.tag.map(Value::from)),
+        ("epic_id", scope.epic.map(Value::from)),
         ("item_id", item.map(Value::from)),
     ] {
         if let Some(value) = value {

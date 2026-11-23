@@ -192,6 +192,7 @@
       "block": "fajr",
       "day": "2031-05-14",
       "ended_at": null,
+      "epic_id": null,
       "id": "<id:1>",
       "item_id": "<id:2>",
       "max_minutes": 900,

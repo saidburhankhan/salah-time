@@ -121,6 +121,9 @@ pub struct ItemAddArgs {
     days: Option<String>,
     #[arg(long, value_name = "ID")]
     project: Option<String>,
+    /// An epic of the item's project
+    #[arg(long, value_name = "ID", requires = "project")]
+    epic: Option<String>,
     #[arg(long, value_name = "MINUTES")]
     planned_minutes: Option<i64>,
     /// The one-time day, or the first day of a repeating item
@@ -170,6 +173,12 @@ pub struct ItemEditArgs {
     /// Detach the item from its project
     #[arg(long)]
     no_project: bool,
+    /// An epic of the item's (new) project
+    #[arg(long, value_name = "ID", conflicts_with_all = ["no_epic", "no_project"])]
+    epic: Option<String>,
+    /// Detach the item from its epic
+    #[arg(long)]
+    no_epic: bool,
     #[arg(long, value_name = "MINUTES", conflicts_with = "no_planned_minutes")]
     planned_minutes: Option<i64>,
     /// Clear the planned minutes
@@ -197,6 +206,9 @@ pub struct SessionStartArgs {
     item: Option<String>,
     #[arg(long, value_name = "ID")]
     project: Option<String>,
+    /// Work on an epic without a task; its project is recorded too
+    #[arg(long, value_name = "ID")]
+    epic: Option<String>,
     #[command(flatten)]
     output: Output,
 }
@@ -227,6 +239,9 @@ pub struct SessionLogArgs {
     item: Option<String>,
     #[arg(long, value_name = "ID")]
     project: Option<String>,
+    /// Work on an epic without a task; its project is recorded too
+    #[arg(long, value_name = "ID")]
+    epic: Option<String>,
     #[arg(long, value_name = "YYYY-MM-DD")]
     date: Option<String>,
     #[arg(long)]
@@ -380,6 +395,9 @@ pub struct StatsArgs {
     project: Option<String>,
     #[arg(long, value_name = "ID")]
     tag: Option<String>,
+    /// Epic id, or `none` for work outside any epic
+    #[arg(long, value_name = "ID")]
+    epic: Option<String>,
     #[arg(long, value_name = "ID")]
     item: Option<String>,
     #[command(flatten)]
@@ -390,22 +408,22 @@ pub struct StatsArgs {
 
 /// JSON params built from optional flags; absent flags are left out.
 #[derive(Default)]
-struct Params(Map<String, Value>);
+pub(crate) struct Params(Map<String, Value>);
 
 impl Params {
-    fn set(mut self, key: &str, value: impl Into<Value>) -> Self {
+    pub(crate) fn set(mut self, key: &str, value: impl Into<Value>) -> Self {
         self.0.insert(key.into(), value.into());
         self
     }
 
-    fn opt(self, key: &str, value: Option<impl Into<Value>>) -> Self {
+    pub(crate) fn opt(self, key: &str, value: Option<impl Into<Value>>) -> Self {
         match value {
             Some(value) => self.set(key, value),
             None => self,
         }
     }
 
-    fn done(self) -> Value {
+    pub(crate) fn done(self) -> Value {
         Value::Object(self.0)
     }
 }
@@ -454,7 +472,11 @@ fn metric_choices(choices: &[String]) -> Value {
         .collect()
 }
 
-fn print(output: &Output, result: &Value, human: impl Fn(&Value) -> String) -> Result<(), String> {
+pub(crate) fn print(
+    output: &Output,
+    result: &Value,
+    human: impl Fn(&Value) -> String,
+) -> Result<(), String> {
     if output.json {
         println!("{result}");
     } else {
@@ -471,6 +493,7 @@ pub fn item(local: &mut Local<'_>, command: ItemCommand) -> Result<(), String> {
                 .set(if a.quick { "quick_text" } else { "title" }, text)
                 .opt("block", a.block)
                 .opt("project_id", a.project)
+                .opt("epic_id", a.epic)
                 .opt("planned_minutes", a.planned_minutes)
                 .opt("date", a.date);
             let result = local.mutate("item.add", repeat(params, a.repeat, a.days).done())?;
@@ -505,6 +528,10 @@ pub fn item(local: &mut Local<'_>, command: ItemCommand) -> Result<(), String> {
             if a.no_project {
                 params = params.set("project_id", Value::Null);
             }
+            params = params.opt("epic_id", a.epic);
+            if a.no_epic {
+                params = params.set("epic_id", Value::Null);
+            }
             if a.no_planned_minutes {
                 params = params.set("planned_minutes", Value::Null);
             }
@@ -529,7 +556,8 @@ pub fn session(local: &mut Local<'_>, command: SessionCommand) -> Result<(), Str
             let item = a.item.map(|id| local.item_id(&id)).transpose()?;
             let params = Params::default()
                 .opt("item_id", item)
-                .opt("project_id", a.project);
+                .opt("project_id", a.project)
+                .opt("epic_id", a.epic);
             ("session.start", params.done(), a.output)
         }
         SessionCommand::Stop(a) => {
@@ -546,6 +574,7 @@ pub fn session(local: &mut Local<'_>, command: SessionCommand) -> Result<(), Str
             let params = Params::default()
                 .opt("item_id", item)
                 .opt("project_id", a.project)
+                .opt("epic_id", a.epic)
                 .opt("date", a.date)
                 .opt("block", a.block)
                 .opt("minutes", a.minutes)
@@ -691,6 +720,7 @@ pub fn stats(local: &mut Local<'_>, args: StatsArgs) -> Result<(), String> {
         .opt("days", args.days)
         .opt("project_id", args.project)
         .opt("tag_id", args.tag)
+        .opt("epic_id", args.epic)
         .opt("item_id", item);
     let mut params = params.done();
     if let Value::Object(map) = &mut params {

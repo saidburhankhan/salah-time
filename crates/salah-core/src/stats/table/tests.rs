@@ -45,6 +45,7 @@ pub(crate) fn on_project(project: &Project) -> Target {
     Target {
         item_id: None,
         project_id: Some(project.id.clone()),
+        epic_id: None,
     }
 }
 
@@ -52,6 +53,7 @@ pub(crate) fn on_item(id: &str) -> Target {
     Target {
         item_id: Some(id.into()),
         project_id: None,
+        epic_id: None,
     }
 }
 

@@ -31,13 +31,14 @@ impl Database {
             conn.execute_batch(STEPS[1].sql).unwrap();
             let item = conn
                 .query_row(
-                    "SELECT *, 0 AS metrics_custom FROM items WHERE id='daily'",
+                    "SELECT *, 0 AS metrics_custom, NULL AS epic_id FROM items WHERE id='daily'",
                     [],
                     crate::codec::item,
                 )
                 .unwrap();
             let mut legacy = serde_json::to_value(item).unwrap();
             legacy.as_object_mut().unwrap().remove("metric_ids");
+            legacy.as_object_mut().unwrap().remove("epic_id");
             conn.execute(
                 "INSERT INTO item_history VALUES ('daily','2031-05-13',?1)",
                 [legacy.to_string()],
@@ -477,7 +478,7 @@ fn rebuild_step_checks_references_before_commit_and_restores_enforcement_on_ever
     for (sql, expected) in [
         (
             "DELETE FROM days_written",
-            "violates a foreign key in day_clocks",
+            "violates a foreign key in day_clocks (rowid 1, parent days_written, fkid 0)",
         ),
         (
             "DROP TABLE days_written; SELECT * FROM nonexistent",

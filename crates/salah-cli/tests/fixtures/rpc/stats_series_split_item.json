@@ -3,6 +3,7 @@
   "jsonrpc": "2.0",
   "result": {
     "filter": {
+      "epic_id": null,
       "item_id": null,
       "minutes_max": null,
       "minutes_min": null,

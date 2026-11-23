@@ -65,8 +65,11 @@ pub fn stop(
             let mut tick = new_session(
                 ids.new_id(),
                 now,
-                Some(item.id),
-                item.project_id,
+                super::Target {
+                    item_id: Some(item.id),
+                    project_id: item.project_id,
+                    epic_id: item.epic_id,
+                },
                 stopped.block,
             );
             tick.version = tx.put_session(&tick)?;

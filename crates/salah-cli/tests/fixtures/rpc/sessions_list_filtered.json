@@ -8,6 +8,7 @@
         "block": "dhuhr",
         "day": "2031-05-08",
         "ended_at": null,
+        "epic_id": null,
         "id": "<id:7>",
         "item": {
           "id": "<id:2>",

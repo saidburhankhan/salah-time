@@ -5,6 +5,7 @@
     "block": "fajr",
     "planned_minutes": 20,
     "repeat": "daily",
+    "start_day": null,
     "title": "Read",
     "weekdays": null
   }

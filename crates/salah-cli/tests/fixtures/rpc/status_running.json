@@ -106,6 +106,7 @@
           "block": "fajr",
           "detail_text": "0 / 30 min · Daily",
           "done": false,
+          "epic_id": null,
           "id": "<id:4>",
           "metric_ids": null,
           "metrics": [
@@ -149,6 +150,7 @@
               "block": "fajr",
               "day": "2031-05-14",
               "ended_at": null,
+              "epic_id": null,
               "id": "<id:6>",
               "item_id": "<id:4>",
               "max_minutes": 1,
@@ -172,6 +174,7 @@
           "block": "fajr",
           "detail_text": "0 / 15 min · Once",
           "done": false,
+          "epic_id": null,
           "id": "<id:5>",
           "metric_ids": null,
           "metrics": [
@@ -226,6 +229,7 @@
           "block": "fajr",
           "detail_text": "0 / 30 min · Daily",
           "done": false,
+          "epic_id": null,
           "id": "<id:4>",
           "metric_ids": null,
           "metrics": [
@@ -269,6 +273,7 @@
               "block": "fajr",
               "day": "2031-05-14",
               "ended_at": null,
+              "epic_id": null,
               "id": "<id:6>",
               "item_id": "<id:4>",
               "max_minutes": 1,
@@ -292,6 +297,7 @@
           "block": "fajr",
           "detail_text": "0 / 15 min · Once",
           "done": false,
+          "epic_id": null,
           "id": "<id:5>",
           "metric_ids": null,
           "metrics": [
@@ -414,6 +420,7 @@
       "block": "fajr",
       "day": "2031-05-14",
       "ended_at": null,
+      "epic_id": null,
       "id": "<id:6>",
       "item_id": "<id:4>",
       "max_minutes": 1,

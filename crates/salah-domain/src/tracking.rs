@@ -107,6 +107,7 @@ pub struct Item {
     pub id: String,
     pub title: String,
     pub project_id: Option<String>,
+    pub epic_id: Option<String>,
     /// Inherit from the project when absent. An empty list asks for nothing.
     #[serde(default)]
     pub metric_ids: Option<Vec<String>>,
@@ -130,6 +131,7 @@ pub struct Session {
     pub id: String,
     pub item_id: Option<String>,
     pub project_id: Option<String>,
+    pub epic_id: Option<String>,
     pub block: BlockKey,
     pub started_at: Option<DateTime<Utc>>,
     pub ended_at: Option<DateTime<Utc>>,
@@ -189,6 +191,7 @@ pub struct DayPlanLine {
     pub item_id: String,
     /// The item's project when the line was planned.
     pub project_id: Option<String>,
+    pub epic_id: Option<String>,
     pub planned_minutes: Option<i64>,
 }
 
@@ -310,6 +313,7 @@ mod tests {
             id: "item".into(),
             title: "Item".into(),
             project_id: None,
+            epic_id: None,
             metric_ids: None,
             block: BoundaryId::Fajr,
             repeat,
@@ -352,6 +356,7 @@ mod tests {
             id: "s".into(),
             item_id: None,
             project_id: Some("p".into()),
+            epic_id: None,
             block: BlockKey {
                 day: day(20),
                 start: BoundaryId::Fajr,

@@ -9,8 +9,8 @@
 //! into one `other` series, counting each session once.
 
 use super::table::{
-    Bucket, Column, cells, columns, dated, days, item_key, keyed, metric_columns, project_key,
-    tag_keys, weeks,
+    Bucket, Column, cells, columns, dated, days, epic_key, item_key, keyed, metric_columns,
+    project_key, tag_keys, weeks,
 };
 use super::{Filter, Range, report_scope};
 use crate::{Store, guard::not_found};
@@ -38,6 +38,7 @@ pub enum Interval {
 #[serde(rename_all = "lowercase")]
 pub enum Split {
     Project,
+    Epic,
     Tag,
     Item,
 }
@@ -123,6 +124,7 @@ pub fn series(
         }],
         Some(split) => top(match split {
             Split::Project => keyed(&sessions, |s| vec![project_key(s)]),
+            Split::Epic => keyed(&sessions, |s| vec![epic_key(s)]),
             Split::Tag => keyed(&sessions, |s| tag_keys(s, &tags)),
             Split::Item => keyed(&sessions, |s| vec![item_key(s)]),
         }),

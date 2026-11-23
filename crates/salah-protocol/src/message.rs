@@ -106,6 +106,7 @@ pub enum ChangeScope {
     Items,
     Sessions,
     Projects,
+    Epics,
     Tags,
     Metrics,
     Marks,
@@ -118,6 +119,7 @@ impl ChangeScope {
         Some(match entity {
             "item" => Self::Items,
             "session" => Self::Sessions,
+            "epics" => Self::Epics,
             "project" => Self::Projects,
             "tag" => Self::Tags,
             "metric" => Self::Metrics,

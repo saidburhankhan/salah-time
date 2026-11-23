@@ -77,6 +77,22 @@ fn get_name<T: DeserializeOwned>(row: &Row, column: &str) -> rusqlite::Result<T>
     serde_json::from_value(serde_json::Value::String(text)).map_err(invalid)
 }
 
+pub(crate) fn epic(row: &Row) -> rusqlite::Result<salah_domain::epic::Epic> {
+    Ok(salah_domain::epic::Epic {
+        id: row.get("id")?,
+        project_id: row.get("project_id")?,
+        name: row.get("name")?,
+        note: row.get("note")?,
+        status: get_name(row, "status")?,
+        finished_at: get_optional_timestamp(row, "finished_at")?,
+        position: row.get("position")?,
+        created_at: get_timestamp(row, "created_at")?,
+        updated_at: get_timestamp(row, "updated_at")?,
+        deleted_at: get_optional_timestamp(row, "deleted_at")?,
+        version: row.get("version")?,
+    })
+}
+
 pub(crate) fn project(row: &Row) -> rusqlite::Result<Project> {
     Ok(Project {
         id: row.get("id")?,
@@ -135,6 +151,7 @@ pub(crate) fn item(row: &Row) -> rusqlite::Result<Item> {
         id: row.get("id")?,
         title: row.get("title")?,
         project_id: row.get("project_id")?,
+        epic_id: row.get("epic_id")?,
         metric_ids: row.get::<_, bool>("metrics_custom")?.then(Vec::new),
         block: get_name(row, "block")?,
         repeat: get_name(row, "repeat")?,
@@ -155,6 +172,7 @@ pub(crate) fn session(row: &Row) -> rusqlite::Result<Session> {
         id: row.get("id")?,
         item_id: row.get("item_id")?,
         project_id: row.get("project_id")?,
+        epic_id: row.get("epic_id")?,
         block: BlockKey {
             day: get_day(row, "day")?,
             start: get_name(row, "block")?,
@@ -187,6 +205,7 @@ pub(crate) fn day_plan_line(row: &Row) -> rusqlite::Result<DayPlanLine> {
         block: get_name(row, "block")?,
         item_id: row.get("item_id")?,
         project_id: row.get("project_id")?,
+        epic_id: row.get("epic_id")?,
         planned_minutes: row.get("planned_minutes")?,
     })
 }

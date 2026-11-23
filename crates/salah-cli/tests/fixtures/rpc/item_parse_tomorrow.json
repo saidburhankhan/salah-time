@@ -1,0 +1,12 @@
+{
+  "id": 2,
+  "jsonrpc": "2.0",
+  "result": {
+    "block": "asr",
+    "planned_minutes": 15,
+    "repeat": "none",
+    "start_day": "2031-05-15",
+    "title": "Call mum",
+    "weekdays": null
+  }
+}

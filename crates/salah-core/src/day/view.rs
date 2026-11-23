@@ -30,6 +30,7 @@ pub struct DayRow {
     pub position: i64,
     pub version: i64,
     pub project: Option<ProjectRef>,
+    pub epic_id: Option<String>,
     pub metric_ids: Option<Vec<String>>,
     pub metrics: Vec<PromptMetric>,
     /// The project and minutes as planned that day (the snapshot of a past day).
@@ -343,6 +344,7 @@ impl Ledger {
             weekdays: item.weekdays,
             position: item.position,
             version: item.version,
+            epic_id: line.epic_id.clone(),
             project: line
                 .project_id
                 .as_ref()
@@ -410,6 +412,7 @@ mod tests {
                         target: Target {
                             item_id: Some(item.id.clone()),
                             project_id: None,
+                            epic_id: None,
                         },
                         minutes: Some(minutes),
                         values: Values::from([("focus".into(), 4.0), ("quality".into(), 4.0)]),
@@ -493,6 +496,7 @@ mod tests {
                         target: Target {
                             item_id: None,
                             project_id: Some(project_id.into()),
+                            epic_id: None,
                         },
                         minutes: Some(minutes),
                         values: Values::from([("focus".into(), 4.0), ("quality".into(), 4.0)]),

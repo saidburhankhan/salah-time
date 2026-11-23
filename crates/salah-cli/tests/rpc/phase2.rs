@@ -86,7 +86,7 @@ fn stats_item_filter_intersects_project_and_tag_and_supports_730_inclusive_days(
         "stats.get",
         json!({"from":DATE,"to":DATE,"tag_id":tag,"project_id":project,"item_id":item}),
     );
-    let filter = Fixtures::default().check("stats_item_filter", response);
+    let filter = Fixtures::with_ids(&[&item, &project, &tag]).check("stats_item_filter", response);
     assert_eq!(filter["filter"]["item_id"], item);
     assert_eq!(filter["totals"]["minutes"], 15);
     assert_eq!(filter["totals"]["sessions"], 1);

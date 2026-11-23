@@ -103,26 +103,29 @@ impl Store {
             .transpose()
     }
 
+    pub fn items_in_epic(&self, id: &str) -> Result<Vec<Item>, Error> {
+        self.items_where(
+            "SELECT * FROM items WHERE epic_id=?1 AND deleted_at IS NULL ORDER BY id",
+            [id],
+        )
+    }
+
     pub fn items(&self) -> Result<Vec<Item>, Error> {
-        self.all(
-            "SELECT * FROM items ORDER BY created_at, id",
-            [],
-            codec::item,
-        )?
-        .into_iter()
-        .map(|item| self.with_metric_ids(item))
-        .collect()
+        self.items_where("SELECT * FROM items ORDER BY created_at, id", [])
     }
 
     pub fn custom_items_in_project(&self, project_id: &str) -> Result<Vec<Item>, Error> {
-        self.all(
+        self.items_where(
             "SELECT * FROM items WHERE project_id = ?1 AND metrics_custom = 1 ORDER BY id",
             [project_id],
-            codec::item,
-        )?
-        .into_iter()
-        .map(|item| self.with_metric_ids(item))
-        .collect()
+        )
+    }
+
+    fn items_where(&self, sql: &str, params: impl Params) -> Result<Vec<Item>, Error> {
+        self.all(sql, params, codec::item)?
+            .into_iter()
+            .map(|item| self.with_metric_ids(item))
+            .collect()
     }
 
     fn with_metric_ids(&self, mut item: Item) -> Result<Item, Error> {

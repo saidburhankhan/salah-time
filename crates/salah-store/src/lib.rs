@@ -1,6 +1,7 @@
 //! SQLite persistence for Salah's v1 tracking model.
 
 mod codec;
+mod epics;
 mod migrations;
 mod read;
 pub mod reports;
@@ -228,6 +229,7 @@ mod tests {
             id: "i".into(),
             title: "I".into(),
             project_id: Some("p".into()),
+            epic_id: None,
             metric_ids: None,
             block: BoundaryId::Fajr,
             repeat: Repeat::Daily,
@@ -271,6 +273,7 @@ mod tests {
             id: "night-session".into(),
             item_id: Some(item.id.clone()),
             project_id: Some("p".into()),
+            epic_id: None,
             block: BlockKey {
                 day: d(),
                 start: BoundaryId::Night,
@@ -301,6 +304,7 @@ mod tests {
             id: "s".into(),
             item_id: None,
             project_id: Some("p".into()),
+            epic_id: None,
             block: BlockKey {
                 day: d(),
                 start: BoundaryId::Fajr,

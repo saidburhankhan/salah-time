@@ -391,7 +391,7 @@ fn stats_get_and_table_narrow_sessions_by_duration_and_metric_values() {
     let h = Harness::new();
     let s = seed(&h);
     let mut rpc = Session::open(&h, NOW);
-    let mut fixtures = Fixtures::default();
+    let mut fixtures = Fixtures::with_ids(&[&s.tag, &s.quran]);
     let range = json!({"from":"2031-05-01","to":"2031-05-14"});
     let with = |extra: Value| {
         let mut params = range.clone();

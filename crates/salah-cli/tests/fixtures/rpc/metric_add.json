@@ -4,6 +4,7 @@
   "result": {
     "changed": {
       "deleted": [],
+      "epics": [],
       "items": [],
       "marks": [],
       "metrics": [

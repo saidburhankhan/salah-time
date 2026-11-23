@@ -109,13 +109,23 @@ impl Step {
     fn commit(&self, tx: Transaction<'_>, next: i64) -> Result<(), Error> {
         tx.execute_batch(self.sql).map_err(storage_error)?;
         if self.foreign_keys_off
-            && let Some(table) = tx
-                .query_row("PRAGMA foreign_key_check", [], |r| r.get::<_, String>(0))
+            && let Some((table, rowid, parent, fkid)) = tx
+                .query_row("PRAGMA foreign_key_check", [], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<i64>>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, i64>(3)?,
+                    ))
+                })
                 .optional()
                 .map_err(storage_error)?
         {
+            // A WITHOUT ROWID table reports no rowid.
+            let rowid = rowid.map_or_else(|| "none".to_owned(), |id| id.to_string());
             return Err(Error::Storage(format!(
-                "store: migration {next} violates a foreign key in {table}"
+                "store: migration {next} violates a foreign key in {table} \
+                 (rowid {rowid}, parent {parent}, fkid {fkid})"
             )));
         }
         tx.pragma_update(None, "user_version", next)

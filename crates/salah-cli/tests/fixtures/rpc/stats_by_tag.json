@@ -98,7 +98,22 @@
         "unplanned_minutes": 20
       }
     ],
+    "epics": [
+      {
+        "id": "none",
+        "metrics": {
+          "<id:1>": 6.0,
+          "focus": 3.0,
+          "quality": 4.0
+        },
+        "minutes": 45,
+        "name": "No epic",
+        "project_id": "<id:3>",
+        "sessions": 2
+      }
+    ],
     "filter": {
+      "epic_id": null,
       "item_id": null,
       "minutes_max": null,
       "minutes_min": null,
