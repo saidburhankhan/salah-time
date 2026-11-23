@@ -154,7 +154,11 @@ ColumnLayout {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
                 win: charts.win
+                objectName: "metricChart_" + modelData.metric_id
                 series: modelData
+                weightedAverage: modelData.metric_id === "focus" ? charts.totals.avg_focus
+                    : modelData.metric_id === "quality" ? charts.totals.avg_quality
+                    : (charts.stats.range_values || {})[modelData.metric_id]
                 ceiling: {
                     var metric = charts.win.metricById(modelData.metric_id)
                     return metric && metric.kind === "scale" ? Number(metric.scale_max || 5)

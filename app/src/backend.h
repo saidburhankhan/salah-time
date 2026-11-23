@@ -168,18 +168,20 @@ public:
     // Done is an explicit tick: an item with a tick today is unticked (its
     // tick sessions removed), otherwise ticked. Timed sessions never count.
     Q_INVOKABLE bool toggleDone(const QString &id, const QString &state = {});
-    Q_INVOKABLE void tickItem(const QString &id, const QVariantMap &values = {}, const QString &note = {});
+    Q_INVOKABLE QString newOperationId() const { return CoreClient::makeOpId(); }
+    Q_INVOKABLE void tickItem(const QString &id, const QVariantMap &values = {}, const QString &note = {},
+                              const QString &operation = {});
     Q_INVOKABLE void untickItem(const QString &id);
     // With an epic and no item the session is logged against the epic (the
     // server takes its project from it).
     Q_INVOKABLE void logSession(const QString &itemId, const QString &projectId, int minutes,
                                 const QVariantMap &values = {}, const QString &note = {},
-                                const QString &epicId = {});
+                                const QString &epicId = {}, const QString &day = {}, const QString &operation = {});
     Q_INVOKABLE void startSession(const QString &itemId, const QString &projectId = {});
     Q_INVOKABLE void stopSession(const QString &sessionId, const QVariantMap &values = {},
-                                 const QString &note = {}, bool done = false, int minutes = -1);
+                                 const QString &note = {}, bool done = false, int minutes = -1, const QString &operation = {});
     Q_INVOKABLE void editSession(const QString &sessionId, int minutes, const QVariantMap &values,
-                                 const QString &note);
+                                 const QString &note, qint64 version = -1, const QString &operation = {});
     Q_INVOKABLE void removeSession(const QString &sessionId);
     Q_INVOKABLE void bumpDistractions(const QString &sessionId, int delta);
     Q_INVOKABLE void addRunningNote(const QString &sessionId, const QString &text);
@@ -220,7 +222,8 @@ signals:
     void entitySaved(const QString &kind, const QString &id);
     void entitySaveFailed(const QString &kind, const QString &error);
     // A session write (tick, log, stop, edit, remove) finished.
-    void sessionWriteFinished(bool ok, const QString &message);
+    void sessionWriteFinished(bool ok, const QString &message, const QString &operation);
+    void reportsInvalidated();
     void runningNoteFinished(const QString &sessionId, bool ok);
     void runningChanged();
     void trendsChanged();
@@ -251,7 +254,7 @@ private:
     CoreClient::Callback statsResponse();
     void applyRunningWrite(const CoreClient::Result &result);
     void applyStatus(const QJsonObject &status);
-    static QJsonObject filterParams(const QVariantMap &filter, bool allowAnyDays);
+    QJsonObject filterParams(const QVariantMap &filter, bool allowAnyDays);
     void requestSessions(const QJsonObject &params, bool append);
     void refreshRunning();
     QJsonArray sessionsOf(const QString &itemId) const;
@@ -270,9 +273,7 @@ private:
     void optimisticMove(const QString &id, const QString &block, const QString &afterId,
                         const QString &beforeId);
     qint64 versionFor(const QString &id) const;
-    int legacyMoveIndex(const QString &id, const QString &block, const QString &afterId,
-                        const QString &beforeId) const;
-    void reloadFromNotification(qint64 revision);
+    void reloadFromNotification(qint64 revision, const QStringList &scopes);
     bool dayContains(const QString &id) const;
     void refreshBacklog();
     QVariantMap backlogItem(const QString &id) const;

@@ -21,13 +21,15 @@ Rectangle {
             top = Math.max(top, Number(present[i].value))
         return top
     }
-    readonly property real summary: {
+    property var weightedAverage: null
+    readonly property var summary: {
+        if (series.rollup === "avg") return weightedAverage
         if (present.length === 0)
             return 0
         var sum = 0
         for (var i = 0; i < present.length; i++)
             sum += Number(present[i].value)
-        return series.rollup === "avg" ? sum / present.length : sum
+        return sum
     }
     property bool tableMode: false
     // Draw a sum as a line over the days instead of a column per day.
@@ -86,7 +88,8 @@ Rectangle {
         anchors.right: parent.right
         anchors.rightMargin: 18
         y: 15
-        text: chart.present.length === 0 ? qsTr("no values")
+        text: chart.summary == null && chart.present.length > 0 ? "—"
+            : chart.present.length === 0 ? qsTr("no values")
             : (chart.series.rollup === "avg" ? qsTr("avg %1") : qsTr("total %1")).arg(chart.format(chart.summary))
         textFormat: Text.PlainText
         color: chart.present.length === 0 ? chart.win.muted : theme.accent

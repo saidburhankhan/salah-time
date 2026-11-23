@@ -78,7 +78,10 @@ void CoreClient::configureTransport(const QString &path) {
         startNext();
     });
     connect(m_transport, &SocketTransport::reconnected, this, &CoreClient::reconnected);
-    connect(m_transport, &SocketTransport::changed, this, &CoreClient::changed);
+    connect(m_transport, &SocketTransport::changed, this, [this](qint64 revision, const QStringList &scopes) {
+        ++m_readGeneration;
+        emit changed(revision, scopes);
+    });
     m_transport->start();
 }
 
@@ -96,21 +99,22 @@ void CoreClient::enqueue(const QStringList &args, QJsonObject params, const QStr
                          bool socketOnly) {
     if (read) {
         const bool queuedMutation = std::any_of(m_queue.cbegin(), m_queue.cend(), [](const Request &r) { return !r.read; });
-        if (!queuedMutation && m_running && m_current.read && m_current.args == args) {
+        if (!queuedMutation && m_running && m_current.read && m_current.generation == m_readGeneration
+            && m_current.method == method && m_current.params == params) {
             if (callback) m_current.callbacks.append(std::move(callback));
             return;
         }
         for (auto it = m_queue.end(); it != m_queue.begin();) {
             Request &request = *--it;
             if (!request.read) break;
-            if (request.read && request.args == args) {
+            if (request.generation == m_readGeneration && request.method == method && request.params == params) {
                 if (callback) request.callbacks.append(std::move(callback));
                 return;
             }
         }
     }
     Request request{method, std::move(params), args, {}, read, mutation, bool(cliDecoder), socketOnly,
-                    opId, std::move(decoder), std::move(cliDecoder)};
+                    opId, std::move(decoder), std::move(cliDecoder), m_readGeneration};
     if (callback) request.callbacks.append(std::move(callback));
     m_queue.enqueue(std::move(request));
     emit busyChanged();
@@ -126,34 +130,32 @@ void CoreClient::startNext() {
     }
     m_current = m_queue.dequeue();
     m_running = true;
-    if (m_mode == Mode::Socket) startSocket(m_current);
+    if (m_mode == Mode::Socket) startSocket();
     else if (m_current.socketOnly) { finishWithError(tr("This action needs the Salah daemon.")); return; }
-    else startProcess(m_current);
+    else startProcess();
     emit busyChanged();
 }
 
-void CoreClient::startSocket(Request request) {
+void CoreClient::startSocket() {
     m_timeout.stop();
-    if (!m_transport) {
-        // Defensive: a request can only be dispatched in Socket mode, but never
-        // dereference the transport if that invariant is broken (for example
-        // during teardown or a failed configuration).
-        completeSocket(request, SocketTransport::Reply{false, false, QStringLiteral("not_ready"),
-                                                       tr("Salah daemon is not reachable."), {}});
-        return;
-    }
-    const QString method = request.method;
-    const QJsonObject params = request.params;
-    m_transport->send(method, params,
-                      [this, request = std::move(request)](const SocketTransport::Reply &reply) mutable {
-                          completeSocket(request, reply);
-                      });
+    m_transport->send(m_current.method, m_current.params, [this](const SocketTransport::Reply &reply) {
+        completeRpc(reply);
+    });
 }
 
-void CoreClient::startProcess(Request request) {
+void CoreClient::startProcess() {
     m_process.setProgram(m_program);
-    m_process.setArguments(request.args);
+    m_process.setArguments(m_current.mutation ? QStringList{QStringLiteral("rpc")} : m_current.args);
     m_process.start();
+    if (m_current.mutation) {
+        auto frame = [](int id, const QString &method, const QJsonObject &params) {
+            return QJsonDocument(QJsonObject{{"jsonrpc", "2.0"}, {"id", id}, {"method", method},
+                                             {"params", params}}).toJson(QJsonDocument::Compact) + '\n';
+        };
+        m_process.write(frame(1, QStringLiteral("hello"), SocketTransport::helloParams()));
+        m_process.write(frame(2, m_current.method, m_current.params));
+        m_process.closeWriteChannel();
+    }
     m_timeout.start(m_timeoutMs);
     emit busyChanged();
 }
@@ -164,9 +166,10 @@ QString CoreClient::stripErrorPrefix(QString message) {
     return message;
 }
 
-void CoreClient::completeSocket(const Request &request, const SocketTransport::Reply &reply) {
+void CoreClient::completeRpc(const SocketTransport::Reply &reply) {
     if (!m_running) return;
     Result result;
+    const Request request = std::move(m_current);
     result.opId = request.opId;
     if (!reply.ok) {
         ErrorKind kind = ErrorKind::Rpc;
@@ -224,6 +227,16 @@ void CoreClient::finish(bool timedOut) {
         QString detail = stripErrorPrefix(QString::fromUtf8(m_process.readAllStandardError()));
         if (detail.isEmpty()) detail = tr("Could not run Salah: %1").arg(m_process.errorString());
         result.error = {m_process.error() == QProcess::FailedToStart ? ErrorKind::Process : ErrorKind::Exit, detail};
+    } else if (m_current.mutation) {
+        for (const auto &line : m_process.readAllStandardOutput().split('\n')) {
+            const auto frame = QJsonDocument::fromJson(line).object();
+            if (frame.value("jsonrpc") == "2.0" && frame.value("id").toInt() == 2
+                && (frame.contains("error") || frame.contains("result"))) {
+                completeRpc(SocketTransport::decodeReply(frame));
+                return;
+            }
+        }
+        result.error = {ErrorKind::Decode, tr("Salah returned no matching RPC response.")};
     } else if (!m_current.expectJson) {
         result.ok = true;
     } else {
@@ -270,44 +283,25 @@ void CoreClient::statsDays(int days, Callback callback) {
 void CoreClient::statsFiltered(int days, const QString &tagId, const QString &projectId, const QString &itemId,
                                Callback callback, const QDate &from, const QDate &to) {
     QJsonObject params;
-    QStringList args{"stats"};
     if (from.isValid() && to.isValid()) {
         const QString first = from.toString(Qt::ISODate), last = to.toString(Qt::ISODate);
         params = {{"from", first}, {"to", last}};
-        args << "--from" << first << "--to" << last;
     } else {
         params.insert(QStringLiteral("days"), days);
-        args << "--days" << QString::number(days);
     }
-    args << "--json";
-    auto addFilter = [&](const QString &key, const QString &flag, const QString &id) {
-        if (id.isEmpty()) return;
-        params.insert(key, id);
-        args << flag << id;
-    };
-    addFilter(QStringLiteral("tag_id"), QStringLiteral("--tag"), tagId);
-    addFilter(QStringLiteral("project_id"), QStringLiteral("--project"), projectId);
-    addFilter(QStringLiteral("item_id"), QStringLiteral("--item"), itemId);
+    if (!tagId.isEmpty()) params.insert("tag_id", tagId);
+    if (!projectId.isEmpty()) params.insert("project_id", projectId);
+    if (!itemId.isEmpty()) params.insert("item_id", itemId);
+    statsQuery(params, std::move(callback));
+}
+void CoreClient::statsQuery(const QJsonObject &params, Callback callback) {
+    auto args = reportArguments(params, {QStringLiteral("stats")});
+    args << QStringLiteral("--json");
     enqueue(args, params, QStringLiteral("stats.get"), std::move(callback), true, false,
             Dto::decodeStats, Dto::decodeStats);
 }
-void CoreClient::statsQuery(const QJsonObject &params, Callback callback) {
-    const bool sessionFilters = params.contains(QStringLiteral("epic_id")) || params.contains(QStringLiteral("minutes_min"))
-        || params.contains(QStringLiteral("minutes_max")) || params.contains(QStringLiteral("values"));
-    if (sessionFilters) {
-        const QString key = QString::fromUtf8(QJsonDocument(params).toJson(QJsonDocument::Compact));
-        enqueue({QStringLiteral("rpc"), QStringLiteral("stats.get"), key}, params, QStringLiteral("stats.get"),
-                std::move(callback), true, false, Dto::decodeStats, nullptr, {}, true);
-        return;
-    }
-    const QDate from = QDate::fromString(params.value(QStringLiteral("from")).toString(), Qt::ISODate);
-    const QDate to = QDate::fromString(params.value(QStringLiteral("to")).toString(), Qt::ISODate);
-    statsFiltered(params.value(QStringLiteral("days")).toInt(28), params.value(QStringLiteral("tag_id")).toString(),
-                  params.value(QStringLiteral("project_id")).toString(), params.value(QStringLiteral("item_id")).toString(),
-                  std::move(callback), from, to);
-}
-void CoreClient::statsSeries(const QJsonObject &params, Callback callback) {
-    QStringList args{QStringLiteral("stats"), QStringLiteral("series")};
+
+QStringList CoreClient::reportArguments(const QJsonObject &params, QStringList args) {
     auto option = [&](const char *key, const char *flag) {
         const QJsonValue value = params.value(QLatin1String(key));
         if (!value.isUndefined()) args << QLatin1String(flag) << value.toVariant().toString();
@@ -317,9 +311,11 @@ void CoreClient::statsSeries(const QJsonObject &params, Callback callback) {
     option("to", "--to");
     option("tag_id", "--tag");
     option("project_id", "--project");
+    option("epic_id", "--epic");
     option("item_id", "--item");
     option("minutes_min", "--min-minutes");
     option("minutes_max", "--max-minutes");
+    option("group", "--group");
     option("interval", "--interval");
     option("split", "--split");
     for (const auto &measure : params.value(QStringLiteral("measures")).toArray())
@@ -331,15 +327,21 @@ void CoreClient::statsSeries(const QJsonObject &params, Callback callback) {
             args << (QStringLiteral("--") + bound.key())
                  << (metric.key() + QLatin1Char('=') + QString::number(bound.value().toDouble(), 'g', 17));
     }
-    // The CLI knows no epic filter or epic split; those go to the daemon.
-    const bool epics = params.contains(QStringLiteral("epic_id")) || params.value(QStringLiteral("split")).toString() == QStringLiteral("epic");
-    enqueue(args, params, QStringLiteral("stats.series"), std::move(callback), true, false,
-            Dto::decodeJson, Dto::decodeJson, {}, epics);
+    return args;
+}
+
+void CoreClient::statsSeries(const QJsonObject &params, Callback callback) {
+    enqueue(reportArguments(params, {"stats", "series"}), params, QStringLiteral("stats.series"),
+            std::move(callback), true, false, Dto::decodeJson, Dto::decodeJson);
+}
+
+void CoreClient::statsTable(const QJsonObject &params, Callback callback) {
+    enqueue(reportArguments(params, {"stats", "table"}), params, QStringLiteral("stats.table"),
+            std::move(callback), true, false, Dto::decodeJson, Dto::decodeJson);
 }
 
 void CoreClient::rpcRead(const QString &method, const QJsonObject &params, Callback callback) {
-    const QString key = QString::fromUtf8(QJsonDocument(params).toJson(QJsonDocument::Compact));
-    enqueue({QStringLiteral("rpc"), method, key}, params, method, std::move(callback), true, false,
+    enqueue({QStringLiteral("rpc"), method}, params, method, std::move(callback), true, false,
             Dto::decodeJson, nullptr, {}, true);
 }
 void CoreClient::itemsList(Callback callback) {
@@ -347,16 +349,6 @@ void CoreClient::itemsList(Callback callback) {
             Dto::decodeJson, Dto::decodeJson);
 }
 void CoreClient::itemAdd(const ItemFields &f, Callback callback) {
-    QStringList args{"item", "add", "--json"};
-    if (f.quick) args << "--quick";
-    if (!f.block.isEmpty()) args << "--block" << f.block;
-    if (!f.quick) {
-        args << "--repeat" << f.repeat;
-        if (!f.weekdays.isEmpty()) args << "--days" << f.weekdays.join(',');
-        if (!f.projectId.isEmpty()) args << "--project" << f.projectId;
-        if (f.hasPlannedMinutes) args << "--planned-minutes" << QString::number(f.plannedMinutes);
-    }
-    args << dateArgs(f.date) << "--" << f.title;
     const QString opId = f.opId.isEmpty() ? makeOpId() : f.opId;
     QJsonObject params{{"op_id", opId}};
     if (f.quick) params.insert(QStringLiteral("quick_text"), f.title);
@@ -376,15 +368,9 @@ void CoreClient::itemAdd(const ItemFields &f, Callback callback) {
         if (!f.metricIds.isUndefined()) params.insert(QStringLiteral("metric_ids"), f.metricIds);
     }
     if (!f.backlog && f.date.isValid()) params.insert(QStringLiteral("date"), f.date.toString(Qt::ISODate));
-    enqueue(args, params, QStringLiteral("item.add"), std::move(callback), false, true,
-            Dto::decodeMutationResult, Dto::decodeMutationResult, opId,
-            f.backlog || (!f.quick && (!f.metricIds.isUndefined() || f.epicId.isString())));
+    writeRpc(QStringLiteral("item.add"), params, std::move(callback));
 }
 void CoreClient::itemEdit(const QString &id, const ItemFields &f, Callback callback, qint64 expectedVersion) {
-    QStringList args{"item", "edit", "--json", id, "--title=" + f.title, "--block", f.block, "--repeat", f.repeat};
-    if (!f.weekdays.isEmpty()) args << "--days" << f.weekdays.join(',');
-    if (!f.projectId.isEmpty()) args << "--project" << f.projectId; else args << "--no-project";
-    if (f.hasPlannedMinutes) args << "--planned-minutes" << QString::number(f.plannedMinutes); else args << "--no-planned-minutes";
     const QString opId = makeOpId();
     QJsonObject params{{"op_id", opId}, {"id", id}, {"title", f.title}, {"repeat", f.repeat}};
     if (!f.backlog) params.insert(QStringLiteral("block"), f.block);
@@ -398,37 +384,30 @@ void CoreClient::itemEdit(const QString &id, const ItemFields &f, Callback callb
     if (!f.metricIds.isUndefined()) params.insert(QStringLiteral("metric_ids"), f.metricIds);
     if (!f.epicId.isUndefined()) params.insert(QStringLiteral("epic_id"), f.epicId);
     if (expectedVersion >= 0) params.insert(QStringLiteral("expected_version"), expectedVersion);
-    enqueue(args, params, QStringLiteral("item.edit"), std::move(callback), false, true,
-            Dto::decodeMutationResult, Dto::decodeMutationResult, opId,
-            f.backlog || !f.metricIds.isUndefined() || !f.epicId.isUndefined());
+    writeRpc(QStringLiteral("item.edit"), params, std::move(callback));
 }
 void CoreClient::itemRemove(const QString &id, Callback callback, qint64 expectedVersion) {
     const QString opId = makeOpId();
     QJsonObject params{{"op_id", opId}, {"id", id}};
     if (expectedVersion >= 0) params.insert(QStringLiteral("expected_version"), expectedVersion);
-    enqueue({"item", "remove", "--json", id}, params, QStringLiteral("item.remove"), std::move(callback),
-            false, true, Dto::decodeMutationResult, Dto::decodeMutationResult, opId);
+    writeRpc(QStringLiteral("item.remove"), params, std::move(callback));
 }
 void CoreClient::itemMove(const QString &id, const QString &block, int index, Callback callback, qint64 expectedVersion,
                           const QString &afterId, const QString &beforeId) {
     const QString opId = makeOpId();
     QJsonObject params{{"op_id", opId}, {"id", id},
                        {"block", block.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(block)}};
-    // Anchor ids resolve against the write transaction; the numeric index is
-    // only the legacy CLI fallback.
+    // A sibling anchor resolves inside the write transaction.
     if (!afterId.isEmpty()) params.insert(QStringLiteral("after_id"), afterId);
     else if (!beforeId.isEmpty()) params.insert(QStringLiteral("before_id"), beforeId);
     else params.insert(QStringLiteral("index"), index);
     if (expectedVersion >= 0) params.insert(QStringLiteral("expected_version"), expectedVersion);
-    enqueue({"item", "move", "--json", id, "--block", block, "--index", QString::number(index)},
-            params, QStringLiteral("item.move"), std::move(callback), false, true,
-            Dto::decodeMutationResult, Dto::decodeItem, opId, block.isEmpty());
+    writeRpc(QStringLiteral("item.move"), params, std::move(callback));
 }
 void CoreClient::sessionLog(const QString &id, const QString &projectId, int minutes,
                             const QJsonObject &values, const QString &note, const QDate &date,
-                            Callback callback, const QString &epicId) {
-    QStringList a{"session","log","--json"};
-    const QString opId = makeOpId();
+                            Callback callback, const QString &epicId, const QString &operation) {
+    const QString opId = operation.isEmpty() ? makeOpId() : operation;
     QJsonObject params{{"op_id", opId}};
     if (!id.isEmpty()) params.insert(QStringLiteral("item_id"), id);
     if (!projectId.isEmpty()) params.insert(QStringLiteral("project_id"), projectId);
@@ -437,20 +416,18 @@ void CoreClient::sessionLog(const QString &id, const QString &projectId, int min
     if (!values.isEmpty()) params.insert(QStringLiteral("values"), values);
     if (!note.isEmpty()) params.insert(QStringLiteral("note"), note);
     if (date.isValid()) params.insert(QStringLiteral("date"), date.toString(Qt::ISODate));
-    enqueue(a, params, QStringLiteral("session.log"), std::move(callback), false, true,
-            Dto::decodeMutationResult, Dto::decodeMutationResult, opId, !epicId.isEmpty());
+    writeRpc(QStringLiteral("session.log"), params, std::move(callback));
 }
 void CoreClient::sessionStart(const QString &id, const QString &projectId, Callback callback) {
     const QString opId = makeOpId();
     QJsonObject params{{"op_id", opId}};
     if (!id.isEmpty()) params.insert(QStringLiteral("item_id"), id);
     if (!projectId.isEmpty()) params.insert(QStringLiteral("project_id"), projectId);
-    enqueue({"session","start","--json"}, params, QStringLiteral("session.start"), std::move(callback), false, true,
-            Dto::decodeMutationResult, Dto::decodeMutationResult, opId);
+    writeRpc(QStringLiteral("session.start"), params, std::move(callback));
 }
 void CoreClient::sessionStop(const QString &id, const QJsonObject &values, const QString &note,
-                             Callback callback, bool done, int minutes) {
-    const QString opId = makeOpId();
+                             Callback callback, bool done, int minutes, const QString &operation) {
+    const QString opId = operation.isEmpty() ? makeOpId() : operation;
     QJsonObject params{{"op_id", opId}};
     if (!id.isEmpty()) params.insert(QStringLiteral("id"), id);
     if (!values.isEmpty()) params.insert(QStringLiteral("values"), values);
@@ -458,53 +435,35 @@ void CoreClient::sessionStop(const QString &id, const QJsonObject &values, const
     if (done) params.insert(QStringLiteral("done"), true);
     if (minutes >= 0) params.insert(QStringLiteral("minutes"), minutes);
 
-    QStringList args{"session", "stop", "--json"};
-    if (!id.isEmpty()) args << "--id" << id;
-    for (auto it = values.constBegin(); it != values.constEnd(); ++it)
-        args << "--value" << it.key() + "=" + QString::number(it.value().toDouble(), 'g', 16);
-    if (!note.isEmpty()) args << "--note=" + note;
-    if (done) args << "--done";
-    if (minutes >= 0) args << "--minutes" << QString::number(minutes);
-    enqueue(args, params, QStringLiteral("session.stop"), std::move(callback),
-            false, true, Dto::decodeMutationResult, Dto::decodeMutationResult, opId);
+    writeRpc(QStringLiteral("session.stop"), params, std::move(callback));
 }
 void CoreClient::sessionEdit(const QString &id, int minutes, bool hasValues, const QJsonObject &values,
-                             bool hasNote, const QString &note, Callback callback) {
-    const QString opId = makeOpId();
+                             bool hasNote, const QString &note, Callback callback, qint64 version, const QString &operation) {
+    const QString opId = operation.isEmpty() ? makeOpId() : operation;
     QJsonObject params{{"op_id", opId}, {"id", id}};
+    if (version >= 0) params.insert(QStringLiteral("expected_version"), version);
     if (minutes >= 0) params.insert(QStringLiteral("minutes"), minutes);
     if (hasValues) params.insert(QStringLiteral("values"), values);
     if (hasNote)
         params.insert(QStringLiteral("note"), note.trimmed().isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(note));
-    QStringList args{"session", "edit", "--json", id};
-    if (minutes >= 0) args << "--minutes" << QString::number(minutes);
-    if (hasValues)
-        for (auto it = values.constBegin(); it != values.constEnd(); ++it)
-            args << "--value" << it.key() + "=" + QString::number(it.value().toDouble());
-    if (hasNote && !note.trimmed().isEmpty()) args << "--note" << note;
-    enqueue(args, params, QStringLiteral("session.edit"), std::move(callback),
-            false, true, Dto::decodeMutationResult, Dto::decodeMutationResult, opId);
+    writeRpc(QStringLiteral("session.edit"), params, std::move(callback));
 }
 void CoreClient::sessionRemove(const QString &id, Callback callback) {
     const QString opId = makeOpId();
-    enqueue({"session", "remove", "--json", id}, QJsonObject{{"op_id", opId}, {"id", id}},
-            QStringLiteral("session.remove"), std::move(callback), false, true,
-            Dto::decodeMutationResult, Dto::decodeMutationResult, opId);
+    writeRpc(QStringLiteral("session.remove"), QJsonObject{{"id", id}, {"op_id", opId}}, std::move(callback));
 }
 void CoreClient::sessionBump(const QString &id, const QString &metricId, int delta, Callback callback) {
     const QString opId = makeOpId();
     QJsonObject params{{"op_id", opId}, {"metric_id", metricId}, {"delta", delta}};
     if (!id.isEmpty()) params.insert(QStringLiteral("id"), id);
-    enqueue({"rpc", "session.bump"}, params, QStringLiteral("session.bump"), std::move(callback),
-            false, true, Dto::decodeMutationResult, nullptr, opId, true);
+    writeRpc(QStringLiteral("session.bump"), params, std::move(callback));
 }
 
 void CoreClient::sessionNote(const QString &id, const QString &text, Callback callback) {
     const QString opId = makeOpId();
     QJsonObject params{{"op_id", opId}, {"text", text.trimmed()}};
     if (!id.isEmpty()) params.insert(QStringLiteral("id"), id);
-    enqueue({"rpc", "session.note"}, params, QStringLiteral("session.note"), std::move(callback),
-            false, true, Dto::decodeMutationResult, nullptr, opId, true);
+    writeRpc(QStringLiteral("session.note"), params, std::move(callback));
 }
 
 void CoreClient::status(Callback callback) {
@@ -512,22 +471,18 @@ void CoreClient::status(Callback callback) {
             Dto::decodeJson, Dto::decodeJson);
 }
 void CoreClient::prayerMark(const QString &prayer, const QDate &date, Callback callback, qint64 expectedVersion) {
-    QStringList a{"prayer","mark","--json",prayer}; a<<dateArgs(date);
     const QString opId = makeOpId();
     QJsonObject params{{"op_id", opId}, {"prayer", prayer}};
     if (date.isValid()) params.insert(QStringLiteral("date"), date.toString(Qt::ISODate));
     if (expectedVersion >= 0) params.insert(QStringLiteral("expected_version"), expectedVersion);
-    enqueue(a, params, QStringLiteral("prayer.mark"), std::move(callback), false, true,
-            Dto::decodeMutationResult, Dto::decodePrayerMark, opId);
+    writeRpc(QStringLiteral("prayer.mark"), params, std::move(callback));
 }
 void CoreClient::prayerUnmark(const QString &prayer, const QDate &date, Callback callback, qint64 expectedVersion) {
-    QStringList a{"prayer","unmark","--json",prayer}; a<<dateArgs(date);
     const QString opId = makeOpId();
     QJsonObject params{{"op_id", opId}, {"prayer", prayer}};
     if (date.isValid()) params.insert(QStringLiteral("date"), date.toString(Qt::ISODate));
     if (expectedVersion >= 0) params.insert(QStringLiteral("expected_version"), expectedVersion);
-    enqueue(a, params, QStringLiteral("prayer.unmark"), std::move(callback), false, true,
-            Dto::decodeMutationResult, Dto::decodePrayerMark, opId);
+    writeRpc(QStringLiteral("prayer.unmark"), params, std::move(callback));
 }
 void CoreClient::parse(const QString &text, Callback callback) {
     enqueue({"item","parse","--json","--",text}, QJsonObject{{"text", text}}, QStringLiteral("item.parse"),
@@ -555,19 +510,21 @@ void CoreClient::configShow(Callback callback) {
 }
 void CoreClient::configSetSleepTime(const QString &time, Callback callback) {
     const QString opId = makeOpId();
-    enqueue({"config","set","--sleep-time",time},
-            QJsonObject{{"op_id", opId}, {"sleep_time", time}}, QStringLiteral("config.set"),
-            std::move(callback), false, true, Dto::decodeConfig, nullptr, opId);
+    writeRpc(QStringLiteral("config.set"), QJsonObject{{"op_id", opId}, {"sleep_time", time}}, std::move(callback), Dto::decodeConfig);
 }
 void CoreClient::listEntities(const QString &method, Callback callback) {
-    // Reads are coalesced by their argument list, so each list method needs
-    // its own key. No archive filter: Settings shows archived rows to restore.
+    // No archive filter: Settings shows archived rows to restore.
     enqueue({QStringLiteral("rpc"), method}, QJsonObject{}, method, std::move(callback), true, false,
             Dto::decodeJson, nullptr, {}, true);
 }
 void CoreClient::mutateEntity(const QString &method, QJsonObject params, Callback callback) {
     const QString opId = makeOpId();
     params.insert(QStringLiteral("op_id"), opId);
-    enqueue({}, params, method, std::move(callback), false, true,
-            Dto::decodeMutationResult, nullptr, opId, true);
+    writeRpc(method, params, std::move(callback));
+}
+
+void CoreClient::writeRpc(const QString &method, const QJsonObject &params, Callback callback,
+                          Decoder decoder) {
+    enqueue({QStringLiteral("rpc"), method}, params, method, std::move(callback), false, true,
+            decoder, nullptr, params.value(QStringLiteral("op_id")).toString());
 }

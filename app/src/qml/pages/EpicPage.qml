@@ -59,6 +59,7 @@ ScrollView {
         win.openSessionPrompt({
             mode: "edit",
             tick: session.minutes === null || session.minutes === undefined,
+            version: session.version,
             sessionId: String(session.id),
             itemId: String(session.item_id || ""),
             projectId: String(session.project_id || ""),
@@ -76,6 +77,12 @@ ScrollView {
 
     Connections {
         target: backend
+        function onReportsInvalidated() {
+            if (epicPage.visible) {
+                backend.loadTrackingItems()
+                backend.loadEpicPage(epicPage.win.epicId)
+            }
+        }
         function onSessionWriteFinished(ok, message) {
             if (ok && epicPage.visible)
                 epicPage.open()

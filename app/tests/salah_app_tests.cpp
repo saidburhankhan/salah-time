@@ -139,9 +139,31 @@ class SalahAppTests : public QObject {
     Q_OBJECT
     static void write(const QString &path, const QByteArray &data) { QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly)); QCOMPARE(f.write(data), data.size()); }
     static QJsonDocument readJson(const QString &path) { QFile f(path); if (!f.open(QIODevice::ReadOnly)) qFatal("fixture not readable"); return QJsonDocument::fromJson(f.readAll()); }
+    static QByteArray fakeRpc(const QTemporaryDir &dir) {
+        return "if [ \"$1\" = rpc ]; then\n"
+               "  IFS= read -r hello && IFS= read -r request || exit 2\n"
+               "  printf '%s\\n' \"$hello\" \"$request\" >> '" + dir.filePath("frames").toUtf8() + "'\n"
+               "  printf '%s\\n' \"$request\" | jq -c 'if .params.id == \"conflicting-edit\" then "
+               "{jsonrpc,id,error:{code:-32004,message:\"Session was changed\",data:{kind:\"conflict\"}}} else "
+               "{jsonrpc,id,result:{revision:1,op_id:.params.op_id,"
+               "changed:{items:[],sessions:[],projects:[],tags:[],metrics:[],marks:[],deleted:[]}}} end'\n"
+               "  exit 0\nfi\n";
+    }
+    static QList<QJsonObject> offlineRequests(const QTemporaryDir &dir) {
+        QFile frames(dir.filePath("frames"));
+        QList<QJsonObject> requests;
+        if (frames.open(QIODevice::ReadOnly)) {
+            while (!frames.atEnd()) {
+                const auto frame = QJsonDocument::fromJson(frames.readLine()).object();
+                if (frame.value("id").toInt() == 2) requests.append(frame);
+            }
+        }
+        return requests;
+    }
     static QString fake(QTemporaryDir &dir) {
         const QString path=dir.filePath("salah"), log=dir.filePath("args");
         QByteArray script = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '"+log.toUtf8()+"'\n";
+        script += fakeRpc(dir);
         script += "rpc='" TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/rpc/'\n"
                   "if [ \"$1\" = day ]; then jq -c .result \"${rpc}day_tracking.json\"; exit 0; fi\n"
                   "if [ \"$1\" = stats ]; then jq -c .result \"${rpc}stats.json\"; exit 0; fi\n";
@@ -164,6 +186,7 @@ else printf '%s\n' '{}'; fi
     static QString fakeCore(QTemporaryDir &dir) {
         const QString path = dir.filePath("core-salah"), log = dir.filePath("core-args");
         QByteArray script = "#!/bin/sh\nfor arg in \"$@\"; do printf '<%s>' \"$arg\"; done >> '" + log.toUtf8() + "'\nprintf '\\n' >> '" + log.toUtf8() + "'\n";
+        script += fakeRpc(dir);
         script += QByteArray(R"SH(
 case "$*" in
   *2099-01-01*) sleep 1 ;;
@@ -982,7 +1005,7 @@ private slots:
     void coreClientDecodesSessionStopMutation() {
         QTemporaryDir dir; const QString path=dir.filePath("salah");
         const QString fixture=QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/rpc/session_stop.json");
-        write(path,"#!/bin/sh\njq -c .result '"+fixture.toUtf8()+"'\n"); QFile::setPermissions(path,QFile::ReadOwner|QFile::WriteOwner|QFile::ExeOwner);
+        write(path,"#!/bin/sh\ncat >/dev/null\njq -c '{jsonrpc,id:2,result}' '"+fixture.toUtf8()+"'\n"); QFile::setPermissions(path,QFile::ReadOwner|QFile::WriteOwner|QFile::ExeOwner);
         CoreClient client(nullptr,path,2000,dir.filePath("missing.sock"));
         QSignalSpy spy(&client,&CoreClient::requestFinished); CoreClient::Result result;
         client.sessionStop("id-1",{}, {}, [&](const CoreClient::Result&r){result=r;}); QTRY_COMPARE(spy.size(),1);
@@ -995,9 +1018,9 @@ private slots:
         CoreClient::ItemFields edit = add; edit.title = "New title"; edit.hasPlannedMinutes = false;
         client.day(QDate(2026,11,22), {}); client.stats(QDate(2026,11,1),QDate(2026,11,30),{});
         client.itemAdd(add); client.itemEdit("id-1",edit); client.itemRemove("id-old"); client.itemMove("id-1","isha",-2);
-        client.sessionLog("id-1", "project-1", 15, {}, {}, QDate(2026,11,23));
+        client.sessionLog("id-1", {}, 15, {{"focus", 4}}, "Chapter finished", QDate(2026,11,23));
         client.sessionLog("id-1", "project-1");
-        client.sessionStart("id-1", "project-1"); client.sessionStop("session-1");
+        client.sessionStart({}, "project-1"); client.sessionStop("session-1");
         client.prayerMark("fajr",QDate(2026,11,22)); client.prayerUnmark("fajr",QDate(2026,11,22));
         client.parse("read -- carefully",{}); client.configShow({}); client.configSetSleepTime("22:45");
         client.sessionStop("session-2", QJsonObject{{"focus", 4}}, "Finished chapter", {}, true, 32);
@@ -1006,22 +1029,331 @@ private slots:
         QCOMPARE(lines.size(), 16);
         QCOMPARE(lines.at(0),"<day><--date><2026-11-22><--json>");
         QCOMPARE(lines.at(1),"<stats><--from><2026-11-01><--to><2026-11-30><--json>");
-        QCOMPARE(lines.at(2),"<item><add><--json><--block><asr><--repeat><weekly><--days><mon,wed><--project><project-1><--planned-minutes><30><--date><2026-11-23><--><Title -- literal>");
-        QCOMPARE(lines.at(3),"<item><edit><--json><id-1><--title=New title><--block><asr><--repeat><weekly><--days><mon,wed><--project><project-1><--no-planned-minutes>");
-        QCOMPARE(lines.at(4),"<item><remove><--json><id-old>");
-        QCOMPARE(lines.at(5),"<item><move><--json><id-1><--block><isha><--index><-2>");
-        QCOMPARE(lines.at(6),"<session><log><--json>");
-        QCOMPARE(lines.at(7),"<session><log><--json>");
-        QCOMPARE(lines.at(8),"<session><start><--json>");
-        QCOMPARE(lines.at(9),"<session><stop><--json><--id><session-1>");
-        QCOMPARE(lines.at(10),"<prayer><mark><--json><fajr><--date><2026-11-22>");
-        QCOMPARE(lines.at(11),"<prayer><unmark><--json><fajr><--date><2026-11-22>");
-        QCOMPARE(lines.at(12),"<item><parse><--json><--><read -- carefully>");
-        QCOMPARE(lines.at(13),"<config><show>");
-        QCOMPARE(lines.at(14),"<config><set><--sleep-time><22:45>");
-        QCOMPARE(lines.at(15), "<session><stop><--json><--id><session-2><--value><focus=4>"
-                               "<--note=Finished chapter><--done><--minutes><32>");
+        QCOMPARE(lines.at(12), "<item><parse><--json><--><read -- carefully>");
+        QCOMPARE(lines.at(13), "<config><show>");
+        const auto writes = offlineRequests(dir);
+        QCOMPARE(writes.size(), 12);
+        const QStringList expected{"item.add", "item.edit", "item.remove", "item.move", "session.log", "session.log",
+                                   "session.start", "session.stop", "prayer.mark", "prayer.unmark", "config.set", "session.stop"};
+        QSet<QString> ids;
+        for (int i = 0; i < writes.size(); ++i) {
+            QCOMPARE(writes[i].value("method").toString(), expected[i]);
+            const auto id = writes[i].value("params").toObject().value("op_id").toString();
+            QVERIFY(!id.isEmpty());
+            QVERIFY(!ids.contains(id));
+            ids.insert(id);
+        }
+        auto params = [&](int i) { return writes[i].value("params").toObject(); };
+        QCOMPARE(params(0).value("title"), "Title -- literal");
+        QCOMPARE(params(0).value("weekdays").toArray(), (QJsonArray{"mon", "wed"}));
+        QCOMPARE(params(0).value("planned_minutes"), 30);
+        QCOMPARE(params(1).value("planned_minutes"), QJsonValue(QJsonValue::Null));
+        QCOMPARE(params(2).value("id"), "id-old");
+        QCOMPARE(params(3).value("block"), "isha");
+        QCOMPARE(params(4).value("item_id"), "id-1");
+        QCOMPARE(params(4).value("minutes"), 15);
+        QCOMPARE(params(4).value("date"), "2026-11-23");
+        QCOMPARE(params(4).value("values").toObject().value("focus"), 4);
+        QCOMPARE(params(4).value("note"), "Chapter finished");
+        QVERIFY(!params(5).contains("minutes"));
+        QCOMPARE(params(6).value("project_id"), "project-1");
+        QCOMPARE(params(7).value("id"), "session-1");
+        QCOMPARE(params(8).value("prayer"), "fajr");
+        QCOMPARE(params(9).value("date"), "2026-11-22");
+        QCOMPARE(params(10).value("sleep_time"), "22:45");
+        QCOMPARE(params(11).value("minutes"), 32);
+        QCOMPARE(params(11).value("done"), true);
+        QCOMPARE(params(11).value("values").toObject().value("focus"), 4);
+        QCOMPARE(params(11).value("note"), "Finished chapter");
     }
+    void changedNotificationRefreshesTheVisibleReportAndPicker() {
+        QTemporaryDir dir;
+        FakeDaemon daemon(daemon_path(dir));
+        if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        auto state = trackingState();
+        daemon.setHandler(trackingHandler(state));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        backend.reload();
+        waitForBackendIdle(backend);
+        root->setProperty("page", 2);
+        QObject *stats = findByName(root.data(), "statsScroll");
+        QVERIFY(stats);
+        QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, "project"), Q_ARG(QVariant, "study")));
+        auto invalidate = [&](int revision, const QString &method, const QString &field, const QString &id) {
+            waitForBackendIdle(backend);
+            const int reports = requestCount(daemon, method);
+            const int lists = requestCount(daemon, "items.list");
+            daemon.notifyChanged(revision, {"items", "sessions"});
+            QTRY_VERIFY(requestCount(daemon, method) > reports);
+            QTRY_VERIFY(requestCount(daemon, "items.list") > lists);
+            waitForBackendIdle(backend);
+            QCOMPARE(lastRequest(daemon, method).value("params").toObject().value(field).toString(), id);
+        };
+        invalidate(101, "stats.series", "project_id", "study");
+        QVERIFY(QMetaObject::invokeMethod(stats, "setTab", Q_ARG(QVariant, "table")));
+        invalidate(102, "stats.table", "project_id", "study");
+        auto *table = findByName(root.data(), "generalTable");
+        QVERIFY(table);
+        QVERIFY(QMetaObject::invokeMethod(table, "setGroup", Q_ARG(QVariant, "project")));
+        waitForBackendIdle(backend);
+        QVERIFY(QMetaObject::invokeMethod(table, "setGroup", Q_ARG(QVariant, "epic")));
+        // The project report is still on screen during the epic read.
+        auto *action = findItemByName(table, "epicRowOpen");
+        QVERIFY(action && !action->property("enabled").toBool());
+        waitForBackendIdle(backend);
+        QVERIFY(QMetaObject::invokeMethod(stats, "setTab", Q_ARG(QVariant, "notes")));
+        invalidate(103, "sessions.list", "project_id", "study");
+
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "openEpic", Q_ARG(QVariant, "e-grammar")));
+        waitForBackendIdle(backend);
+        const int series = requestCount(daemon, "stats.series");
+        invalidate(104, "sessions.list", "epic_id", "e-grammar");
+        QVERIFY(requestCount(daemon, "stats.series") > series);
+        QCOMPARE(lastRequest(daemon, "stats.series").value("params").toObject().value("epic_id"), "e-grammar");
+
+        // An epic log uses the current tracking day even if Today is browsing history.
+        state->day["day"] = "2031-05-13";
+        state->day["is_today"] = false;
+        backend.selectDay("2031-05-13");
+        waitForBackendIdle(backend);
+        QVERIFY(backend.selectedDay() != backend.todayDay());
+        auto *epic = findByName(root.data(), "epicPage");
+        auto *prompt = findByName(root.data(), "sessionPrompt");
+        auto *minutes = findByName(root.data(), "sessionMinutesField");
+        QVERIFY(epic && prompt && minutes);
+        QVERIFY(QMetaObject::invokeMethod(epic, "logTime"));
+        minutes->setProperty("text", "15");
+        QVERIFY(QMetaObject::invokeMethod(prompt, "save", Q_ARG(QVariant, false), Q_ARG(QVariant, false)));
+        QTRY_COMPARE(requestCount(daemon, "session.log"), 1);
+        const auto log = lastRequest(daemon, "session.log").value("params").toObject();
+        QCOMPARE(log.value("epic_id"), "e-grammar");
+        QVERIFY(!log.contains("date"));
+    }
+
+    void countdownUsesDeadlineAndQuickAddShowsLiteralMarkup() {
+        QTemporaryDir dir;
+        Backend backend(nullptr, fake(dir));
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        waitForBackendIdle(backend);
+        auto day = Dto::decode<Dto::DayPlan>(fixture("day"));
+        QVERIFY(day && day.value->now);
+        auto next = day.value->now->json.value("next").toObject();
+        next["at"] = QDateTime::currentDateTimeUtc().addSecs(61).toString(Qt::ISODateWithMs);
+        day.value->now->json["next"] = next;
+        backend.nowState()->update(*day.value, QDateTime::currentMSecsSinceEpoch());
+        root->setProperty("countdown", 400);
+        QTRY_VERIFY_WITH_TIMEOUT(root->property("countdown").toInt() <= 61, 2500);
+        QVERIFY(root->property("countdown").toInt() >= 57);
+        auto *preview = findByName(root.data(), "quickPreview");
+        QVERIFY(preview);
+        Dto::ParseDraft draft;
+        draft.title = "<b>Read</b>";
+        backend.parseDraft()->update(draft);
+        QCOMPARE(preview->property("textFormat").toInt(), int(Qt::PlainText));
+        QVERIFY(preview->property("text").toString().contains("<b>Read</b>"));
+    }
+
+    void socketReadsCoalesceOnlyIdenticalParamsAndFinishEveryCaller() {
+        QTemporaryDir dir;
+        FakeDaemon daemon(daemon_path(dir));
+        if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        daemon.setHandler([](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            // Slow enough that the first read is still in flight when the
+            // later calls are queued or coalesced.
+            QTimer::singleShot(400, server, [=] { server->respond(socket, request, request.value("params")); });
+        });
+        CoreClient client(nullptr, QString(), 4000, daemon_path(dir));
+        const QJsonObject a{{"measures", QJsonArray{"minutes"}}, {"epic_id", "a"}};
+        QJsonObject b = a, explicitBounds = a;
+        b["epic_id"] = "b";
+        explicitBounds["values"] = QJsonObject{}; // Same CLI arguments, different RPC params.
+        QList<QJsonObject> replies;
+        auto call = [&](const QJsonObject &params) {
+            client.statsSeries(params, [&](const CoreClient::Result &reply) {
+                QVERIFY(reply.ok);
+                replies.append(std::get<Dto::Json>(reply.value).json);
+            });
+        };
+        call(a);
+        QTRY_COMPARE(requestCount(daemon, "stats.series"), 1);
+        call(b);
+        call(a);
+        call(explicitBounds);
+        QTRY_COMPARE(replies.size(), 4);
+        QCOMPARE(replies, (QList<QJsonObject>{a, a, b, explicitBounds}));
+        QCOMPARE(requestCount(daemon, "stats.series"), 3);
+    }
+
+    void sessionEditorCorrelatesRepliesAndKeepsExplicitClears() {
+        QTemporaryDir dir;
+        Backend backend(nullptr, fake(dir));
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        QObject *notes = findByName(root.data(), "notesList");
+        QObject *prompt = findByName(root.data(), "sessionPrompt");
+        QObject *note = findByName(root.data(), "sessionNoteField");
+        QVERIFY(notes && prompt && note);
+        auto submit = [&](const QString &id, int version) {
+            QVariantMap row{{"id", id}, {"minutes", 15}, {"values", QVariantMap{{"focus", 3}}},
+                            {"version", version}, {"note", "old"}};
+            QVERIFY(QMetaObject::invokeMethod(notes, "openSession", Q_ARG(QVariant, row)));
+            note->setProperty("text", "");
+            prompt->setProperty("values", QVariantMap{});
+            QVERIFY(QMetaObject::invokeMethod(prompt, "save", Q_ARG(QVariant, false), Q_ARG(QVariant, false)));
+        };
+        submit("first", 7);
+        const QString first = prompt->property("operation").toString();
+        QVERIFY(!first.isEmpty());
+        root->setProperty("sessionPromptVisible", false);
+        submit("conflicting-edit", 4);
+        const QString second = prompt->property("operation").toString();
+        QVERIFY(!second.isEmpty() && first != second);
+        QTRY_COMPARE(prompt->property("serverError").toString(), "Session was changed");
+        QVERIFY(root->property("sessionPromptVisible").toBool());
+        QVERIFY(!prompt->property("waiting").toBool());
+        const auto writes = offlineRequests(dir);
+        QCOMPARE(writes.size(), 2);
+        const auto params = writes.last().value("params").toObject();
+        QCOMPARE(params.value("op_id"), second);
+        QCOMPARE(params.value("expected_version"), 4);
+        QCOMPARE(params.value("values"), QJsonValue(QJsonObject{}));
+        QCOMPARE(params.value("note"), QJsonValue(QJsonValue::Null));
+    }
+
+    void alreadyTickedCompletesPromptWithoutWriting() {
+        QTemporaryDir dir;
+        Backend backend(nullptr, fake(dir));
+        backend.reload();
+        waitForBackendIdle(backend);
+        QSignalSpy finished(&backend, &Backend::sessionWriteFinished);
+        backend.tickItem("<id:5>", {}, {}, "skip");
+        backend.tickItem("<id:5>", {{"focus", 2}}, "unsaved note", "done");
+        QCOMPARE(finished.size(), 2);
+        QCOMPARE(finished[0].at(0).toBool(), true);
+        QCOMPARE(finished[0].at(2).toString(), "skip");
+        QCOMPARE(finished[1].at(0).toBool(), false);
+        QVERIFY(finished[1].at(1).toString().contains("not saved"));
+        QCOMPARE(finished[1].at(2).toString(), "done");
+        QVERIFY(offlineRequests(dir).isEmpty());
+    }
+
+    void filteredChartsUseWeightedTotalsAndClearOnReadFailure() {
+        QTemporaryDir dir;
+        fake(dir);
+        QJsonObject stats = fixture("stats");
+        auto totals = stats.value("totals").toObject();
+        totals["avg_focus"] = 4.6;
+        stats["totals"] = totals;
+        QJsonArray points{QJsonObject{{"day", "2031-05-13"}, {"value", 1}},
+                          QJsonObject{{"day", "2031-05-14"}, {"value", 5}}};
+        QJsonObject series{{"metric_id", "focus"}, {"name", "Focus"}, {"rollup", "avg"}, {"points", points}};
+        auto custom = series;
+        custom["metric_id"] = "clarity";
+        stats["series"] = QJsonArray{series, custom};
+        write(dir.filePath("report.json"), QJsonDocument(stats).toJson());
+        const auto script = dir.filePath("report-cli");
+        write(script, "#!/bin/sh\ncd '" + dir.path().toUtf8() + "'\n" + R"SH(
+if [ "$1" = stats ]; then
+    printf '%s\n' "$*" >> report-args
+    case "$*" in
+        *broken*) exit 1 ;;
+        "stats table"*) echo '{"totals":{"values":{"clarity":2.4}}}' ;;
+        *) cat report.json ;;
+    esac
+else
+    exec ./salah "$@"
+fi
+)SH");
+        QFile::setPermissions(script, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        Backend backend(nullptr, script);
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        const QVariantMap filter{{"days", 7}, {"project_id", "none"}, {"epic_id", "none"},
+            {"minutes_min", 10}, {"values", QVariantMap{{"focus", QVariantMap{{"min", 2}, {"max", 5}}}}}};
+        backend.loadStatsQuery(filter);
+        waitForBackendIdle(backend);
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        auto focus = visualNamed(window, "metricChart_focus").value(0);
+        auto clarity = visualNamed(window, "metricChart_clarity").value(0);
+        QVERIFY(focus && clarity);
+        QCOMPARE(focus->property("summary").toDouble(), 4.6);
+        QCOMPARE(clarity->property("summary").toDouble(), 2.4);
+        QFile args(dir.filePath("report-args"));
+        QVERIFY(args.open(QIODevice::ReadOnly));
+        const auto output = args.readAll();
+        QVERIFY(output.contains("stats --days 7 --project none --epic none --min-minutes 10 --max focus=5 --min focus=2 --json"));
+        QVERIFY(output.contains("stats table --days 7 --project none --epic none --min-minutes 10 --max focus=5 --min focus=2"));
+        backend.loadStatsQuery({{"project_id", "broken"}});
+        waitForBackendIdle(backend);
+        QVERIFY(!backend.error().isEmpty());
+        QVERIFY(backend.statsData().isEmpty());
+    }
+
+    void taskSearchIncludesUnassignedWorkBeyondFirstPage() {
+        QTemporaryDir dir;
+        const auto cli = fake(dir);
+        const auto script = dir.filePath("items-cli");
+        QJsonArray tasks;
+        for (int n = 1; n <= 31; ++n)
+            tasks.append(QJsonObject{{"id", QString::number(n)}, {"title", QString("Read chapter %1").arg(n)},
+                                     {"project_id", n == 31 ? QJsonValue("book") : QJsonValue(QJsonValue::Null)}});
+        write(dir.filePath("items.json"), QJsonDocument(tasks).toJson());
+        write(script, "#!/bin/sh\nif [ \"$1 $2\" = 'item list' ]; then cat '" + dir.filePath("items.json").toUtf8()
+              + "'; else exec '" + cli.toUtf8() + "' \"$@\"; fi\n");
+        QFile::setPermissions(script, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        Backend backend(nullptr, script);
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        root->setProperty("page", 2);
+        backend.loadTrackingItems();
+        waitForBackendIdle(backend);
+        QObject *stats = findByName(root.data(), "statsScroll");
+        QObject *bar = stats->property("filterBar").value<QObject *>();
+        QVERIFY(bar);
+        auto *none = findByName(bar, "statsProject_none");
+        QVERIFY(none && QMetaObject::invokeMethod(none, "clicked"));
+        QCOMPARE(bar->property("taskChoices").toList().size(), 30);
+        auto *search = findByName(bar, "statsTaskSearch");
+        QVERIFY(search);
+        search->setProperty("text", "CHAPTER 30");
+        QVERIFY(QMetaObject::invokeMethod(search, "textEdited"));
+        QCOMPARE(bar->property("matchingTasks").toList().size(), 1);
+        auto *last = findItemByName(bar, "statsTask_30");
+        QVERIFY(last && QMetaObject::invokeMethod(last, "clicked"));
+        QVariant query;
+        QVERIFY(QMetaObject::invokeMethod(bar, "query", Q_RETURN_ARG(QVariant, query)));
+        QCOMPARE(query.toMap().value("project_id").toString(), "none");
+        QCOMPARE(query.toMap().value("item_id").toString(), "30");
+    }
+
     void coreClientQueueCoalescingAndOrdering() {
         QTemporaryDir dir; CoreClient client(nullptr,fakeCore(dir),3000); QSignalSpy spy(&client,&CoreClient::requestFinished);
         int callbacks = 0;
@@ -1107,10 +1439,14 @@ private slots:
     void exactWriteArguments() {
         QTemporaryDir dir; Backend b(nullptr,fake(dir)); QSignalSpy spy(&b,&Backend::requestFinished);
         b.reload(); QTRY_COMPARE(spy.size(),4); b.addQuick("Read Quran after Isha","asr");
-        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item add --json --quick --block asr -- Read Quran after Isha"),2000);
-        b.moveItem("a1","isha"); b.togglePrayer("fajr",false);
-        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("item move --json a1 --block isha --index 0"),3000);
-        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("prayer mark --json fajr --date 2031-05-14"),3000);
+        b.moveItem("a1", "isha"); b.togglePrayer("fajr", false);
+        QTRY_COMPARE_WITH_TIMEOUT(offlineRequests(dir).size(), 3, 3000);
+        const auto requests = offlineRequests(dir);
+        const auto add = requests[0].value("params").toObject();
+        QCOMPARE(add.value("quick_text"), "Read Quran after Isha");
+        QCOMPARE(add.value("block"), "asr");
+        QCOMPARE(requests[1].value("params").toObject().value("index"), 0);
+        QCOMPARE(requests[2].value("params").toObject().value("date"), "2031-05-14");
     }
     void socketMoveSendsNeighbourAnchors() {
         QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
@@ -1177,7 +1513,8 @@ private slots:
         QVERIFY(untouched >= 0); QVERIFY(touched >= 0);
         QVERIFY(!b.dayTimeline()->data(b.dayTimeline()->index(untouched, 0), DayTimelineModel::PendingRole).toBool());
         QVERIFY(b.dayTimeline()->data(b.dayTimeline()->index(touched, 0), DayTimelineModel::PendingRole).toBool());
-        QTRY_VERIFY_WITH_TIMEOUT(logLines(dir).contains("session start --json"),3000);
+        QTRY_COMPARE_WITH_TIMEOUT(offlineRequests(dir).size(), 1, 3000);
+        QCOMPARE(offlineRequests(dir).first().value("params").toObject().value("item_id"), "<id:4>");
     }
     void escapeFunctionClosesTopOverlay() {
         QTemporaryDir dir; Backend backend(nullptr,fake(dir)); Theme theme(dir.path());
@@ -1227,12 +1564,21 @@ private slots:
         QCOMPARE(bounds.toMap().value("from").toString(),QString("2026-02-01")); QCOMPARE(bounds.toMap().value("to").toString(),QString("2026-02-28"));
         QVERIFY(QMetaObject::invokeMethod(root.data(),"statsBounds",Q_RETURN_ARG(QVariant,bounds),Q_ARG(QVariant,"custom"),Q_ARG(QVariant,QDateTime()),Q_ARG(QVariant,QDateTime(QDate(2026,12,2),QTime())),Q_ARG(QVariant,QDateTime(QDate(2026,11,29),QTime()))));
         QCOMPARE(bounds.toMap().value("from").toString(),QString("2026-11-29")); QCOMPARE(bounds.toMap().value("to").toString(),QString("2026-12-02"));
-        root->setProperty("statsMode","month"); root->setProperty("statsAnchor",QDateTime(QDate(2026,1,31),QTime()));
-        QVERIFY(QMetaObject::invokeMethod(root.data(),"stepStats",Q_ARG(QVariant,1))); QCOMPARE(root->property("statsAnchor").toDateTime().date(),QDate(2026,2,1));
-        root->setProperty("statsMode","week"); root->setProperty("statsAnchor",QDateTime(QDate(2026,11,22),QTime()));
-        QVERIFY(QMetaObject::invokeMethod(root.data(),"stepStats",Q_ARG(QVariant,-1))); QCOMPARE(root->property("statsAnchor").toDateTime().date(),QDate(2026,11,15));
-        root->setProperty("statsMode","custom"); root->setProperty("customFrom",QDateTime(QDate(2026,11,29),QTime())); root->setProperty("customTo",QDateTime(QDate(2026,12,2),QTime()));
-        QVERIFY(QMetaObject::invokeMethod(root.data(),"stepStats",Q_ARG(QVariant,1))); QCOMPARE(root->property("customFrom").toDateTime().date(),QDate(2026,12,3)); QCOMPARE(root->property("customTo").toDateTime().date(),QDate(2026,12,6));
+        QObject *bar = findByName(root.data(), "statsScroll")->property("filterBar").value<QObject *>();
+        QVERIFY(bar);
+        QVERIFY(QMetaObject::invokeMethod(bar, "setCustom", Q_ARG(QVariant, "2026-11-29"), Q_ARG(QVariant, "2026-12-02")));
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "stepStats", Q_ARG(QVariant, 1)));
+        QCOMPARE(bar->property("customFrom").toString(), "2026-12-03");
+        QCOMPARE(bar->property("customTo").toString(), "2026-12-06");
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "stepStats", Q_ARG(QVariant, -1)));
+        QCOMPARE(bar->property("customTo").toString(), "2026-12-02");
+        QSignalSpy edited(bar, SIGNAL(edited()));
+        for (const auto &end : {"2026-02-30", "2026-04-30", "2028-11-29"}) {
+            QVERIFY(QMetaObject::invokeMethod(bar, "setCustom", Q_ARG(QVariant, "2026-11-29"), Q_ARG(QVariant, end)));
+            QVERIFY(!bar->property("rangeError").toString().isEmpty());
+        }
+        QCOMPARE(edited.size(), 0);
+        QCOMPARE(bar->property("customFrom").toString(), "2026-11-29");
         QVariant stepped;
         QVERIFY(QMetaObject::invokeMethod(root.data(),"monthStep",Q_RETURN_ARG(QVariant,stepped),Q_ARG(QVariant,QDateTime(QDate(2024,1,31),QTime())),Q_ARG(QVariant,1)));
         QCOMPARE(stepped.toDateTime().date(),QDate(2024,2,29));
@@ -1969,19 +2315,11 @@ const int original = model->indexOfItem("<id:4>");
         QCOMPARE(tick.value("values").toObject().value("focus").toDouble(), 5.0);
         QCOMPARE(tick.value("note").toString(), QString("After salah"));
 
-        // Ticking an item whose timer runs pauses it first (no values).
+        // session.log stops a matching timer in the same write as the tick.
         backend.tickItem("deep", QVariantMap{{"focus", 4}});
         QTRY_COMPARE_WITH_TIMEOUT(requestCount(daemon, "session.log"), 2, 3000);
-        int stopAt = -1, logAt = -1;
-        for (int i = 0; i < daemon.requests.size(); ++i) {
-            const QString method = daemon.requests.at(i).value("method").toString();
-            if (method == "session.stop") stopAt = i;
-            if (method == "session.log") logAt = i;
-        }
-        QVERIFY(stopAt >= 0 && stopAt < logAt);
-        const QJsonObject stop = daemon.requests.at(stopAt).value("params").toObject();
-        QCOMPARE(stop.value("id").toString(), QString("s-run"));
-        QVERIFY(!stop.contains("values"));
+        QCOMPARE(requestCount(daemon, "session.stop"), 0);
+        QCOMPARE(lastRequest(daemon, "session.log").value("params").toObject().value("item_id"), "deep");
 
         // Already done: tickItem never adds a second tick.
         waitForBackendIdle(backend);
@@ -2350,7 +2688,9 @@ const int original = model->indexOfItem("<id:4>");
         daemon.setHandler([](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
             const QString method = request.value("method").toString();
             const QJsonObject params = request.value("params").toObject();
-            if (method == "stats.table" && params.contains("values"))
+            if (method == "stats.table" && params.value("project_id") == "broken")
+                server->respondError(socket, request, -32602, "invalid_params", "unknown project");
+            else if (method == "stats.table" && params.contains("values"))
                 server->respond(socket, request, fixture("stats_table_metric_filter"));
             else if (method == "stats.table")
                 server->respond(socket, request, fixture(params.value("group").toString() == "project" ? "stats_table_project" : "stats_table_week"));
@@ -2389,6 +2729,13 @@ const int original = model->indexOfItem("<id:4>");
         QTRY_COMPARE_WITH_TIMEOUT(table.size(), 3, 3000);
         QCOMPARE(backend.statsTable().value("filter").toMap().value("minutes_min").toInt(), 10);
         QCOMPARE(backend.statsTable().value("rows").toList().size(), 1);
+        // A failed query clears the previous rows instead of showing them
+        // under the new filter.
+        backend.loadStatsTable(QVariantMap{{"days", 14}, {"project_id", "broken"}}, "project");
+        QTRY_COMPARE_WITH_TIMEOUT(table.size(), 4, 3000);
+        QVERIFY(backend.statsTable().isEmpty());
+        QCOMPARE(backend.error(), QString("unknown project"));
+        backend.dismissError();
         QSignalSpy stats(&backend, &Backend::statsDataChanged);
         backend.loadStatsQuery(QVariantMap{{"days", 14}, {"minutes_min", 10}, {"values", QVariantMap{{"focus", QVariantMap{{"min", 3}}}}}});
         QTRY_COMPARE_WITH_TIMEOUT(stats.size(), 1, 3000);
@@ -2605,6 +2952,42 @@ const int original = model->indexOfItem("<id:4>");
         root->setProperty("timerNow", QDateTime::currentMSecsSinceEpoch() + 60 * 60 * 1000);
         QCOMPARE(elapsed->property("text").toString(), QString("120:00"));
         shotWindow(window, "running-card-stale.png");
+        for (const char *button : {"distractionPlus", "distractionMinus", "runningAddNoteButton"}) {
+            auto *control = findByName(card, button);
+            QVERIFY(control && !control->property("enabled").toBool());
+        }
+        // Pause stays available: it is the way to save a stale session.
+        auto *stalePause = findByName(card, "runningStopButton");
+        QVERIFY(stalePause && stalePause->property("enabled").toBool());
+        QQmlComponent rowComponent(&engine, QUrl("qrc:/qml/today/ItemCard.qml"));
+        QScopedPointer<QObject> row(rowComponent.createWithInitialProperties({
+            {"win", QVariant::fromValue(root.data())}, {"timerRunning", true},
+            {"runningSessionId", "s-run"}, {"itemId", "deep"}}));
+        QVERIFY2(row, qPrintable(rowComponent.errorString()));
+        auto *pause = findByName(row.data(), "timerButton");
+        QVERIFY(pause);
+        QVERIFY(pause->property("text").toString().contains("120:00"));
+        row->setProperty("runningSessionId", "previous-session");
+        QVERIFY(QMetaObject::invokeMethod(pause, "clicked"));
+        QVERIFY(!root->property("sessionPromptVisible").toBool());
+        waitForBackendIdle(backend);
+        row->setProperty("runningSessionId", "s-run");
+        QVERIFY(QMetaObject::invokeMethod(pause, "clicked"));
+        QVERIFY(root->property("sessionPromptVisible").toBool());
+        auto *prompt = findByName(root.data(), "sessionPrompt");
+        auto *worked = findByName(root.data(), "sessionMinutesField");
+        QVERIFY(prompt && worked);
+        worked->setProperty("text", "90");
+        auto updated = status.value("running").toObject();
+        updated["max_minutes"] = 45;
+        status["running"] = updated;
+        reloadStatus();
+        QCOMPARE(prompt->property("workedCap").toInt(), 45);
+        QVERIFY(!worked->property("acceptableInput").toBool());
+        QVERIFY(QMetaObject::invokeMethod(prompt, "save", Q_ARG(QVariant, false), Q_ARG(QVariant, false)));
+        QVERIFY(!prompt->property("waiting").toBool());
+        QVERIFY(prompt->property("serverError").toString().contains("45"));
+        QVERIFY(offlineRequests(dir).isEmpty());
     }
     void filterBarTableAndTabsFollowTheUser() {
         QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");

@@ -28,7 +28,11 @@ QJsonObject Backend::filterParams(const QVariantMap &filter, bool allowAnyDays) 
     QJsonObject params;
     const QDate from = QDate::fromString(filter.value(QStringLiteral("from")).toString(), Qt::ISODate);
     const QDate to = QDate::fromString(filter.value(QStringLiteral("to")).toString(), Qt::ISODate);
-    if (from.isValid() && to.isValid() && from <= to && from.daysTo(to) < 730) {
+    if (filter.contains("from") || filter.contains("to")) {
+        if (!from.isValid() || !to.isValid() || from > to || from.daysTo(to) >= 730) {
+            fail(tr("Choose a valid date range of 1 to 730 days."));
+            return {};
+        }
         params.insert(QStringLiteral("from"), from.toString(Qt::ISODate));
         params.insert(QStringLiteral("to"), to.toString(Qt::ISODate));
     } else {
@@ -61,7 +65,30 @@ QJsonObject Backend::filterParams(const QVariantMap &filter, bool allowAnyDays) 
 }
 
 void Backend::loadStatsQuery(const QVariantMap &filter) {
-    m_client.statsQuery(filterParams(filter, true), statsResponse());
+    const QJsonObject params = filterParams(filter, true);
+    if (params.isEmpty()) return;
+    auto apply = statsResponse();
+    const quint64 request = m_statsRequest;
+    m_client.statsQuery(params, [this, apply, params, request](const CoreClient::Result &result) {
+        apply(result);
+        if (!result.ok || request != m_statsRequest) return;
+        // stats.get supplies overall focus and quality. The table supplies the
+        // weighted range totals for other average metrics under the same filter.
+        const auto series = m_stats.json.value("series").toArray();
+        for (const auto &entry : series) {
+            const auto metric = entry.toObject();
+            if (metric.value("rollup") != "avg" || metric.value("metric_id") == "focus"
+                || metric.value("metric_id") == "quality") continue;
+            m_client.statsTable(params, [this, request](const CoreClient::Result &table) {
+                if (request != m_statsRequest) return;
+                if (!table.ok) { fail(table.error.message); return; }
+                const auto totals = std::get<Dto::Json>(table.value).json.value("totals").toObject();
+                m_stats.json.insert("range_values", totals.value("values"));
+                emit statsDataChanged();
+            });
+            break;
+        }
+    });
 }
 
 void Backend::loadTrends(const QVariantMap &filter, const QStringList &measures,
@@ -75,6 +102,7 @@ void Backend::loadTrends(const QVariantMap &filter, const QStringList &measures,
         return;
     }
     QJsonObject params = filterParams(filter, true);
+    if (params.isEmpty()) return;
     params.insert(QStringLiteral("measures"), QJsonArray::fromStringList(measures));
     params.insert(QStringLiteral("interval"), interval);
     if (!split.isEmpty()) params.insert(QStringLiteral("split"), split);
@@ -99,11 +127,15 @@ void Backend::loadStatsTable(const QVariantMap &filter, const QString &group) {
         return;
     }
     QJsonObject params = filterParams(filter, true);
+    if (params.isEmpty()) return;
     params.insert(QStringLiteral("group"), kTableGroups.contains(group) ? group : QStringLiteral("week"));
     const quint64 request = ++m_statsTableRequest;
     m_client.rpcRead(QStringLiteral("stats.table"), params, [this, request](const CoreClient::Result &result) {
         if (request != m_statsTableRequest) return;
         if (!result.ok) {
+            // Never leave the previous query's rows under the new filter.
+            m_statsTable.clear();
+            emit statsTableChanged();
             fail(result.error.message);
             return;
         }
@@ -116,6 +148,7 @@ void Backend::loadStatsTable(const QVariantMap &filter, const QString &group) {
 
 void Backend::loadSessions(const QVariantMap &filter) {
     QJsonObject params = filterParams(filter, true);
+    if (params.isEmpty()) return;
     const auto withNote = filter.constFind(QStringLiteral("with_note"));
     if (withNote != filter.cend()) params.insert(QStringLiteral("with_note"), withNote->toBool());
     const QString query = filter.value(QStringLiteral("q")).toString().trimmed();

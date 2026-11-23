@@ -80,6 +80,9 @@ ScrollView {
 
     Connections {
         target: backend
+        function onReportsInvalidated() {
+            if (statsPage.visible) statsPage.open()
+        }
         function onSessionWriteFinished(ok, message) {
             if (ok && statsPage.visible && statsPage.tab === "notes")
                 notesList.reload()

@@ -30,7 +30,11 @@ ColumnLayout {
     property var valueRanges: ({})
     // The metric range editor: "" closed, "minutes" or a metric id.
     property string editing: ""
-    readonly property int maxTasks: 24
+    property string taskSearch: ""
+    property string rangeError: ""
+    readonly property var matchingTasks: taskChoices.filter(function(task) {
+        return String(task.title || "").toLowerCase().includes(taskSearch.trim().toLowerCase())
+    })
     readonly property var projectChoices: (backend.projects || []).filter(function(p) {
         return !p.archived && (tagId === "" || (p.tag_ids || []).indexOf(tagId) >= 0)
     })
@@ -56,7 +60,7 @@ ColumnLayout {
             if (epicId !== "" && epicId !== "none" && epic !== epicId)
                 return false
             if (projectId !== "")
-                return project === projectId
+                return projectId === "none" ? project === "" : project === projectId
             return tagId === "" || allowed[project] === true
         })
     }
@@ -103,6 +107,7 @@ ColumnLayout {
 
     function validDate(text) {
         return /^\d{4}-\d{2}-\d{2}$/.test(text) && !isNaN(Date.parse(text))
+            && new Date(Date.parse(text)).toISOString().slice(0, 10) === text
     }
     function has(value) {
         return value !== undefined && value !== null && !isNaN(Number(value))
@@ -193,14 +198,29 @@ ColumnLayout {
         edited()
     }
     function setRange(days) {
+        rangeError = ""
         range = days
         edited()
     }
     function setCustom(from, to) {
+        if (!validDate(from) || !validDate(to) || from > to || Date.parse(to) - Date.parse(from) >= 730 * 86400000) {
+            rangeError = qsTr("Choose valid dates in order. The range can include up to 730 days.")
+            return
+        }
+        rangeError = ""
         customFrom = from
         customTo = to
         range = 0
         edited()
+    }
+    function stepRange(direction) {
+        var last = Date.parse(range === 0 ? customTo : backend.todayDay)
+        if (isNaN(last)) return
+        var day = 86400000
+        var first = range === 0 ? Date.parse(customFrom) : last - (range - 1) * day
+        var offset = direction * (last - first + day)
+        setCustom(new Date(first + offset).toISOString().slice(0, 10),
+                  new Date(last + offset).toISOString().slice(0, 10))
     }
     function startCustom() {
         if (!validDate(customFrom) || !validDate(customTo)) {
@@ -276,7 +296,7 @@ ColumnLayout {
                 parts.push("# " + String(tag.name))
         }
         if (projectId !== "")
-            parts.push(win.projectName(projectId))
+            parts.push(projectId === "none" ? qsTr("No project") : win.projectName(projectId))
         if (epicId === "none")
             parts.push(qsTr("No epic"))
         else if (epicId !== "")
@@ -324,10 +344,11 @@ ColumnLayout {
         TextField {
             visible: bar.range === 0
             Layout.preferredWidth: 130
+            id: fromField
             text: bar.customFrom
             placeholderText: "YYYY-MM-DD"
             font.family: bar.win.mono
-            onEditingFinished: if (bar.validDate(text) && text !== bar.customFrom) bar.setCustom(text, bar.customTo)
+            onEditingFinished: if (text !== bar.customFrom || bar.rangeError) bar.setCustom(fromField.text, toField.text)
         }
         Label {
             visible: bar.range === 0
@@ -337,14 +358,22 @@ ColumnLayout {
         TextField {
             visible: bar.range === 0
             Layout.preferredWidth: 130
+            id: toField
             text: bar.customTo
             placeholderText: "YYYY-MM-DD"
             font.family: bar.win.mono
-            onEditingFinished: if (bar.validDate(text) && text !== bar.customTo) bar.setCustom(bar.customFrom, text)
+            onEditingFinished: if (text !== bar.customTo || bar.rangeError) bar.setCustom(fromField.text, toField.text)
         }
         Item {
             Layout.fillWidth: true
         }
+    }
+
+    Label {
+        visible: bar.range === 0 && bar.rangeError !== ""
+        text: bar.rangeError
+        textFormat: Text.PlainText
+        color: "#df9986"
     }
 
     RowLayout {
@@ -392,6 +421,14 @@ ColumnLayout {
                 text: qsTr("All")
                 selected: bar.projectId === ""
                 onClicked: bar.setFilter("project", "")
+            }
+            ChoiceChip {
+                objectName: "statsProject_none"
+                visible: bar.tagId === ""
+                win: bar.win
+                text: qsTr("No project")
+                selected: bar.projectId === "none"
+                onClicked: bar.setFilter("project", "none")
             }
             Repeater {
                 model: bar.projectChoices
@@ -452,32 +489,44 @@ ColumnLayout {
         RowTitle {
             text: qsTr("TASKS")
         }
-        Flow {
-            objectName: "statsTaskList"
+        ColumnLayout {
             Layout.fillWidth: true
-            spacing: 8
-            ChoiceChip {
-                win: bar.win
-                text: qsTr("All")
-                selected: bar.itemId === ""
-                onClicked: bar.setFilter("item", "")
+            TextField {
+                objectName: "statsTaskSearch"
+                Layout.preferredWidth: 240
+                placeholderText: qsTr("Search tasks")
+                text: bar.taskSearch
+                onTextEdited: bar.taskSearch = text
             }
-            Repeater {
-                model: bar.taskChoices.slice(0, bar.maxTasks)
-                ChoiceChip {
-                    required property var modelData
-                    win: bar.win
-                    text: String(modelData.title || "")
-                    selected: bar.itemId === String(modelData.id)
-                    onClicked: bar.setFilter("item", String(modelData.id))
+            ScrollView {
+                id: taskScroll
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(taskChips.implicitHeight, 136)
+                contentWidth: availableWidth
+                clip: true
+                Flow {
+                    id: taskChips
+                    objectName: "statsTaskList"
+                    width: taskScroll.availableWidth
+                    spacing: 8
+                    ChoiceChip {
+                        win: bar.win
+                        text: qsTr("All")
+                        selected: bar.itemId === ""
+                        onClicked: bar.setFilter("item", "")
+                    }
+                    Repeater {
+                        model: bar.matchingTasks
+                        ChoiceChip {
+                            required property var modelData
+                            win: bar.win
+                            objectName: "statsTask_" + modelData.id
+                            text: String(modelData.title || "")
+                            selected: bar.itemId === String(modelData.id)
+                            onClicked: bar.setFilter("item", String(modelData.id))
+                        }
+                    }
                 }
-            }
-            Label {
-                visible: bar.taskChoices.length > bar.maxTasks
-                height: 40
-                verticalAlignment: Text.AlignVCenter
-                text: qsTr("+%1 more, pick a project to narrow").arg(bar.taskChoices.length - bar.maxTasks)
-                color: bar.win.muted
             }
         }
     }

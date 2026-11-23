@@ -22,10 +22,7 @@ SocketTransport::SocketTransport(QObject *parent) : QObject(parent), m_socket(ne
         if (m_state != State::Connecting) return;
         m_state = State::Hello;
         m_handshakeId = m_nextId++;
-        QJsonObject params{{"protocol", QJsonArray{1}},
-                           {"client", QStringLiteral("salah-app/0.4")},
-                           {"actor", QStringLiteral("app")}};
-        writeRequest(m_handshakeId, QStringLiteral("hello"), params);
+        writeRequest(m_handshakeId, QStringLiteral("hello"), helloParams());
         m_handshakeTimer.start(m_timeoutMs);
     });
     connect(m_socket, &QLocalSocket::disconnected, this, [this] {
@@ -286,7 +283,7 @@ void SocketTransport::onReadyRead() {
                                             .value(QStringLiteral("revision"))
                                             .toVariant().toLongLong();
                 m_lastRevision = qMax(m_lastRevision, revision);
-                emit changed(revision);
+                emit changed(revision, object.value("params").toObject().value("scopes").toVariant().toStringList());
             }
             continue;
         }
@@ -303,24 +300,34 @@ void SocketTransport::onReadyRead() {
             entry.timer->stop();
             entry.timer->deleteLater();
         }
-        Reply reply;
-        if (object.contains(QStringLiteral("error"))) {
-            const QJsonObject error = object.value(QStringLiteral("error")).toObject();
-            const QJsonObject data = error.value(QStringLiteral("data")).toObject();
-            reply.kind = data.value(QStringLiteral("kind")).toString();
-            if (reply.kind.isEmpty()) {
-                reply.kind = error.value(QStringLiteral("code")).toInt() == -32004
-                                 ? QStringLiteral("conflict")
-                                 : QStringLiteral("rpc");
-            }
-            reply.message = error.value(QStringLiteral("message")).toString();
-            reply.conflict = reply.kind == QStringLiteral("conflict");
-            // Error details (for example `missing` metric ids) for the caller.
-            reply.value = data;
-        } else {
-            reply.ok = true;
-            reply.value = object.value(QStringLiteral("result"));
-        }
-        if (entry.handler) entry.handler(reply);
+        if (entry.handler) entry.handler(decodeReply(object));
     }
+}
+
+QJsonObject SocketTransport::helloParams() {
+    return {{"protocol", QJsonArray{1}},
+            {"client", QStringLiteral("salah-app/0.4")},
+            {"actor", QStringLiteral("app")}};
+}
+
+SocketTransport::Reply SocketTransport::decodeReply(const QJsonObject &object) {
+    Reply reply;
+    if (object.contains(QStringLiteral("error"))) {
+        const QJsonObject error = object.value(QStringLiteral("error")).toObject();
+        const QJsonObject data = error.value(QStringLiteral("data")).toObject();
+        reply.kind = data.value(QStringLiteral("kind")).toString();
+        if (reply.kind.isEmpty()) {
+            reply.kind = error.value(QStringLiteral("code")).toInt() == -32004
+                             ? QStringLiteral("conflict")
+                             : QStringLiteral("rpc");
+        }
+        reply.message = error.value(QStringLiteral("message")).toString();
+        reply.conflict = reply.kind == QStringLiteral("conflict");
+        // Error details (for example `missing` metric ids) for the caller.
+        reply.value = data;
+    } else {
+        reply.ok = true;
+        reply.value = object.value(QStringLiteral("result"));
+    }
+    return reply;
 }

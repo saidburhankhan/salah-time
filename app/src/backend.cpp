@@ -237,13 +237,17 @@ void Backend::refreshRunning() {
     emit runningChanged();
 }
 
-void Backend::reloadFromNotification(qint64 revision) {
+void Backend::reloadFromNotification(qint64 revision, const QStringList &scopes) {
     if (revision <= m_lastNotificationRevision) return;
     m_lastNotificationRevision = revision;
     reload();
     // Another surface (the bar widget, the CLI) may have changed projects,
     // tags, or metrics; the lists are cheap.
     loadSettings();
+    if (scopes.isEmpty() || scopes.contains("sessions") || scopes.contains("items")
+        || scopes.contains("projects") || scopes.contains("epics") || scopes.contains("tags")
+        || scopes.contains("metrics") || scopes.contains("config") || scopes.contains("marks"))
+        emit reportsInvalidated();
 }
 
 void Backend::applyDayPlan(const Dto::DayPlan &plan) {
@@ -496,8 +500,10 @@ CoreClient::Callback Backend::statsResponse() {
     const quint64 request = ++m_statsRequest;
     return [this, request](const CoreClient::Result &result) {
         if (request != m_statsRequest) return;
-        if (!result.ok) fail(result.error.message);
-        else if (const auto *stats = std::get_if<Dto::Stats>(&result.value)) applyStats(*stats);
+        if (!result.ok) {
+            applyStats({});
+            fail(result.error.message);
+        } else if (const auto *stats = std::get_if<Dto::Stats>(&result.value)) applyStats(*stats);
     };
 }
 
@@ -637,25 +643,6 @@ void Backend::removeItem(const QString &id) {
     m_client.itemRemove(id, mutationResponse(id), m_backlogOpen ? backlogVersionFor(id) : versionFor(id));
 }
 
-int Backend::legacyMoveIndex(const QString &id, const QString &block, const QString &afterId,
-                             const QString &beforeId) const {
-    QStringList peers;
-    for (const Dto::DayBlock &entry : m_dayPlan.blocks) {
-        if (entry.start != block) continue;
-        std::vector<Dto::DayItem> items = entry.items;
-        sortItems(items);
-        for (const Dto::DayItem &item : items)
-            if (item.id != id) peers.append(item.id);
-        break;
-    }
-    for (int i = 0; i < peers.size(); ++i) {
-        const QString peer = peers.at(i);
-        if (!afterId.isEmpty() && peer == afterId) return i + 1;
-        if (!beforeId.isEmpty() && peer == beforeId) return i;
-    }
-    return 0;
-}
-
 void Backend::optimisticMove(const QString &id, const QString &block, const QString &afterId,
                              const QString &beforeId) {
     Dto::DayItem moving;
@@ -689,10 +676,9 @@ void Backend::optimisticMove(const QString &id, const QString &block, const QStr
 
 void Backend::moveItem(const QString &id, const QString &block, const QString &afterId,
                        const QString &beforeId) {
-    const int index = legacyMoveIndex(id, block, afterId, beforeId);
     optimisticMove(id, block, afterId, beforeId);
     setItemPending(id, true);
-    m_client.itemMove(id, block, index, mutationResponse(id), versionFor(id), afterId, beforeId);
+    m_client.itemMove(id, block, 0, mutationResponse(id), versionFor(id), afterId, beforeId);
 }
 
 QJsonArray Backend::sessionsOf(const QString &itemId) const {
@@ -724,20 +710,18 @@ bool Backend::toggleDone(const QString &id, const QString &state) {
     return true;
 }
 
-void Backend::tickItem(const QString &id, const QVariantMap &values, const QString &note) {
-    // Done is one explicit tick; never a second one.
-    const QJsonArray sessions = sessionsOf(id);
-    QString runningId;
-    for (const QJsonValue &value : sessions) {
-        const QJsonObject session = value.toObject();
-        if (isTick(session)) return;
-        if (session.value(QStringLiteral("running")).toBool()) runningId = session.value(QStringLiteral("id")).toString();
+void Backend::tickItem(const QString &id, const QVariantMap &values, const QString &note, const QString &operation) {
+    for (const QJsonValue &value : sessionsOf(id)) {
+        if (isTick(value.toObject())) {
+            const bool saved = values.isEmpty() && note.trimmed().isEmpty();
+            emit sessionWriteFinished(saved, saved ? QString() : tr("Already marked done. Your ratings and note were not saved."), operation);
+            return;
+        }
     }
     setItemPending(id, true);
-    // A running timer on the item is paused first (no values); the queue
-    // keeps the order.
-    if (!runningId.isEmpty()) m_client.sessionStop(runningId, {}, {}, sessionResponse({}, false));
-    m_client.sessionLog(id, {}, -1, QJsonObject::fromVariantMap(values), note, writeDate(), sessionResponse(id));
+    // The server stops a matching timer and records the tick in one transaction.
+    m_client.sessionLog(id, {}, -1, QJsonObject::fromVariantMap(values), note, writeDate(),
+                        sessionResponse(id), {}, operation);
 }
 
 void Backend::untickItem(const QString &id) {
@@ -752,26 +736,32 @@ void Backend::untickItem(const QString &id) {
 }
 
 void Backend::logSession(const QString &itemId, const QString &projectId, int minutes,
-                         const QVariantMap &values, const QString &note, const QString &epicId) {
-    if (itemId.isEmpty() && projectId.isEmpty() && epicId.isEmpty()) return;
+                         const QVariantMap &values, const QString &note, const QString &epicId,
+                         const QString &day, const QString &operation) {
+    if (itemId.isEmpty() && projectId.isEmpty() && epicId.isEmpty()) {
+        emit sessionWriteFinished(false, tr("Choose a task, project or epic."), operation);
+        return;
+    }
     if (!itemId.isEmpty()) setItemPending(itemId, true);
     const bool epicOnly = itemId.isEmpty() && !epicId.isEmpty();
     m_client.sessionLog(itemId, itemId.isEmpty() && !epicOnly ? projectId : QString(), minutes > 0 ? minutes : -1,
-                        QJsonObject::fromVariantMap(values), note, writeDate(), sessionResponse(itemId), epicOnly ? epicId : QString());
+                        QJsonObject::fromVariantMap(values), note, QDate::fromString(day, Qt::ISODate), sessionResponse(itemId),
+                        epicOnly ? epicId : QString(), operation);
 }
 
 void Backend::stopSession(const QString &sessionId, const QVariantMap &values,
-                          const QString &note, bool done, int minutes) {
+                          const QString &note, bool done, int minutes, const QString &operation) {
     const QString itemId = m_running.value(QStringLiteral("id")).toString() == sessionId || sessionId.isEmpty()
         ? m_running.value(QStringLiteral("item_id")).toString() : QString();
     if (!itemId.isEmpty()) setItemPending(itemId, true);
     m_client.sessionStop(sessionId, QJsonObject::fromVariantMap(values), note,
-                         sessionResponse(itemId), done, minutes);
+                         sessionResponse(itemId), done, minutes, operation);
 }
 
-void Backend::editSession(const QString &sessionId, int minutes, const QVariantMap &values, const QString &note) {
+void Backend::editSession(const QString &sessionId, int minutes, const QVariantMap &values, const QString &note,
+                          qint64 version, const QString &operation) {
     m_client.sessionEdit(sessionId, minutes > 0 ? minutes : -1, true, QJsonObject::fromVariantMap(values),
-                         true, note, sessionResponse({}));
+                         true, note, sessionResponse({}), version, operation);
 }
 
 void Backend::removeSession(const QString &sessionId) {
@@ -813,11 +803,11 @@ CoreClient::Callback Backend::sessionResponse(const QString &pendingItemId, bool
         if (!pendingItemId.isEmpty()) setItemPending(pendingItemId, false);
         if (result.ok) {
             m_refreshPending = true;
-            if (announce) emit sessionWriteFinished(true, {});
+            if (announce) emit sessionWriteFinished(true, {}, result.opId);
             return;
         }
         fail(result.error.message);
-        if (announce) emit sessionWriteFinished(false, result.error.message);
+        if (announce) emit sessionWriteFinished(false, result.error.message, result.opId);
         if (result.error.kind == CoreClient::ErrorKind::Conflict || !m_client.offline()) reload();
     };
 }

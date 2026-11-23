@@ -40,13 +40,15 @@ public:
     void stop();
     void send(const QString &method, const QJsonObject &params, Handler handler);
 
+    static QJsonObject helloParams();
+    static Reply decodeReply(const QJsonObject &object);
     static QString defaultSocketPath();
 
 signals:
     void readyChanged(bool ready);
     void fellBackToCli();
     void reconnected();
-    void changed(qint64 revision);
+    void changed(qint64 revision, const QStringList &scopes);
 
 private:
     enum class State { Idle, Connecting, Hello, Subscribe, Ready, Reconnecting, Failed };

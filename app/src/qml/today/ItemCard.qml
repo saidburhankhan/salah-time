@@ -55,8 +55,15 @@ Rectangle {
                                     title: title, color: projectColor, metrics: promptMetrics })
     }
 
+    readonly property var rowTimer: {
+        if (runningSessionId && backend.running.id === runningSessionId)
+            return backend.running
+        return sessionList.find(function(s) { return s.running && s.id === runningSessionId })
+            || { started_at: timerStartedAt }
+    }
     function addTime() {
         win.openSessionPrompt({ mode: "log", itemId: itemId, projectId: projectId,
+                                day: backend.selectedDay === backend.todayDay ? "" : backend.selectedDay,
                                 title: title, color: projectColor, metrics: promptMetrics })
     }
 
@@ -220,14 +227,14 @@ Rectangle {
             primary: itemCard.timerRunning
             enabled: !itemCard.pending && (itemCard.timerRunning || !itemCard.otherRunning)
             text: itemCard.timerRunning
-                ? "❚❚ " + itemCard.win.elapsedClock(itemCard.timerStartedAt)
+                ? "❚❚ " + itemCard.win.runningClock(itemCard.rowTimer)
                 : (itemCard.actualMinutes > 0 ? qsTr("▶  Resume") : qsTr("▶  Start"))
             font.family: itemCard.win.mono
             ToolTip.visible: hovered && itemCard.otherRunning
             ToolTip.text: qsTr("Pause the running session first")
             onClicked: {
                 if (itemCard.timerRunning)
-                    itemCard.win.pauseRunning()
+                    itemCard.win.pauseSession(itemCard.runningSessionId)
                 else
                     backend.startSession(itemCard.itemId)
             }

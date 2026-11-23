@@ -100,10 +100,10 @@ ApplicationWindow {
         return Qt.locale("en_US").toString(d, "ddd d MMM")
     }
     function countdownFromNext() {
-        if (!backend.nowState.nextAt) return Number(backend.nowState.nextRemainingSeconds || 0)
         var at = Date.parse(String(backend.nowState.nextAt || ""))
-        if (!isNaN(at)) return Math.max(0, Math.floor((at - Date.now()) / 1000))
-        return Number(backend.nowState.nextRemainingSeconds || 0)
+        if (isNaN(at))
+            at = backend.nowState.fetchedAt + Number(backend.nowState.nextRemainingSeconds || 0) * 1000
+        return Math.max(0, Math.floor((at - Date.now()) / 1000))
     }
     function timerMinutes(snapshot, started, projected, running) {
         var total = Number(snapshot || 0)
@@ -155,17 +155,7 @@ ApplicationWindow {
         else { var monday = (a.getDay() + 6) % 7; first = new Date(a.getFullYear(), a.getMonth(), a.getDate() - monday); last = new Date(first.getFullYear(), first.getMonth(), first.getDate() + 6) }
         return { from: iso(first), to: iso(last), first: first, last: last }
     }
-    function stepStats(amount) {
-        var b = statsBounds(statsMode, statsAnchor, customFrom, customTo)
-        if (statsMode === "custom") {
-            var n = Math.round((b.last - b.first) / 86400000) + 1
-            customFrom = new Date(b.first.getFullYear(), b.first.getMonth(), b.first.getDate() + amount * n)
-            customTo = new Date(b.last.getFullYear(), b.last.getMonth(), b.last.getDate() + amount * n)
-            statsAnchor = customFrom
-        } else if (statsMode === "month") statsAnchor = new Date(statsAnchor.getFullYear(), statsAnchor.getMonth() + amount, 1)
-        else statsAnchor = new Date(statsAnchor.getFullYear(), statsAnchor.getMonth(), statsAnchor.getDate() + amount * 7)
-        loadStatistics()
-    }
+    function stepStats(amount) { statisticsPage.filterBar.stepRange(amount) }
     // The Statistics page owns its range (7/28/90 days) and filter.
     function loadStatistics() { statisticsPage.open() }
     function statsRangeLabel() {
@@ -378,6 +368,19 @@ ApplicationWindow {
     }
     function openSessionPrompt(options) {
         sessionPrompt.show(options)
+    }
+    function runningClock(session) {
+        if (!session) return "—"
+        if (session.stale)
+            return session.max_minutes > 0 ? formatElapsed(session.max_minutes * 60) : "—"
+        return elapsedClock(session.started_at)
+    }
+    function pauseSession(expectedId) {
+        if (!expectedId || backend.running.id !== expectedId) {
+            backend.reload()
+            return
+        }
+        pauseRunning()
     }
     function pauseRunning() {
         var running = backend.running

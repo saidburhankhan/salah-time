@@ -68,6 +68,8 @@ Popup {
         }
         Label {
             Layout.fillWidth: true
+            objectName: "quickPreview"
+            textFormat: Text.PlainText
             text: backend.parseDraft.title
                 ? qsTr("%1 · %2 · %3 %4")
                     .arg(backend.parseDraft.title)

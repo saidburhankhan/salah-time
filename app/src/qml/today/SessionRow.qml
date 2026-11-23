@@ -47,7 +47,7 @@ Rectangle {
         Label {
             Layout.preferredWidth: 64
             text: sessionRow.running
-                ? sessionRow.win.elapsedClock(sessionRow.session.started_at)
+                ? sessionRow.win.runningClock(backend.running.id === sessionRow.session.id ? backend.running : sessionRow.session)
                 : (sessionRow.tick ? "✓" : qsTr("%1 min").arg(sessionRow.session.minutes))
             color: sessionRow.win.text
             font.family: sessionRow.win.mono
@@ -67,7 +67,7 @@ Rectangle {
             win: sessionRow.win
             primary: true
             text: qsTr("Pause")
-            onClicked: sessionRow.win.pauseRunning()
+            onClicked: sessionRow.win.pauseSession(sessionRow.session.id)
         }
         AppButton {
             visible: !sessionRow.running && !sessionRow.confirmingRemove
@@ -76,6 +76,7 @@ Rectangle {
             onClicked: sessionRow.win.openSessionPrompt({
                 mode: "edit",
                 tick: sessionRow.tick,
+                version: sessionRow.session.version,
                 sessionId: String(sessionRow.session.id),
                 projectId: String(sessionRow.session.project_id || ""),
                 title: sessionRow.itemTitle,

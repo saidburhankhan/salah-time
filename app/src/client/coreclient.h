@@ -11,8 +11,7 @@
 #include "sockettransport.h"
 
 // The app's core client. It speaks protocol v1 JSON-RPC over the daemon
-// socket when reachable and falls back to the legacy `salah <action>` CLI
-// process transport (one process per request) when the socket is not.
+// socket when reachable. Offline writes use the same frames over stdio RPC.
 class CoreClient : public QObject {
     Q_OBJECT
 public:
@@ -61,10 +60,9 @@ public:
     void statsDays(int days, Callback callback);
     void statsFiltered(int days, const QString &tagId, const QString &projectId, const QString &itemId,
                        Callback callback, const QDate &from = {}, const QDate &to = {});
-    // stats.get with a ready parameter object (range, tag/project/item and the
-    // session filters minutes_min/minutes_max/values). Without session
-    // filters it also works through the CLI fallback.
+    // stats.get with a ready parameter object and the same filters offline.
     void statsQuery(const QJsonObject &params, Callback callback);
+    void statsTable(const QJsonObject &params, Callback callback);
     void statsSeries(const QJsonObject &params, Callback callback);
     // A daemon-only read (stats.table, sessions.list). Reads are coalesced by
     // method plus parameters.
@@ -77,14 +75,15 @@ public:
                   const QString &afterId = {}, const QString &beforeId = {});
     void sessionLog(const QString &itemId, const QString &projectId = {}, int minutes = -1,
                     const QJsonObject &values = {}, const QString &note = {},
-                    const QDate &date = {}, Callback callback = {}, const QString &epicId = {});
+                    const QDate &date = {}, Callback callback = {}, const QString &epicId = {}, const QString &operation = {});
     void sessionStart(const QString &itemId, const QString &projectId = {}, Callback callback = {});
     void sessionStop(const QString &sessionId = {}, const QJsonObject &values = {},
-                     const QString &note = {}, Callback callback = {}, bool done = false, int minutes = -1);
+                     const QString &note = {}, Callback callback = {}, bool done = false, int minutes = -1, const QString &operation = {});
     // session.edit: minutes < 0 keeps them; values/note are sent only when
     // the matching has* flag is set (an empty note clears it).
     void sessionEdit(const QString &sessionId, int minutes, bool hasValues, const QJsonObject &values,
-                     bool hasNote, const QString &note, Callback callback = {});
+                     bool hasNote, const QString &note, Callback callback = {}, qint64 version = -1,
+                     const QString &operation = {});
     void sessionRemove(const QString &sessionId, Callback callback = {});
     void sessionBump(const QString &sessionId, const QString &metricId, int delta, Callback callback = {});
     void sessionNote(const QString &sessionId, const QString &text, Callback callback = {});
@@ -107,7 +106,7 @@ signals:
     void requestFinished(QStringList arguments, bool success);
     void offlineChanged(bool offline);
     void reconnected();
-    void changed(qint64 revision);
+    void changed(qint64 revision, const QStringList &scopes);
 
 private:
     struct Request {
@@ -122,7 +121,9 @@ private:
         QString opId;
         std::function<Dto::AnyDecoded(const QJsonValue &)> decoder;
         std::function<Dto::AnyDecoded(const QJsonValue &)> cliDecoder;
+        quint64 generation = 0;
     };
+    quint64 m_readGeneration = 0;
     enum class Mode { Waiting, Socket, Cli };
 
     void configureTransport(const QString &socketPath);
@@ -132,10 +133,13 @@ private:
                  bool socketOnly = false);
     void finishWithError(const QString &message);
     void startNext();
-    void startSocket(Request request);
-    void startProcess(Request request);
+    void startSocket();
+    void startProcess();
     void finish(bool timedOut = false);
-    void completeSocket(const Request &request, const SocketTransport::Reply &reply);
+    void completeRpc(const SocketTransport::Reply &reply);
+    using Decoder = std::function<Dto::AnyDecoded(const QJsonValue &)>;
+    void writeRpc(const QString &method, const QJsonObject &params, Callback callback, Decoder decoder = Dto::decodeMutationResult);
+    static QStringList reportArguments(const QJsonObject &params, QStringList args);
     static QStringList dateArgs(const QDate &date);
     static QString stripErrorPrefix(QString message);
 

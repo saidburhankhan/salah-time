@@ -17,6 +17,7 @@ Rectangle {
     property string sortKey: ""
     property bool sortDesc: true
     readonly property var report: backend.statsTable
+    readonly property string displayedGroup: report.group || group
     readonly property var columns: report.columns || []
     readonly property var shown: columns.filter(function(c) { return table.hidden.indexOf(String(c.id)) < 0 })
     readonly property bool showsSessions: shown.some(function(c) { return c.id === "sessions" })
@@ -108,7 +109,7 @@ Rectangle {
         if (key === "")
             return list
         var copy = list.slice()
-        var dated = group === "week" || group === "day"
+        var dated = displayedGroup === "week" || displayedGroup === "day"
         copy.sort(function(a, b) {
             if (key === "label") {
                 var order = dated ? String(a.from || a.key).localeCompare(String(b.from || b.key))
@@ -265,7 +266,7 @@ Rectangle {
                         height: parent.height
                         leftPadding: 4
                         verticalAlignment: Text.AlignVCenter
-                        text: table.headerText("label", table.groups.filter(function(g) { return g.id === table.group })[0].name)
+                        text: table.headerText("label", table.groups.filter(function(g) { return g.id === table.displayedGroup })[0].name)
                         textFormat: Text.PlainText
                         color: table.sortKey === "label" ? table.win.selectedText : table.win.muted
                         font.family: table.win.mono
@@ -365,7 +366,7 @@ Rectangle {
                                 MouseArea {
                                     objectName: "epicRowOpen"
                                     anchors.fill: parent
-                                    enabled: table.group === "epic" && line.modelData.key !== "none"
+                                    enabled: table.report.group === "epic" && line.modelData.key !== "none"
                                     cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                                     onClicked: table.win.openEpic(String(line.modelData.key))
                                 }

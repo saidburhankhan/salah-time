@@ -24,7 +24,7 @@ Item {
         running: true
         repeat: true
         onTriggered: {
-            if (shortcuts.win.countdown > 0) shortcuts.win.countdown--
+            shortcuts.win.countdown = shortcuts.win.countdownFromNext()
             shortcuts.win.timerNow = Date.now()
         }
     }

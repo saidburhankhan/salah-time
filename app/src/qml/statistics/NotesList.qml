@@ -39,6 +39,7 @@ ColumnLayout {
         win.openSessionPrompt({
             mode: "edit",
             tick: session.minutes === null || session.minutes === undefined,
+            version: session.version,
             sessionId: String(session.id),
             itemId: String(session.item_id || ""),
             projectId: String(session.project_id || ""),

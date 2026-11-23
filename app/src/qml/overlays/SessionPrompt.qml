@@ -34,7 +34,10 @@ Popup {
     property int maxMinutes: 0
     property bool stale: false
     readonly property int workedCap: maxMinutes > 0 ? maxMinutes : Math.max(1, initialMinutes)
-    property bool waiting: false
+    property string operation: ""
+    property string logDay: ""
+    property double editVersion: -1
+    readonly property bool waiting: operation !== ""
     property string serverError: ""
     readonly property bool pauseMode: mode === "pause"
     readonly property bool needsMinutes: mode === "log" || (mode === "edit" && !tick)
@@ -77,7 +80,9 @@ Popup {
         initialValues = copy
         metrics = win.promptMetrics(projectId, copy, options.metrics, mode === "edit")
         notes = options.notes || []
-        waiting = false
+        operation = ""
+        logDay = options.day || ""
+        editVersion = options.version === undefined ? -1 : options.version
         serverError = ""
         maxMinutes = options.maxMinutes || 0
         stale = !!options.stale
@@ -103,15 +108,30 @@ Popup {
         values = copy
     }
 
+    function updateWorkedLimit() {
+        var current = backend.running
+        if (!pauseMode || !current || current.id !== sessionId || current.max_minutes == null)
+            return
+        maxMinutes = Number(current.max_minutes)
+        stale = !!current.stale
+        // Keep an untouched default valid. A typed correction stays visible
+        // for the user to adjust if the new limit is lower.
+        if (initialMinutes > maxMinutes && minutesField.text === String(initialMinutes)) {
+            initialMinutes = maxMinutes
+            minutesField.text = String(initialMinutes)
+        }
+    }
+
     function save(skip, markDone) {
         if (!canSave)
             return
+        updateWorkedLimit()
         if (pauseMode && minutesField.text !== "" && !minutesField.acceptableInput) {
             serverError = qsTr("Enter 1 to %1 minutes, or leave Worked empty.").arg(workedCap)
             minutesField.forceActiveFocus()
             return
         }
-        waiting = true
+        operation = backend.newOperationId()
         serverError = ""
         var note = skip ? "" : noteField.text.trim()
         var chosen = skip ? {} : values
@@ -123,22 +143,25 @@ Popup {
                     edits[key] = chosen[key]
             }
             var adjustedMinutes = minutes > 0 && minutes !== initialMinutes ? minutes : -1
-            backend.stopSession(sessionId, edits, note, markDone === true && itemId !== "", adjustedMinutes)
+            backend.stopSession(sessionId, edits, note, markDone === true && itemId !== "", adjustedMinutes, operation)
         } else if (mode === "done")
-            backend.tickItem(itemId, chosen, note)
+            backend.tickItem(itemId, chosen, note, operation)
         else if (mode === "edit")
-            backend.editSession(sessionId, tick ? 0 : minutes, chosen, note)
+            backend.editSession(sessionId, tick ? 0 : minutes, chosen, note, editVersion, operation)
         else
             backend.logSession(itemId, itemId === "" ? projectId : "", minutes, chosen, note,
-                               itemId === "" ? epicId : "")
+                               itemId === "" ? epicId : "", logDay, operation)
     }
 
     Connections {
         target: backend
-        function onSessionWriteFinished(ok, message) {
-            if (!prompt.waiting)
+        function onRunningChanged() {
+            if (prompt.visible) prompt.updateWorkedLimit()
+        }
+        function onSessionWriteFinished(ok, message, opId) {
+            if (!prompt.waiting || opId !== prompt.operation)
                 return
-            prompt.waiting = false
+            prompt.operation = ""
             if (ok)
                 prompt.win.sessionPromptVisible = false
             else

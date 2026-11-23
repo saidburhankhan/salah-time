@@ -29,7 +29,7 @@ Card {
 
     function saveNote() {
         var text = noteField.text.trim()
-        if (text === "" || savingNote || backend.offlineMode)
+        if (text === "" || savingNote || stale)
             return
         savingNote = true
         backend.addRunningNote(sessionId, text)
@@ -112,9 +112,7 @@ Card {
             Label {
                 objectName: "runningElapsed"
                 Layout.fillWidth: true
-                text: runningCard.stale
-                    ? (runningCard.maxMinutes > 0 ? runningCard.win.formatElapsed(runningCard.maxMinutes * 60) : "—")
-                    : runningCard.win.elapsedClock(runningCard.session.started_at)
+                text: runningCard.win.runningClock(runningCard.session)
                 textFormat: Text.PlainText
                 font.features: { "tnum": 1 }
                 color: runningCard.win.text
@@ -161,7 +159,7 @@ Card {
                 rightPadding: 11
                 text: "−"
                 Accessible.name: qsTr("Subtract a distraction")
-                enabled: !backend.offlineMode && runningCard.distractions > 0
+                enabled: !runningCard.stale && runningCard.distractions > 0
                 onClicked: backend.bumpDistractions(runningCard.sessionId, -1)
             }
             AppButton {
@@ -171,7 +169,7 @@ Card {
                 rightPadding: 11
                 text: "+"
                 Accessible.name: qsTr("Add a distraction")
-                enabled: !backend.offlineMode
+                enabled: !runningCard.stale
                 onClicked: backend.bumpDistractions(runningCard.sessionId, 1)
             }
         }
@@ -201,7 +199,7 @@ Card {
         AppButton {
             objectName: "runningAddNoteButton"
             visible: !runningCard.addingNote
-            enabled: !backend.offlineMode
+            enabled: !runningCard.stale
             win: runningCard.win
             text: qsTr("Add note")
             onClicked: {
@@ -219,7 +217,7 @@ Card {
                 Layout.fillWidth: true
                 placeholderText: qsTr("Note")
                 maximumLength: 500
-                enabled: !runningCard.savingNote
+                enabled: !runningCard.stale && !runningCard.savingNote
                 onAccepted: runningCard.saveNote()
                 Keys.onEscapePressed: {
                     clear()
@@ -229,7 +227,7 @@ Card {
             AppButton {
                 win: runningCard.win
                 text: qsTr("Save")
-                enabled: !backend.offlineMode && !runningCard.savingNote && noteField.text.trim() !== ""
+                enabled: !runningCard.stale && !runningCard.savingNote && noteField.text.trim() !== ""
                 onClicked: runningCard.saveNote()
             }
         }
