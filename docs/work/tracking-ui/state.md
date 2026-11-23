@@ -137,3 +137,10 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   with the 0c build: totals 250 min / 18 sessions unchanged; arabic 162/7 → 182/12, dmbs 67/2 →
   68/3, No tag 21/9 → 0/3 (the 6 accepted moved-task sessions); integrity and FK ok.
   C8 now on goals (task 1); C9 on 0-data; C10 dispatched (Sol, task 0 first).
+- 03:3x committed 553b72f (C8 0c; Opus review APPROVE, nits below) and a02235b (C10 0, widget tag
+  chips; 125 node checks, render: Quran pre-selects Faith). INSTALL GATE satisfied. Plan: install
+  after C9 CHECKPOINT 0 (app tag editing) is verified, so app + widget + backend ship together.
+  0c review nits for C8's next resume: tag.remove result should list the items it re-versioned;
+  detach_item_tag logs op "delete" for removed items (use "update"); stale comments stats.rs:541,
+  tags.rs:1, tags::remove doc; item_tag_ids sorts by id but report_tags by name (pick name order).
+  C10 idle: tasks 1–2 need C8 goals/review fixtures.
