@@ -22,7 +22,7 @@ the final user report. Workers own only the slice assigned to them.
 |---|---|---|---|
 | `items-mvp` | Installed | Superseded by `redesign` (same branch) | 2026-11-22 |
 | `redesign` | Installed | Finish A9 app fixes; then superseded by `architecture` | 2026-11-22 |
-| `tracking-ui` | In progress | UI-A (app) and UI-W (widget) fixing usability; then install | 2026-11-23 |
+| `tracking-ui` | Installed | User visual check (U5); fix reported issues | 2026-11-23 |
 
 Completed work may be moved from `docs/work/` to `docs/archive/`. Do not load
 archived work unless the current task explicitly depends on it.

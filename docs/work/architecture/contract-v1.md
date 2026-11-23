@@ -1,5 +1,9 @@
 # CLI contract v1: frozen fixtures
 
+> **Superseded.** This document records the CLI fixtures before session tracking.
+> For current tracking behavior and wire formats, see [Protocol v1](protocol-v1.md).
+> The [tracking-model interface](../../archive/tracking-model/interface.md) records the model and its review decisions.
+
 This is the golden contract the desktop app and the bar widget consume today:
 the unwrapped JSON printed by the `salah` CLI. The transport protocol is
 separate: see [`protocol-v1.md`](protocol-v1.md). `tests/contract.rs` runs the real

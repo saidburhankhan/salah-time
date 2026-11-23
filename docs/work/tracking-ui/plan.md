@@ -92,8 +92,8 @@ the required and optional metrics, and see results in charts. Both surfaces stay
 
 ## Slices
 
-- [ ] U1 — app: Settings (restore prayer section, Projects/Tags/Metrics editors), item editor picker.
-- [ ] U2 — app: Today running timer + stop prompt, session list edit/remove, + time, tick/untick.
-- [ ] U3 — app: Stats rebuilt with charts and working filter.
-- [ ] U4 — widget: tick/untick, running indicator + stop, Log panel (item or project, metrics).
+- [x] U1 — app: Settings (restore prayer section, Projects/Tags/Metrics editors), item editor picker.
+- [x] U2 — app: Today running timer + stop prompt, session list edit/remove, + time, tick/untick.
+- [x] U3 — app: Stats rebuilt with charts and working filter.
+- [x] U4 — widget: tick/untick, running indicator + stop, Log panel (item or project, metrics).
 - [ ] U5 — integration: install, live smoke in scratch env, user visual check.
