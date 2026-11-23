@@ -3,6 +3,8 @@ use crate::{Store, user_version};
 use rusqlite::{Connection, types::Value};
 use std::{fs, path::PathBuf};
 
+mod phase3;
+
 struct Database {
     root: PathBuf,
     path: PathBuf,
@@ -107,8 +109,9 @@ fn check_integrity(conn: &Connection) {
 }
 
 /// Capture all original columns and rows, including links, sync metadata,
-/// replay JSON and sqlite_sequence. Only migration 003's new rows are extra.
+/// replay JSON and sqlite_sequence. Allow for the new rows when crossing 003.
 fn original_rows(conn: &Connection) -> Vec<(String, Vec<Vec<Value>>)> {
+    let before_v3 = user_version(conn).unwrap() < 3;
     let mut stmt = conn
         .prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")
         .unwrap();
@@ -119,8 +122,8 @@ fn original_rows(conn: &Connection) -> Vec<(String, Vec<Vec<Value>>)> {
             let select = conn.prepare(&format!("SELECT * FROM {table}")).unwrap();
             let cols = select.column_names().join(", ");
             let filter = match table.as_str() {
-                "metrics" => " WHERE id != 'distractions'",
-                "project_metrics" => " WHERE metric_id != 'distractions'",
+                "metrics" if before_v3 => " WHERE id != 'distractions'",
+                "project_metrics" if before_v3 => " WHERE metric_id != 'distractions'",
                 _ => "",
             };
             let sql = format!("SELECT {cols} FROM {table}{filter} ORDER BY rowid");
@@ -153,10 +156,11 @@ fn fresh_database_runs_all_steps_and_skips_the_empty_version_zero_backup() {
         ]
     );
     assert!(db.backup(2).table_exists(None, "day_clocks").unwrap());
-    assert_eq!(store.version().unwrap(), 3);
+    assert!(db.backup(3).table_exists(None, "item_metrics").unwrap());
+    assert_eq!(store.version().unwrap(), crate::schema_version());
     check_integrity(&store.conn);
     let paths = db.backups();
-    assert_eq!(paths.len(), 2);
+    assert_eq!(paths.len(), 3);
     drop(Store::open(&db.path).unwrap());
     assert_eq!(db.backups(), paths);
 }
@@ -193,7 +197,7 @@ fn tracking_ui_step_preserves_wal_data_and_adds_only_the_specified_rows() {
     assert!(db.path.with_extension("db-wal").metadata().unwrap().len() > 0);
     let before = original_rows(&seed);
     let store = Store::open(&db.path).unwrap();
-    assert_eq!(store.version().unwrap(), 3);
+    assert_eq!(store.version().unwrap(), crate::schema_version());
     assert_preserved(&db.backup(2), &before);
     let conn = &store.conn;
     assert_preserved(conn, &before);
@@ -283,13 +287,16 @@ fn failed_step_rolls_back_its_schema_and_version_and_can_be_retried() {
     assert!(!conn.column_exists(None, "items", "metrics_custom").unwrap());
     conn.execute_batch("ALTER TABLE session_notes RENAME TO saved_notes")
         .unwrap();
-    assert_eq!(Store::open(&db.path).unwrap().version().unwrap(), 3);
+    assert_eq!(
+        Store::open(&db.path).unwrap().version().unwrap(),
+        crate::schema_version()
+    );
     check_integrity(&conn);
 }
 
 #[test]
 fn unknown_or_pretracking_files_are_refused_in_place() {
-    for version in [1, 3, 4] {
+    for version in [1, crate::schema_version(), crate::schema_version() + 1] {
         let db = Database::new(&format!("unknown-{version}"));
         let conn = Connection::open(&db.path).unwrap();
         conn.execute_batch("CREATE TABLE items(title TEXT); INSERT INTO items VALUES ('keep')")
@@ -317,7 +324,7 @@ fn unknown_or_pretracking_files_are_refused_in_place() {
 #[test]
 fn upgrade_from_v1_rotates_real_backups_and_removes_only_its_own_stale_partials() {
     let db = Database::new("rotation");
-    let seed = db.at(1, false);
+    let mut seed = db.at(1, false);
     let oldest = db.root.join("salah.db.bak-v1-10");
     let retained = db.root.join("salah.db.bak-v1-20");
     seed.backup(rusqlite::MAIN_DB, &oldest, None).unwrap();
@@ -334,8 +341,9 @@ fn upgrade_from_v1_rotates_real_backups_and_removes_only_its_own_stale_partials(
         fs::write(db.root.join(filename), "unrelated").unwrap();
     }
 
-    let store = Store::open(&db.path).unwrap();
-    assert_eq!(store.version().unwrap(), 3);
+    // Two successful steps rotate out the oldest of the two preexisting copies.
+    super::run(&mut seed, Some(&db.path), &STEPS[..3]).unwrap();
+    assert_eq!(user_version(&seed).unwrap(), 3);
     assert!(!oldest.exists());
     assert!(!stale.exists());
     assert_eq!(fs::read(&retained).unwrap(), original);
@@ -361,7 +369,7 @@ fn upgrade_from_v1_rotates_real_backups_and_removes_only_its_own_stale_partials(
         }
     }
     assert_eq!(versions, [1, 1, 2]);
-    assert_preserved(&store.conn, &before);
+    assert_preserved(&seed, &before);
 }
 
 #[test]
@@ -448,7 +456,7 @@ fn failed_commit_discards_its_backup_and_keeps_older_copies() {
     assert_preserved(&writer, &before);
     reader.execute_batch("COMMIT").unwrap();
     super::apply(&mut writer, Some(&db.path)).unwrap();
-    assert_eq!(user_version(&writer).unwrap(), 3);
+    assert_eq!(user_version(&writer).unwrap(), crate::schema_version());
     assert!(!backups[0].exists());
 }
 
@@ -478,7 +486,7 @@ fn rebuild_step_checks_references_before_commit_and_restores_enforcement_on_ever
     ] {
         let error = run_step(&mut store.conn, sql).unwrap_err();
         assert!(error.contains(expected), "{error}");
-        assert_eq!(store.version().unwrap(), 3);
+        assert_eq!(store.version().unwrap(), crate::schema_version());
         assert!(store.foreign_keys_enabled().unwrap());
         assert_eq!(db.backups(), backups);
         assert_eq!(
@@ -496,7 +504,7 @@ fn rebuild_step_checks_references_before_commit_and_restores_enforcement_on_ever
         ALTER TABLE rebuilt RENAME TO days_written;",
     )
     .unwrap();
-    assert_eq!(store.version().unwrap(), 4);
+    assert_eq!(store.version().unwrap(), crate::schema_version() + 1);
     assert!(store.foreign_keys_enabled().unwrap());
     assert!(store.conn.execute("DELETE FROM days_written", []).is_err());
     assert_eq!(
@@ -506,6 +514,6 @@ fn rebuild_step_checks_references_before_commit_and_restores_enforcement_on_ever
         ),
         [[Value::Text("2031-05-12".into())]]
     );
-    db.backup(3);
+    db.backup(crate::schema_version());
     check_integrity(&store.conn);
 }

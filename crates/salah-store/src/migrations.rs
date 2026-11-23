@@ -28,6 +28,10 @@ pub(super) const STEPS: &[Step] = &[
         sql: include_str!("migrations/003_tracking_ui.sql"),
         foreign_keys_off: false,
     },
+    Step {
+        sql: include_str!("migrations/004_epics_backlog_resources.sql"),
+        foreign_keys_off: true,
+    },
 ];
 
 pub(super) fn apply(conn: &mut Connection, path: Option<&Path>) -> Result<(), Error> {
