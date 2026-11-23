@@ -139,5 +139,13 @@
   "session.done": "Done",
   "session.skip": "Skip",
   "session.skipTooltip": "Mark done without metrics or a note",
-  "session.running": "running"
+  "session.running": "running",
+  "goal.allWork": "All work",
+  "goal.task": "Task",
+  "goal.epic": "Epic",
+  "goal.project": "Project",
+  "goal.none": "—︎",
+  "goal.minuteUnit": "min",
+  "goal.weekMark": "Wk",
+  "goal.more": "+%1"
 }

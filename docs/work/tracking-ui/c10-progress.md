@@ -18,3 +18,33 @@ selected and sent the expected backlog payload. Socket integration is
 pending orchestrator verification.
 
 CHECKPOINT 0: Add task tag selection to the widget creation sheet — files: plugin/local.salah/BarWidget.qml, plugin/local.salah/CreationChipRow.qml, plugin/local.salah/CreationLogic.js, plugin/local.salah/QuickAdd.qml, plugin/local.salah/SalahClient.qml, plugin/local.salah/i18n/en.json, plugin/local.salah/tests/creation_logic_test.js, docs/work/tracking-ui/c10-progress.md
+
+## Task 1 — goal chips
+
+The panel header shows today's and this week's goals from `status.get.goals`
+as compact chips below the hero, above the running card. `GoalLogic.js`
+orders today's goals before the week's (server position order within each),
+keeps the first three and reports the rest as "+N". Each chip shows the
+label, `value / target` with a unit (`≤` for at_most goals), a thin progress
+bar and a muted check when met. `GoalChips.qml` renders them and hides
+entirely when there are no goals. A metric goal with no recorded value shows
+"—" and an empty bar. Goals carry only ids, so labels come from the loaded
+items, epics, projects and metric catalogue: item title, epic name, project
+name, "All work", with " · Metric" appended for metric goals (an unresolved
+scope shows an empty label). Week goals carry a small "Wk" prefix. All text
+is `Text.PlainText` in muted theme tints; the bar "+" click target is
+untouched. Strings are in `i18n/en.json` (`goal.*`).
+
+Checks: all node tests passed, including 7 new ones in `goal_logic_test.js`
+(fixture shape, empty or missing list, more than 3 goals, met and unmet,
+at_most, null metric value, array-like input). `omarchy plugin validate`,
+`jq empty` and `git diff --check` passed. qmllint reports no syntax errors
+(only unresolved `qs.*` import noise). No offscreen render was run.
+
+CHECKPOINT 1: Add panel header goal chips from status.get.goals — files: plugin/local.salah/GoalLogic.js, plugin/local.salah/GoalChips.qml, plugin/local.salah/BarWidget.qml, plugin/local.salah/i18n/en.json, plugin/local.salah/tests/goal_logic_test.js, docs/work/tracking-ui/c10-progress.md
+
+Orchestrator follow-up (render review): an item goal whose task is not on today's plan rendered a
+blank chip label. `scopeLabel` now prefers a server `scope_label` (queued for C8 as an additive
+GoalView field) and otherwise falls back to "Task"/"Epic"/"Project". Render with a scratch daemon
+built at bdc257e: "All work 25 / 60 min", "Task 25 / 20 min ✓", "Wk Quran 4 / 300 min", "+1".
+8 goal checks pass.

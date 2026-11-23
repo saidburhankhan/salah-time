@@ -1217,6 +1217,11 @@ BarWidget {
             }
           }
 
+          GoalChips {
+            id: goalChips
+            host: root
+          }
+
           RunningCard {
             id: runningCard
             width: parent.width
