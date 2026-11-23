@@ -20,6 +20,9 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   (app). After C2 is fully committed: dispatch C5 (phase 3 backend); after C5's first checkpoint: C6
   (widget) and C7 (app), each after the previous worker on that directory is committed.
   If Codex hits its 5h limit, continue the same brief with a Claude subagent.
+- Review gates (data-model.md): C2 checkpoint 0 (migration chain + 003) and C5 checkpoint 0
+  (004) each get an independent Claude reviewer before more work builds on them; migrate a copy of
+  the live DB in scratch and compare row counts before every install.
 
 - U5: user visual check after `omarchy restart shell`; fix what they report.
 - Optional: app/widget could show `stale` on an overnight timer (backend reports it since 47fb1d1).
