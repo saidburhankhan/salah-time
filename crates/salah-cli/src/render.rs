@@ -26,12 +26,19 @@ pub fn mutation(result: &Value) -> String {
     let changed = &result["changed"];
     let mut lines = Vec::new();
     for item in rows(&changed["items"]) {
+        let when = if item["backlog"].as_bool() == Some(true) {
+            "backlog".to_owned()
+        } else {
+            format!(
+                "{} after {}",
+                text(&item["schedule_text"]),
+                text(&item["block"])
+            )
+        };
         lines.push(format!(
-            "item {}  {}  ({} after {})",
+            "item {}  {}  ({when})",
             short(&item["id"]),
             text(&item["title"]),
-            text(&item["schedule_text"]),
-            text(&item["block"]),
         ));
     }
     for session in rows(&changed["sessions"]) {
@@ -85,7 +92,7 @@ pub fn items(result: &Value) -> String {
             format!(
                 "{}  {:<8} {}  ({})",
                 short(&item["id"]),
-                text(&item["block"]),
+                item["block"].as_str().unwrap_or("backlog"),
                 text(&item["title"]),
                 text(&item["schedule_text"]),
             )
@@ -112,6 +119,33 @@ pub fn projects(result: &Value) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Backlog rows in order, with the project and planned minutes.
+pub fn backlog(result: &Value) -> String {
+    let lines: Vec<String> = rows(result)
+        .iter()
+        .map(|item| {
+            let minutes = match &item["planned_minutes"] {
+                Value::Number(n) => format!("  {n} min"),
+                _ => String::new(),
+            };
+            format!(
+                "{}  {}{}{minutes}",
+                short(&item["id"]),
+                text(&item["title"]),
+                item["project"]["name"]
+                    .as_str()
+                    .map(|name| format!("  [{name}]"))
+                    .unwrap_or_default(),
+            )
+        })
+        .collect();
+    if lines.is_empty() {
+        "the backlog is empty".into()
+    } else {
+        lines.join("\n")
+    }
 }
 
 /// Epics with their status and recorded work.

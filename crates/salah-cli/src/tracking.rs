@@ -121,8 +121,8 @@ pub struct ItemAddArgs {
     days: Option<String>,
     #[arg(long, value_name = "ID")]
     project: Option<String>,
-    /// An epic of the item's project
-    #[arg(long, value_name = "ID", requires = "project")]
+    /// Without --project the item joins the epic's project
+    #[arg(long, value_name = "ID")]
     epic: Option<String>,
     #[arg(long, value_name = "MINUTES")]
     planned_minutes: Option<i64>,

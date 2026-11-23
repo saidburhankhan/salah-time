@@ -548,6 +548,43 @@ fn method_success_and_error(client: &mut Client) {
         ),
         -32002
     );
+    let shelved = client.good(
+        "item.add",
+        json!({"op_id":"s4-backlog-add","title":"Someday","backlog":true}),
+    )["changed"]["items"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(client.good("backlog.list", json!({}))[0]["id"], shelved);
+    assert_eq!(client.bad("backlog.list", json!([])), -32602);
+    assert_eq!(
+        client.good(
+            "item.schedule",
+            json!({"op_id":"s4-schedule","id":shelved,"day":DATE,"block":"isha"})
+        )["changed"]["items"][0]["block"],
+        "isha"
+    );
+    assert_eq!(
+        client.bad(
+            "item.schedule",
+            json!({"op_id":"s4-schedule-bad","id":shelved})
+        ),
+        -32602
+    );
+    assert_eq!(
+        client.good("item.backlog", json!({"op_id":"s4-shelve","id":shelved}))["changed"]["items"]
+            [0]["backlog"],
+        true
+    );
+    assert_eq!(
+        client.bad(
+            "item.backlog",
+            json!({"op_id":"s4-shelve-bad","id":"missing"})
+        ),
+        -32002
+    );
+    assert!(client.good("epics.list", json!({})).is_array());
+    assert_eq!(client.bad("epics.list", json!({"status":"done"})), -32602);
 
     let started = client.good("session.start", json!({"op_id":"s4-start","item_id":id}));
     let session = started["changed"]["sessions"][0]["id"]

@@ -116,7 +116,7 @@ fn live_positions(store: &Store, block: BoundaryId) -> Vec<i64> {
         .items()
         .unwrap()
         .into_iter()
-        .filter(|item| item.is_live() && item.block == block)
+        .filter(|item| item.is_live() && item.block == Some(block))
         .map(|item| item.position)
         .collect();
     positions.sort_unstable();

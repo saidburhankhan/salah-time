@@ -1,3 +1,4 @@
+use backlog::BacklogCommand;
 use chrono::{DateTime, FixedOffset, Local as LocalTime, Utc};
 use clap::{Args, Parser, Subcommand};
 use epics::EpicCommand;
@@ -12,6 +13,7 @@ use tracking::{
     TagCommand,
 };
 
+mod backlog;
 mod daemon;
 mod epics;
 mod local;
@@ -62,6 +64,11 @@ enum Command {
     Project {
         #[command(subcommand)]
         command: ProjectCommand,
+    },
+    /// One-time tasks without a day yet, and scheduling them
+    Backlog {
+        #[command(subcommand)]
+        command: BacklogCommand,
     },
     /// Manage a project's epics
     Epic {
@@ -242,6 +249,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Some(Command::Item { command }) => tracking::item(&mut local()?, command),
         Some(Command::Session { command }) => tracking::session(&mut local()?, command),
         Some(Command::Project { command }) => tracking::project(&mut local()?, command),
+        Some(Command::Backlog { command }) => backlog::backlog(&mut local()?, command),
         Some(Command::Epic { command }) => epics::epic(&mut local()?, command),
         Some(Command::Tag { command }) => tracking::tag(&mut local()?, command),
         Some(Command::Metric { command }) => tracking::metric(&mut local()?, command),

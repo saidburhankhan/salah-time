@@ -5,6 +5,7 @@ mod epics;
 mod migrations;
 mod read;
 pub mod reports;
+mod resources;
 mod write;
 
 pub use write::WriteTx;
@@ -231,10 +232,10 @@ mod tests {
             project_id: Some("p".into()),
             epic_id: None,
             metric_ids: None,
-            block: BoundaryId::Fajr,
+            block: Some(BoundaryId::Fajr),
             repeat: Repeat::Daily,
             weekdays: None,
-            day: d(),
+            day: Some(d()),
             planned_minutes: Some(30),
             position: 0,
             created_at: t(1),
@@ -265,10 +266,46 @@ mod tests {
         assert!(s.write(|q| q.put_item(&x)).is_err())
     }
     #[test]
+    fn backlog_items_round_trip_and_count_their_live_resources() {
+        let mut s = Store::open_in_memory().unwrap();
+        let mut item = i();
+        (item.block, item.day, item.repeat) = (None, None, Repeat::None);
+        s.write(|x| {
+            x.put_project(&p())?;
+            x.put_item(&item)
+        })
+        .unwrap();
+        assert_eq!(s.item(&item.id).unwrap(), Some(item.clone()));
+        s.conn
+            .execute_batch(
+                "INSERT INTO resources (id, item_id, kind, body, url, remind_at, position,
+                     created_at, updated_at, deleted_at, version) VALUES
+                 ('n1','i','note','a',NULL,NULL,0,'t','t',NULL,1),
+                 ('n2','i','note','b',NULL,NULL,1,'t','t',NULL,1),
+                 ('l1','i','link',NULL,'https://x',NULL,2,'t','t',NULL,1),
+                 ('r1','i','reminder',NULL,NULL,'2031-05-14T10:00:00Z',3,'t','t',NULL,1),
+                 ('gone','i','link',NULL,'https://y',NULL,4,'t','t','t',1);",
+            )
+            .unwrap();
+        let counts = s.item_resource_counts().unwrap();
+        assert_eq!(
+            counts["i"],
+            salah_domain::resource::ResourceCounts {
+                notes: 2,
+                links: 1,
+                reminders: 1
+            }
+        );
+        // A repeating item cannot be in the backlog.
+        item.repeat = Repeat::Daily;
+        assert!(s.write(|x| x.put_item(&item)).is_err());
+    }
+
+    #[test]
     fn night_item_and_session_round_trip() {
         let mut s = Store::open_in_memory().unwrap();
         let mut item = i();
-        item.block = BoundaryId::Night;
+        item.block = Some(BoundaryId::Night);
         let session = Session {
             id: "night-session".into(),
             item_id: Some(item.id.clone()),

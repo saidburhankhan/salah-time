@@ -11,7 +11,7 @@ use salah_core::items::{ItemView, MovePosition, NewItem};
 use salah_core::projects::ProjectView;
 use salah_core::sessions::SessionView;
 use salah_core::{
-    Store, WriteTx, day, epics, items, marks, metrics, projects, quick, sessions, tags,
+    Store, WriteTx, backlog, day, epics, items, marks, metrics, projects, quick, sessions, tags,
 };
 use salah_domain::error::Error;
 use salah_domain::tracking::{Item, Project, Session};
@@ -145,6 +145,12 @@ pub(crate) fn item_add(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, R
         new.epic_id = p.epic_id.clone();
         new.metric_ids = p.metric_ids.clone();
         new.date = p.date.or(new.date);
+        new.backlog = p.backlog;
+        if p.backlog && p.quick_text.is_some() {
+            // The text's own day and block give way to the backlog.
+            new.block = p.block;
+            new.date = p.date;
+        }
         let item = items::add(tx, &config, now, ids, new)?;
         item_views(tx, today, vec![item])
     })
@@ -208,6 +214,28 @@ pub(crate) fn item_remove(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value
         Ok(removed(
             items::remove(tx, &config, now, &p.id, p.expected_version)?.id,
         ))
+    })
+}
+
+pub(crate) fn item_schedule(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: ItemScheduleParams = parse(call.params)?;
+    let config = ctx.config.load()?;
+    let now = ctx.now();
+    let today = day::current(&config, now)?;
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
+        let item = backlog::schedule(tx, &config, now, &p.id, p.day, p.block, p.expected_version)?;
+        item_views(tx, today, vec![item])
+    })
+}
+
+pub(crate) fn item_backlog(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: RemoveParams = parse(call.params)?;
+    let config = ctx.config.load()?;
+    let now = ctx.now();
+    let today = day::current(&config, now)?;
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
+        let item = backlog::to_backlog(tx, &config, now, &p.id, p.expected_version)?;
+        item_views(tx, today, vec![item])
     })
 }
 

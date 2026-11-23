@@ -41,6 +41,19 @@ pub fn find(store: &Store, id: &str) -> Result<Epic, Error> {
         .ok_or_else(|| not_found("epic", id))
 }
 
+/// A live epic that can take new tasks: a finished one still accepts late
+/// sessions, but not tasks.
+pub(crate) fn assignable(store: &Store, id: &str) -> Result<Epic, Error> {
+    let epic = find(store, id)?;
+    if epic.status == EpicStatus::Finished {
+        return Err(Error::validation(
+            "epic_id",
+            "epic is finished; reopen it to add tasks",
+        ));
+    }
+    Ok(epic)
+}
+
 pub fn add(
     tx: &WriteTx<'_>,
     now: DateTime<Utc>,

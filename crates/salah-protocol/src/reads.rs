@@ -149,6 +149,17 @@ pub(crate) fn item_preview(call: Call<'_>, _: &mut Context<'_>) -> Result<Value,
     )?)
 }
 
+pub(crate) fn backlog(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let params: crate::methods::BacklogListParams = parse(call.params)?;
+    let today = day::current(&ctx.config.load()?, ctx.now())?;
+    to_value(salah_core::backlog::list(
+        ctx.store,
+        today,
+        params.project_id.as_deref(),
+        params.tag_id.as_deref(),
+    )?)
+}
+
 pub(crate) fn epics(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let params: crate::methods::EpicsListParams = parse(call.params)?;
     let today = day::current(&ctx.config.load()?, ctx.now())?;

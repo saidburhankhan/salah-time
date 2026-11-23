@@ -1,4 +1,5 @@
-//! Items: work planned into a prayer block, once or on a repeat rule.
+//! Items: work planned into a prayer block, once or on a repeat rule. A
+//! one-time item may instead wait in the backlog (see [`crate::backlog`]).
 
 use crate::config::Config;
 use crate::guard::{ensure_version, minutes, not_found, nullable};
@@ -36,6 +37,8 @@ pub struct NewItem {
     /// The day of a one-time item or the first day of a repeating one.
     /// Defaults to the day in progress.
     pub date: Option<NaiveDate>,
+    /// A one-time item with no day or block yet.
+    pub backlog: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -74,6 +77,8 @@ pub enum MovePosition {
 pub struct ItemView {
     #[serde(flatten)]
     pub item: Item,
+    /// No day and no block: the item waits in the backlog.
+    pub backlog: bool,
     pub metrics: Vec<PromptMetric>,
     pub schedule_text: String,
     /// The first day on or after `from` on which the item applies.
@@ -86,6 +91,7 @@ impl ItemView {
             metrics: effective_metrics(store, &item)?,
             schedule_text: item.schedule_text(),
             next_occurrence: item.next_occurrence(from),
+            backlog: item.is_backlog(),
             item,
         })
     }
@@ -100,10 +106,10 @@ pub struct Preview {
     pub schedule_text: String,
 }
 
-/// Live items in block (day order) and position order.
+/// Live items in block (day order) and position order, the backlog last.
 pub fn list(store: &Store) -> Result<Vec<Item>, Error> {
     let mut items: Vec<Item> = store.items()?.into_iter().filter(Item::is_live).collect();
-    items.sort_by_key(|item| (item.block, item.position));
+    items.sort_by_key(|item| (item.is_backlog(), item.block, item.position));
     Ok(items)
 }
 
@@ -141,28 +147,41 @@ pub fn add(
 ) -> Result<Item, Error> {
     let planning = schedule::resolve(config, now)?.planning_block();
     day::freeze_past(tx, config, planning.day)?;
-    let day = new.date.unwrap_or(planning.day);
-    if day < planning.day {
-        return Err(Error::validation(
-            "date",
-            "an item cannot start before today; past days are not re-planned",
-        ));
-    }
-    let default_block = if day == planning.day {
-        planning.start
-    } else {
-        BoundaryId::Fajr
-    };
-    let block = validate_block(new.block.unwrap_or(default_block))?;
     let repeat = new.repeat.unwrap_or(Repeat::None);
     validate_repeat(repeat, new.weekdays)?;
-    let project_id = checked_project(tx, new.project_id)?;
+    let (block, day) = if new.backlog {
+        if new.block.is_some() || new.date.is_some() {
+            return Err(Error::validation(
+                "backlog",
+                "a backlog task has no day or block; schedule it later",
+            ));
+        }
+        one_time(repeat)?;
+        (None, None)
+    } else {
+        let day = new.date.unwrap_or(planning.day);
+        if day < planning.day {
+            return Err(Error::validation(
+                "date",
+                "an item cannot start before today; past days are not re-planned",
+            ));
+        }
+        let default_block = if day == planning.day {
+            planning.start
+        } else {
+            BoundaryId::Fajr
+        };
+        let block = validate_block(new.block.unwrap_or(default_block))?;
+        (Some(block), Some(day))
+    };
+    let (project_id, epic_id) = epic_owner(tx, new.project_id, new.epic_id)?;
+    let project_id = checked_project(tx, project_id)?;
     let metric_ids = checked_metric_ids(tx, project_id.as_deref(), new.metric_ids)?;
     let mut item = Item {
         id: ids.new_id(),
         title: validate_title(&new.title)?,
         project_id,
-        epic_id: new.epic_id,
+        epic_id,
         metric_ids,
         block,
         repeat,
@@ -199,12 +218,20 @@ pub fn edit(
         item.title = validate_title(title)?;
     }
     if let Some(block) = changes.block
-        && block != item.block
+        && Some(block) != item.block
     {
-        item.block = validate_block(block)?;
-        item.position = next_position(tx, block)?;
+        if item.is_backlog() {
+            return Err(backlog_has_no_block());
+        }
+        item.block = Some(validate_block(block)?);
+        item.position = next_position(tx, item.block)?;
     }
-    if let Some(repeat) = changes.repeat {
+    if let Some(repeat) = changes.repeat
+        && repeat != item.repeat
+    {
+        if item.is_backlog() {
+            one_time(repeat)?;
+        }
         item.repeat = repeat;
         if repeat != Repeat::Weekly {
             item.weekdays = None;
@@ -215,15 +242,24 @@ pub fn edit(
     }
     validate_repeat(item.repeat, item.weekdays)?;
     let previous_project = item.project_id.clone();
+    let project_given = changes.project_id.is_some();
     if let Some(project_id) = changes.project_id {
         item.project_id = checked_project(tx, project_id)?;
     }
-    // A new project resets the selection unless the same edit chooses one,
-    // which is then checked against the new project.
-    if let Some(epic_id) = changes.epic_id {
-        item.epic_id = epic_id;
-    } else if item.project_id != previous_project {
-        item.epic_id = None;
+    // A new project resets the epic and the metric selection unless the same
+    // edit chooses them, which are then checked against the new project.
+    match changes.epic_id {
+        Some(Some(epic_id)) if item.epic_id.as_ref() != Some(&epic_id) => {
+            let epic = crate::epics::assignable(tx, &epic_id)?;
+            // An item without a project joins the epic's project.
+            if item.project_id.is_none() && !project_given {
+                item.project_id = Some(projects::active(tx, &epic.project_id)?.id);
+            }
+            item.epic_id = Some(epic_id);
+        }
+        Some(epic_id) => item.epic_id = epic_id,
+        None if item.project_id != previous_project => item.epic_id = None,
+        None => {}
     }
     match changes.metric_ids {
         Some(ids) => item.metric_ids = checked_metric_ids(tx, item.project_id.as_deref(), ids)?,
@@ -245,13 +281,25 @@ pub fn move_to(
     config: &Config,
     now: DateTime<Utc>,
     id: &str,
-    block: BoundaryId,
+    block: Option<BoundaryId>,
     position: MovePosition,
     expected_version: Option<i64>,
 ) -> Result<Vec<Item>, Error> {
-    let block = validate_block(block)?;
+    let block = block.map(validate_block).transpose()?;
     let mut moved = find(tx, id)?;
     ensure_version("item", id, moved.version, expected_version)?;
+    // A move stays inside the backlog or among the scheduled blocks;
+    // `item.schedule` and `item.backlog` cross between them.
+    match (moved.is_backlog(), block.is_none()) {
+        (true, false) => return Err(backlog_has_no_block()),
+        (false, true) => {
+            return Err(Error::validation(
+                "block",
+                "only a backlog task moves with block null; use item.backlog",
+            ));
+        }
+        _ => {}
+    }
     let today = day::current(config, now)?;
     day::freeze_past(tx, config, today)?;
     let mut siblings: Vec<Item> = list(tx)?
@@ -384,13 +432,45 @@ fn sibling_index(siblings: &[Item], anchor: &str) -> Result<usize, Error> {
         .ok_or_else(|| not_found("item", anchor))
 }
 
-fn next_position(store: &Store, block: BoundaryId) -> Result<i64, Error> {
+/// The position after every live item in `block` (`None`: the backlog).
+pub(crate) fn next_position(store: &Store, block: Option<BoundaryId>) -> Result<i64, Error> {
     Ok(list(store)?
         .iter()
         .filter(|i| i.block == block)
         .map(|i| i.position + 1)
         .max()
         .unwrap_or(0))
+}
+
+/// Only one-time tasks can wait in the backlog.
+pub(crate) fn one_time(repeat: Repeat) -> Result<(), Error> {
+    if repeat != Repeat::None {
+        return Err(Error::validation(
+            "repeat",
+            "only one-time tasks can be in the backlog",
+        ));
+    }
+    Ok(())
+}
+
+fn backlog_has_no_block() -> Error {
+    Error::validation(
+        "block",
+        "a backlog task has no block; schedule it with item.schedule",
+    )
+}
+
+/// A chosen epic must be active; without a project the item takes the epic's.
+fn epic_owner(
+    store: &Store,
+    project_id: Option<String>,
+    epic_id: Option<String>,
+) -> Result<(Option<String>, Option<String>), Error> {
+    let Some(epic_id) = epic_id else {
+        return Ok((project_id, None));
+    };
+    let epic = crate::epics::assignable(store, &epic_id)?;
+    Ok((project_id.or(Some(epic.project_id)), Some(epic_id)))
 }
 
 fn checked_project(store: &Store, id: Option<String>) -> Result<Option<String>, Error> {
@@ -421,7 +501,10 @@ mod tests {
                 ))
             })
             .unwrap();
-        assert_eq!((first.block, first.day), (BoundaryId::Dhuhr, date(20)));
+        assert_eq!(
+            (first.block, first.day),
+            (Some(BoundaryId::Dhuhr), Some(date(20)))
+        );
         assert_eq!((first.position, second.position), (0, 1));
         let other_day = store
             .write(|tx| {
@@ -437,7 +520,7 @@ mod tests {
                 )
             })
             .unwrap();
-        assert_eq!(other_day.block, BoundaryId::Fajr);
+        assert_eq!(other_day.block, Some(BoundaryId::Fajr));
     }
 
     #[test]
@@ -504,7 +587,7 @@ mod tests {
                     &config(),
                     at(20, 13, 5),
                     &c.id,
-                    BoundaryId::Dhuhr,
+                    Some(BoundaryId::Dhuhr),
                     MovePosition::After(a.id.clone()),
                     None,
                 )

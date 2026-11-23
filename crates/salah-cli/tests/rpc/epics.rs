@@ -43,9 +43,9 @@ fn epic_lifecycle_keeps_versions_history_and_replays() {
     bad(
         &mut rpc,
         "item.add",
-        json!({"op_id":"no-project","title":"Wrong owner","epic_id":e}),
-        "validation",
-        Some("epic_id"),
+        json!({"op_id":"no-project","title":"Wrong owner","project_id":null,"epic_id":"missing"}),
+        "not_found",
+        None,
     );
     bad(
         &mut rpc,
@@ -92,6 +92,50 @@ fn epic_lifecycle_keeps_versions_history_and_replays() {
     let finished = fixtures.check("epic_edit_finish",rpc.request("epic.edit",json!({"op_id":"finish","id":e,"expected_version":1,"name":"Read in spring","status":"finished","note":null})));
     let finished_at = &finished["changed"]["epics"][0]["finished_at"];
     assert!(finished_at.is_string());
+    // A finished epic takes late sessions but no new tasks.
+    let finished_msg = |response: &serde_json::Value| {
+        assert_eq!(
+            response["error"]["data"]["kind"], "validation",
+            "{response}"
+        );
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("epic is finished; reopen it to add tasks"),
+            "{response}"
+        );
+    };
+    finished_msg(&rpc.request(
+        "item.add",
+        json!({"op_id":"late-task","title":"Late","project_id":p,"epic_id":e}),
+    ));
+    let loose = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"loose","title":"Loose","project_id":p}),
+    );
+    finished_msg(&rpc.request(
+        "item.edit",
+        json!({"op_id":"into-finished","id":loose,"epic_id":e}),
+    ));
+    good(
+        &mut rpc,
+        "item.edit",
+        json!({"op_id":"keep-finished","id":routine,"title":"Morning pages"}),
+    );
+    let late = good(
+        &mut rpc,
+        "session.log",
+        json!({"op_id":"late-log","epic_id":e,"date":DATE,"minutes":5}),
+    );
+    assert_eq!(late["changed"]["sessions"][0]["epic_id"], e);
+    good(
+        &mut rpc,
+        "item.remove",
+        json!({"op_id":"drop-loose","id":loose}),
+    );
     assert_eq!(
         good(&mut rpc, "epics.list", json!({"status":"active"})),
         json!([])
@@ -299,6 +343,7 @@ fn epic_reports_use_recorded_ownership_and_include_unassigned_work() {
             .clone();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["minutes"], minutes);
+        assert!(rows[0]["epic"].is_null());
     }
     drop(rpc);
     let mut next = Session::open(&h, "2031-05-15T10:00:00+05:00");
@@ -328,12 +373,57 @@ fn epic_reports_use_recorded_ownership_and_include_unassigned_work() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|s| s["epic_id"] == e && s["project_id"] == p)
+            .all(|s| s["epic_id"] == e
+                && s["project_id"] == p
+                && s["epic"] == json!({"id": e, "name": "Reading"}))
     );
     bad(
         &mut next,
         "session.log",
         json!({"op_id":"wrong-epic","item_id":item,"epic_id":e}),
+        "validation",
+        Some("epic_id"),
+    );
+}
+
+#[test]
+fn an_item_with_only_an_epic_joins_the_epic_project() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    let p = project(&mut rpc, "Library");
+    let e = added(
+        &mut rpc,
+        "epic.add",
+        "epics",
+        json!({"op_id":"epic","project_id":p,"name":"Reading"}),
+    );
+    let added_item = good(
+        &mut rpc,
+        "item.add",
+        json!({"op_id":"outline","title":"Outline","epic_id":e}),
+    );
+    let item = &added_item["changed"]["items"][0];
+    assert_eq!(
+        (&item["project_id"], &item["epic_id"]),
+        (&json!(p), &json!(e))
+    );
+    let loose = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"loose","title":"Loose"}),
+    );
+    let joined = good(
+        &mut rpc,
+        "item.edit",
+        json!({"op_id":"join","id":loose,"epic_id":e}),
+    );
+    assert_eq!(joined["changed"]["items"][0]["project_id"], p);
+    let other = project(&mut rpc, "Other");
+    bad(
+        &mut rpc,
+        "item.add",
+        json!({"op_id":"mismatch","title":"X","project_id":other,"epic_id":e}),
         "validation",
         Some("epic_id"),
     );

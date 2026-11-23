@@ -166,6 +166,9 @@ pub struct ItemAddParams {
     pub planned_minutes: Option<i64>,
     #[serde(default)]
     pub date: Option<NaiveDate>,
+    /// A one-time task without a day or block.
+    #[serde(default)]
+    pub backlog: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -183,7 +186,9 @@ pub struct ItemEditParams {
 pub struct ItemMoveParams {
     pub op_id: String,
     pub id: String,
-    pub block: BoundaryId,
+    /// Required; `null` moves within the backlog.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub block: Option<BoundaryId>,
     #[serde(default)]
     pub index: Option<usize>,
     #[serde(default)]
@@ -194,7 +199,25 @@ pub struct ItemMoveParams {
     pub expected_version: Option<i64>,
 }
 
-/// `item.remove`, `tag.remove`, `session.remove`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct ItemScheduleParams {
+    pub op_id: String,
+    pub id: String,
+    pub day: NaiveDate,
+    pub block: BoundaryId,
+    #[serde(default)]
+    pub expected_version: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct BacklogListParams {
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub tag_id: Option<String>,
+}
+
+/// `item.remove`, `item.backlog`, `tag.remove`, `session.remove`.
 #[derive(Clone, Debug, Deserialize)]
 pub struct RemoveParams {
     pub op_id: String,

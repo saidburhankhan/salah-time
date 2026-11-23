@@ -77,6 +77,18 @@ fn get_name<T: DeserializeOwned>(row: &Row, column: &str) -> rusqlite::Result<T>
     serde_json::from_value(serde_json::Value::String(text)).map_err(invalid)
 }
 
+fn get_optional_name<T: DeserializeOwned>(row: &Row, column: &str) -> rusqlite::Result<Option<T>> {
+    let text: Option<String> = row.get(column)?;
+    text.map(|text| serde_json::from_value(serde_json::Value::String(text)).map_err(invalid))
+        .transpose()
+}
+
+fn get_optional_day(row: &Row, column: &str) -> rusqlite::Result<Option<NaiveDate>> {
+    let text: Option<String> = row.get(column)?;
+    text.map(|text| NaiveDate::parse_from_str(&text, "%Y-%m-%d").map_err(invalid))
+        .transpose()
+}
+
 pub(crate) fn epic(row: &Row) -> rusqlite::Result<salah_domain::epic::Epic> {
     Ok(salah_domain::epic::Epic {
         id: row.get("id")?,
@@ -153,10 +165,10 @@ pub(crate) fn item(row: &Row) -> rusqlite::Result<Item> {
         project_id: row.get("project_id")?,
         epic_id: row.get("epic_id")?,
         metric_ids: row.get::<_, bool>("metrics_custom")?.then(Vec::new),
-        block: get_name(row, "block")?,
+        block: get_optional_name(row, "block")?,
         repeat: get_name(row, "repeat")?,
         weekdays: row.get::<_, Option<u8>>("weekdays")?.map(Weekdays),
-        day: get_day(row, "start_day")?,
+        day: get_optional_day(row, "start_day")?,
         planned_minutes: row.get("planned_minutes")?,
         position: row.get("position")?,
         created_at: get_timestamp(row, "created_at")?,

@@ -575,6 +575,8 @@ fn a_timer_becomes_stale_only_after_its_own_sleep_boundary() {
     assert!(status["result"]["running"].is_null());
 }
 
+#[path = "rpc/backlog.rs"]
+mod backlog;
 #[path = "rpc/epics.rs"]
 mod epics;
 #[path = "rpc/phase2.rs"]

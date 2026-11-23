@@ -97,16 +97,19 @@ store-wide counter, never a precondition.
 | `hello` | `protocol[]`, `client`, `actor?` | `protocol`, `server`, `capabilities`, `revision` | protocol | — | — |
 | `status.get` | — | `Status`: prayer projection, `planner` (today's rows), `running: SessionView\|null`, `prompt: [PromptMetric]` | config, source, storage | — | — |
 | `day.get` | `date?` | `DayPlan`: prayers, blocks with `capacity_minutes`/`planned_minutes`/`actual_minutes`/`unplanned_minutes` and rows, `open`, `fulfilment` | validation, source, storage | — | — |
-| `items.list` | — | `[ItemView]` | storage | — | — |
+| `items.list` | — | `[ItemView]`, the backlog last | storage | — | — |
+| `backlog.list` | `project_id?`, `tag_id?` (each also `"none"`) | `[ItemView + project: {id,name,color,tag_ids}\|null + resources: {notes,links,reminders}]` in backlog order | not_found, storage | — | — |
 | `stats.get` | `from,to` or `days?` (default 30, max 730), `tag_id?`, `project_id?`, `epic_id?`, `item_id?` (each also `"none"`), `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}` | `range`, `filter`, `days` (with `unplanned_minutes`, nullable `fulfilment_ratio`), `series` (minutes first), `projects`, `epics`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
 | `stats.table` | `stats.get`'s range and filter (including the session bounds), `group?` (`week` default, `day`, `project`, `epic`, `tag`, `item`) | `range`, `filter`, `group`, `columns`, `rows`, `totals` | validation, not_found, storage | — | — |
 | `stats.series` | `stats.get`'s range and filter (including the session bounds), `interval?` (`day` default, `week`), `split?` (`project`, `epic`, `tag`, `item`), `measures: [id]` (required, non-empty: `minutes`, `sessions`, a metric id or `distractions_per_hour`) | `range`, `filter`, `interval`, `split`, `periods`, `series` | validation (empty `measures`, range over 730 days), not_found (unknown measure), storage | — | — |
-| `sessions.list` | `stats.get`'s range and project, epic, tag and item filters, `with_note?` (default true), `q?`, `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}`, `limit?` (default 100, 1–500), `before?` (a previous `next`) | `rows: [SessionView + project + item]`, `next: cursor\|null` | validation, not_found, storage | — | — |
+| `sessions.list` | `stats.get`'s range and project, epic, tag and item filters, `with_note?` (default true), `q?`, `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}`, `limit?` (default 100, 1–500), `before?` (a previous `next`) | `rows: [SessionView + project + epic + item]`, `next: cursor\|null` | validation, not_found, storage | — | — |
 | `item.parse` | `text` | draft `{title, block, repeat, weekdays, planned_minutes, start_day}` | validation (and, only when the text names a day, config/source) | — | — |
 | `item.preview` | `block`, `repeat`, `weekdays?`, `planned_minutes?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
-| `item.add` | `op_id`, `title` or `quick_text`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `epic_id?`, `planned_minutes?`, `date?`, `metric_ids?` | mutation result (`changed.items`) | validation, not_found, source, storage | yes | no |
+| `item.add` | `op_id`, `title` or `quick_text`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `epic_id?`, `planned_minutes?`, `date?`, `metric_ids?`, `backlog?` (one-time, then no `block`/`date`) | mutation result (`changed.items`) | validation, not_found, source, storage | yes | no |
 | `item.edit` | `op_id`, `id`, `expected_version?`, `title?`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `epic_id?`, `planned_minutes?`, `metric_ids?` (`null` clears the project, epic, planned minutes or metric selection) | mutation result | validation, not_found, conflict, storage | yes | yes |
-| `item.move` | `op_id`, `id`, `block`, `after_id?` / `before_id?` / `index?`, `expected_version?` | mutation result (every renumbered item) | validation, not_found, conflict, storage | yes | yes |
+| `item.move` | `op_id`, `id`, `block` (required; `null` reorders the backlog), `after_id?` / `before_id?` / `index?`, `expected_version?` | mutation result (every renumbered item) | validation, not_found, conflict, storage | yes | yes |
+| `item.schedule` | `op_id`, `id`, `day`, `block`, `expected_version?` (one-time items only) | mutation result (`changed.items`) | validation, not_found, conflict, source, storage | yes | yes |
+| `item.backlog` | `op_id`, `id`, `expected_version?` (one-time items only) | mutation result (`changed.items`) | validation, not_found, conflict, source, storage | yes | yes |
 | `item.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`) | not_found, conflict, storage | yes | yes |
 | `epics.list` | `project_id?`, `status?` (`active` or `finished`) | epics with work totals and task counts, in project and position order | validation, storage | — | — |
 | `epic.add` | `op_id`, `project_id`, `name`, `note?` | mutation result (`changed.epics`) | validation, not_found, storage | yes | no |
@@ -170,7 +173,24 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   ordered oldest first and `at` is a UTC instant.
 - `ItemView` and day rows expose nullable `epic_id`. An assigned epic must belong
   to the item’s project. Changing projects clears the old epic. The same edit can
-  select an epic in the new project. Frozen day rows use the planned epic.
+  select an epic in the new project. Frozen day rows use the planned epic. An epic
+  given without a project (on `item.add`, or `item.edit` of an item without one)
+  brings its project. A finished epic takes no new or moved-in tasks (`validation`,
+  "epic is finished; reopen it to add tasks"); its tasks keep it, and sessions may
+  still be logged against it.
+- Backlog: `ItemView.backlog` is true when a one-time item has `block` and `day`
+  `null` (`next_occurrence` is then `null`). A backlog item is in no day plan,
+  snapshot, capacity or fulfilment; work logged on it is unplanned. `item.add
+  {backlog: true}` takes no `block` or `date` (with `quick_text` the parsed day and
+  block are dropped) and appends to the backlog. `item.schedule` sets a day from
+  today on and a block, appending to that block; it also moves a planned one-time
+  item. `item.backlog` clears both and appends to the backlog; an item already there
+  is returned unchanged. A past day that already lists the item keeps it. Both
+  reject repeating items (`validation`, field `repeat`). `item.move` with `block:
+  null` reorders the backlog; a move between the backlog and a block, `item.edit`
+  of a backlog item's `block`, or a repeat on it is a `validation` error.
+  `backlog.list` filters by project and by the project's tags; its `resources`
+  counts the item's live resources of each kind.
 - `ItemView` and day rows expose `metric_ids` and the effective `metrics` list.
   `metric_ids: null` inherits the project's active asked metrics. Without a project it
   inherits focus, quality, and distractions. An explicit list selects only those metrics
@@ -251,8 +271,8 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   run in SQL. Rows are finished live sessions (ticks included): newest planning day
   first, then the newest end instant (creation for manual logs and ticks), then id.
   Each row is a `SessionView` (with its timestamped `notes`) plus `project:
-  {id,name,color}|null` and `item: {id,title}|null`, the session's recorded project
-  and task with their current labels. `with_note` keeps sessions with a main note or
+  {id,name,color}|null`, `epic: {id,name}|null` and `item: {id,title}|null`, the
+  session's recorded project, epic and task with their current labels. `with_note` keeps sessions with a main note or
   a live timestamped entry. `q` is trimmed and matches either case-insensitively
   (Unicode lowercase, literal text). `minutes_min`/`minutes_max` are inclusive and
   never match a tick. Each `values` entry needs the session to have that value within
@@ -402,7 +422,7 @@ Example stale edit:
 - Reuse the same `op_id` when retrying after a timeout; use a new one for a new
   intent.
 - `expected_version` applies per entity on every `*.edit` and `*.remove`,
-  `item.move`, and optionally prayer marks. Appends (`*.add`, `session.start`,
+  `item.move`, `item.schedule`, `item.backlog`, and optionally prayer marks. Appends (`*.add`, `session.start`,
   `session.stop`, `session.bump`, `session.note`, `session.log`) need no precondition, only `op_id`. A stale
   version is `data.kind = "conflict"` and writes nothing.
 - Every entity row carries its `version` (lists, day rows, and `changed`). `revision` orders pushes and de-duplicates them; it

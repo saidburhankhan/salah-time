@@ -8,6 +8,7 @@
         "block": "fajr",
         "day": "2031-05-14",
         "ended_at": "2031-05-14T04:55:00Z",
+        "epic": null,
         "epic_id": null,
         "id": "<id:1>",
         "item": {
@@ -42,6 +43,7 @@
         "block": "maghrib",
         "day": "2031-05-13",
         "ended_at": null,
+        "epic": null,
         "epic_id": null,
         "id": "<id:5>",
         "item": {
@@ -64,6 +66,7 @@
         "block": "dhuhr",
         "day": "2031-05-08",
         "ended_at": null,
+        "epic": null,
         "epic_id": null,
         "id": "<id:7>",
         "item": {

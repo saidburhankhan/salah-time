@@ -5,6 +5,7 @@
 //! Mutations take an open [`WriteTx`], so the caller decides the transaction
 //! and its idempotency record; reads take a [`Store`].
 
+pub mod backlog;
 pub mod config;
 pub mod day;
 pub mod epics;

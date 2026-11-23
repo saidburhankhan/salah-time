@@ -4,5 +4,6 @@ pub mod day;
 pub mod epic;
 pub mod error;
 pub mod item;
+pub mod resource;
 pub mod runtime;
 pub mod tracking;

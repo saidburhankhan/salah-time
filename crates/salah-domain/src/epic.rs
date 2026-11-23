@@ -23,6 +23,13 @@ pub struct Epic {
     pub version: i64,
 }
 
+/// An epic as a session row names it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct EpicRef {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct EpicView {
     #[serde(flatten)]

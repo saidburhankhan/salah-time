@@ -7,6 +7,7 @@ pub use crate::stats::measures::{Measures, ValueRange};
 use crate::stats::{Filter, Range, report_scope};
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use salah_domain::{
+    epic::EpicRef,
     error::Error,
     tracking::{ItemRef, ProjectRef},
 };
@@ -82,6 +83,7 @@ pub struct ListRow {
     #[serde(flatten)]
     pub session: SessionView,
     pub project: Option<ProjectRef>,
+    pub epic: Option<EpicRef>,
     pub item: Option<ItemRef>,
 }
 
@@ -142,6 +144,12 @@ pub fn list(
                 Some(false),
             ),
             project: s.project,
+            epic: s
+                .session
+                .epic_id
+                .clone()
+                .zip(s.epic_name)
+                .map(|(id, name)| EpicRef { id, name }),
             item: s.item,
         })
         .collect();

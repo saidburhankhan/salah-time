@@ -274,7 +274,7 @@ pub fn log_with_changes(
     new: NewLog,
 ) -> Result<LogResult, Error> {
     let item_block = match &new.target.item_id {
-        Some(id) => Some(items::find(tx, id)?.block),
+        Some(id) => items::find(tx, id)?.block,
         None => None,
     };
     let target = resolve(tx, new.target)?;

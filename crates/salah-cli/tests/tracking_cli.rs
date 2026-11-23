@@ -548,3 +548,68 @@ fn epics_are_added_assigned_reported_and_finished() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(String::from_utf8_lossy(&output.stdout).starts_with("removed "));
 }
+
+#[test]
+fn quick_items_join_the_epic_project_and_backlog_tasks_get_scheduled() {
+    let fixture = Fixture::new();
+    let project = fixture.added("projects", &["project", "add", "Book", "--json"]);
+    let epic = fixture.added(
+        "epics",
+        &["epic", "add", "Draft", "--project", &project, "--json"],
+    );
+    let quick = fixture.json(&[
+        "item",
+        "add",
+        "--quick",
+        "--epic",
+        &epic,
+        "write 30m after isha",
+        "--json",
+    ]);
+    let item = &quick["changed"]["items"][0];
+    assert_eq!(
+        (&item["project_id"], &item["epic_id"], &item["block"]),
+        (
+            &Value::from(project.as_str()),
+            &Value::from(epic.as_str()),
+            &Value::from("isha")
+        )
+    );
+
+    let task = fixture.added(
+        "items",
+        &[
+            "backlog",
+            "add",
+            "--quick",
+            "read notes 20m tomorrow",
+            "--project",
+            &project,
+            "--json",
+        ],
+    );
+    let listed = fixture.json(&["backlog", "list", "--project", &project, "--json"]);
+    assert_eq!(listed[0]["title"], "Read notes");
+    assert_eq!(listed[0]["planned_minutes"], 20);
+    let human = fixture.run(&["backlog", "list"]);
+    let human = String::from_utf8_lossy(&human.stdout);
+    assert!(human.contains("Read notes  [Book]  20 min"), "{human}");
+    let added = fixture.run(&["backlog", "add", "Call"]);
+    assert!(String::from_utf8_lossy(&added.stdout).contains("(backlog)"));
+
+    let scheduled = fixture.json(&[
+        "backlog",
+        "schedule",
+        &task[..8],
+        "--date",
+        "2031-05-15",
+        "--block",
+        "asr",
+        "--json",
+    ]);
+    assert_eq!(scheduled["changed"]["items"][0]["day"], "2031-05-15");
+    let listed = fixture.json(&["backlog", "list", "--json"]);
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    let items = fixture.run(&["item", "list"]);
+    assert!(String::from_utf8_lossy(&items.stdout).contains("backlog  Call"));
+}

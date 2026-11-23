@@ -101,7 +101,8 @@ pub struct ProjectMetric {
 
 /// A reusable plan line. `day` is its first/applicable day (the v1
 /// `start_day` column); concrete historical plans are represented by
-/// [`DayPlanLine`].
+/// [`DayPlanLine`]. A one-time item without a block and day is in the
+/// backlog: it is in no day's plan until it is scheduled.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Item {
     pub id: String,
@@ -111,11 +112,11 @@ pub struct Item {
     /// Inherit from the project when absent. An empty list asks for nothing.
     #[serde(default)]
     pub metric_ids: Option<Vec<String>>,
-    pub block: BoundaryId,
+    pub block: Option<BoundaryId>,
     pub repeat: Repeat,
     #[serde(default)]
     pub weekdays: Option<Weekdays>,
-    pub day: NaiveDate,
+    pub day: Option<NaiveDate>,
     pub planned_minutes: Option<i64>,
     #[serde(default)]
     pub position: i64,
@@ -226,18 +227,27 @@ impl Item {
         self.deleted_at.is_none()
     }
 
+    /// A one-time item with no day and block, planned on no day.
+    pub fn is_backlog(&self) -> bool {
+        self.block.is_none()
+    }
+
     pub fn applies_to(&self, day: NaiveDate) -> bool {
         self.is_live() && self.recurs_on(day)
     }
 
     /// Whether the repeat rule falls on `day`, whatever the item's liveness.
+    /// A backlog item recurs on no day.
     pub fn recurs_on(&self, day: NaiveDate) -> bool {
         use chrono::Datelike;
+        let Some(first) = self.day.filter(|_| self.block.is_some()) else {
+            return false;
+        };
         match self.repeat {
-            Repeat::None => self.day == day,
-            Repeat::Daily => self.day <= day,
+            Repeat::None => first == day,
+            Repeat::Daily => first <= day,
             Repeat::Weekly => {
-                self.day <= day
+                first <= day
                     && self
                         .weekdays
                         .is_some_and(|days| days.contains(day.weekday()))
@@ -247,10 +257,11 @@ impl Item {
 
     /// First date on or after `from` (and the item's first day) on which it applies.
     pub fn next_occurrence(&self, from: NaiveDate) -> Option<NaiveDate> {
-        if self.repeat == Repeat::None && self.day < from {
+        let first = self.day.filter(|_| self.block.is_some())?;
+        if self.repeat == Repeat::None && first < from {
             return None;
         }
-        item::next_occurrence(self.repeat, self.weekdays, self.day.max(from))
+        item::next_occurrence(self.repeat, self.weekdays, first.max(from))
     }
 
     pub fn schedule_text(&self) -> String {
@@ -315,10 +326,10 @@ mod tests {
             project_id: None,
             epic_id: None,
             metric_ids: None,
-            block: BoundaryId::Fajr,
+            block: Some(BoundaryId::Fajr),
             repeat,
             weekdays,
-            day: day(20),
+            day: Some(day(20)),
             planned_minutes: None,
             position: 0,
             created_at: now,
@@ -347,6 +358,28 @@ mod tests {
         let mut removed = daily.clone();
         removed.deleted_at = Some(Utc::now());
         assert!(!removed.applies_to(day(25)));
+        let mut backlog = once.clone();
+        (backlog.block, backlog.day) = (None, None);
+        assert!(backlog.is_backlog() && !backlog.applies_to(day(20)));
+        assert_eq!(backlog.next_occurrence(day(1)), None);
+    }
+
+    #[test]
+    fn item_history_written_before_the_backlog_still_decodes() {
+        let json = r#"{"id":"i","title":"Read","project_id":null,"block":"fajr",
+            "repeat":"daily","day":"2026-11-20","planned_minutes":20,
+            "created_at":"2026-11-20T04:00:00Z","updated_at":"2026-11-20T04:00:00Z",
+            "deleted_at":null}"#;
+        let old: Item = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            (old.block, old.day),
+            (Some(BoundaryId::Fajr), Some(day(20)))
+        );
+        assert_eq!((old.epic_id.as_deref(), old.version), (None, 1));
+        let mut backlog = old.clone();
+        (backlog.block, backlog.day, backlog.repeat) = (None, None, Repeat::None);
+        let round: Item = serde_json::from_str(&serde_json::to_string(&backlog).unwrap()).unwrap();
+        assert_eq!(round, backlog);
     }
 
     #[test]

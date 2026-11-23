@@ -1,0 +1,65 @@
+{
+  "id": 2,
+  "jsonrpc": "2.0",
+  "result": {
+    "changed": {
+      "deleted": [],
+      "epics": [],
+      "items": [
+        {
+          "backlog": true,
+          "block": null,
+          "created_at": "2031-05-14T04:30:00Z",
+          "day": null,
+          "deleted_at": null,
+          "epic_id": null,
+          "id": "<id:4>",
+          "metric_ids": null,
+          "metrics": [
+            {
+              "kind": "scale",
+              "metric_id": "focus",
+              "name": "Focus",
+              "required": false,
+              "scale_max": 5,
+              "unit": ""
+            },
+            {
+              "kind": "scale",
+              "metric_id": "quality",
+              "name": "Quality",
+              "required": false,
+              "scale_max": 5,
+              "unit": ""
+            },
+            {
+              "kind": "count",
+              "metric_id": "distractions",
+              "name": "Distractions",
+              "required": false,
+              "scale_max": null,
+              "unit": "times"
+            }
+          ],
+          "next_occurrence": null,
+          "planned_minutes": 10,
+          "position": 1,
+          "project_id": null,
+          "repeat": "none",
+          "schedule_text": "Once",
+          "title": "Pay rent",
+          "updated_at": "2031-05-15T05:00:00Z",
+          "version": 2,
+          "weekdays": null
+        }
+      ],
+      "marks": [],
+      "metrics": [],
+      "projects": [],
+      "sessions": [],
+      "tags": []
+    },
+    "op_id": "shelve",
+    "revision": 11
+  }
+}

@@ -104,7 +104,7 @@ pub fn freeze(
 /// Freezes unwritten days in the past year before an item changes. Reads may
 /// have materialized isolated days anywhere in that range.
 pub fn freeze_past(tx: &WriteTx<'_>, config: &Config, today: NaiveDate) -> Result<(), Error> {
-    let Some(first) = tx.items()?.iter().map(|item| item.day).min() else {
+    let Some(first) = tx.items()?.iter().filter_map(|item| item.day).min() else {
         return Ok(());
     };
     let from = first.max(today - Duration::days(366));
@@ -174,6 +174,7 @@ fn blocks_for_day(
 }
 
 /// The lines of the items that existed at the day's end and recur on it.
+/// Backlog items have no block and recur on no day.
 fn planned_lines(items: Vec<Item>, day: NaiveDate, end: DateTime<Utc>) -> Vec<DayPlanLine> {
     let mut lines: Vec<DayPlanLine> = items
         .into_iter()
@@ -182,13 +183,15 @@ fn planned_lines(items: Vec<Item>, day: NaiveDate, end: DateTime<Utc>) -> Vec<Da
                 && item.deleted_at.is_none_or(|at| at > end)
                 && item.recurs_on(day)
         })
-        .map(|item| DayPlanLine {
-            day,
-            block: item.block,
-            item_id: item.id,
-            project_id: item.project_id,
-            epic_id: item.epic_id,
-            planned_minutes: item.planned_minutes,
+        .filter_map(|item| {
+            Some(DayPlanLine {
+                day,
+                block: item.block?,
+                item_id: item.id,
+                project_id: item.project_id,
+                epic_id: item.epic_id,
+                planned_minutes: item.planned_minutes,
+            })
         })
         .collect();
     lines.sort_by(|a, b| (a.block, &a.item_id).cmp(&(b.block, &b.item_id)));
