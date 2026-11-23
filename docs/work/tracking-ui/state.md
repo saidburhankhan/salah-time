@@ -75,6 +75,10 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   v1, v2, v3; (c) backlog work makes the codec's `block`/`start_day` Option and old item_history JSON
   still decodes; (d) `item.parse` understands "today"/"tomorrow" (sets the day, drops the word
   from the title) so the widget sheet and Enter fast path schedule tomorrow. Spec fix: 005 no longer re-creates `sessions_by_day` (001 has it).
+- 17:09 reset 1 used by the orchestrator (user's OK) via the Codex TUI `/usage` → Redeem reset
+  (tmux-driven). One reset left, expiring 13 Dec 02:46 (the used one would have expired 2 Dec), so
+  resets do NOT expire on the 25 Nov renewal. Codex: fresh weekly + 5h at 17:09. Now: C5 resources
+  (Sol, inherited a stopped Claude worker's partial diff), R2 review of epics/backlog (Astra).
 - U5: user visual check after `omarchy restart shell`; fix what they report.
 - Optional: app/widget could show `stale` on an overnight timer (backend reports it since 47fb1d1).
 - Codex 5h limit hit at 06:59 (resets 11:26); weekly was 45% at 06:20.
