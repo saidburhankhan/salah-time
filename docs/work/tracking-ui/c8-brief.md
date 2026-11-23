@@ -9,6 +9,9 @@ over plan.md on storage), `plan.md` ("User decisions", "Phase 2", "Phase 3" incl
 "Phase 4", whose contract is locked), the c2/c5 progress files, and the code you own.
 
 Tasks:
+0a. The shared `block_minutes` rule from plan.md "Addendum: sessions across prayer blocks"
+   (day view block bars, `stats.table` group "block", `stats.series` split "block") with its tests and
+   `stats_table_block.json`. CHECKPOINT 0a.
 0. Migration 005 exactly as data-model.md specifies, with its migration test on realistic rows
    (follow the existing migration tests). CHECKPOINT 0 alone, for the independent review.
 1. Goals: domain types, store queries, `salah-core` module `goals` (progress from sessions for

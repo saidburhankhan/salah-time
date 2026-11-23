@@ -11,7 +11,8 @@ progress files, `docs/work/architecture/protocol-v1.md`, and the phase 4 fixture
 Tasks:
 1. Insights page as plan.md describes: block / hour / weekday groups as compact bar rows with
    minutes, focus and distractions per hour; the distractions-per-hour line; Best and Hardest
-   sessions with notes, opening the session. Shared Stats filter bar. CHECKPOINT 1.
+   sessions with notes, opening the session; the On-plan rate per task and the planned × actual
+   block table (plan.md "Addendum: sessions across prayer blocks"). Shared Stats filter bar. CHECKPOINT 1.
 2. Goals: a Goals section in the project, epic and item editors (add: period, minutes or metric,
    direction, target; edit target; end), an overall Goals page with progress bars and per-goal
    history table. CHECKPOINT 2.

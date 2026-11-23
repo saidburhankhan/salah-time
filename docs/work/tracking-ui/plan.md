@@ -431,3 +431,32 @@ wants lines: dots connected by a line, one line per series, to see rises and fal
   - Weighting and rollups are the same as `stats.table`; `key:"none"` for unassigned work.
   - Max 8 split keys, the top ones by minutes, plus a combined "Other" series when more exist.
   - Fixtures: `stats_series_day.json`, `stats_series_split_item.json`.
+
+### Addendum: sessions across prayer blocks (user decision 2026-11-23 ~13:30)
+Tasks often take longer than planned. A session may cross any number of prayer blocks. Nothing
+warns, blocks or splits the recording: one session, its real start and end. Statistics must show it
+properly:
+- **One shared rule in salah-core, `block_minutes(session, day clock)`, computed at read time from
+  `started_at`/`ended_at` and that day's block boundaries; no schema change.**
+  - A timed session's minutes are split across the blocks it overlapped, in proportion to its real
+    span, scaled so the parts sum exactly to its recorded `minutes`, including a Worked override.
+    The largest remainder goes to the block where it started.
+  - Logged sessions without times stay whole in their `block`.
+  - Ticks have no minutes.
+  - The session itself is still one row, listed under the block where it started.
+- **Used by:**
+  - the Today page block bars (actual and unplanned minutes per block);
+  - Insights "By prayer block";
+  - a new `stats.table` group `"block"`;
+  - a new `stats.series` split `"block"`.
+  - Totals by day, task, project, tag and epic are unchanged: a session counts whole toward its task and day.
+- **Planned vs actual block (Insights):**
+  - **On-plan rate** per task/routine: the share of its minutes done in its planned block.
+  - A **planned × actual block table**: rows are planned blocks, columns are actual blocks, cells
+    are minutes, so drift is visible (e.g. "Quran: planned Fajr, 60% after Isha").
+  - Items with no planned block (backlog work) and bare-project sessions are listed as "Unplanned".
+  - `insights.get` gains `on_plan: [{item_id, name, planned_block, minutes, on_plan_minutes}]` and
+    `block_matrix: [{planned_block|null, actual_block, minutes}]`.
+- **Worker:** C8 implements the rule first (before goals, since goals and insights use it) with tests:
+  a 2-hour session across Fajr→Dhuhr→Asr, a Worked override that shortens it, logged sessions, and
+  a timer clamped at Sleep. Fixture: `stats_table_block.json`. C9 shows the matrix and the on-plan rate.
