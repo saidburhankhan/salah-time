@@ -265,10 +265,10 @@ impl<'a> Sample<'a> {
         }
     }
 
-    fn metric(&self, metric: &Metric) -> Option<(f64, f64)> {
-        let mut value = self.session.value(&metric.id)?;
+    pub(super) fn metric(&self, kind: Rollup, id: &str) -> Option<(f64, f64)> {
+        let mut value = self.session.value(id)?;
         let weight = self.minutes.unwrap_or(1).max(1) as f64;
-        if metric.rollup == Rollup::Sum && self.minutes != self.session.minutes {
+        if kind == Rollup::Sum && self.minutes != self.session.minutes {
             value *= weight / self.session.weight();
         }
         Some((value, weight))
@@ -285,7 +285,9 @@ pub(super) fn cells(
     for metric in metrics {
         let value = aggregate(
             metric.rollup,
-            sessions.iter().filter_map(|s| s.metric(metric)),
+            sessions
+                .iter()
+                .filter_map(|s| s.metric(metric.rollup, &metric.id)),
         );
         if metric.id == DISTRACTIONS {
             let rate = value

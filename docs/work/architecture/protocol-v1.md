@@ -279,8 +279,10 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
     original block, and its full duration on the task and day. A row `key` is the
     block id (`fajr` … `isha`, or `night` for work before Fajr), `label` its name,
     `color`/`from`/`to` `null`. A past day uses its frozen block boundaries; other
-    days use the timetable of the config in force that day. `stats.get` `blocks`
-    is unchanged: it still counts each session whole in its recorded block.
+    days use the timetable of the config in force that day. In `stats.get`, each
+    entry of `blocks` uses this allocation for `minutes` and this weighting for
+    `avg_focus`. All six blocks appear in prayer order with their capacity over
+    the range. Empty blocks have zero minutes and null average focus.
   - `totals`: `{minutes, sessions, values}` over every session in scope.
 - `stats.series` feeds the Trends line chart and aggregates exactly like `stats.table`
   (same filters, minute weighting, rollups, `distractions_per_hour`, `key: "none"`). One

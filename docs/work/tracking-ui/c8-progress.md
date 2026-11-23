@@ -66,3 +66,26 @@ CHECKPOINT 0a: Core: shared block_minutes rule for day block bars, stats.table g
   `cargo test --offline --workspace` 223 passed (socket tests included), `git diff --check`.
 
 CHECKPOINT 0: Store: migration 005 (goals, reviews, item_tags seeded from project tags) with v4→v5 migration tests — files: crates/salah-store/src/migrations.rs, crates/salah-store/src/migrations/005_goals_reviews_item_tags.sql, crates/salah-store/src/migrations/tests.rs, crates/salah-store/src/migrations/tests/phase3.rs, crates/salah-store/src/migrations/tests/phase4.rs, crates/salah-store/src/migrations/tests/tracking_v4.sql, docs/work/tracking-ui/c8-progress.md
+
+## 0b — prayer-block totals in `stats.get`
+
+`stats.get.blocks` now uses the same allocated session minutes and focus weights as
+`stats.table` and `stats.series`. The RPC regression exercises a Fajr-to-Dhuhr timer
+with a Worked override, a manual Dhuhr log, an Asr tick and three empty blocks.
+It checks minutes and average focus against the table and verifies the 35-minute total.
+
+Workspace tests passed (215). The sandbox skipped the eight Unix-socket tests in
+the CLI daemon target:
+
+- `methods::every_protocol_method_has_a_success_and_an_error_over_the_socket`
+- `transport::a_second_daemon_refuses_to_steal_the_live_socket`
+- `transport::a_stale_socket_file_is_replaced_and_sigterm_removes_it`
+- `transport::clock_boundary_is_pushed_when_the_next_boundary_changes`
+- `transport::concurrent_writers_keep_revisions_gapless`
+- `transport::rpc_socket_bridges_stdio_to_the_daemon`
+- `transport::socket_permissions_and_handshake`
+- `transport::subscribers_receive_changed_for_socket_and_plain_cli_writes`
+
+Strict Clippy, `cargo fmt --check` and `git diff --check` passed.
+
+CHECKPOINT 0b: Use shared prayer-block minutes and focus weights in stats.get — files: crates/salah-core/src/stats.rs, crates/salah-core/src/stats/{blocks,table}.rs, crates/salah-cli/tests/rpc/reports.rs, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md

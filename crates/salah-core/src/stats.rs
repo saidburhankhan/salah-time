@@ -4,7 +4,7 @@
 //! An `avg` rollup is weighted by session minutes; a tick weighs 1.
 
 use crate::config::Config;
-use crate::day::{self, Fulfilment, Snapshot, block_capacity, day_capacity, total_minutes};
+use crate::day::{self, Fulfilment, Snapshot, day_capacity, total_minutes};
 use crate::{Store, projects, tags};
 use chrono::NaiveDate;
 use measures::Measures;
@@ -222,7 +222,7 @@ pub fn stats(
         series: ledger.series(),
         projects: ledger.project_stats(),
         tags,
-        blocks: ledger.block_stats(),
+        blocks: blocks::summary(&ledger.sessions, &ledger.days),
         totals: ledger.totals(),
         epics: ledger.epic_stats,
         range,
@@ -417,27 +417,6 @@ impl Ledger {
                     sessions: mine.len() as i64,
                     metrics: recorded_metrics(&self.metrics, &mine),
                 })
-            })
-            .collect()
-    }
-
-    fn block_stats(&self) -> Vec<BlockStat> {
-        BoundaryId::AWAKE
-            .into_iter()
-            .map(|block| {
-                let inside = || self.sessions.iter().filter(move |s| s.block.start == block);
-                BlockStat {
-                    block,
-                    minutes: total_minutes(inside()),
-                    capacity_minutes: self
-                        .days
-                        .iter()
-                        .flat_map(|(_, snapshot)| &snapshot.blocks)
-                        .filter(|b| b.block == block)
-                        .map(block_capacity)
-                        .sum(),
-                    avg_focus: rollup(Rollup::Avg, inside(), "focus"),
-                }
             })
             .collect()
     }

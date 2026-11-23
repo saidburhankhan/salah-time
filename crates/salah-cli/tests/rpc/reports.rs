@@ -626,6 +626,23 @@ fn block_reports_share_worked_minutes_with_the_day_bars() {
     assert_eq!(rows[1]["values"]["focus"], 3.5);
     assert_eq!(rows[1]["values"]["distractions_per_hour"], 3.0);
 
+    let stats = good(&mut rpc, "stats.get", json!({"days":1}));
+    let blocks = stats["blocks"].as_array().unwrap();
+    assert_eq!(blocks.len(), 6);
+    for block in blocks {
+        match rows.iter().find(|row| row["key"] == block["block"]) {
+            Some(row) => {
+                assert_eq!(block["minutes"], row["minutes"]);
+                assert_eq!(block["avg_focus"], row["values"]["focus"]);
+            }
+            None => {
+                assert_eq!(block["minutes"], 0);
+                assert_eq!(block["avg_focus"], Value::Null);
+            }
+        }
+    }
+    assert_eq!(stats["totals"]["minutes"], 35);
+
     let plan = good(&mut rpc, "day.get", json!({}));
     let fajr = &plan["blocks"][1];
     let dhuhr = &plan["blocks"][2];
