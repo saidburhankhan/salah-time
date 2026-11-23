@@ -55,6 +55,7 @@ BarWidget {
   property string noteDraft: ""
   property string noteOp: ""
   property string noteError: ""
+  property var noteSubmission: null
   // An error from a row's own action, shown inside that expanded row.
   property string rowErrorKey: ""
   property string rowErrorText: ""
@@ -72,6 +73,7 @@ BarWidget {
   readonly property string remainingShort: formatRemaining(remainingSeconds, true)
   readonly property var planner: report && report.planner ? report.planner : null
   readonly property var runningTimer: report && report.running ? report.running : null
+  readonly property bool canAnnotateTimer: SessionLogic.canAnnotateRunning(runningTimer)
   readonly property int workedMinutes: runningTimer
     ? SessionLogic.workedMinutes(runningTimer.started_at, countdownNowMs, runningTimer.max_minutes) : 1
   readonly property real distractions: runningTimer && runningTimer.values
@@ -317,7 +319,7 @@ BarWidget {
   }
 
   function bump(delta, fromBar) {
-    if (!runningTimer) return
+    if (!canAnnotateTimer) return
     var opId = beginOp("bump", "")
     pendingOps[opId].pulse = fromBar
     client.rpcMutation(opId, "session.bump", {
@@ -326,7 +328,7 @@ BarWidget {
   }
 
   function openNote(source) {
-    if (!runningTimer || noteOp) return
+    if (!canAnnotateTimer || noteOp) return
     if (noteSessionId !== runningTimer.id) noteDraft = ""
     noteSessionId = runningTimer.id
     noteError = ""
@@ -339,14 +341,15 @@ BarWidget {
     noteDraft = ""
     noteError = ""
     noteOp = ""
+    noteSubmission = null
   }
 
   function saveNote() {
-    var trimmed = noteDraft.trim()
-    if (!trimmed || noteOp || !runningTimer || runningTimer.id !== noteSessionId) return
+    if (!noteDraft.trim() || noteOp || !canAnnotateTimer || runningTimer.id !== noteSessionId) return
     noteError = ""
-    noteOp = beginOp("note", "")
-    client.rpcMutation(noteOp, "session.note", { "id": noteSessionId, "text": trimmed })
+    noteSubmission = SessionLogic.noteAttempt(noteSubmission, noteSessionId, noteDraft, client.newOpId)
+    noteOp = beginOp("note", "", "", noteSubmission.opId)
+    client.rpcMutation(noteOp, "session.note", Object.assign({}, noteSubmission.params))
   }
 
   function openDonePanel(item) {
@@ -386,37 +389,19 @@ BarWidget {
     if (content && content.sessionEditor) content.sessionEditor.reset(presetKey)
   }
 
-  // Ticks the item, carrying the filled values. A running timer on the item
-  // is stopped first (no values), and the tick follows once that succeeds.
+  // A duration-free log ticks the item and stops its matching timer atomically.
   function tickDone(item, values, note) {
     if (!item || sessionPanelOp !== "") return
     sessionPanelError = ""
     var id = String(item.id || "")
-    var block = String(item.block || "")
-    var rowKey = "item:" + id
-    function sendTick() {
-      var tickOp = beginOp("tick", rowKey)
-      pendingOps[tickOp].panel = true
-      sessionPanelOp = tickOp
-      client.logSession(tickOp, id, "", null, values, note, block)
-    }
-    var stopId = SessionLogic.doneAction(plannerItem(id)).stopId
-    if (stopId === "") {
-      sendTick()
-      return
-    }
-    var stopOp = beginOp("stopSession", rowKey)
-    pendingOps[stopOp].panel = true
-    pendingOps[stopOp].after = sendTick
-    sessionPanelOp = stopOp
-    client.stopSession(stopOp, { "id": stopId })
+    sessionPanelOp = beginOp("tick", "item:" + id)
+    client.logSession(sessionPanelOp, id, "", null, values, note, item.block)
   }
 
   function logTime(target, minutes, values, note, epicId) {
     if (!target || sessionPanelOp !== "") return
     sessionPanelError = ""
     var opId = beginOp("logSession", target.kind === "item" ? "item:" + String(target.id) : "")
-    pendingOps[opId].panel = true
     sessionPanelOp = opId
     if (target.kind === "item") client.logSession(opId, String(target.id), "", minutes, values, note, "")
     else client.logSession(opId, "", String(target.id), minutes, values, note, "", String(epicId || ""))
@@ -492,7 +477,7 @@ BarWidget {
       if (JSON.stringify(reminders) !== JSON.stringify(dueReminders)) dueReminders = reminders
       var runningId = status.running ? status.running.id : ""
       if (sessionPanelMode === "pause" && pauseId !== runningId) closeSessionPanel()
-      if (noteSource && noteSessionId !== runningId) closeNote()
+      if (noteSource && (noteSessionId !== runningId || !canAnnotateTimer)) closeNote()
       // The item being ticked was removed elsewhere (the app, the CLI).
       if (sessionPanelMode === "done" && doneItem && sessionPanelOp === "") {
         var stillThere = null
@@ -525,29 +510,11 @@ BarWidget {
       dueReminders = dueReminders.filter(function(row) { return row.id !== reminderId })
     if (pendingOps[opId] && pendingOps[opId].pulse) bumpPulse.restart()
     if (opId === noteOp) closeNote()
-    var after = pendingOps[opId] ? pendingOps[opId].after : null
-    if (after) {
-      // A chained step (stop, then tick) keeps the panel open until the end.
-      clearPending(opId)
-      after()
-      return
-    }
     if (opId === sessionPanelOp) closeSessionPanel()
-    if (result && result.fallback) {
-      clearPending(opId)
-      if (kind === "add" && result.raw) {
-        var raw = null
-        try { raw = JSON.parse(String(result.raw || "").trim()) } catch (error) { raw = null }
-        var fallbackContent = panel.loadedContent
-        if (fallbackContent && raw) fallbackContent.showNextOccurrence(raw)
-      }
-      client.refreshStatus()
-      return
-    }
-    if (kind === "add" && result && result.changed && result.changed.items
-        && result.changed.items.length > 0) {
+    if (kind === "add") {
+      var item = CreationLogic.addedItem(result)
       var target = panel.loadedContent
-      if (target) target.showNextOccurrence(result.changed.items[0])
+      if (target && item) target.showNextOccurrence(item)
     }
     clearPending(opId)
     client.refreshStatus()
@@ -732,10 +699,12 @@ BarWidget {
     verticalPadding: 2
     text: "+"
     tooltipText: strings.t("session.bumpHint")
+    interactive: root.canAnnotateTimer
+    dimmed: !root.canAnnotateTimer
     active: bumpPulse.running
     activeColor: Commons.Color.accent
     onPressed: function(mouseButton) {
-      if (mouseButton !== Qt.LeftButton && mouseButton !== Qt.RightButton) return
+      if (!root.canAnnotateTimer || (mouseButton !== Qt.LeftButton && mouseButton !== Qt.RightButton)) return
       root.bump(1, true)
       if (mouseButton === Qt.RightButton) root.openNote("bar")
     }
@@ -785,7 +754,7 @@ BarWidget {
     y: root.vertical ? Style.space(3) : Math.round((button.height - size) / 2)
   }
 
-  KeyboardPanel {
+  SalahKeyboardPanel {
     id: panel
     anchorItem: button
     owner: root

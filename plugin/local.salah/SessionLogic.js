@@ -35,17 +35,36 @@ function tickIds(item) {
 
 // What a tap on an item's done box does (plan.md, user decisions):
 //   the item has a tick today -> "untick": remove its tick(s); timed sessions stay
-//   otherwise                 -> "done": open the done panel; when the item's
-//                                timer is running, `stopId` is stopped first
+//   otherwise                 -> "done": open the done panel
 // Timed sessions alone never make an item done.
 function doneAction(item) {
   var ids = tickIds(item)
-  if (ids.length > 0) return { "action": "untick", "ids": ids, "stopId": "" }
-  var sessions = item && item.sessions ? item.sessions : []
-  var stopId = ""
-  for (var i = 0; i < sessions.length; i++)
-    if (sessions[i] && sessions[i].running === true) stopId = text(sessions[i].id)
-  return { "action": "done", "ids": [], "stopId": stopId }
+  return { "action": ids.length > 0 ? "untick" : "done", "ids": ids }
+}
+
+function canEditMinutes(session) {
+  return !!session && session.running !== true && session.minutes != null
+}
+
+function canAnnotateRunning(session) {
+  return !!session && session.stale !== true
+}
+
+function noteAttempt(previous, sessionId, draft, newOpId) {
+  var trimmed = text(draft).trim()
+  if (previous && previous.params.id === sessionId && previous.params.text === trimmed) return previous
+  return { opId: newOpId(), params: { id: sessionId, text: trimmed } }
+}
+
+function logParams(itemId, projectId, minutes, values, note, block, epicId) {
+  var params = { values: values || {} }
+  if (itemId) params.item_id = String(itemId)
+  if (projectId) params.project_id = String(projectId)
+  if (epicId) params.epic_id = String(epicId)
+  if (minutes != null) params.minutes = Number(minutes)
+  if (note) params.note = String(note)
+  if (block) params.block = String(block)
+  return params
 }
 
 function promptRow(metric) {

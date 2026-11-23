@@ -41,18 +41,18 @@ const walk = day.blocks[1].items[1]
 
 // ---- done / untick --------------------------------------------------------
 
-same(logic.doneAction({ "sessions": [] }), { "action": "done", "ids": [], "stopId": "" },
+same(logic.doneAction({ "sessions": [] }), { "action": "done", "ids": [] },
   "an item without sessions opens the done panel")
-same(logic.doneAction(walk), { "action": "untick", "ids": ["<id:8>"], "stopId": "" },
+same(logic.doneAction(walk), { "action": "untick", "ids": ["<id:8>"] },
   "an item with a tick is unticked")
 same(logic.doneAction({ "sessions": [walk.sessions[0], { "id": "t2", "minutes": null, "running": false }] }).ids,
   ["<id:8>", "t2"], "untick removes every tick, never logs a second one")
-same(logic.doneAction(quran), { "action": "done", "ids": [], "stopId": "" },
+same(logic.doneAction(quran), { "action": "done", "ids": [] },
   "timed sessions alone do not make an item done")
 same(logic.doneAction({ "sessions": [walk.sessions[0], quran.sessions[0]] }),
-  { "action": "untick", "ids": ["<id:8>"], "stopId": "" }, "untick keeps the timed sessions")
-same(logic.doneAction(status.planner.items[0]), { "action": "done", "ids": [], "stopId": "<id:6>" },
-  "ticking an item whose timer runs stops that timer first")
+  { "action": "untick", "ids": ["<id:8>"] }, "untick keeps the timed sessions")
+same(logic.doneAction(status.planner.items[0]), { "action": "done", "ids": [] },
+  "a running timer does not change the done action (the server stops it)")
 assert(logic.isTick(walk.sessions[0]) && !logic.isTick(quran.sessions[0])
   && !logic.isTick(status.running), "isTick: no minutes and not running")
 same(logic.tickIds(status.planner.items[0]), [], "a running session is not a tick")
@@ -192,5 +192,22 @@ same(logic.clockText(5), "00:05", "seconds alone still keep two digits per field
 same(logic.clockText(3723), "62:03", "no hours: minutes keep counting past 60")
 same(logic.clockText(6005), "100:05", "past 99 minutes")
 same(logic.clockText(-4), "00:00", "never negative")
+
+// ---- annotate, minutes, note retry, log params ----------------------------
+assert(logic.canEditMinutes({ "minutes": 15, "running": false }), "finished timed session is editable")
+assert(!logic.canEditMinutes({ "minutes": null, "running": false }), "completion tick is not editable")
+assert(!logic.canEditMinutes({ "minutes": 3, "running": true }), "running session is not editable")
+assert(logic.canAnnotateRunning({ "id": "r" }) && !logic.canAnnotateRunning({ "id": "r", "stale": true })
+  && !logic.canAnnotateRunning(null), "stale or missing running session cannot be annotated")
+let n = 0
+const mint = () => "op" + (++n)
+const first = logic.noteAttempt(null, "s1", " hi ", mint)
+same(first, { "opId": "op1", "params": { "id": "s1", "text": "hi" } }, "first note attempt")
+assert(logic.noteAttempt(first, "s1", "hi  ", mint) === first, "unchanged retry keeps the op id")
+assert(logic.noteAttempt(first, "s1", "hi there", mint).opId === "op2", "edited draft gets a new op id")
+assert(logic.noteAttempt(first, "s2", "hi", mint).opId === "op3", "other session gets a new op id")
+same(logic.logParams("i", "", null, null, "", "", ""), { "values": {}, "item_id": "i" }, "tick log has no minutes")
+same(logic.logParams("", "p", 0, { "a": 1 }, "n", "isha", "e"),
+  { "values": { "a": 1 }, "project_id": "p", "epic_id": "e", "minutes": 0, "note": "n", "block": "isha" }, "full log")
 
 console.log("1.." + checks)

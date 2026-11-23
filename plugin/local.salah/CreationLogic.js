@@ -95,3 +95,16 @@ function addParams(parsed, fields, projectId, backlog, date, epicId) {
   }
   return params
 }
+
+function addedItem(result) {
+  if (!result) return null
+  if (result.fallback) {
+    try {
+      result = JSON.parse(result.raw)
+    } catch (error) {
+      return null
+    }
+  }
+  var items = result && result.changed && result.changed.items
+  return items && items.length ? items[0] : null
+}

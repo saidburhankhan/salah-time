@@ -127,3 +127,12 @@ test("day rows name their epic, finished ones included", () => {
   assert.equal(logic.epicName(epics, "zz"), "")
   assert.equal(logic.epicName(epics, null), "")
 })
+
+test("addedItem reads the socket envelope and the CLI fallback raw text", () => {
+  const item = { id: "i1", next_occurrence: "2026-11-24" }
+  same(logic.addedItem({ changed: { items: [item] } }), item)
+  same(logic.addedItem({ fallback: true, raw: JSON.stringify({ changed: { items: [item] } }) + "\n" }), item)
+  assert.equal(logic.addedItem({ fallback: true, raw: "oops" }), null)
+  assert.equal(logic.addedItem({ changed: { items: [] } }), null)
+  assert.equal(logic.addedItem(null), null)
+})

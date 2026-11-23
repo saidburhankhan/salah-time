@@ -184,6 +184,7 @@ Item {
         id: sessionRow
         required property var modelData
         readonly property bool running: modelData.running === true
+        readonly property bool editable: SessionLogic.canEditMinutes(modelData)
         width: column.width
 
         Row {
@@ -211,13 +212,11 @@ Item {
           }
 
           TextField {
-            visible: !sessionRow.running
+            visible: sessionRow.editable
             anchors.verticalCenter: parent.verticalCenter
             width: Style.space(54)
             height: Style.space(24)
-            text: sessionRow.modelData.minutes === null || sessionRow.modelData.minutes === undefined
-              ? "" : String(sessionRow.modelData.minutes)
-            placeholderText: "—"
+            text: sessionRow.editable ? String(sessionRow.modelData.minutes) : ""
             foreground: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -229,20 +228,19 @@ Item {
             onActiveFocusChanged: root.fieldFocusChanged(activeFocus)
             onAccepted: {
               var minutes = Number(text)
-              if (minutes !== Number(sessionRow.modelData.minutes))
+              if (sessionRow.editable && minutes !== Number(sessionRow.modelData.minutes))
                 root.minutesEdited(String(sessionRow.modelData.id), minutes)
               focus = false
             }
             Keys.onEscapePressed: function(event) {
-              text = sessionRow.modelData.minutes === null || sessionRow.modelData.minutes === undefined
-                ? "" : String(sessionRow.modelData.minutes)
+              text = sessionRow.editable ? String(sessionRow.modelData.minutes) : ""
               focus = false
               event.accepted = true
             }
           }
 
           Text {
-            visible: !sessionRow.running
+            visible: sessionRow.editable
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
             text: root.strings.t("session.minutesUnit")

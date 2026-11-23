@@ -1,6 +1,8 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "SessionLogic.js" as SessionLogic
+import "TransportLogic.js" as TransportLogic
 
 // Transport for the widget: JSON-RPC 2.0 over the daemon's NDJSON Unix
 // socket, with the `salah` CLI as a fallback when the daemon is unavailable.
@@ -46,8 +48,8 @@ Item {
   property int lastKnownRevision: 0
   property int lastStatusRevision: 0
   property int lastAppliedRevision: 0
-  property int requestedStatusRevision: 0
   property int pendingStatusRevision: 0
+  property bool pendingClockRefresh: false
   property bool statusInFlight: false
   property int nextRequestId: 1
   property var requests: ({})
@@ -117,6 +119,7 @@ Item {
     client.lastStatusRevision = 0
     client.lastAppliedRevision = 0
     client.pendingStatusRevision = 0
+    client.pendingClockRefresh = false
     client.statusInFlight = false
     handshakeTimer.restart()
     if (client.request("hello", { "protocol": [1], "client": "salah-widget", "actor": "widget" },
@@ -137,6 +140,7 @@ Item {
     var wasActive = client.socketActive
     client.socketActive = false
     client.pendingStatusRevision = 0
+    client.pendingClockRefresh = false
     client.statusInFlight = false
     if (wasActive) client.transportChanged(false)
     client.failOutstanding(reason)
@@ -219,7 +223,8 @@ Item {
     if (method === "clock.boundary") {
       // The core pushes the authoritative boundary; refetch its status
       // projection instead of running a local boundary timer.
-      client.refreshStatus()
+      if (client.statusInFlight) client.pendingClockRefresh = true
+      else client.refreshStatus()
       return
     }
     if (message.id === undefined || message.id === null) return
@@ -229,7 +234,7 @@ Item {
 
     if (message.error) {
       var detail = client.errorDetail(message.error)
-      if (meta.type === "status") client.handleStatusFailure(detail)
+      if (meta.type === "status") client.handleStatusFailure(meta, detail)
       else if (meta.type === "parse") client.itemParsed(meta.text, null, detail)
       else if (meta.type === "resources") client.resourcesLoaded(meta.requestId, null, detail)
       else if (meta.type === "projects" || meta.type === "metrics" || meta.type === "epics") {
@@ -318,7 +323,6 @@ Item {
       return
     }
     client.statusInFlight = true
-    client.requestedStatusRevision = target
     if (client.request("status.get", {}, { "type": "status", "revision": target }) < 0) {
       client.statusInFlight = false
       client.statusFailed("connection closed")
@@ -331,25 +335,25 @@ Item {
     client.lastStatusRevision = Math.max(client.lastStatusRevision, metaRevision)
     // A mutation response applied after this snapshot was requested is newer
     // than the snapshot; refetch instead of overwriting canonical rows.
-    if (metaRevision < client.lastAppliedRevision) {
-      client.pendingStatusRevision = 0
-      client.requestStatus(client.lastAppliedRevision)
-      return
-    }
-    client.statusLoaded(report)
-    if (client.pendingStatusRevision > metaRevision) {
-      var next = client.pendingStatusRevision
-      client.pendingStatusRevision = 0
-      client.requestStatus(next)
-    } else {
-      client.pendingStatusRevision = 0
-    }
+    var next = client.takeStatusFollowUp(metaRevision)
+    if (metaRevision >= client.lastAppliedRevision) client.statusLoaded(report)
+    if (next !== null) client.requestStatus(next)
   }
 
-  function handleStatusFailure(message) {
+  function handleStatusFailure(meta, message) {
     client.statusInFlight = false
     client.lastStatusRevision = 0
+    var next = client.takeStatusFollowUp(Number(meta.revision) || 0)
     client.statusFailed(message)
+    if (next !== null) client.requestStatus(next)
+  }
+
+  function takeStatusFollowUp(revision) {
+    var next = TransportLogic.followUpStatusRevision(revision, client.lastAppliedRevision,
+      client.pendingStatusRevision, client.pendingClockRefresh)
+    client.pendingStatusRevision = 0
+    client.pendingClockRefresh = false
+    return next
   }
 
   function handleChanged(params) {
@@ -420,26 +424,8 @@ Item {
   }
 
   function logSession(opId, itemId, projectId, minutes, values, note, block, epicId) {
-    if (client.socketActive) {
-      var params = { "values": values || {} }
-      if (String(itemId || "") !== "") params.item_id = String(itemId)
-      if (String(projectId || "") !== "") params.project_id = String(projectId)
-      if (String(epicId || "") !== "") params.epic_id = String(epicId)
-      if (minutes !== undefined && minutes !== null) params.minutes = Number(minutes)
-      if (String(note || "") !== "") params.note = String(note)
-      if (String(block || "") !== "") params.block = String(block)
-      client.sendMutation(opId, "logSession", "session.log", params)
-      return
-    }
-    var command = ["salah", "session", "log", "--json"]
-    if (String(itemId || "") !== "") command = command.concat(["--item", String(itemId)])
-    if (String(projectId || "") !== "") command = command.concat(["--project", String(projectId)])
-    if (String(epicId || "") !== "") command = command.concat(["--epic", String(epicId)])
-    if (minutes !== undefined && minutes !== null) command = command.concat(["--minutes", String(Number(minutes))])
-    if (String(block || "") !== "") command = command.concat(["--block", String(block)])
-    command = command.concat(client.valueArgs(values))
-    if (String(note || "") !== "") command.push("--note=" + String(note))
-    client.fallback(opId, "logSession", command)
+    var params = SessionLogic.logParams(itemId, projectId, minutes, values, note, block, epicId)
+    client.rpcMutation(opId, "session.log", params, "logSession")
   }
 
   function startSession(opId, itemId, projectId) {
@@ -579,7 +565,7 @@ Item {
   }
 
   function loadEpics() {
-    client.read("epics.list", { "status": "active" }, { "type": "epics" })
+    client.read("epics.list", {}, { "type": "epics" })
   }
 
   function loadMetrics() {

@@ -36,6 +36,13 @@ test("a status snapshot without reminders has no due rows", () => {
   assert.equal(logic.orderedDueReminders(null).length, 0)
 })
 
+test("QML-style array-like reminders are copied and sorted", () => {
+  const [earlier, later] = fixture("status_reminders").reminders
+  const rows = { 0: later, 1: earlier, length: 2 }
+  assert.deepEqual(Array.from(logic.orderedDueReminders(rows)), [earlier, later])
+  assert.equal(rows[0], later)
+})
+
 test("the paperclip count adds notes, links and open reminders", () => {
   assert.equal(logic.resourceCount({ notes: 2, links: 1, reminders: 4 }), 7)
   assert.equal(logic.resourceCount({ notes: 0, links: 0, reminders: 0 }), 0)

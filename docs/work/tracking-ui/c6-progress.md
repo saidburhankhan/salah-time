@@ -41,3 +41,21 @@ The paperclip badge counts notes, links and open reminders from the day row. Exp
 All 110 Node checks passed, including seven resource checks. Omarchy plugin validation, QML syntax checks, i18n JSON parsing, and `git diff --check` passed. A mocked offscreen interaction check covered URL validation and note and link saves, reminder dispatch, stale replies, and retry. An offscreen Quickshell harness with stubbed popup windows and CLI fixtures verified the paperclip count and loading the expanded row over stdio. Socket integration and visual review remain with the orchestrator.
 
 CHECKPOINT 2b: Add resource counts, links, reminder completion and quick add to widget rows (`plugin/local.salah/BarWidget.qml`, `plugin/local.salah/ItemResources.qml`, `plugin/local.salah/ResourceLogic.js`, `plugin/local.salah/RowActions.qml`, `plugin/local.salah/SalahClient.qml`, `plugin/local.salah/TimelineRow.qml`, `plugin/local.salah/i18n/en.json`, `plugin/local.salah/tests/resource_logic_test.js`, `docs/work/tracking-ui/c6-progress.md`)
+
+## R3w — plugin review fixes (Claude, inheriting Codex C6's WIP)
+
+Task A: `ResourceLogic.orderedDueReminders` accepts any array-like and copies it with `Array.prototype.slice.call`; a node test passes a non-Array object. No other `Array.isArray` pattern exists in the plugin .js/.qml files.
+
+Task B, all plugin/ findings were real and are fixed:
+- BarWidget note retry: `SessionLogic.noteAttempt` keeps the op_id and payload for an unchanged draft; `rpcMutation` sends the same op_id over socket or CLI.
+- Epic labels: `epics.list` now fetches all statuses; `epicName` labels finished epics; `epicsForProject`/`validEpicId` stay active-only for creation and Log chips.
+- clock.boundary during status.get: `pendingClockRefresh` plus `TransportLogic.followUpStatusRevision` forces a fresh status.get after the in-flight read (also after a failed read).
+- CLI quick-add: `CreationLogic.addedItem` extracts `changed.items[0]` from the socket result or the CLI fallback raw text.
+- KeyboardPanel dismissal: `SalahKeyboardPanel.qml` masks the other outputs' dismissal windows with a region that subtracts the bar strip (`PanelLogic.barStrip`), so bar clicks reach the other monitor's bar. Needs a live two-monitor check; not render-tested here.
+- RowActions minutes editor only for finished sessions with non-null minutes (`canEditMinutes`).
+- Stale running session: bump and note controls (card and bar, including right-click note) disabled via `canAnnotateRunning`; Pause stays.
+- Widget tickDone sends one `session.log` tick; the stop-first chain is removed.
+
+Tests: five node test files pass (new: transport_panel_logic_test.js; additions in session, creation, resource tests). `omarchy plugin validate`, `jq empty i18n/en.json`, `git diff --check` pass. All new files are referenced.
+
+CHECKPOINT R3w: Widget: fix R3 findings (note retry op_id, epic labels, clock refresh, stale controls, single-write tick, dismissal overlay) and due-reminder array-like bug (plugin/local.salah/BarWidget.qml, CreationLogic.js, ResourceLogic.js, RowActions.qml, RunningCard.qml, SalahClient.qml, SessionLogic.js, PanelLogic.js, TransportLogic.js, SalahKeyboardPanel.qml, tests/creation_logic_test.js, tests/resource_logic_test.js, tests/session_logic_test.js, tests/transport_panel_logic_test.js, docs/work/tracking-ui/c6-progress.md)

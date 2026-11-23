@@ -122,6 +122,8 @@ Rectangle {
           required property int modelData
           width: Style.space(26)
           height: Style.space(24)
+          enabled: card.host.canAnnotateTimer
+          opacity: enabled ? 1 : 0.45
           text: modelData < 0 ? "−" : "+"
           tooltipText: card.host.tr.t(modelData < 0 ? "panel.decreaseCount" : "panel.increaseCount")
           bordered: true
@@ -135,6 +137,8 @@ Rectangle {
 
       Button {
         height: Style.space(24)
+        enabled: card.host.canAnnotateTimer
+        opacity: enabled ? 1 : 0.45
         text: card.host.tr.t("session.addNote")
         bordered: true
         foreground: card.host.foreground
