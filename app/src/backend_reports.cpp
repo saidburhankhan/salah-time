@@ -64,6 +64,32 @@ void Backend::loadStatsQuery(const QVariantMap &filter) {
     m_client.statsQuery(filterParams(filter, true), statsResponse());
 }
 
+void Backend::loadTrends(const QVariantMap &filter, const QStringList &measures,
+                         const QString &interval, const QString &split) {
+    const quint64 request = ++m_trendsRequest;
+    if (measures.isEmpty()) {
+        if (!m_trends.isEmpty()) {
+            m_trends.clear();
+            emit trendsChanged();
+        }
+        return;
+    }
+    QJsonObject params = filterParams(filter, true);
+    params.insert(QStringLiteral("measures"), QJsonArray::fromStringList(measures));
+    params.insert(QStringLiteral("interval"), interval);
+    if (!split.isEmpty()) params.insert(QStringLiteral("split"), split);
+    m_client.statsSeries(params, [this, request](const CoreClient::Result &result) {
+        if (request != m_trendsRequest) return;
+        if (result.ok) {
+            m_trends = std::get<Dto::Json>(result.value).json.toVariantMap();
+        } else {
+            m_trends.clear();
+            fail(result.error.message);
+        }
+        emit trendsChanged();
+    });
+}
+
 void Backend::loadStatsTable(const QVariantMap &filter, const QString &group) {
     // stats.table is served by the daemon only; offline there is nothing to show.
     if (m_client.offline()) {

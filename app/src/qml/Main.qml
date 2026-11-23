@@ -450,13 +450,16 @@ ApplicationWindow {
         z: 3000
         visible: false
         property alias text: tipLabel.text
-        width: tipLabel.implicitWidth + 24
-        height: 38
+        width: Math.min(win.width - 24, tipLabel.implicitWidth + 24)
+        height: tipLabel.implicitHeight + 20
         radius: 7
         color: "#35322c"
         border.color: "#575249"
         Label {
             id: tipLabel
+            width: parent.width - 24
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             color: win.text
             font.family: win.mono

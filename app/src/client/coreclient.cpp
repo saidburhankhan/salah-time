@@ -306,6 +306,35 @@ void CoreClient::statsQuery(const QJsonObject &params, Callback callback) {
                   params.value(QStringLiteral("project_id")).toString(), params.value(QStringLiteral("item_id")).toString(),
                   std::move(callback), from, to);
 }
+void CoreClient::statsSeries(const QJsonObject &params, Callback callback) {
+    QStringList args{QStringLiteral("stats"), QStringLiteral("series")};
+    auto option = [&](const char *key, const char *flag) {
+        const QJsonValue value = params.value(QLatin1String(key));
+        if (!value.isUndefined()) args << QLatin1String(flag) << value.toVariant().toString();
+    };
+    option("days", "--days");
+    option("from", "--from");
+    option("to", "--to");
+    option("tag_id", "--tag");
+    option("project_id", "--project");
+    option("item_id", "--item");
+    option("minutes_min", "--min-minutes");
+    option("minutes_max", "--max-minutes");
+    option("interval", "--interval");
+    option("split", "--split");
+    for (const auto &measure : params.value(QStringLiteral("measures")).toArray())
+        args << QStringLiteral("--measure") << measure.toString();
+    const auto values = params.value(QStringLiteral("values")).toObject();
+    for (auto metric = values.begin(); metric != values.end(); ++metric) {
+        const auto bounds = metric.value().toObject();
+        for (auto bound = bounds.begin(); bound != bounds.end(); ++bound)
+            args << (QStringLiteral("--") + bound.key())
+                 << (metric.key() + QLatin1Char('=') + QString::number(bound.value().toDouble(), 'g', 17));
+    }
+    enqueue(args, params, QStringLiteral("stats.series"), std::move(callback), true, false,
+            Dto::decodeJson, Dto::decodeJson);
+}
+
 void CoreClient::rpcRead(const QString &method, const QJsonObject &params, Callback callback) {
     const QString key = QString::fromUtf8(QJsonDocument(params).toJson(QJsonDocument::Compact));
     enqueue({QStringLiteral("rpc"), method, key}, params, method, std::move(callback), true, false,

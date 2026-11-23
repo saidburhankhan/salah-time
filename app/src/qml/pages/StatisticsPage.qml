@@ -43,8 +43,10 @@ ScrollView {
             generalTable.load(query)
         else if (tab === "notes")
             notesList.load(query)
-        else
+        else {
             backend.loadStatsQuery(query)
+            charts.trends.load(query)
+        }
     }
     function setTab(id) {
         if (tab === id)
@@ -132,6 +134,8 @@ ScrollView {
         }
 
         ChartsView {
+            id: charts
+            metrics: filterBar.metricChoices
             visible: statsPage.tab === "charts"
             Layout.fillWidth: true
             win: statsPage.win

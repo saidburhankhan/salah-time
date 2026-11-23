@@ -57,6 +57,7 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList runningPrompt READ runningPrompt NOTIFY runningChanged)
     Q_PROPERTY(QString runningTitle READ runningTitle NOTIFY runningChanged)
     Q_PROPERTY(QString runningColor READ runningColor NOTIFY runningChanged)
+    Q_PROPERTY(QVariantMap trends READ trends NOTIFY trendsChanged)
     Q_PROPERTY(QVariantMap statsTable READ statsTable NOTIFY statsTableChanged)
     Q_PROPERTY(QVariantList sessionsList READ sessionsList NOTIFY sessionsListChanged)
     Q_PROPERTY(bool sessionsHasMore READ sessionsHasMore NOTIFY sessionsListChanged)
@@ -111,6 +112,7 @@ public:
     QVariantList runningPrompt() const { return m_runningPrompt; }
     QString runningTitle() const { return m_runningTitle; }
     QString runningColor() const { return m_runningColor; }
+    QVariantMap trends() const { return m_trends; }
     QVariantMap statsTable() const { return m_statsTable; }
     QVariantList sessionsList() const { return m_sessionsList; }
     bool sessionsHasMore() const { return !m_sessionsNext.isEmpty(); }
@@ -126,6 +128,8 @@ public:
     // filter: days or from/to, tag_id, project_id, item_id, minutes_min,
     // minutes_max, values {metric_id: {min?, max?}}; unknown keys are dropped.
     Q_INVOKABLE void loadStatsQuery(const QVariantMap &filter);
+    Q_INVOKABLE void loadTrends(const QVariantMap &filter, const QStringList &measures,
+                                const QString &interval, const QString &split);
     Q_INVOKABLE void loadStatsTable(const QVariantMap &filter, const QString &group = {});
     // sessions.list: the filter plus with_note and q. loadMoreSessions pages
     // with the last `next` cursor and the same filter.
@@ -194,6 +198,7 @@ signals:
     void sessionWriteFinished(bool ok, const QString &message);
     void runningNoteFinished(const QString &sessionId, bool ok);
     void runningChanged();
+    void trendsChanged();
     void statsTableChanged();
     void sessionsListChanged();
     void sessionsLoadingChanged();
@@ -281,6 +286,8 @@ private:
     QVariantMap m_running, m_lastRunning;
     QVariantList m_runningPrompt, m_lastRunningPrompt;
     QString m_runningTitle, m_runningColor;
+    QVariantMap m_trends;
+    quint64 m_trendsRequest = 0;
     QVariantMap m_statsTable;
     quint64 m_statsTableRequest = 0;
     QVariantList m_sessionsList;

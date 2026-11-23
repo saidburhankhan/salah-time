@@ -7,6 +7,8 @@ import QtQuick.Layouts
 ColumnLayout {
     id: charts
     property var win
+    property alias trends: trendsCard
+    property var metrics
     property var tip
     readonly property var stats: backend.statsData
     readonly property var totals: stats.totals || {}
@@ -103,6 +105,16 @@ ColumnLayout {
             value: charts.fulfilment < 0 ? "—" : Math.round(charts.fulfilment * 100) + "%"
             detail: charts.plannedDays === 1 ? qsTr("over 1 planned day") : qsTr("over %1 planned days").arg(charts.plannedDays)
         }
+    }
+
+    TrendsChart {
+        id: trendsCard
+        Layout.fillWidth: true
+        win: charts.win
+        tip: charts.tip
+        metrics: charts.metrics
+        report: backend.trends
+        onRequested: (filter, measures, interval, split) => backend.loadTrends(filter, measures, interval, split)
     }
 
     DayColumnChart {

@@ -301,6 +301,38 @@ inline QJsonObject stats(const QString &tagId = {}, const QString &projectId = {
                                {"avg_focus", 3.6}, {"avg_quality", 4.1}}}};
 }
 
+// A 28-day stats.series response for the Trends screenshots. Each task has a
+// different sampling pattern, including sessions without a Focus rating.
+inline QJsonObject trendMonth(const QJsonArray &measures, bool tasks) {
+    const QDate first = QDate::fromString(kDay, Qt::ISODate).addDays(-27);
+    QJsonArray periods, lines;
+    for (int d = 0; d < 28; ++d) periods.append(first.addDays(d).toString(Qt::ISODate));
+    const QStringList titles{"Read Quran", "Deep work", "Morning walk"};
+    for (int task = 0; task < (tasks ? titles.size() : 1); ++task) {
+        for (const auto &measure : measures) {
+            const bool minutes = measure.toString() == "minutes";
+            const QString name = minutes ? "Minutes" : "Focus";
+            QJsonArray points;
+            for (int d = 0; d < 28; ++d) {
+                const int sessions = (d + task * 2) % 9 == 5 ? 0 : 1 + d % 3;
+                QJsonValue value;
+                if (minutes)
+                    value = sessions ? 25 + (d * 7) % 60 : 0;
+                else if (sessions && (d + task) % 13 != 6)
+                    value = qRound(10 * (2.9 + 0.4 * task + 0.9 * qSin(0.38 * d + 2 * task))) / 10.0;
+                points.append(QJsonObject{{"value", value}, {"sessions", sessions}});
+            }
+            lines.append(QJsonObject{{"key", tasks ? QString::number(task) : QStringLiteral("all")},
+                                     {"label", tasks ? titles[task] : name}, {"color", QJsonValue::Null},
+                                     {"measure", measure}, {"unit", minutes ? "min" : ""},
+                                     {"scale_max", minutes ? QJsonValue(QJsonValue::Null) : QJsonValue(5)},
+                                     {"points", points}});
+        }
+    }
+    return QJsonObject{{"periods", periods}, {"series", lines}, {"interval", "day"},
+                       {"split", tasks ? QJsonValue("item") : QJsonValue(QJsonValue::Null)}};
+}
+
 inline QJsonObject tableColumn(const QString &id, const QString &name, const QString &unit, const QString &kind,
                                const QString &rollup, int scaleMax = 0, const QString &derivedFrom = {}) {
     return QJsonObject{{"id", id}, {"name", name}, {"unit", unit}, {"kind", kind}, {"rollup", rollup},

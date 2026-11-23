@@ -30,6 +30,7 @@ Item {
                 verticalAlignment: Text.AlignVCenter
                 horizontalAlignment: index === 0 ? Text.AlignLeft : Text.AlignRight
                 text: String(modelData)
+                elide: Text.ElideRight
                 textFormat: Text.PlainText
                 color: table.win.muted
                 font.family: table.win.mono
@@ -68,6 +69,7 @@ Item {
                     verticalAlignment: Text.AlignVCenter
                     horizontalAlignment: index === 0 ? Text.AlignLeft : Text.AlignRight
                     text: String(modelData)
+                    elide: Text.ElideRight
                     textFormat: Text.PlainText
                     color: index === 0 ? table.win.muted : table.win.text
                     font.family: table.win.mono

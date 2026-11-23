@@ -62,6 +62,7 @@ public:
     // session filters minutes_min/minutes_max/values). Without session
     // filters it also works through the CLI fallback.
     void statsQuery(const QJsonObject &params, Callback callback);
+    void statsSeries(const QJsonObject &params, Callback callback);
     // A daemon-only read (stats.table, sessions.list). Reads are coalesced by
     // method plus parameters.
     void rpcRead(const QString &method, const QJsonObject &params, Callback callback);

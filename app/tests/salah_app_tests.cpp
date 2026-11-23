@@ -405,6 +405,13 @@ esac
                 server->respond(socket, request, TrackingFixture::stats(params.value("tag_id").toString(), narrow,
                                                                         days > 0 ? days : 28));
             }
+            else if (method == "stats.series") {
+                if (params.value("interval") == "week")
+                    server->respond(socket, request, fixture("stats_series_split_item"));
+                else
+                    server->respond(socket, request, TrackingFixture::trendMonth(params.value("measures").toArray(),
+                                                                                  params.value("split") == "item"));
+            }
             else if (method == "stats.table") {
                 QJsonObject table = TrackingFixture::statsTable(params.value("group").toString("week"));
                 table["filter"] = QJsonObject{{"tag_id", params.value("tag_id")}, {"project_id", params.value("project_id")},
@@ -471,6 +478,60 @@ esac
         if (dir.isEmpty()) return;
         QDir().mkpath(dir);
         QVERIFY2(image.save(dir + "/" + name), qPrintable(name));
+    }
+    static void trendsScreens(QQuickWindow *window, QObject *stats) {
+        auto *chart = qobject_cast<QQuickItem *>(findByName(stats, "trendsChart"));
+        auto *flick = stats->property("contentItem").value<QQuickItem *>();
+        QVERIFY(chart && flick);
+        auto click = [&](const QString &name) {
+            QObject *button = findItemByName(chart, name);
+            return button && QMetaObject::invokeMethod(button, "clicked");
+        };
+        auto placeChart = [&] {
+            const qreal top = chart->mapToItem(flick, QPointF()).y();
+            flick->setProperty("contentY", flick->property("contentY").toReal() + top - 10);
+        };
+        QVERIFY(click("trendsMeasure_focus"));
+        QVERIFY(click("trendsMeasure_minutes"));
+        QVERIFY(click("trendsSplit_item"));
+        QTRY_COMPARE(chart->property("shown").toList().size(), 3);
+        QCOMPARE(chart->property("periods").toList().size(), 28);
+        QCOMPARE(chart->property("panels").toList().size(), 1);
+        QTest::qWait(50);
+        placeChart();
+        shotWindow(window, "trends-focus-tasks.png");
+        QVERIFY(click("trendsLine_1"));
+        QCOMPARE(chart->property("shown").toList().size(), 2);
+        QVERIFY(click("trendsLine_1"));
+
+        QVERIFY(click("trendsSplit_"));
+        QVERIFY(click("trendsMeasure_minutes"));
+        QTRY_COMPARE(chart->property("panels").toList().size(), 2);
+        placeChart();
+        shotWindow(window, "trends-mixed-split.png");
+        QVERIFY(click("trendsRelative"));
+        QCOMPARE(chart->property("panels").toList().size(), 1);
+        auto *hover = qobject_cast<QQuickItem *>(findItemByName(chart, "trendsHover"));
+        QVERIFY(hover);
+        // The second period has Focus 3.2 and 32 minutes across two sessions.
+        QTest::mouseMove(window, hover->mapToScene({hover->width() / 27, 95}).toPoint());
+        QObject *tip = findByName(window, "statsTooltip");
+        QVERIFY(tip);
+        QTRY_VERIFY(tip->property("visible").toBool());
+        const QString tooltip = tip->property("text").toString();
+        QVERIFY2(tooltip.contains("32 min") && tooltip.contains("3.2"), qPrintable(tooltip));
+        QCOMPARE(tooltip.count("2 sessions"), 2);
+        shotWindow(window, "trends-mixed-relative.png");
+        QTest::mouseMove(window, QPoint(10, 10));
+        QVERIFY(click("chartTableButton"));
+        const auto rows = chart->property("tableRows").toList();
+        QCOMPARE(rows.size(), 28);
+        QVERIFY(rows[5].toList().contains("—"));
+        QVERIFY(rows[5].toList().contains("0 min"));
+        QVERIFY(click("chartChartButton"));
+        QVERIFY(click("trendsSplitView"));
+        QVERIFY(click("trendsMeasure_focus"));
+        flick->setProperty("contentY", 0);
     }
     static QObject *findItemByName(QObject *root, const QString &name) {
         auto *item = qobject_cast<QQuickItem *>(root);
@@ -2358,6 +2419,10 @@ const int original = model->indexOfItem("<id:4>");
         QVERIFY(QMetaObject::invokeMethod(bar, "setMetricRange", Q_ARG(QVariant, QVariant("minutes")), Q_ARG(QVariant, QVariant(60)), Q_ARG(QVariant, QVariant(10))));
         waitForBackendIdle(backend);
         QVariantList chips = bar->property("activeChips").toList();
+        QJsonObject seriesParams = lastRequest(daemon, "stats.series").value("params").toObject();
+        QCOMPARE(seriesParams.take("measures").toArray(), QJsonArray{"minutes"});
+        QCOMPARE(seriesParams.take("interval").toString(), QString("day"));
+        QCOMPARE(seriesParams, lastRequest(daemon, "stats.get").value("params").toObject());
         QCOMPARE(chips.size(), 3);
         QCOMPARE(chips.at(0).toMap().value("text").toString(), QString("Duration 10–60 min"));
         QCOMPARE(chips.at(1).toMap().value("text").toString(), QString::fromUtf8("Focus ≥ 4"));
@@ -2421,6 +2486,96 @@ const int original = model->indexOfItem("<id:4>");
         QCOMPARE(findByName(again.data(), "statsScroll")->property("tab").toString(), QString("notes"));
         QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
     }
+    void trendsUiPreviews() {
+        QTemporaryDir dir;
+        fake(dir);
+        const QString cli = dir.filePath("reports-cli");
+        auto saveReport = [&](const QString &name, const QJsonObject &report) {
+            write(dir.filePath(name + ".json"), QJsonDocument(report).toJson(QJsonDocument::Compact));
+        };
+        saveReport("tasks", TrackingFixture::trendMonth({"focus"}, true));
+        saveReport("mixed", TrackingFixture::trendMonth({"focus", "minutes"}, false));
+        saveReport("minutes", TrackingFixture::trendMonth({"minutes"}, false));
+        // The CLI serves the same series as the socket screenshot test. Log
+        // the arguments so range and metric filters are checked in both modes.
+        write(cli, "#!/bin/sh\ncd '" + dir.path().toUtf8() + "'\n" + R"SH(
+if [ "$1 $2" = "stats series" ]; then
+    printf '%s\n' "$*" >> series-args
+    case " $* " in
+        *" --split item "*) cat tasks.json ;;
+        *" --measure focus "*) cat mixed.json ;;
+        *) cat minutes.json ;;
+    esac
+else
+    exec ./salah "$@"
+fi
+)SH");
+        QFile::setPermissions(cli, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        Backend backend(nullptr, cli, 3000, daemon_path(dir));
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        window->resize(1280, 820);
+        root->setProperty("page", 2);
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "loadStatistics"));
+        waitForBackendIdle(backend);
+        backend.dismissError();
+        auto *stats = findByName(root.data(), "statsScroll");
+        QVERIFY(stats);
+        trendsScreens(window, stats);
+        waitForBackendIdle(backend);
+
+        QFile args(dir.filePath("series-args"));
+        QVERIFY(args.open(QIODevice::ReadOnly));
+        QVERIFY(args.readAll().contains("stats series --days 28 --interval day --split item --measure focus\n"));
+        auto *chart = findByName(stats, "trendsChart");
+        QVERIFY(chart);
+        chart->setProperty("report", fixture("stats_series_day").toVariantMap());
+        QCOMPARE(chart->property("groups").toList().size(), 3);
+        chart->setProperty("report", fixture("stats_series_split_item").toVariantMap());
+        QCOMPARE(chart->property("groups").toList().size(), 1);
+        auto overflow = fixture("stats_series_split_item");
+        auto series = overflow.value("series").toArray();
+        while (series.size() < 9) {
+            auto line = series.first().toObject();
+            line["key"] = QString::number(series.size());
+            series.append(line);
+        }
+        overflow["series"] = series;
+        chart->setProperty("report", overflow.toVariantMap());
+        QCOMPARE(chart->property("shown").toList().size(), 8);
+        auto *ninth = findItemByName(chart, "trendsLine_8");
+        QVERIFY(ninth && !ninth->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(chart, "trendsLine_0"), "clicked"));
+        QVERIFY(ninth->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(ninth, "clicked"));
+        QCOMPARE(chart->property("shown").toList().size(), 8);
+        const QVariant day31("2031-04-01");
+        QVERIFY(QMetaObject::invokeMethod(stats, "setCustom", Q_ARG(QVariant, day31), Q_ARG(QVariant, QVariant("2031-05-01"))));
+        QCOMPARE(chart->property("interval").toString(), QString("day"));
+        QVERIFY(QMetaObject::invokeMethod(stats, "setCustom", Q_ARG(QVariant, day31), Q_ARG(QVariant, QVariant("2031-05-02"))));
+        QCOMPARE(chart->property("interval").toString(), QString("week"));
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(chart, "trendsInterval_day"), "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("project")), Q_ARG(QVariant, QVariant("study"))));
+        QCOMPARE(chart->property("interval").toString(), QString("day"));
+        auto *bar = stats->property("filterBar").value<QObject *>();
+        QVERIFY(bar);
+        QVERIFY(QMetaObject::invokeMethod(bar, "setMetricRange", Q_ARG(QVariant, QVariant("minutes")),
+                                          Q_ARG(QVariant, QVariant(10)), Q_ARG(QVariant, QVariant(60))));
+        QVERIFY(QMetaObject::invokeMethod(bar, "setMetricRange", Q_ARG(QVariant, QVariant("focus")),
+                                          Q_ARG(QVariant, QVariant(3.5)), Q_ARG(QVariant, QVariant(""))));
+        waitForBackendIdle(backend);
+        const auto filtered = args.readAll().trimmed().split('\n').last();
+        QCOMPARE(filtered, QByteArray("stats series --from 2031-04-01 --to 2031-05-02 --project study "
+                                      "--min-minutes 10 --max-minutes 60 --interval day --measure minutes --min focus=3.5"));
+    }
+
     void trackingUiScreens() {
         QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
         auto state = trackingState();
@@ -2559,7 +2714,9 @@ const int original = model->indexOfItem("<id:4>");
         shotWindow(window, "stats-all.png");
         QObject *stats = findByName(root.data(), "statsScroll"); QVERIFY(stats);
         QObject *flick = stats->property("contentItem").value<QObject *>(); QVERIFY(flick);
-        flick->setProperty("contentY", 520);
+        trendsScreens(window, stats);
+        waitForBackendIdle(backend);
+        flick->setProperty("contentY", flick->property("contentHeight").toReal() - flick->property("height").toReal());
         shotWindow(window, "stats-all-bottom.png");
         flick->setProperty("contentY", 0);
         QTRY_VERIFY_WITH_TIMEOUT(!backend.trackingItems().isEmpty(), 3000);
@@ -2581,7 +2738,12 @@ const int original = model->indexOfItem("<id:4>");
         QObject *dayChart = findByName(root.data(), "dayChart"); QVERIFY(dayChart);
         QVERIFY(QMetaObject::invokeMethod(findItemByName(dayChart, "chartTableButton"), "clicked"));
         QTRY_VERIFY_WITH_TIMEOUT(dayChart->property("tableMode").toBool(), 2000);
+        auto *dayItem = qobject_cast<QQuickItem *>(dayChart);
+        auto *viewport = qobject_cast<QQuickItem *>(flick);
+        QVERIFY(dayItem && viewport);
+        flick->setProperty("contentY", dayItem->mapToItem(viewport, QPointF()).y() + flick->property("contentY").toReal());
         shotWindow(window, "stats-chart-table.png");
+        flick->setProperty("contentY", 0);
         QVERIFY(QMetaObject::invokeMethod(findItemByName(dayChart, "chartChartButton"), "clicked"));
         QVERIFY(!dayChart->property("tableMode").toBool());
         QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("project")), Q_ARG(QVariant, QVariant("quran"))));
