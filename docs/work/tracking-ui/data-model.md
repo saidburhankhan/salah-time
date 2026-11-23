@@ -207,7 +207,6 @@ CREATE TABLE reviews (
     version     INTEGER NOT NULL CHECK (version >= 1)
 );
 CREATE UNIQUE INDEX reviews_by_week ON reviews (week) WHERE deleted_at IS NULL;
-CREATE INDEX sessions_by_day ON sessions (day);
 ```
 
 Rules:

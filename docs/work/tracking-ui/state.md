@@ -70,6 +70,10 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   checked lossless against bak-v1 (only 003's additions), integrity ok; script fixed in 461786e.
   Pending small fixes: widget Worked cap at `max_minutes` + stale display, and the app running card
   showing 600:01 for a stale timer (both Sol, with the 16:27 window); Pause could refetch status.
+- 004 review (independent, APPROVE, 5f88483). For C5's next resume: (a) the foreign_key_check error
+  names table, rowid, parent and fkid; (b) a full v1→v4 rotation test asserting kept backups are
+  v1, v2, v3; (c) backlog work makes the codec's `block`/`start_day` Option and old item_history JSON
+  still decodes. Spec fix: 005 no longer re-creates `sessions_by_day` (001 has it).
 - U5: user visual check after `omarchy restart shell`; fix what they report.
 - Optional: app/widget could show `stale` on an overnight timer (backend reports it since 47fb1d1).
 - Codex 5h limit hit at 06:59 (resets 11:26); weekly was 45% at 06:20.
