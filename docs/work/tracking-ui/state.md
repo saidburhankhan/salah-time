@@ -168,3 +168,9 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   Queue for C8 at 08:13 (before insights): additive GoalView `scope_label` (item title / epic name /
   project name; null for all-work) so clients never show an unresolved scope; widget and app read it.
   C9 task 2 (app Goals UI) still with Claude Sonnet.
+- 04:1x committed d01dbe1 (C9 task 2 app Goals UI, Claude Sonnet; 82 app tests, screenshots ok;
+  the daily "All work" history in goals-page.png shows week rows only because goals_history.json is a
+  week goal — real goals.history returns day rows). INSTALLED d01dbe1+state (goals in backend, app,
+  widget): scripts/test 230 passed, clippy clean, daemon restarted, DB still v5 (no migration),
+  integrity ok, totals unchanged. C9 follow-up: after goal.edit, keep the history open on the
+  successor id instead of closing it. Next Codex window 08:13 (see the 08:14 cron).
