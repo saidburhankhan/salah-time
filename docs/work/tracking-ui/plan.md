@@ -403,3 +403,6 @@ The user wants Statistics filtered by focus and other metrics too, not only by t
   for each metric (focus, quality, distractions, the project's own) an optional min-max range;
   active filters shown as removable chips ("Focus ≥ 4", "Distractions ≤ 2"), "Clear" resets.
 - Fixtures: `stats_metric_filter.json`, `stats_table_metric_filter.json`.
+- Layout (user, ~13:05): Statistics has three tabs, Charts | Table | Notes, under one shared
+  filter bar (range, tags/projects/tasks, Metrics row). Filters persist across tabs; the Notes page
+  is the Notes tab, not a separate sidebar entry.
