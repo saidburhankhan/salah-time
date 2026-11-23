@@ -24,6 +24,16 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   (004) each get an independent Claude reviewer before more work builds on them; migrate a copy of
   the live DB in scratch and compare row counts before every install.
 
+- Model tiers (user, 2026-11-23): hard parts on `MODEL=gpt-6.2-astra EFFORT=high`, normal work on
+  the dispatcher default `gpt-6.2-sol` high. The model is chosen per dispatch/resume, so a worker
+  switches tier at its checkpoint.
+  - Astra: C2 task 0 (migration chain + 003), C2 3 (`stats.table`) and 3b (`sessions.list`);
+    C5 task 0 (004 items rebuild) and the backlog/epic core rules; C4 general table + Notes page;
+    C6 widget creation sheet; any task that failed review once on Sol.
+  - Sol: C2 1, 2, 2b, 2c, 2d, 4 (CLI), 5 (fixtures); C3 widget tasks; C4 pause panel,
+    filters, Chart/Table toggle; C5 resources/CLI/fixtures; C6 rest; C7 app pages; docs.
+  - Independent migration reviews stay with a Claude reviewer.
+
 - U5: user visual check after `omarchy restart shell`; fix what they report.
 - Optional: app/widget could show `stale` on an overnight timer (backend reports it since 47fb1d1).
 - Codex 5h limit hit at 06:59 (resets 11:26); weekly was 45% at 06:20.
