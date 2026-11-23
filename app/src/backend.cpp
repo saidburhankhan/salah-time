@@ -615,6 +615,8 @@ void Backend::saveItem(const QVariantMap &item) {
                                                                         : QJsonValue(epic->toString());
     const auto metricIds = item.constFind(QStringLiteral("metric_ids"));
     if (metricIds != item.cend()) fields.metricIds = QJsonValue::fromVariant(*metricIds);
+    const auto tagIds = item.constFind(QStringLiteral("tag_ids"));
+    if (tagIds != item.cend()) fields.tagIds = QJsonValue::fromVariant(*tagIds);
     fields.plannedMinutes = item.value(QStringLiteral("planned_minutes")).toInt();
     fields.hasPlannedMinutes = fields.plannedMinutes > 0;
     if (id.isEmpty()) {

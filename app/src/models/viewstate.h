@@ -201,6 +201,7 @@ class ItemDraft : public QObject {
     Q_PROPERTY(QString projectId READ projectId NOTIFY changed)
     Q_PROPERTY(QString epicId READ epicId NOTIFY changed)
     Q_PROPERTY(QVariant metricIds READ metricIds NOTIFY changed)
+    Q_PROPERTY(QVariant tagIds READ tagIds NOTIFY changed)
     Q_PROPERTY(int plannedMinutes READ plannedMinutes NOTIFY changed)
 public:
     explicit ItemDraft(QObject *parent = nullptr);
@@ -216,6 +217,7 @@ public:
     QString projectId() const { return m_projectId; }
     QString epicId() const { return m_epicId; }
     QVariant metricIds() const { return m_metricIds; }
+    QVariant tagIds() const { return m_tagIds; }
     int plannedMinutes() const { return m_plannedMinutes; }
 
     void update(const QJsonObject &row);
@@ -233,5 +235,6 @@ private:
     int m_target = 0;
     QString m_projectId, m_epicId;
     QVariant m_metricIds;
+    QVariant m_tagIds;
     int m_plannedMinutes = 0;
 };

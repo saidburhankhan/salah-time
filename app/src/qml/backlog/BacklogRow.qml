@@ -15,6 +15,9 @@ Rectangle {
     }
     readonly property bool dragged: drag.active && drag.task.id === task.id
     readonly property bool dropTarget: drag.active && drag.anchorId === task.id
+    readonly property string tagNames: (task.tag_ids || []).map(function(id) {
+        return win.tagById(id)?.name
+    }).filter(function(name) { return !!name }).join(" · ")
 
     implicitHeight: 55
     height: implicitHeight
@@ -69,14 +72,28 @@ Rectangle {
             ToolTip.delay: 500
             ToolTip.text: qsTr("Drag to reorder, or drag to Today and drop on a prayer block.")
         }
-        Label {
+        ColumnLayout {
             Layout.fillWidth: true
-            text: row.task.title
-            textFormat: Text.PlainText
-            elide: Text.ElideRight
-            color: row.win.text
-            font.pixelSize: 15
-            font.weight: Font.Medium
+            spacing: 2
+            Label {
+                Layout.fillWidth: true
+                text: row.task.title
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                color: row.win.text
+                font.pixelSize: 15
+                font.weight: Font.Medium
+            }
+            Label {
+                objectName: "backlogTaskTags_" + row.task.id
+                visible: row.tagNames !== ""
+                Layout.fillWidth: true
+                text: row.tagNames
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                color: row.win.muted
+                font.pixelSize: 11
+            }
         }
         Label {
             Layout.preferredWidth: 85

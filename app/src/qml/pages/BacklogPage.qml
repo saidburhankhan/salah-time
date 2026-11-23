@@ -12,7 +12,7 @@ ColumnLayout {
     property string tagId: ""
     property string projectId: ""
     property var dragRows: []
-    readonly property var liveRows: groupRows(backend.backlogItems, backend.epics, backend.tags)
+    readonly property var liveRows: groupRows(backend.backlogItems, backend.epics)
     readonly property var rows: win.backlogDrag.active ? dragRows : liveRows
 
     spacing: 12
@@ -38,7 +38,7 @@ ColumnLayout {
         load()
     }
 
-    function groupRows(items, epics, tags) {
+    function groupRows(items, epics) {
         var projects = new Map()
         for (var task of items) {
             var project = task.project
@@ -62,12 +62,8 @@ ColumnLayout {
         var rows = []
         for (var group of orderedProjects) {
             var project = group.project
-            var tagNames = project ? tags.filter(function(tag) {
-                return (project.tag_ids || []).indexOf(tag.id) >= 0
-            }).map(function(tag) { return tag.name }) : []
             rows.push({ kind: "project", title: project ? project.name : qsTr("No project"),
-                        projectId: project ? project.id : "", color: project ? project.color : "",
-                        tags: tagNames.join(" · ") })
+                        projectId: project ? project.id : "", color: project ? project.color : "" })
             var byEpic = new Map(epics.map(function(epic) { return [epic.id, epic] }))
             var orderedEpics = Array.from(group.epics.keys()).sort(function(a, b) {
                 if (!a) return 1
@@ -223,20 +219,13 @@ ColumnLayout {
                 color: page.win.projectById(entry.projectId)?.color || entry.color || page.win.muted
             }
             Label {
+                Layout.fillWidth: true
                 text: entry.title
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
                 color: page.win.text
                 font.pixelSize: 16
                 font.weight: Font.DemiBold
-            }
-            Label {
-                Layout.fillWidth: true
-                text: entry.tags
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
-                color: page.win.muted
-                font.pixelSize: 12
             }
         }
     }

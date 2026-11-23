@@ -38,6 +38,8 @@ public:
         QJsonValue epicId = QJsonValue::Undefined;
         // Undefined preserves the current selection, null follows the project.
         QJsonValue metricIds = QJsonValue::Undefined;
+        // Undefined uses project defaults on add and preserves tags on edit.
+        QJsonValue tagIds = QJsonValue::Undefined;
         int plannedMinutes = 0;
         bool hasPlannedMinutes = false;
         QDate date;

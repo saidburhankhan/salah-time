@@ -24,6 +24,14 @@ Popup {
     }
     property var metricIds: null
     property bool metricIdsEdited: false
+    property var tagOverrides: null
+    // Routine report rows may need the item list to supply their current tags.
+    readonly property var savedTagIds: item.tagIds ?? (item.id
+        ? (backend.trackingItems || []).find(function(task) { return task.id === item.id })?.tag_ids
+        : undefined)
+    readonly property var tagIds: tagOverrides ?? (item.id
+        ? (savedTagIds ?? [])
+        : (win.projectById(projectId)?.tag_ids || []))
     readonly property bool projectChanged: !!item.id && projectId !== (item.projectId || "")
     readonly property var projectMetrics: win.promptMetrics(projectId, {}, null, false)
     readonly property var askChoices: {
@@ -58,8 +66,11 @@ Popup {
         epicId = item.epicId || ""
         metricIds = item.metricIds || null
         metricIdsEdited = false
+        tagOverrides = null
         confirming = false
         backend.loadSettings()
+        if (item.id && item.tagIds == null)
+            backend.loadTrackingItems()
         entryFields.initialize(item.title || "", item.plannedMinutes ? String(item.plannedMinutes) : "")
         refreshPreview()
     }
@@ -95,6 +106,8 @@ Popup {
             result.block = block
         if (metricIdsEdited && !projectChanged)
             result.metric_ids = metricIds
+        if (tagOverrides !== null)
+            result.tag_ids = tagOverrides
         // Sent when an epic is chosen, or to clear the one the task had.
         if (epicId !== "" || !!item.epicId)
             result.epic_id = epicId
@@ -105,6 +118,8 @@ Popup {
             return
         projectId = id
         epicId = id === (item.projectId || "") ? (item.epicId || "") : ""
+        if (!item.id)
+            tagOverrides = null
         metricIds = projectChanged ? null : (item.metricIds || null)
         metricIdsEdited = false
     }
@@ -112,6 +127,15 @@ Popup {
         return metricIds === null
             ? projectMetrics.some(function(metric) { return metric.metric_id === id })
             : metricIds.indexOf(id) >= 0
+    }
+    function toggleTag(id) {
+        var ids = Array.from(tagIds)
+        var index = ids.indexOf(id)
+        if (index >= 0)
+            ids.splice(index, 1)
+        else
+            ids.push(id)
+        tagOverrides = ids
     }
     function toggleMetric(id) {
         if (projectChanged)
@@ -140,6 +164,7 @@ Popup {
             win.editItem = backlog ? ({ backlog: true }) : ({})
             metricIds = null
             metricIdsEdited = false
+            tagOverrides = null
             entryFields.clearTitle()
         } else {
             win.entryVisible = false

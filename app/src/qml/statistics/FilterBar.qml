@@ -48,11 +48,25 @@ ColumnLayout {
             return allowed[project] === true && (projectId === "" || project === projectId)
         })
     }
-    readonly property var taskChoices: (backend.trackingItems || []).filter(function(item) {
+    readonly property var scopedTasks: (backend.trackingItems || []).filter(function(item) {
         var project = String(item.project_id || "none")
         var epic = String(item.epic_id || "none")
         return (projectId === "" || project === projectId) && (epicId === "" || epic === epicId)
     })
+    readonly property var taskChoices: scopedTasks.filter(function(item) {
+        var ids = item.tag_ids || []
+        return tagId === "" || (tagId === "none" ? ids.length === 0 : ids.indexOf(tagId) >= 0)
+    })
+    readonly property var tagChoices: {
+        var tags = backend.tags || []
+        if (projectId === "")
+            return tags
+        var ids = new Set()
+        for (var task of scopedTasks)
+            for (var id of task.tag_ids || [])
+                ids.add(id)
+        return tags.filter(function(tag) { return ids.has(tag.id) })
+    }
     // Focus, quality, distractions and, with a project chosen, its own
     // metrics; otherwise every active metric.
     readonly property var metricChoices: {
@@ -150,18 +164,18 @@ ColumnLayout {
         return projectId === "" ? win.projectName(epic.project_id) + " · " + name : name
     }
     // kind: "" (clear everything), "tag", "project", "epic" or "item".
-    // A project or epic change can make a selected task unavailable.
+    // A project, epic or tag change can make a selected task unavailable.
     function setFilter(kind, id) {
         if (kind === "tag") {
             tagId = id
+            clearUnavailableTask()
         } else if (kind === "project") {
             projectId = id
             epicId = ""
             itemId = ""
         } else if (kind === "epic") {
             epicId = id
-            if (itemId !== "" && !taskChoices.some(function(t) { return String(t.id) === itemId }))
-                itemId = ""
+            clearUnavailableTask()
         } else if (kind === "item") {
             itemId = id
         } else {
@@ -171,6 +185,10 @@ ColumnLayout {
             itemId = ""
         }
         edited()
+    }
+    function clearUnavailableTask() {
+        if (itemId !== "" && !taskChoices.some(function(task) { return String(task.id) === itemId }))
+            itemId = ""
     }
     function setRange(days) {
         rangeError = ""
@@ -265,7 +283,9 @@ ColumnLayout {
     }
     function filterName() {
         var parts = []
-        if (tagId !== "") {
+        if (tagId === "none") {
+            parts.push(qsTr("No tag"))
+        } else if (tagId !== "") {
             var tag = win.tagById(tagId)
             if (tag)
                 parts.push("# " + String(tag.name))
@@ -428,7 +448,7 @@ ColumnLayout {
     }
 
     RowLayout {
-        visible: bar.taskChoices.length > 0
+        visible: bar.scopedTasks.length > 0
         Layout.fillWidth: true
         spacing: 8
         RowTitle {
@@ -510,8 +530,15 @@ ColumnLayout {
                 selected: bar.tagId === ""
                 onClicked: bar.setFilter("tag", "")
             }
+            ChoiceChip {
+                objectName: "statsTag_none"
+                win: bar.win
+                text: qsTr("No tag")
+                selected: bar.tagId === "none"
+                onClicked: bar.setFilter("tag", "none")
+            }
             Repeater {
-                model: backend.tags || []
+                model: bar.tagChoices
                 ChoiceChip {
                     required property var modelData
                     objectName: "statsTag_" + modelData.id

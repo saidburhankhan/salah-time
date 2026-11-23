@@ -3,14 +3,16 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
 
-// Tags group projects across the Statistics filter.
 RowLayout {
     id: tags
     property var win
     property string editId: ""
     property string editColor: "#2e7d32"
     property bool confirmingRemove: false
+    readonly property var taskCounts: counts(backend.trackingItems || [])
+    readonly property var projectCounts: counts(backend.projects || [])
     spacing: 20
+    onVisibleChanged: if (visible) backend.loadTrackingItems()
 
     function startNew() {
         editId = ""
@@ -37,20 +39,22 @@ RowLayout {
         backend.saveEntity("tag", fields)
     }
 
-    function usage(id) {
-        var count = 0
-        var list = backend.projects || []
-        for (var i = 0; i < list.length; i++) {
-            if ((list[i].tag_ids || []).indexOf(id) >= 0)
-                count++
-        }
-        return count
+    function counts(rows) {
+        var totals = Object.create(null)
+        for (var row of rows)
+            for (var id of row.tag_ids || [])
+                totals[id] = (totals[id] || 0) + 1
+        return totals
     }
 
     Component.onCompleted: startNew()
 
     Connections {
         target: backend
+        function onReportsInvalidated() {
+            if (tags.visible)
+                backend.loadTrackingItems()
+        }
         function onEntitySaved(kind, id) {
             if (kind !== "tag")
                 return
@@ -86,7 +90,7 @@ RowLayout {
             visible: (backend.tags || []).length === 0
             Layout.fillWidth: true
             Layout.topMargin: 12
-            text: qsTr("No tags yet. Tags group projects, for example Faith or Health, and filter the statistics.")
+            text: qsTr("No tags yet. Use tags such as Faith or Health to organise tasks across projects.")
             color: tags.win.muted
             wrapMode: Text.WordWrap
         }
@@ -100,7 +104,8 @@ RowLayout {
             delegate: Card {
                 id: tagRow
                 required property var modelData
-                readonly property int projectCount: tags.usage(String(modelData.id))
+                readonly property int taskCount: tags.taskCounts[modelData.id] || 0
+                readonly property int projectCount: tags.projectCounts[modelData.id] || 0
                 win: tags.win
                 width: ListView.view.width
                 height: 60
@@ -125,7 +130,11 @@ RowLayout {
                         elide: Text.ElideRight
                     }
                     Label {
-                        text: tagRow.projectCount === 1 ? qsTr("1 project") : qsTr("%1 projects").arg(tagRow.projectCount)
+                        objectName: "tagUsage_" + tagRow.modelData.id
+                        text: qsTr("%1 · %2").arg(
+                            tagRow.taskCount === 1 ? qsTr("1 task") : qsTr("%1 tasks").arg(tagRow.taskCount),
+                            tagRow.projectCount === 1 ? qsTr("1 project") : qsTr("%1 projects").arg(tagRow.projectCount))
+                        textFormat: Text.PlainText
                         color: tags.win.muted
                         font.pixelSize: 12
                     }
@@ -186,7 +195,7 @@ RowLayout {
             Label {
                 visible: tags.confirmingRemove
                 Layout.fillWidth: true
-                text: qsTr("Removing a tag takes it off every project. Sessions are kept.")
+                text: qsTr("Removing a tag takes it off tasks and project defaults. Sessions are kept.")
                 color: "#ef8068"
                 wrapMode: Text.WordWrap
             }

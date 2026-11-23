@@ -367,6 +367,7 @@ void CoreClient::itemAdd(const ItemFields &f, Callback callback) {
         if (f.hasPlannedMinutes) params.insert(QStringLiteral("planned_minutes"), f.plannedMinutes);
         if (!f.metricIds.isUndefined()) params.insert(QStringLiteral("metric_ids"), f.metricIds);
     }
+    if (!f.tagIds.isUndefined()) params.insert(QStringLiteral("tag_ids"), f.tagIds);
     if (!f.backlog && f.date.isValid()) params.insert(QStringLiteral("date"), f.date.toString(Qt::ISODate));
     writeRpc(QStringLiteral("item.add"), params, std::move(callback));
 }
@@ -382,6 +383,7 @@ void CoreClient::itemEdit(const QString &id, const ItemFields &f, Callback callb
     params.insert(QStringLiteral("project_id"), f.projectId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(f.projectId));
     params.insert(QStringLiteral("planned_minutes"), f.hasPlannedMinutes ? QJsonValue(f.plannedMinutes) : QJsonValue(QJsonValue::Null));
     if (!f.metricIds.isUndefined()) params.insert(QStringLiteral("metric_ids"), f.metricIds);
+    if (!f.tagIds.isUndefined()) params.insert(QStringLiteral("tag_ids"), f.tagIds);
     if (!f.epicId.isUndefined()) params.insert(QStringLiteral("epic_id"), f.epicId);
     if (expectedVersion >= 0) params.insert(QStringLiteral("expected_version"), expectedVersion);
     writeRpc(QStringLiteral("item.edit"), params, std::move(callback));

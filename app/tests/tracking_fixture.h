@@ -165,7 +165,8 @@ inline QJsonObject staleRunningSession() {
 
 inline QJsonObject item(const QString &id, const QString &title, const QString &block, int position,
                         const QString &projectId, int planned, const QJsonArray &sessions,
-                        const QString &repeat = "daily", const QString &epicId = {}) {
+                        const QString &repeat = "daily", const QString &epicId = {},
+                        const QJsonArray &tags = {}) {
     // Done means the item has a tick; timed sessions only add minutes.
     int actual = 0;
     bool done = false;
@@ -181,7 +182,7 @@ inline QJsonObject item(const QString &id, const QString &title, const QString &
     return QJsonObject{
         {"id", id}, {"title", title}, {"block", block}, {"position", position},
         {"project", projectId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(projectRef(projectId))},
-        {"epic_id", epicId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(epicId)},
+        {"epic_id", epicId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(epicId)}, {"tag_ids", tags},
         {"planned_minutes", planned > 0 ? QJsonValue(planned) : QJsonValue(QJsonValue::Null)},
         {"actual_minutes", actual}, {"done", done}, {"sessions", sessions}, {"repeat", repeat},
         {"schedule_text", schedule}, {"detail_text", detail}, {"next_occurrence", kDay},
@@ -201,20 +202,20 @@ inline QJsonArray dayItems(const QString &block, bool withRunning = true) {
                             session("s-q3", "quran", "quran", "fajr", 0,
                                     QJsonObject{{"focus", 4.0}, {"quality", 5.0}, {"pages", 6.0}},
                                     {}, false, "Finished the juz", {}, "e-juz")},
-                 "daily", "e-juz"),
+                 "daily", "e-juz", {"faith"}),
             item("walk", "Morning walk", "fajr", 1, "", 0,
-                 QJsonArray{session("s-w1", "walk", "", "fajr", 0, {})})};
+                 QJsonArray{session("s-w1", "walk", "", "fajr", 0, {})}, "daily", {}, {"learning"})};
     if (block == "dhuhr") {
         QJsonArray deep{session("s-d1", "deep", "study", "dhuhr", 40,
                                 QJsonObject{{"focus", 4.0}}, "2031-05-14T07:30:00Z", false, {}, {}, "e-grammar")};
         if (withRunning) deep.append(runningSession());
-        return QJsonArray{item("deep", "Deep work: grammar", "dhuhr", 0, "study", 90, deep, "daily", "e-grammar"),
+        return QJsonArray{item("deep", "Deep work: grammar", "dhuhr", 0, "study", 90, deep, "daily", "e-grammar", {"learning"}),
                           item("dhikr", "Dhikr after Dhuhr", "dhuhr", 1, "quran", 10, {})};
     }
     if (block == "asr")
-        return QJsonArray{item("gym", "Gym session", "asr", 0, "fitness", 45, {})};
+        return QJsonArray{item("gym", "Gym session", "asr", 0, "fitness", 45, {}, "daily", {}, {"health"})};
     if (block == "isha")
-        return QJsonArray{item("review", "Review notes", "isha", 0, "study", 20, {}, "none")};
+        return QJsonArray{item("review", "Review notes", "isha", 0, "study", 20, {}, "none", {}, {"learning"})};
     return {};
 }
 

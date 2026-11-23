@@ -154,6 +154,7 @@ ScrollView {
                         model: form.win.activeProjects()
                         ChoiceChip {
                             required property var modelData
+                            objectName: "entryProject_" + modelData.id
                             win: form.win
                             text: String(modelData.name || "")
                             dotColor: String(modelData.color || "transparent")
@@ -219,6 +220,36 @@ ScrollView {
                                 text: String(modelData.name || "")
                                 selected: form.epicId === String(modelData.id)
                                 onClicked: form.epicId = String(modelData.id)
+                            }
+                        }
+                    }
+                }
+                RowLayout {
+                    visible: (backend.tags || []).length > 0 && (!form.item.id || form.savedTagIds != null)
+                    Layout.fillWidth: true
+                    Layout.topMargin: 6
+                    spacing: 12
+                    Label {
+                        Layout.alignment: Qt.AlignTop
+                        Layout.topMargin: 11
+                        text: qsTr("Tags")
+                        color: form.win.text
+                        font.pixelSize: 15
+                        font.weight: Font.Medium
+                    }
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Repeater {
+                            model: backend.tags || []
+                            ChoiceChip {
+                                required property var modelData
+                                objectName: "entryTag_" + modelData.id
+                                win: form.win
+                                text: String(modelData.name || "")
+                                dotColor: String(modelData.color || "transparent")
+                                selected: form.tagIds.indexOf(modelData.id) >= 0
+                                onClicked: form.toggleTag(modelData.id)
                             }
                         }
                     }

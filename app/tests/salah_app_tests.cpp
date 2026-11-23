@@ -144,11 +144,14 @@ class TrackingUiPreviewBackend : public Backend {
     Q_PROPERTY(QVariantList metrics READ previewMetrics CONSTANT)
     Q_PROPERTY(QVariantList trackingItems MEMBER m_previewTasks CONSTANT)
     Q_PROPERTY(QVariantList backlogItems MEMBER m_previewBacklog CONSTANT)
+    Q_PROPERTY(QVariantMap statsTable MEMBER m_previewStatsTable CONSTANT)
 public:
     TrackingUiPreviewBackend(const QString &program, const QString &socketPath,
-                             const QJsonArray &tasks, const QJsonArray &backlog)
+                             const QJsonArray &tasks, const QJsonArray &backlog,
+                             const QJsonObject &statsTable = {})
         : Backend(nullptr, program, 3000, socketPath),
-          m_previewTasks(tasks.toVariantList()), m_previewBacklog(backlog.toVariantList()) {}
+          m_previewTasks(tasks.toVariantList()), m_previewBacklog(backlog.toVariantList()),
+          m_previewStatsTable(statsTable.toVariantMap()) {}
     bool previewOfflineMode() const { return false; }
     QVariantList previewProjects() const { return TrackingFixture::projects().toVariantList(); }
     QVariantList previewTags() const { return TrackingFixture::tags().toVariantList(); }
@@ -157,6 +160,7 @@ public:
 private:
     const QVariantList m_previewTasks;
     const QVariantList m_previewBacklog;
+    const QVariantMap m_previewStatsTable;
 };
 }
 
@@ -507,11 +511,12 @@ esac
                 QJsonArray rows;
                 for (const QJsonValue &block : state->day.value("blocks").toArray())
                     for (const QJsonValue &value : block.toObject().value("items").toArray()) {
-                        const QJsonObject row = value.toObject();
-                        rows.append(QJsonObject{{"id", row.value("id")}, {"title", row.value("title")},
-                                                {"project_id", row.value("project").toObject().value("id")},
-                                                {"epic_id", row.value("epic_id")}});
+                        QJsonObject row = value.toObject();
+                        row["project_id"] = row.take("project").toObject().value("id");
+                        rows.append(row);
                     }
+                for (const QJsonValue &row : state->backlog)
+                    rows.append(row);
                 server->respond(socket, request, rows);
             }
             else if (method == "config.get") server->respond(socket, request, QJsonObject{{"sleep_time", "23:00"}, {"location", "Tashkent"}, {"latitude", 41.2}, {"longitude", 69.2}, {"timezone_offset", 5}, {"method", "uzbekistan"}, {"method_name", "Muslim Board of Uzbekistan"}, {"asr", "hanafi"}, {"auto_location", true}, {"last_location_provider", QJsonValue::Null}, {"last_location_sync", QJsonValue::Null}});
@@ -524,10 +529,15 @@ esac
             }
             else if (method == "backlog.list") {
                 QJsonArray rows;
+                const QString project = params.value("project_id").toString();
+                const QString tag = params.value("tag_id").toString();
                 for (const QJsonValue &row : state->backlog) {
-                    const QString project = params.value("project_id").toString();
-                    const QJsonObject owner = row.toObject().value("project").toObject();
-                    if (project.isEmpty() || (project == "none" ? owner.isEmpty() : owner.value("id").toString() == project))
+                    const QJsonObject task = row.toObject();
+                    const QString owner = task.value("project_id").toString();
+                    const QJsonArray tags = task.value("tag_ids").toArray();
+                    const bool matchesProject = project.isEmpty() || (project == "none" ? owner.isEmpty() : owner == project);
+                    const bool matchesTag = tag.isEmpty() || (tag == "none" ? tags.isEmpty() : tags.contains(tag));
+                    if (matchesProject && matchesTag)
                         rows.append(row);
                 }
                 server->respond(socket, request, rows);
@@ -2759,6 +2769,8 @@ const int original = model->indexOfItem("<id:4>");
                 server->respondError(socket, request, -32602, "invalid_params", "unknown project");
             else if (method == "stats.table" && params.contains("values"))
                 server->respond(socket, request, fixture("stats_table_metric_filter"));
+            else if (method == "stats.table" && params.value("group") == "tag")
+                server->respond(socket, request, fixture("stats_table_tag_items"));
             else if (method == "stats.table")
                 server->respond(socket, request, fixture(params.value("group").toString() == "project" ? "stats_table_project" : "stats_table_week"));
             else if (method == "stats.get")
@@ -2808,6 +2820,14 @@ const int original = model->indexOfItem("<id:4>");
         QTRY_COMPARE_WITH_TIMEOUT(stats.size(), 1, 3000);
         QCOMPARE(backend.statsData().value("filter").toMap().value("values").toMap().value("focus").toMap().value("min").toDouble(), 3.0);
         QCOMPARE(backend.statsData().value("totals").toMap().value("sessions").toInt(), 2);
+        backend.loadStatsTable(QVariantMap{{"days", 1}}, "tag");
+        QTRY_COMPARE_WITH_TIMEOUT(table.size(), 5, 3000);
+        rows = backend.statsTable().value("rows").toList();
+        QCOMPARE(rows.size(), 2);
+        QCOMPARE(rows.first().toMap().value("minutes").toInt(), 80);
+        QCOMPARE(rows.last().toMap().value("key").toString(), QString("none"));
+        QCOMPARE(rows.last().toMap().value("sessions").toInt(), 1);
+        QCOMPARE(backend.statsTable().value("totals").toMap().value("minutes").toInt(), 100);
         QVERIFY(backend.error().isEmpty());
     }
     void epicsFollowCanonicalFixtures() {
@@ -3240,29 +3260,35 @@ fi
     static QJsonArray backlogRows() {
         const QJsonObject base = readJson(QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/rpc/backlog_list.json")).object().value("result").toArray().first().toObject();
         auto row = [&](const QString &id, const QString &title, const QString &project, const QString &name,
-                       const QString &color, const QString &epic, int minutes, int notes, int links) {
+                       const QString &color, const QString &epic, int minutes, int notes, int links,
+                       const QJsonArray &tags = {}, const QJsonArray &defaults = {}) {
             QJsonObject r = base;
             r["id"] = id; r["title"] = title; r["epic_id"] = epic.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(epic);
+            r["project_id"] = project.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(project);
+            r["tag_ids"] = tags;
             r["project"] = project.isEmpty() ? QJsonValue(QJsonValue::Null)
-                : QJsonValue(QJsonObject{{"id", project}, {"name", name}, {"color", color}, {"tag_ids", QJsonArray{}}});
+                : QJsonValue(QJsonObject{{"id", project}, {"name", name}, {"color", color}, {"tag_ids", defaults}});
             r["planned_minutes"] = minutes > 0 ? QJsonValue(minutes) : QJsonValue(QJsonValue::Null);
             r["resources"] = QJsonObject{{"notes", notes}, {"links", links}, {"reminders", 0}};
             return r;
         };
         return QJsonArray{
-            row("b1", "Read chapter 4", "study", "Study", "#4f7a6a", "e-grammar", 40, 1, 2),
-            row("b2", "Verb tables", "study", "Study", "#4f7a6a", "e-grammar", 25, 0, 0),
-            row("b3", "Sort the reading list", "study", "Study", "#4f7a6a", "", 0, 0, 1),
-            row("b4", "Review Juz 30", "quran", "Quran", "#7a6a4f", "e-juz", 30, 2, 0),
-            row("b5", "Call the bank", "", "", "", "", 15, 0, 0)};
+            row("b1", "Read chapter 4", "study", "Study", "#4f7a6a", "e-grammar", 40, 1, 2, {"faith"}, {"learning"}),
+            row("b2", "Verb tables", "study", "Study", "#4f7a6a", "e-grammar", 25, 0, 0, {"learning"}, {"learning"}),
+            row("b3", "Sort the reading list", "study", "Study", "#4f7a6a", "", 0, 0, 1, {}, {"learning"}),
+            row("b4", "Review Juz 30", "quran", "Quran", "#7a6a4f", "e-juz", 30, 2, 0, {"faith"}, {"faith"}),
+            row("b5", "Call the bank", "", "", "", "", 15, 0, 0, {"learning"})};
     }
     void taskTagFilterScreens() {
         QTemporaryDir dir;
         const QJsonArray tasks{
-            QJsonObject{{"id", "read"}, {"title", "Read Quran"}, {"project_id", "quran"}, {"epic_id", "e-juz"}},
-            QJsonObject{{"id", "study"}, {"title", "Deep study"}, {"project_id", "study"}, {"epic_id", "e-grammar"}},
-            QJsonObject{{"id", "walk"}, {"title", "Morning walk"}}};
-        TrackingUiPreviewBackend backend(fake(dir), daemon_path(dir), tasks, backlogRows());
+            QJsonObject{{"id", "read"}, {"title", "Read Quran"}, {"project_id", "quran"},
+                        {"epic_id", "e-juz"}, {"tag_ids", QJsonArray{"learning"}}},
+            QJsonObject{{"id", "review"}, {"title", "Review yesterday’s reading"}, {"project_id", "quran"},
+                        {"epic_id", "e-tajweed"}, {"tag_ids", QJsonArray{}}},
+            QJsonObject{{"id", "walk"}, {"title", "Morning walk"}, {"tag_ids", QJsonArray{"learning"}}}};
+        TrackingUiPreviewBackend backend(fake(dir), daemon_path(dir), tasks, backlogRows(),
+                                         fixture("stats_table_tag_items"));
         Theme theme(dir.path());
         QQmlEngine engine;
         engine.rootContext()->setContextProperty("backend", &backend);
@@ -3303,9 +3329,14 @@ fi
         };
         QVERIFY(QMetaObject::invokeMethod(bar, "setFilter", Q_ARG(QVariant, QVariant("project")),
                                           Q_ARG(QVariant, QVariant("quran"))));
+        QCOMPARE(bar->property("tagChoices").toList().size(), 1);
+        QVERIFY(!findItemByName(bar, "statsTag_faith"));
+        QVERIFY(click("statsTask_review"));
         QVERIFY(click("statsTag_learning"));
         QCOMPARE(bar->property("projectId").toString(), QString("quran"));
         QCOMPARE(bar->property("projectChoices").toList().size(), 3);
+        QVERIFY(bar->property("itemId").toString().isEmpty());
+        QCOMPARE(bar->property("taskChoices").toList().value(0).toMap().value("id").toString(), QString("read"));
         waitForBackendIdle(backend);
         backend.dismissError();
         shotWindow(window, "stats-task-tag-filters.png");
@@ -3314,6 +3345,26 @@ fi
         QVERIFY(QMetaObject::invokeMethod(bar, "query", Q_RETURN_ARG(QVariant, query)));
         QCOMPARE(query.toMap().value("tag_id").toString(), QString("learning"));
         QCOMPARE(query.toMap().value("project_id").toString(), QString("none"));
+        QCOMPARE(bar->property("taskChoices").toList().value(0).toMap().value("id").toString(), QString("walk"));
+        QVERIFY(QMetaObject::invokeMethod(bar, "setFilter", Q_ARG(QVariant, QVariant("project")),
+                                          Q_ARG(QVariant, QVariant("quran"))));
+        QVERIFY(click("statsTag_none"));
+        QCOMPARE(bar->property("taskChoices").toList().value(0).toMap().value("id").toString(), QString("review"));
+        QVERIFY(QMetaObject::invokeMethod(bar, "query", Q_RETURN_ARG(QVariant, query)));
+        QCOMPARE(query.toMap().value("tag_id").toString(), QString("none"));
+        QVERIFY(QMetaObject::invokeMethod(bar, "setFilter", Q_ARG(QVariant, QVariant("")),
+                                          Q_ARG(QVariant, QVariant(""))));
+        QVERIFY(QMetaObject::invokeMethod(stats, "setTab", Q_ARG(QVariant, QVariant("table"))));
+        auto *table = findByName(window, "generalTable");
+        QVERIFY(table);
+        QVERIFY(QMetaObject::invokeMethod(table, "setGroup", Q_ARG(QVariant, QVariant("tag"))));
+        const auto reportRows = table->property("rows").toList();
+        QCOMPARE(reportRows.size(), 2);
+        QCOMPARE(reportRows.last().toMap().value("sessions").toInt(), 1);
+        QTRY_VERIFY(hasVisualText(window, "No tag"));
+        window->resize(1280, 920);
+        shotWindow(window, "stats-task-tag-table.png");
+        window->resize(1280, 820);
 
         window->setProperty("page", 3);
         auto *settings = findByName(window, "settingsPage");
@@ -3325,6 +3376,13 @@ fi
         waitForBackendIdle(backend);
         backend.dismissError();
         shotWindow(window, "settings-project-default-tags.png");
+        settings->setProperty("section", "tags");
+        QTRY_COMPARE(visualNamed(window, "tagUsage_learning").size(), 1);
+        QCOMPARE(visualNamed(window, "tagUsage_learning").first()->property("text").toString(), QString("2 tasks · 1 project"));
+        auto *faithUsage = visualNamed(window, "tagUsage_faith").value(0);
+        QVERIFY(faithUsage);
+        QCOMPARE(faithUsage->property("text").toString(), QString("0 tasks · 1 project"));
+        shotWindow(window, "settings-task-tag-counts.png");
 
         window->setProperty("page", 5);
         QTRY_COMPARE(visualNamed(window, "backlogProjectDot_quran").size(), 1);
@@ -3332,6 +3390,11 @@ fi
         QCOMPARE(dot->property("color").value<QColor>(), QColor("#4c8bf5"));
         QCOMPARE(dot->property("width").toReal(), 10.0);
         QCOMPARE(dot->property("height").toReal(), 10.0);
+        auto *studyTags = visualNamed(window, "backlogTaskTags_b1").value(0);
+        auto *unassignedTags = visualNamed(window, "backlogTaskTags_b5").value(0);
+        QVERIFY(studyTags && unassignedTags);
+        QCOMPARE(studyTags->property("text").toString(), QString("Faith"));
+        QCOMPARE(unassignedTags->property("text").toString(), QString("Learning"));
         shotWindow(window, "backlog-project-dots.png");
         auto *tag = visualNamed(window, "backlogTag_learning").value(0);
         auto *unassigned = visualNamed(window, "backlogProject_none").value(0);
@@ -3339,6 +3402,104 @@ fi
         QVERIFY(tag && QMetaObject::invokeMethod(tag, "clicked"));
         QVERIFY(unassigned->property("visible").toBool());
         QVERIFY(unassigned->property("selected").toBool());
+    }
+    void taskTagEditorWrites() {
+        const QJsonObject added = fixture("item_add_tags");
+        QVERIFY(Dto::decode<Dto::MutationResult>(added));
+        ItemDraft canonical;
+        canonical.update(added.value("changed").toObject().value("items").toArray().first().toObject());
+        QCOMPARE(canonical.tagIds().toList(), QVariantList{"<id:1>"});
+        QVERIFY(canonical.backlog() && canonical.projectId().isEmpty());
+        const auto listed = rpcFixture("items_list").value("result").toArray();
+        canonical.update(listed.first().toObject());
+        QCOMPARE(canonical.tagIds().toList(), QVariantList{"<id:2>"});
+        canonical.update(listed.last().toObject());
+        QVERIFY(canonical.tagIds().isValid() && canonical.tagIds().toList().isEmpty());
+        canonical.clear();
+        QVERIFY(!canonical.tagIds().isValid());
+
+        QTemporaryDir dir;
+        TrackingUiPreviewBackend backend(fake(dir), daemon_path(dir), {}, backlogRows());
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        ItemDraft backlogDraft;
+        backlogDraft.update(backlogRows().first().toObject());
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        auto *entry = findByName(window, "entryPopup");
+        QVERIFY(entry);
+        auto *content = entry->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content);
+        auto *title = findByName(window, "entryTitleField");
+        QVERIFY(title);
+        auto click = [content](const QString &name) {
+            auto *chip = findItemByName(content, name);
+            return chip && chip->property("visible").toBool() && QMetaObject::invokeMethod(chip, "clicked");
+        };
+        auto selected = [content](const QString &name) {
+            auto *chip = findItemByName(content, "entryTag_" + name);
+            return chip && chip->property("selected").toBool();
+        };
+        auto submit = [entry](bool keepOpen = false) {
+            return QMetaObject::invokeMethod(entry, "submitTitle", Q_ARG(QVariant, QVariant(keepOpen)));
+        };
+        backend.reload();
+        waitForBackendIdle(backend);
+        QVERIFY(QMetaObject::invokeMethod(window, "openEntry", Q_ARG(QVariant, QVariant(QVariantMap{}))));
+        QTRY_VERIFY(entry->property("opened").toBool());
+        QVERIFY(click("entryProject_quran"));
+        QVERIFY(selected("faith"));
+        QVERIFY(click("entryTag_health") && selected("health"));
+        QVERIFY(click("entryProject_study"));
+        QVERIFY(selected("learning") && !selected("faith") && !selected("health"));
+        title->setProperty("text", "Read chapter");
+        shotWindow(window, "task-editor-default-tags.png");
+        QVERIFY(submit());
+        QTRY_COMPARE(offlineRequests(dir).size(), 1);
+        auto params = offlineRequests(dir).last().value("params").toObject();
+        QCOMPARE(params.value("project_id").toString(), QString("study"));
+        QVERIFY(!params.contains("tag_ids"));
+
+        window->setProperty("page", 5);
+        QVERIFY(QMetaObject::invokeMethod(window, "openBacklogEntry"));
+        QTRY_VERIFY(entry->property("opened").toBool());
+        QVERIFY(click("entryProject_quran") && selected("faith"));
+        QVERIFY(click("entryTag_faith") && !selected("faith"));
+        title->setProperty("text", "Untagged backlog task");
+        QVERIFY(submit(true));
+        QTRY_COMPARE(offlineRequests(dir).size(), 2);
+        params = offlineRequests(dir).last().value("params").toObject();
+        QCOMPARE(params.value("tag_ids"), QJsonValue(QJsonArray{}));
+        QVERIFY(params.value("backlog").toBool());
+        QVERIFY(selected("faith"));
+        QVERIFY(click("noProjectChip"));
+        QVERIFY(click("entryTag_learning") && selected("learning"));
+        title->setProperty("text", "Read without a project");
+        QVERIFY(submit());
+        QTRY_COMPARE(offlineRequests(dir).size(), 3);
+        params = offlineRequests(dir).last().value("params").toObject();
+        QCOMPARE(params.value("tag_ids"), QJsonValue(QJsonArray{"learning"}));
+        QVERIFY(!params.contains("project_id"));
+
+        window->setProperty("editItem", QVariant::fromValue(&backlogDraft));
+        window->setProperty("entryVisible", true);
+        QTRY_VERIFY(entry->property("opened").toBool());
+        QVERIFY(selected("faith") && !selected("learning"));
+        shotWindow(window, "backlog-editor-task-tags.png");
+        QVERIFY(click("entryProject_fitness") && selected("faith") && !selected("health"));
+        QVERIFY(click("entryTag_faith") && !selected("faith"));
+        QVERIFY(submit());
+        QTRY_COMPARE(offlineRequests(dir).size(), 4);
+        QCOMPARE(offlineRequests(dir).last().value("method").toString(), QString("item.edit"));
+        params = offlineRequests(dir).last().value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("b1"));
+        QCOMPARE(params.value("project_id").toString(), QString("fitness"));
+        QCOMPARE(params.value("tag_ids"), QJsonValue(QJsonArray{}));
     }
     void backlogRequestsFollowCanonicalFixtures() {
         for (const char *name : {"item_add_backlog", "item_schedule", "item_backlog"})
@@ -3431,6 +3592,21 @@ fi
         shotWindow(window, "backlog-filtered.png");
         QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "backlogProject_").value(0), "clicked"));
         QTRY_COMPARE_WITH_TIMEOUT(backend.backlogItems().size(), 5, 3000);
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "backlogTag_learning").value(0), "clicked"));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.backlogItems().size(), 2, 3000);
+        QCOMPARE(backend.backlogItems().first().toMap().value("id").toString(), QString("b2"));
+        QCOMPARE(backend.backlogItems().last().toMap().value("id").toString(), QString("b5"));
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "backlogProject_none").value(0), "clicked"));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.backlogItems().size(), 1, 3000);
+        QCOMPARE(backend.backlogItems().first().toMap().value("id").toString(), QString("b5"));
+        QCOMPARE(lastRequest(daemon, "backlog.list").value("params").toObject(),
+                 (QJsonObject{{"project_id", "none"}, {"tag_id", "learning"}}));
+        shotWindow(window, "backlog-filtered-task-tag.png");
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "backlogProject_").value(0), "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "backlogTag_none").value(0), "clicked"));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.backlogItems().value(0).toMap().value("id").toString(), QString("b3"), 3000);
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "backlogTag_").value(0), "clicked"));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.backlogItems().size(), 5, 3000);
 
         QObject *dialog = findByName(root.data(), "scheduleDialog"); QVERIFY(dialog);
         QVERIFY(QMetaObject::invokeMethod(root.data(), "openSchedule", Q_ARG(QVariant, backend.backlogItems().first())));
@@ -3518,6 +3694,9 @@ fi
         QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "epic.remove").isEmpty(), 3000);
         QCOMPARE(lastRequest(daemon, "epic.remove").value("params").toObject().value("id").toString(), QString("e-empty"));
         settings->setProperty("section", "tags");
+        QTRY_COMPARE_WITH_TIMEOUT(backend.trackingItems().size(), 6, 3000);
+        QTRY_COMPARE(visualNamed(window, "tagUsage_learning").size(), 1);
+        QCOMPARE(visualNamed(window, "tagUsage_learning").first()->property("text").toString(), QString("3 tasks · 1 project"));
         shotWindow(window, "settings-tags.png");
         settings->setProperty("section", "metrics");
         QObject *metricsPane = findByName(root.data(), "metricsSettings"); QVERIFY(metricsPane);
