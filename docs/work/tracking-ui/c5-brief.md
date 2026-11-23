@@ -8,6 +8,9 @@ Read: `docs/AGENTS.md`, `docs/work/tracking-ui/data-model.md` (locked storage an
 "Phase 3" sections; phase 3's contract is locked, implement it exactly), the previous progress files
 in `docs/work/tracking-ui/` for how this area was built and verified, and the code you own.
 
+Order (user priority 2026-11-23: epics are the most important part of phase 3): (0), then (2b)
+epics, then (1) backlog, then (2) resources, then (3)-(4).
+
 Tasks: (0) migration 004 exactly as data-model.md specifies (items rebuild, epics, resources,
 session/day_plan epic_id) with its migration test; CHECKPOINT after this alone for the independent
 review. (1) nullable day/block for one-time items with a CHECK, backlog semantics in day plans,
@@ -17,7 +20,7 @@ validation, day-row resource counts, `status.get.reminders`, `changed` entity `r
 (2b) epics as plan.md "Epics" specifies: table, methods, item/session `epic_id`, epic resources,
 the stats/table/sessions.list filters and grouping, its own CHECKPOINT; (3) CLI `salah epic ...`, `salah backlog [list|add|schedule]`, `salah resource [list|add|edit|remove]`; (4) fixtures
 named in plan.md and protocol-v1.md. Schema changes are additive and migrate an existing database
-in place (the user has live data now: never drop or rewrite it). One CHECKPOINT after (1), one after
+in place (the user has live data now: never drop or rewrite it). One CHECKPOINT after (2b), one after (1), one after
 (2)-(4). Checks: `cargo test --offline --workspace` (socket tests fail in your sandbox; say which),
 `cargo clippy --offline --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check`.
 
