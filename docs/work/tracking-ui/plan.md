@@ -171,3 +171,63 @@ the required and optional metrics, and see results in charts. Both surfaces stay
 - [ ] P3 app pause panel + stats filters/range/table (C4)
 - [ ] P3b app Notes page (C4, after the stats work)
 - [ ] P4 integration, screenshots reviewed by the orchestrator, install, user check
+
+## Phase 3: resources, backlog, widget task creation (user request 2026-11-23 ~07:50)
+
+Starts after phase 2's backend (C2) is committed, so two workers never edit the item model at once.
+
+### Decisions (user)
+- Tags stay on projects only; a task shows its project's tags.
+- Only one-time tasks can be in the backlog.
+- Reminders show only in the widget (no desktop notifications).
+
+### Design
+- **Resources** on any item: `note` (text), `link` (http/https URL + optional title; opened in the
+  browser), `reminder` (date-time + text; due/overdue ones show in the widget until ticked off).
+  App: a task drawer beside the task with the resource list and add/edit/remove. Widget: a 📎 count
+  on rows with resources, the opened row lists them (links clickable, reminders tickable), quick add
+  of a note or link.
+- **Backlog:** a one-time item with no day and no block. It is not in any day plan, capacity or
+  fulfilment. App Backlog page: grouped by project, filter by tag/project, manual order, planned
+  minutes and resource count per row; **Schedule** (Today / Tomorrow / date + block chips) and drag
+  from the backlog onto Today. Today items (one-time) get "→ Backlog".
+- **Widget creation sheet:** typing in the add field unfolds a compact sheet under it: tag chips
+  (filter), project colour chips, planned-minutes chips 15/30/60/90, When = block chips with Today /
+  Tomorrow, or Backlog; buttons **Add** and **To backlog**; prefilled from the parsed text ("read
+  20m after isha" → 20 min, Isha); Enter keeps the old fast path; Esc closes; never covers the
+  timeline's current block.
+- **Reminder in the bar:** a small bell with a count next to the next prayer when a reminder is
+  due; the popup lists due reminders at the top with tick-off.
+
+### Contract additions (locked by the orchestrator; additive)
+- Item: `day` and `block` become nullable **only** when `repeat = "none"`; `backlog: bool` in
+  ItemView (= both null). `item.add` gains `backlog?: bool` (then no day/block). New methods
+  `item.schedule {id, day, block, op_id}` and `item.backlog {id, op_id}` (one-time only; a past day
+  that already has the item in its frozen plan keeps it). Backlog items never enter day plans.
+- `backlog.list {tag_id?, project_id?}` → `[ItemView + {project: {id,name,color,tag_ids}|null,
+  resources: {notes, links, reminders}}]` in position order; `item.move` works within the backlog
+  with `block: null`.
+- Resource `{id, item_id, kind: "note"|"link"|"reminder", title|null, body|null, url|null,
+  remind_at|null, done: bool, position, sync fields}`. Methods: `resources.list {item_id}`,
+  `resource.add {item_id, kind, title?, body?, url?, remind_at?}`, `resource.edit {id, title?,
+  body?, url?, remind_at?, done?, expected_version?}`, `resource.remove {id}`. Validation: link needs
+  an http(s) URL; reminder needs `remind_at`; note needs `body`.
+- Day rows gain `resources: {notes, links, reminders}` counts.
+- `status.get` gains `reminders: [{id, item_id, item_title, title, remind_at, overdue}]`: not done,
+  due today or earlier, oldest first.
+- `changed` gains the entity `resources`; item changes cover backlog moves.
+- Fixtures: `backlog_list.json`, `item_add_backlog.json`, `item_schedule.json`, `item_backlog.json`,
+  `resources_list.json`, `resource_add_link.json`, `resource_add_reminder.json`,
+  `resource_edit_done.json`, `status_reminders.json`.
+
+### Workers (Codex gpt-6.2-astra high, or Claude if Codex is limited)
+- C5 backend (`crates/**`): the contract above, schema additive (new table, nullable day/block with a
+  CHECK tying them to repeat), tests, CLI (`salah backlog`, `salah resource`), fixtures, protocol-v1.md.
+- C6 widget (`plugin/**`): creation sheet, bell + due reminders, row 📎 and resource list.
+- C7 app (`app/**`): task drawer, Backlog page, schedule dialog, drag from backlog, "→ Backlog".
+
+### Slices
+- [ ] R1 backend (C5)
+- [ ] R2 widget (C6)
+- [ ] R3 app (C7)
+- [ ] R4 integration, screenshots reviewed, install, user check
