@@ -43,8 +43,11 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   Weekly 76% now, so the 16:27 window (~24% left) ends on the weekly cap; then the user applies
   reset 1, later reset 2 (a reset clears weekly + 5h; use one ONLY at a 100% weekly cap, never for
   a 5h cap). Keep the Codex queue full (disjoint dirs: crates / app / plugin / reviews):
-  1. 16:27: C5 task 0 = migration 004 (Astra, crates; Claude review gate), C4 tasks 4-5 = general
-     table + Notes page (Astra, app; needs C2 3b), widget stale-timer display + cap Worked at the running view's `max_minutes` (R1 finding 1; Sol, plugin; the app side goes with C4 tasks 4-5).
+  1. 16:27: C5 task 0 = migration 004 (Astra, crates; Claude review gate); C6 task 1 = widget
+     creation sheet (Astra, plugin; user asked for it; Backlog button goes live when C5 task 1 lands);
+     C4 tasks 4-5 were done by Claude (0b1cf3e). Small Sol fixes in the same window: widget Worked
+     cap at `max_minutes` + stale display (plugin, after C6 task 1), app running card for a stale
+     timer (app).
   2. After reset 1: C5 rest (backlog/epic rules Astra; resources, CLI, fixtures Sol), C6 widget
      phase 3 (creation sheet Astra, rest Sol), C7 app phase 3 (Sol).
   3. Phase 4 (user chose insights, goals, weekly review; plan.md "Phase 4", data-model.md "005"):
