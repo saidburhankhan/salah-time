@@ -392,3 +392,14 @@ data-model.md "005". Builds on phase 3 (epics); starts after phase 3's backend i
 - [ ] G2 app (C9)
 - [ ] G3 widget (C10)
 - [ ] G4 integration, screenshots reviewed, install, user check
+
+### Addendum: metric and duration filters on Statistics (user request 2026-11-23 ~13:00)
+The user wants Statistics filtered by focus and other metrics too, not only by tag/project/task.
+- `stats.get` and `stats.table` accept the session filters `sessions.list` already has:
+  `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}`. They narrow which sessions
+  are aggregated (same predicate code and semantics as `sessions.list`). Planned minutes, capacity
+  and fulfilment's denominator stay unfiltered; the response echoes the filter. Additive.
+- App: one shared filter bar on Statistics and Notes with a "Metrics" row: a duration range, and
+  for each metric (focus, quality, distractions, the project's own) an optional min-max range;
+  active filters shown as removable chips ("Focus ≥ 4", "Distractions ≤ 2"), "Clear" resets.
+- Fixtures: `stats_metric_filter.json`, `stats_table_metric_filter.json`.
