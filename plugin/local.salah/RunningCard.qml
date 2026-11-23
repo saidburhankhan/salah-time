@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "SessionLogic.js" as SessionLogic
 
 Rectangle {
   id: card
@@ -9,6 +10,9 @@ Rectangle {
   required property var host
   readonly property string fontFamily: host.bar ? host.bar.fontFamily : Style.font.family
   readonly property alias noteFocus: editor.textFocus
+  readonly property var timer: host.runningTimer
+  readonly property var sleepCap: timer && timer.stale === true
+    ? SessionLogic.sessionMinuteCap(timer.max_minutes) : null
 
   implicitHeight: content.implicitHeight + Style.space(10)
   radius: Style.cornerRadius
@@ -84,6 +88,18 @@ Rectangle {
         verticalPadding: 0
         onClicked: card.host.pauseRunning()
       }
+    }
+
+    Text {
+      visible: card.sleepCap !== null
+      x: Style.space(10)
+      width: parent.width - x * 2
+      textFormat: Text.PlainText
+      text: visible ? card.host.tr.t("session.ranPastSleep").arg(card.sleepCap) : ""
+      color: card.host.mutedForeground
+      font.family: card.fontFamily
+      font.pixelSize: Style.font.caption
+      elide: Text.ElideRight
     }
 
     Row {

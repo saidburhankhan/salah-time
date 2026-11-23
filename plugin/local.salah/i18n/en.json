@@ -100,6 +100,7 @@
   "session.pauseTitle": "Pause · %1",
   "session.worked": "Worked (min)",
   "session.workedRange": "Enter 1 to %1 minutes, or leave Worked empty.",
+  "session.ranPastSleep": "Ran past Sleep: stop it to save up to %1 min",
   "session.saveDone": "Save & Done",
   "session.distractions": "Distractions %1",
   "session.addNote": "Add note",

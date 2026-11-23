@@ -327,7 +327,8 @@ Rectangle {
           verticalPadding: 0
           onClicked: {
             var next = panel.pauseMode
-              ? Math.max(1, (panel.minutes || panel.initialMinutes) - modelData) : modelData
+              ? SessionLogic.subtractWorkedMinutes(panel.minutes || panel.initialMinutes, panel.elapsed, modelData)
+              : modelData
             minutesField.text = String(next)
             panel.minutesText = minutesField.text
           }

@@ -140,7 +140,26 @@ same(pause({}, "", "030", true, { id: "p", item_id: null }), { id: "p" },
   "project-only pause omits done and a numerically unchanged duration")
 const start = "2031-05-14T04:30:00Z"
 same([0, 89, 90, 999999].map(s => logic.workedMinutes(start, Date.parse(start) + 1000 * s)),
-  [1, 1, 2, 1440], "Worked matches the stop rounding and limits")
+  [1, 1, 2, 1440], "Worked retains the stop rounding and day limit for older running reports")
+const stale = fixture("status_stale.json").running
+const staleStart = Date.parse(stale.started_at)
+const afterSleep = staleStart + (stale.max_minutes + 600) * 60000
+same(logic.workedMinutes(stale.started_at, afterSleep, stale.max_minutes), stale.max_minutes,
+  "Worked uses the stale session's Sleep cutoff")
+same(logic.workedMinutes(start, Date.parse(start) + 32 * 60000, 30), 30,
+  "Worked never exceeds the last server cap for a running timer")
+same(logic.workedMinutes(start, Date.parse(start) + 42 * 1000, 30), 1,
+  "Worked starts at elapsed when the server cap is higher")
+same([5, 15, 30].map(reduction => logic.subtractWorkedMinutes(4, 10, reduction)),
+  [1, 1, 1], "all three correction chips stop at one minute")
+same([5, 15, 30].map(reduction => logic.subtractWorkedMinutes(600, 120, reduction)),
+  [115, 105, 90], "correction chips start at the cap if the field is above it")
+same([afterSleep, afterSleep + 30000].map(now => logic.runningDisplaySeconds(stale, now)),
+  [stale.max_minutes * 60, stale.max_minutes * 60], "the stale clock holds at the Sleep cutoff")
+same(logic.runningDisplaySeconds({ started_at: start, stale: false, max_minutes: 1 },
+  Date.parse(start) + 95000), 95, "an active clock continues counting between server reports")
+same(logic.runningDisplaySeconds({ started_at: start, stale: true }, afterSleep), null,
+  "a stale report without a cap has no displayable duration")
 
 // ---- session notes ---------------------------------------------------------
 

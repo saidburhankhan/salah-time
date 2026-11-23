@@ -134,9 +134,24 @@ function parseMinutes(value) {
   return minutes >= 1 && minutes <= MAX_MINUTES ? minutes : null
 }
 
-// Match the timer's whole-minute rounding and its one-day limit.
-function workedMinutes(startedAt, nowMs) {
-  return Math.max(1, Math.min(MAX_MINUTES, Math.round(elapsedSeconds(startedAt, nowMs) / 60)))
+function sessionMinuteCap(value) {
+  return Number.isInteger(value) && value >= 1 && value <= MAX_MINUTES ? value : null
+}
+
+// Match the timer's rounding and use the server's Sleep cutoff when present.
+function workedMinutes(startedAt, nowMs, maxMinutes) {
+  var cap = sessionMinuteCap(maxMinutes) || MAX_MINUTES
+  return Math.max(1, Math.min(cap, Math.round(elapsedSeconds(startedAt, nowMs) / 60)))
+}
+
+function subtractWorkedMinutes(minutes, cap, reduction) {
+  return Math.max(1, Math.min(minutes, cap) - reduction)
+}
+
+function runningDisplaySeconds(session, nowMs) {
+  if (session.stale !== true) return elapsedSeconds(session.started_at, nowMs)
+  var cap = sessionMinuteCap(session.max_minutes)
+  return cap === null ? null : cap * 60
 }
 
 // The server merges supplied values with counts recorded during the timer.

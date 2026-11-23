@@ -67,3 +67,22 @@ test("Tomorrow follows the tracking day across month, leap-day and year boundari
   assert.equal(logic.tomorrow("2027-12-31"), "2028-01-01")
   assert.equal(logic.tomorrow(""), "")
 })
+
+test("a parsed day prefills the When chip and the date submitted by Add", () => {
+  const today = "2028-02-29"
+  const draft = { ...once, start_day: "2028-03-01", day: today }
+  const schedule = logic.schedule(draft, "", today)
+  same(schedule, { when: "tomorrow", date: "2028-03-01" })
+  same(logic.schedule({ day: "2028-03-01" }, "", today), { when: "tomorrow", date: "2028-03-01" })
+  same(logic.schedule({ day: today }, "", today), { when: "today", date: today })
+  same(logic.schedule(once, "", today), { when: "today", date: today })
+  assert.equal(logic.addParams(draft, { minutes: 20, block: "isha" }, "", false, schedule.date).date,
+    draft.start_day)
+})
+
+test("explicit When choices override the parsed day", () => {
+  const today = "2028-02-29"
+  same(logic.schedule({ day: "2028-03-01" }, "today", today), { when: "today", date: today })
+  same(logic.schedule({ day: today }, "tomorrow", today), { when: "tomorrow", date: "2028-03-01" })
+  same(logic.schedule({ day: "2028-03-01" }, "backlog", today), { when: "backlog", date: "" })
+})

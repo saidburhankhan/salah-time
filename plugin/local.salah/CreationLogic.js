@@ -46,6 +46,14 @@ function tomorrow(day) {
   return date.toISOString().slice(0, 10)
 }
 
+function schedule(parsed, whenChoice, today) {
+  var parsedDay = (parsed && (parsed.start_day || parsed.day)) || ""
+  var when = whenChoice || (parsedDay && today && parsedDay !== today ? "tomorrow" : "today")
+  if (when === "backlog") return { when: when, date: "" }
+  var date = (!whenChoice && parsedDay) || (when === "tomorrow" ? tomorrow(today) : today)
+  return { when: when, date: date }
+}
+
 function addParams(parsed, fields, projectId, backlog, date) {
   if (!parsed || !parsed.title || (backlog && parsed.repeat !== "none")) return null
   var params = { title: parsed.title }

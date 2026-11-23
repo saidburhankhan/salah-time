@@ -66,17 +66,19 @@ BarWidget {
   readonly property var planner: report && report.planner ? report.planner : null
   readonly property var runningTimer: report && report.running ? report.running : null
   readonly property int workedMinutes: runningTimer
-    ? SessionLogic.workedMinutes(runningTimer.started_at, countdownNowMs) : 1
+    ? SessionLogic.workedMinutes(runningTimer.started_at, countdownNowMs, runningTimer.max_minutes) : 1
   readonly property real distractions: runningTimer && runningTimer.values
     ? Number(runningTimer.values.distractions || 0) : 0
-  readonly property string runningElapsedText: runningTimer
-    ? SessionLogic.clockText(SessionLogic.elapsedSeconds(runningTimer.started_at, countdownNowMs)) : ""
+  readonly property var runningSeconds: runningTimer
+    ? SessionLogic.runningDisplaySeconds(runningTimer, countdownNowMs) : null
+  readonly property string runningElapsedText: !runningTimer ? ""
+    : runningSeconds === null ? strings.t("panel.noTimeSymbol") : SessionLogic.clockText(runningSeconds)
 
   readonly property var runningItem: runningTimer ? plannerItem(runningTimer.item_id) : null
   // Everything worked on the running task today: its finished sessions plus
   // the running one, in whole minutes (the hover tooltip shows this).
   readonly property int runningTotalMinutes: (runningItem ? Number(runningItem.actual_minutes || 0) : 0)
-    + Math.floor(SessionLogic.elapsedSeconds(runningTimer ? runningTimer.started_at : "", countdownNowMs) / 60)
+    + Math.floor((runningSeconds || 0) / 60)
   readonly property var runningProject: runningTimer
     ? SessionLogic.findProject(projects, runningTimer.project_id) : null
   readonly property string runningTitle: runningItem ? String(runningItem.title || "")
@@ -261,6 +263,7 @@ BarWidget {
       sessionPanelMode = "pause"
       sessionPanelError = ""
       sessionEditorReset("")
+      refresh()
     }
     var content = panel.loadedContent
     if (content) Qt.callLater(content.revealSessionEditor)
@@ -759,7 +762,7 @@ BarWidget {
       }
       function revealQuickField() {
         quickAdd.blockChoice = ""
-        quickAdd.whenChoice = "today"
+        quickAdd.whenChoice = ""
         if (quickAdd.y < dayScroll.contentY || quickAdd.y + quickField.height > dayScroll.contentY + dayScroll.height)
           dayScroll.contentY = Math.min(quickAdd.y, Math.max(0, dayScroll.contentHeight - dayScroll.height))
       }

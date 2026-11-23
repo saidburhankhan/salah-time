@@ -7,3 +7,13 @@ The sheet uses the core’s `item.parse` result for its title, block, minutes an
 All 89 Node checks passed (6 creation, 29 drag, 54 session), along with Omarchy plugin validation, QML syntax parsing and `git diff --check`. An offscreen QML interaction check with a mock transport exercised parsing, stale replies, both save buttons, a rejected save, duplicate-click protection, Enter and Escape. Socket integration with the phase 3 backend and full-popup visual review are pending with the orchestrator.
 
 CHECKPOINT 1: Add the parsed widget creation sheet with project filters, scheduling and backlog actions (`plugin/local.salah/BarWidget.qml`, `plugin/local.salah/CreationChipRow.qml`, `plugin/local.salah/CreationLogic.js`, `plugin/local.salah/QuickAdd.qml`, `plugin/local.salah/SalahClient.qml`, `plugin/local.salah/i18n/en.json`, `plugin/local.salah/tests/creation_logic_test.js`, `docs/work/tracking-ui/c6-progress.md`)
+
+## Checkpoint 1c — pause cap and parsed date
+
+Worked starts at the lower of rounded elapsed minutes and the server's `max_minutes`. Opening Pause refreshes status for a current cap. The correction chips clamp at one minute, and Save validates against the same capped value. The stale timer freezes at the reported Sleep cutoff and shows a muted line with the maximum duration that can be saved.
+
+The creation sheet uses a parsed `start_day` or `day` to select When and set the date it sends. An explicit When chip overrides the prefill.
+
+All 99 Node checks passed (8 creation, 29 drag, 62 session), along with Omarchy plugin validation, QML syntax parsing, translation JSON parsing and `git diff --check`. The cap tests use the `status_stale.json` fixture. Socket and visual review of this update remain with the orchestrator.
+
+CHECKPOINT 1c: Cap widget pause minutes at Sleep and prefill When from the parsed day (`plugin/local.salah/BarWidget.qml`, `plugin/local.salah/CreationLogic.js`, `plugin/local.salah/QuickAdd.qml`, `plugin/local.salah/RunningCard.qml`, `plugin/local.salah/SessionLogic.js`, `plugin/local.salah/SessionPanel.qml`, `plugin/local.salah/i18n/en.json`, `plugin/local.salah/tests/creation_logic_test.js`, `plugin/local.salah/tests/session_logic_test.js`, `docs/work/tracking-ui/c6-progress.md`)

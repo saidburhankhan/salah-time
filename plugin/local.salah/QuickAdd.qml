@@ -23,14 +23,15 @@ Column {
   property string parseError: ""
   property var minutesChoice: null
   property string blockChoice: ""
-  property string whenChoice: "today"
+  property string whenChoice: ""
   property string tagId: ""
   property string projectId: ""
   property string submitting: ""
   readonly property var planning: host.planner ? host.planner.planning_block : null
   readonly property string today: planning ? planning.day : (host.planner ? host.planner.day : "")
+  readonly property var schedule: CreationLogic.schedule(parsed, whenChoice, today)
   readonly property var fields: CreationLogic.prefill(parsed, minutesChoice, blockChoice,
-    host.quickAddBlock, whenChoice === "tomorrow" ? "fajr" : (planning ? planning.start : ""))
+    host.quickAddBlock, schedule.when === "tomorrow" ? "fajr" : (planning ? planning.start : ""))
   readonly property var tags: CreationLogic.tagsForProjects(host.projects)
   readonly property var filteredProjects: CreationLogic.projectsForTag(host.projects, tagId)
   readonly property bool backlogAllowed: !!parsed && parsed.repeat === "none"
@@ -38,7 +39,7 @@ Column {
   function resetChoices() {
     minutesChoice = null
     blockChoice = ""
-    whenChoice = "today"
+    whenChoice = ""
     tagId = ""
     projectId = ""
   }
@@ -51,9 +52,8 @@ Column {
   }
 
   function submit(backlog) {
-    if (submitting || !parsed || (whenChoice === "tomorrow" && !today && !backlog)) return
-    var date = whenChoice === "tomorrow" ? CreationLogic.tomorrow(today) : today
-    var params = CreationLogic.addParams(parsed, fields, projectId, backlog, date)
+    if (submitting || !parsed || (schedule.when === "tomorrow" && !schedule.date && !backlog)) return
+    var params = CreationLogic.addParams(parsed, fields, projectId, backlog, schedule.date)
     if (!params) return
     submitting = host.beginOp("add", "")
     transport.rpcMutation(submitting, "item.add", params, "add")
@@ -77,7 +77,7 @@ Column {
       if (text !== quickField.text) return
       root.parsed = draft
       root.parseError = error
-      if (draft && !root.backlogAllowed && root.whenChoice === "backlog") root.whenChoice = "today"
+      if (draft && !root.backlogAllowed && root.whenChoice === "backlog") root.whenChoice = ""
     }
     function onTransportChanged(active) {
       if (root.expanded) parseTimer.restart()
@@ -167,12 +167,12 @@ Column {
         { id: "tomorrow", name: root.strings.t("creation.tomorrow"), enabled: !!root.today },
         { id: "backlog", name: root.strings.t("creation.backlog"), enabled: root.backlogAllowed }
       ]
-      selection: root.whenChoice
+      selection: root.schedule.when
       onPicked: value => root.whenChoice = value
     }
 
     ChipRow {
-      visible: root.whenChoice !== "backlog"
+      visible: root.schedule.when !== "backlog"
       caption: root.strings.t("creation.block")
       options: ["night", "fajr", "dhuhr", "asr", "maghrib", "isha"].map(block =>
         ({ id: block, name: root.host.prayerName(block, block) }))
@@ -193,7 +193,7 @@ Column {
         fontSize: Style.font.bodySmall
         verticalPadding: Style.space(2)
         opacity: enabled ? 1 : 0.45
-        onClicked: root.submit(root.whenChoice === "backlog")
+        onClicked: root.submit(root.schedule.when === "backlog")
       }
 
       Button {
