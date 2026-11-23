@@ -97,3 +97,55 @@ the required and optional metrics, and see results in charts. Both surfaces stay
 - [x] U3 — app: Stats rebuilt with charts and working filter.
 - [x] U4 — widget: tick/untick, running indicator + stop, Log panel (item or project, metrics).
 - [ ] U5 — integration: install, live smoke in scratch env, user visual check.
+
+## Phase 2 (user request 2026-11-23 07:2x; starts 11:27 with Codex)
+
+### Decisions
+- **Pause asks optional metrics.** Pause opens a compact panel: the item's metrics (or focus and
+  quality without a project) and a note, all optional. Buttons: **Save** (pause; empty = plain
+  pause) and **Save & Done** (pause + tick). Values and note go on the timed session; the tick
+  carries no values. If the session already has values from pause, the done panel still opens on
+  a later tick but may be skipped.
+- **Stats filters:** separate rows/lists for Tags, Projects (narrowed by the chosen tag), Tasks
+  (narrowed by the chosen project). Every chart and table follows the filter.
+- **Range:** presets 7 / 28 / 90 plus **Custom** with from/to date pickers (any range up to 730
+  days).
+- **Chart/Table toggle** on each chart: the table shows the same per-day numbers.
+- **General table** (new section on Stats): group by Week (default), Day, Project, Tag, Task;
+  column chips for Minutes, Sessions, Focus, Quality and each custom metric (remembered);
+  scale metrics tinted muted red→amber→green by value/scale_max; minutes with an in-cell bar
+  scaled to the column max; totals row; click a header to sort.
+
+### Contract additions (additive; the orchestrator locks these)
+- `stats.get` params gain `item_id?`; `from`/`to` accept any range up to 730 days.
+- `stats.table` params: `from,to` or `days`, `tag_id?`, `project_id?`, `item_id?`,
+  `group: "week"|"day"|"project"|"tag"|"item"` (default `"week"`; weeks start Monday).
+  Result:
+  ```
+  { range, filter, group,
+    columns: [{ id, name, unit, kind, rollup, scale_max|null }],   // "minutes", "sessions", then active metrics in position order
+    rows:    [{ key, label, color|null, from|null, to|null, minutes, sessions, values: {metric_id: number|null} }],
+    totals:  { minutes, sessions, values: {metric_id: number|null} } }
+  ```
+  Only finished sessions count. `avg` metrics are weighted by session minutes (ticks weigh 1),
+  `sum` metrics add up. With `group:"tag"` a session counts in each of its project's tags; totals
+  never double count. Rows with no sessions: included for week/day (zeros, null values), omitted
+  for project/tag/item. Computed in SQL/core, not in the frontends.
+- `session.stop` params gain `done?: bool`: stop the timer with the given values/note, then
+  record a tick (no values) for its item in the same write. `done` on a session without an item
+  is a `validation` error. The mutation result lists both sessions.
+- New fixtures: `stats_table_week.json`, `stats_table_project.json`, `stats_item_filter.json`,
+  `session_stop_done.json`.
+
+### Workers (Codex gpt-6.2-astra high, checkpoint protocol)
+- C2 backend (`crates/**`, protocol-v1.md) — starts 11:27.
+- C3 widget (`plugin/**`): pause panel with Save / Save & Done — starts 11:27, codes against the
+  contract above; fixtures arrive from C2.
+- C4 app (`app/**`): pause panel, filters, custom range, chart/table toggle, general table —
+  dispatched by the orchestrator after C2's first checkpoint.
+
+### Slices
+- [ ] P1 backend: stats.table, item filter, custom range, session.stop done (C2)
+- [ ] P2 widget pause panel (C3)
+- [ ] P3 app pause panel + stats filters/range/table (C4)
+- [ ] P4 integration, screenshots reviewed by the orchestrator, install, user check
