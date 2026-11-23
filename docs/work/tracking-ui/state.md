@@ -16,6 +16,11 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 
 ## Next
 
+- 11:27 timer `salah-phase2`: Codex C2 (backend) + C3 (widget). After C2's first checkpoint: dispatch C4
+  (app). After C2 is fully committed: dispatch C5 (phase 3 backend); after C5's first checkpoint: C6
+  (widget) and C7 (app), each after the previous worker on that directory is committed.
+  If Codex hits its 5h limit, continue the same brief with a Claude subagent.
+
 - U5: user visual check after `omarchy restart shell`; fix what they report.
 - Optional: app/widget could show `stale` on an overnight timer (backend reports it since 47fb1d1).
 - Codex 5h limit hit at 06:59 (resets 11:26); weekly was 45% at 06:20.
