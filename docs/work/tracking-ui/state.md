@@ -131,3 +131,9 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   then goals. C9 (Sol): task 0 split into 0-ui (FilterBar order, default-tags label, Backlog dots,
   search box height, 'No project' visible with a tag) then 0-data against the addendum, finalised on
   C8's fixtures; stop after CHECKPOINT 0. C10 waits for 0c (its tasks 1–2 need goals/review).
+- 03:2x committed 91c8e9f (C8 0b, 223 tests) and 5d3ccb5 (C9 0-ui, 77 app tests, screenshots ok).
+  C8 CHECKPOINT 0c in the tree: snapshot verified in worktree /tmp/claude-1000/vwt (226 tests incl.
+  sockets, fmt, clippy); independent Opus review running; commit 0c only after it. Live-copy v3→v5
+  with the 0c build: totals 250 min / 18 sessions unchanged; arabic 162/7 → 182/12, dmbs 67/2 →
+  68/3, No tag 21/9 → 0/3 (the 6 accepted moved-task sessions); integrity and FK ok.
+  C8 now on goals (task 1); C9 on 0-data; C10 dispatched (Sol, task 0 first).
