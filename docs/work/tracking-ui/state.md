@@ -37,6 +37,18 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - 12:07: Codex 5h window at 95% (resets 16:27; weekly 76%, resets Sun 29 Nov 14:37). Codex C2 and
   C4 stopped mid-task; Claude subagents inherited the uncommitted work: C2 tasks 3/3b on Opus,
   C4 tasks 1b-3 on Sonnet. Same checkpoint protocol (no commits; orchestrator verifies and commits).
+- Codex quota plan (user, 12:20): the subscription renews 25 Nov; the user has two limit resets
+  and wants every bit used. Measured: one 5h window = about 31% of the weekly; three Astra workers
+  burned a window in ~40 min, so quota (not wall clock) is the limit and Sol stretches it.
+  Weekly 76% now, so the 16:27 window (~24% left) ends on the weekly cap; then the user applies
+  reset 1, later reset 2. Keep the Codex queue full (disjoint dirs: crates / app / plugin / reviews):
+  1. 16:27: C5 task 0 = migration 004 (Astra, crates; Claude review gate), C4 tasks 4-5 = general
+     table + Notes page (Astra, app; needs C2 3b), widget stale-timer display (Sol, plugin).
+  2. After reset 1: C5 rest (backlog/epic rules Astra; resources, CLI, fixtures Sol), C6 widget
+     phase 3 (creation sheet Astra, rest Sol), C7 app phase 3 (Sol).
+  3. After reset 2: Astra reviews of phase 3, fix rounds, U5 polish, phase 4 items from the user.
+  When Codex hits a cap: Claude subagents inherit (Opus hard, Sonnet normal) and the orchestrator
+  tells the user so they can apply a reset.
 - U5: user visual check after `omarchy restart shell`; fix what they report.
 - Optional: app/widget could show `stale` on an overnight timer (backend reports it since 47fb1d1).
 - Codex 5h limit hit at 06:59 (resets 11:26); weekly was 45% at 06:20.
