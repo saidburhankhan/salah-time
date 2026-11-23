@@ -127,3 +127,7 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   After 0c: C9 0 (app tags, Astra/Sol) and C10 0 (widget tags, Sol) in parallel.
   Then the install: full scripts/test, live-copy migration diff, screenshots, ./scripts/install.
   Polish leftovers: Backlog heading dots in project colour; FilterBar task search box height.
+- 03:13 new 5h window (weekly 31%, reset unused). Dispatched C8 --resume (Astra): 0b, then 0c,
+  then goals. C9 (Sol): task 0 split into 0-ui (FilterBar order, default-tags label, Backlog dots,
+  search box height, 'No project' visible with a tag) then 0-data against the addendum, finalised on
+  C8's fixtures; stop after CHECKPOINT 0. C10 waits for 0c (its tasks 1–2 need goals/review).
