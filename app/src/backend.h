@@ -108,6 +108,8 @@ public:
 
     Q_INVOKABLE void reload();
     Q_INVOKABLE void loadStats(int days);
+    // The last 7/28/90 days, filtered by one tag or one project (or neither).
+    Q_INVOKABLE void loadStatsFiltered(int days, const QString &tagId, const QString &projectId);
     Q_INVOKABLE void loadStatsRange(const QString &from, const QString &to);
     Q_INVOKABLE void moveDay(int amount);
     Q_INVOKABLE void selectDay(const QString &day);

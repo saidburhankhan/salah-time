@@ -3,14 +3,16 @@
 ## Commits
 
 - 9fae1d6 U1 — Settings pages (projects, tags, metrics), item editor project picker.
+- 49aad8d U2 — Today: pause/resume, done panel + tick/untick, session list edit/remove, + time.
+- (this commit) U3 — Statistics rebuilt with charts and a working filter.
 
 ## Current step
 
-U3 — Stats rebuilt with charts and a working filter.
+Done (U1–U3). Awaiting the regenerated backend fixtures (Codex C1) to re-run against them.
 
 ## Next step
 
-Final report.
+U4/U5 belong to UI-W and the orchestrator.
 
 ## U1 (done)
 
@@ -45,6 +47,16 @@ Final report.
   longer sent on project-only logs, day fulfilment ratio derived from the two sums.
 - Removed unused CounterStepper/CorrectionBox and adjustMinutes/adjustCount (adjustCount
   logged a tick per tap).
+
+## U3 (done)
+
+- Statistics: filter chips All / #tag / project (sent as `stats.get tag_id`/`project_id`),
+  range 7/28/90 days; KPI tiles (time, active days, avg focus + quality, plan fulfilment);
+  minutes per day (tracked vs planned columns, capacity in the subtitle and tooltip); one chart
+  per metric series (averages as lines with gaps, sums as columns); project (with metric
+  values) and tag breakdowns in their colours; time per block against capacity with focus.
+- Removed the orphaned PrayerDayChart, DayTable, TaskBreakdown, RangeBar, RangeDialog.
+- Tests: 52 passed (50 functions + init/cleanup; baseline 43 + 2).
 
 ## Notes
 

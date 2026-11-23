@@ -1,46 +1,92 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Layouts
 
+// Minutes per day as columns: the planned minutes as a ghost column behind
+// the minutes actually tracked. Hover shows the day with its capacity.
 Rectangle {
     id: chart
     objectName: "dayChart"
-    property var chartData
     property var win
     property var tip
-    property bool timeChart: chartData ? chartData[1] === "minutes" : false
-    property int axisLines: timeChart && backend.statsTicks.count > 0
-        ? Math.max(1, backend.statsTicks.count - 1) : 3
-    property real maximum: timeChart && backend.statsTicks.count > 0
-        ? Math.max(1, backend.statsTicks.lastMinutes)
-        : Math.max(1, Math.ceil(Math.max(backend.statsDaily.maxPlanned, backend.statsDaily.maxDone)))
-    function axisLabel(index) {
-        if (timeChart && backend.statsTicks.count > 0)
-            return backend.statsTicks.labelAt(backend.statsTicks.count - 1 - index)
-        return String(Math.round((axisLines - index) * maximum / axisLines))
+    property string title: ""
+    property string subtitle: ""
+    // stats.days rows: {day, minutes, planned_minutes, capacity_minutes, fulfilment_ratio}
+    property var days: []
+    readonly property real maximum: {
+        var top = 30
+        for (var i = 0; i < days.length; i++)
+            top = Math.max(top, Number(days[i].minutes || 0), Number(days[i].planned_minutes || 0))
+        // Round so each of the four grid lines lands on whole 15 or 60 minutes.
+        var unit = (top > 240 ? 60 : 15) * 4
+        return Math.ceil(top / unit) * unit
     }
-    width: parent.width
-    height: 218
+    readonly property int axisLines: 4
+    width: parent ? parent.width : 0
+    height: 250
     radius: theme.radius
     color: win ? win.panel : "#1b1a17"
     border.color: win ? win.border : "#34312a"
+
+    function axisText(minutes) {
+        if (minutes < 60)
+            return minutes + "m"
+        var rest = minutes % 60
+        return Math.floor(minutes / 60) + "h" + (rest ? String(rest).padStart(2, "0") : "")
+    }
+    function dayLabel(index) {
+        var d = Date.fromLocaleString(Qt.locale(), String(days[index].day), "yyyy-MM-dd")
+        if (days.length <= 7)
+            return Qt.locale("en_US").toString(d, "ddd")
+        var every = days.length <= 31 ? 4 : 14
+        // The last day is labelled too, unless a regular label sits right before it.
+        var last = index === days.length - 1 && index % every >= every / 2
+        return (index % every === 0 || last) ? Qt.locale("en_US").toString(d, "d MMM") : ""
+    }
+    function tooltip(row) {
+        var d = Date.fromLocaleString(Qt.locale(), String(row.day), "yyyy-MM-dd")
+        var parts = [Qt.locale("en_US").toString(d, "ddd d MMM"), win.formatMinutes(row.minutes)]
+        if (row.planned_minutes > 0)
+            parts.push(qsTr("planned %1").arg(win.formatMinutes(row.planned_minutes)))
+        parts.push(qsTr("capacity %1").arg(win.formatMinutes(row.capacity_minutes)))
+        return parts.join("  ·  ")
+    }
+
     Label {
         x: 18
         y: 15
-        text: chart.chartData[0]
+        text: chart.title
         color: chart.win.text
         font.pixelSize: 15
         font.weight: Font.Medium
     }
+    Row {
+        anchors.right: parent.right
+        anchors.rightMargin: 18
+        y: 17
+        spacing: 14
+        Label {
+            text: chart.subtitle
+            textFormat: Text.PlainText
+            color: chart.win.muted
+            font.pixelSize: 12
+        }
+        Row {
+            spacing: 6
+            Rectangle { width: 10; height: 10; radius: 2; color: theme.accent; anchors.verticalCenter: parent.verticalCenter }
+            Label { text: qsTr("tracked"); color: chart.win.muted; font.pixelSize: 12 }
+        }
+        Row {
+            spacing: 6
+            Rectangle { width: 10; height: 10; radius: 2; color: "#45423b"; anchors.verticalCenter: parent.verticalCenter }
+            Label { text: qsTr("planned"); color: chart.win.muted; font.pixelSize: 12 }
+        }
+    }
     Item {
         id: plot
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        anchors.leftMargin: 52
+        anchors.fill: parent
+        anchors.leftMargin: 58
         anchors.rightMargin: 18
-        anchors.topMargin: 48
+        anchors.topMargin: 50
         anchors.bottomMargin: 34
         Repeater {
             model: chart.axisLines + 1
@@ -55,14 +101,14 @@ Rectangle {
                     color: "#302e29"
                 }
                 Label {
-                    x: -45
+                    x: -52
                     y: -7
-                    width: 38
+                    width: 44
                     horizontalAlignment: Text.AlignRight
                     color: chart.win.muted
                     font.family: chart.win.mono
                     font.pixelSize: 10
-                    text: chart.axisLabel(index)
+                    text: chart.axisText(Math.round((chart.axisLines - index) * chart.maximum / chart.axisLines))
                 }
             }
         }
@@ -70,80 +116,55 @@ Rectangle {
             anchors.fill: parent
             spacing: 2
             Repeater {
-                id: rowRepeater
-                model: backend.statsDaily
+                model: chart.days
                 Item {
-                    id: taskChartDay
-                    required property string day
-                    required property bool planned
-                    required property bool done
-                    required property int minutes
-                    required property int count
-                    required property string tooltip
+                    id: column
+                    required property var modelData
                     required property int index
-                    objectName: "taskChartDay" + index
-                    width: (plot.width - Math.max(0, backend.statsDaily.count - 1) * 2)
-                        / Math.max(1, backend.statsDaily.count)
+                    width: (plot.width - Math.max(0, chart.days.length - 1) * 2) / Math.max(1, chart.days.length)
                     height: plot.height
                     Rectangle {
-                        visible: !chart.timeChart
                         anchors.bottom: parent.bottom
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: Math.max(3, Math.min(42, parent.width - 3))
-                        height: plot.height * (taskChartDay.planned ? 1 : 0) / chart.maximum
-                        radius: 4
+                        height: plot.height * Number(column.modelData.planned_minutes || 0) / chart.maximum
+                        radius: 3
                         color: "#45423b"
                     }
                     Rectangle {
                         anchors.bottom: parent.bottom
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: Math.max(3, Math.min(42, parent.width - 3))
-                        height: plot.height * Number(chart.timeChart ? taskChartDay.minutes : (taskChartDay.done ? 1 : 0)) / chart.maximum
-                        radius: 4
+                        width: Math.max(2, Math.min(30, parent.width - 7))
+                        height: plot.height * Number(column.modelData.minutes || 0) / chart.maximum
+                        radius: 3
                         color: theme.accent
-                        opacity: .9
-                    }
-                    Rectangle {
-                        visible: taskChartDay.day === backend.todayDay
-                        anchors.bottom: parent.bottom
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: Math.max(5, Math.min(46, parent.width - 1))
-                        height: parent.height
-                        color: "transparent"
-                        border.color: chart.win.text
-                        border.width: 1
-                        opacity: .55
                     }
                     Label {
                         anchors.top: parent.bottom
-                        anchors.topMargin: 7
+                        anchors.topMargin: 8
                         anchors.horizontalCenter: parent.horizontalCenter
                         color: chart.win.muted
                         font.family: chart.win.mono
                         font.pixelSize: 10
-                        text: {
-                            var d = Date.fromLocaleString(Qt.locale(), taskChartDay.day, "yyyy-MM-dd")
-                            if (chart.win.statsMode === "week")
-                                return Qt.locale("en_US").toString(d, "ddd").charAt(0)
-                            return (taskChartDay.index % Math.max(1, Math.ceil(backend.statsDaily.count / 12)) === 0
-                                || taskChartDay.index === backend.statsDaily.count - 1) ? d.getDate() : ""
-                        }
+                        text: chart.dayLabel(column.index)
                     }
                     MouseArea {
-                        objectName: "taskChartHit"
                         anchors.fill: parent
-                        anchors.leftMargin: -2
-                        anchors.rightMargin: -2
                         hoverEnabled: true
                         onEntered: {
-                            chart.tip.text = taskChartDay.tooltip
+                            if (!chart.tip)
+                                return
+                            chart.tip.text = chart.tooltip(column.modelData)
                             chart.tip.visible = true
                             var p = mapToItem(chart.win.contentItem, width / 2, 0)
                             chart.tip.x = Math.max(230, Math.min(chart.win.width - chart.tip.width - 10,
                                 p.x - chart.tip.width / 2))
                             chart.tip.y = Math.max(10, p.y - chart.tip.height - 8)
                         }
-                        onExited: chart.tip.visible = false
+                        onExited: {
+                            if (chart.tip)
+                                chart.tip.visible = false
+                        }
                     }
                 }
             }

@@ -150,7 +150,8 @@ ApplicationWindow {
         else statsAnchor = new Date(statsAnchor.getFullYear(), statsAnchor.getMonth(), statsAnchor.getDate() + amount * 7)
         loadStatistics()
     }
-    function loadStatistics() { var b = statsBounds(statsMode, statsAnchor, customFrom, customTo); backend.loadStatsRange(b.from, b.to) }
+    // The Statistics page owns its range (7/28/90 days) and filter.
+    function loadStatistics() { statisticsPage.reload() }
     function statsRangeLabel() {
         var b = statsBounds(statsMode, statsAnchor, customFrom, customTo), l = Qt.locale("en_US")
         if (statsMode === "month") return l.toString(b.first, "MMMM yyyy")
@@ -351,6 +352,7 @@ ApplicationWindow {
                     win: win
                 }
                 StatisticsPage {
+                    id: statisticsPage
                     visible: win.page === 2
                     Layout.fillWidth: true
                     Layout.fillHeight: true

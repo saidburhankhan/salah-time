@@ -1909,6 +1909,31 @@ const int original = model->indexOfItem("<id:4>");
         QVERIFY(backend.runningTitle().isEmpty());
         QVERIFY(running.size() >= 1);
     }
+    void statsFilterAndRangeReachTheDaemon() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        daemon.setHandler(trackingHandler(trackingState()));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy stats(&backend, &Backend::statsDataChanged);
+        backend.loadStatsFiltered(7, "faith", {});
+        QTRY_COMPARE_WITH_TIMEOUT(stats.size(), 1, 3000);
+        QJsonObject params = lastRequest(daemon, "stats.get").value("params").toObject();
+        QCOMPARE(params.value("days").toInt(), 7);
+        QCOMPARE(params.value("tag_id").toString(), QString("faith"));
+        QVERIFY(!params.contains("project_id"));
+        QCOMPARE(backend.statsData().value("filter").toMap().value("tag_id").toString(), QString("faith"));
+        QCOMPARE(backend.statsData().value("days").toList().size(), 7);
+        backend.loadStatsFiltered(90, {}, "study");
+        QTRY_COMPARE_WITH_TIMEOUT(stats.size(), 2, 3000);
+        params = lastRequest(daemon, "stats.get").value("params").toObject();
+        QCOMPARE(params.value("days").toInt(), 90);
+        QCOMPARE(params.value("project_id").toString(), QString("study"));
+        QVERIFY(!params.contains("tag_id"));
+        // An unfiltered read after a filtered one is not coalesced into it.
+        backend.loadStatsFiltered(90, {}, {});
+        QTRY_COMPARE_WITH_TIMEOUT(stats.size(), 3, 3000);
+        QVERIFY(!lastRequest(daemon, "stats.get").value("params").toObject().contains("project_id"));
+        QCOMPARE(backend.statsData().value("days").toList().size(), 90);
+    }
     void trackingUiScreens() {
         QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
         daemon.setHandler(trackingHandler(trackingState()));
@@ -2006,6 +2031,26 @@ const int original = model->indexOfItem("<id:4>");
         QCOMPARE(prompt->property("metrics").toList().size(), 2);
         QCOMPARE(prompt->property("metrics").toList().first().toMap().value("metric_id").toString(), QString("focus"));
         root->setProperty("sessionPromptVisible", false);
+        // Statistics: all, one project, 90 days, scrolled to the breakdowns.
+        root->setProperty("page", 2);
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "loadStatistics"));
+        waitForBackendIdle(backend);
+        shotWindow(window, "stats-all.png");
+        QObject *stats = findByName(root.data(), "statsScroll"); QVERIFY(stats);
+        QObject *flick = stats->property("contentItem").value<QObject *>(); QVERIFY(flick);
+        flick->setProperty("contentY", 520);
+        shotWindow(window, "stats-all-bottom.png");
+        flick->setProperty("contentY", 0);
+        QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("project")), Q_ARG(QVariant, QVariant("quran"))));
+        waitForBackendIdle(backend);
+        QCOMPARE(lastRequest(daemon, "stats.get").value("params").toObject().value("project_id").toString(), QString("quran"));
+        shotWindow(window, "stats-project.png");
+        QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("")), Q_ARG(QVariant, QVariant(""))));
+        QVERIFY(QMetaObject::invokeMethod(stats, "setRange", Q_ARG(QVariant, QVariant(90))));
+        waitForBackendIdle(backend);
+        QCOMPARE(lastRequest(daemon, "stats.get").value("params").toObject().value("days").toInt(), 90);
+        shotWindow(window, "stats-90.png");
+
         QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
         window->hide();
     }

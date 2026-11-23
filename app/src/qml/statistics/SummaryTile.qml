@@ -1,12 +1,16 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
+// A KPI tile: label, big value, one line of context.
 Rectangle {
     id: summaryTile
-    property var tileData
     property var win
-    width: (parent.width - 36) / 4
-    height: 116
+    property string label: ""
+    property string value: ""
+    property string detail: ""
+    Layout.fillWidth: true
+    Layout.preferredHeight: 116
     radius: theme.radius
     color: win.panel
     border.color: win.border
@@ -15,21 +19,25 @@ Rectangle {
         anchors.margins: 16
         spacing: 7
         Label {
-            text: summaryTile.tileData[0]
+            text: summaryTile.label
             color: summaryTile.win.muted
             font.pixelSize: 13
         }
         Label {
-            text: summaryTile.tileData[1]
+            text: summaryTile.value
+            textFormat: Text.PlainText
             color: summaryTile.win.text
             font.family: summaryTile.win.mono
             font.pixelSize: 27
             font.weight: Font.DemiBold
         }
         Label {
-            text: summaryTile.tileData[2]
+            width: parent.width
+            text: summaryTile.detail
+            textFormat: Text.PlainText
             color: summaryTile.win.muted
             font.pixelSize: 12
+            elide: Text.ElideRight
         }
     }
 }

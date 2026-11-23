@@ -13,13 +13,10 @@
         <file alias="qml/today/NowCard.qml">qml/today/NowCard.qml</file>
         <file alias="qml/today/MonthCalendar.qml">qml/today/MonthCalendar.qml</file>
         <file alias="qml/today/DragGhost.qml">qml/today/DragGhost.qml</file>
-        <file alias="qml/statistics/RangeBar.qml">qml/statistics/RangeBar.qml</file>
         <file alias="qml/statistics/SummaryTile.qml">qml/statistics/SummaryTile.qml</file>
         <file alias="qml/statistics/DayColumnChart.qml">qml/statistics/DayColumnChart.qml</file>
-        <file alias="qml/statistics/PrayerDayChart.qml">qml/statistics/PrayerDayChart.qml</file>
-        <file alias="qml/statistics/DayTable.qml">qml/statistics/DayTable.qml</file>
-        <file alias="qml/statistics/TaskBreakdown.qml">qml/statistics/TaskBreakdown.qml</file>
-        <file alias="qml/statistics/RangeDialog.qml">qml/statistics/RangeDialog.qml</file>
+        <file alias="qml/statistics/LineChart.qml">qml/statistics/LineChart.qml</file>
+        <file alias="qml/statistics/BreakdownCard.qml">qml/statistics/BreakdownCard.qml</file>
         <file alias="qml/overlays/QuickAdd.qml">qml/overlays/QuickAdd.qml</file>
         <file alias="qml/overlays/EntryForm.qml">qml/overlays/EntryForm.qml</file>
         <file alias="qml/overlays/EntryFields.qml">qml/overlays/EntryFields.qml</file>

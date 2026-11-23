@@ -470,8 +470,12 @@ void Backend::applyMutation(const Dto::MutationResult &mutation) {
 }
 
 void Backend::loadStats(int days) {
+    loadStatsFiltered(days, {}, {});
+}
+
+void Backend::loadStatsFiltered(int days, const QString &tagId, const QString &projectId) {
     if (days != 7 && days != 28 && days != 90) days = 28;
-    m_client.statsDays(days, readResponse([this](const CoreClient::Result &result) {
+    m_client.statsFiltered(days, tagId, projectId, readResponse([this](const CoreClient::Result &result) {
         if (const auto *stats = std::get_if<Dto::Stats>(&result.value)) applyStats(*stats);
     }));
 }
