@@ -848,9 +848,10 @@ private slots:
         client.sessionStart("id-1", "project-1"); client.sessionStop("session-1");
         client.prayerMark("fajr",QDate(2026,11,22)); client.prayerUnmark("fajr",QDate(2026,11,22));
         client.parse("read -- carefully",{}); client.configShow({}); client.configSetSleepTime("22:45");
-        QTRY_COMPARE_WITH_TIMEOUT(spy.size(),15,5000);
+        client.sessionStop("session-2", QJsonObject{{"focus", 4}}, "Finished chapter", {}, true, 32);
+        QTRY_COMPARE_WITH_TIMEOUT(spy.size(),16,5000);
         const QStringList lines = coreLogLines(dir);
-        QCOMPARE(lines.size(), 15);
+        QCOMPARE(lines.size(), 16);
         QCOMPARE(lines.at(0),"<day><--date><2026-11-22><--json>");
         QCOMPARE(lines.at(1),"<stats><--from><2026-11-01><--to><2026-11-30><--json>");
         QCOMPARE(lines.at(2),"<item><add><--json><--block><asr><--repeat><weekly><--days><mon,wed><--project><project-1><--planned-minutes><30><--date><2026-11-23><--><Title -- literal>");
@@ -860,12 +861,14 @@ private slots:
         QCOMPARE(lines.at(6),"<session><log><--json>");
         QCOMPARE(lines.at(7),"<session><log><--json>");
         QCOMPARE(lines.at(8),"<session><start><--json>");
-        QCOMPARE(lines.at(9),"<session><stop><--json>");
+        QCOMPARE(lines.at(9),"<session><stop><--json><--id><session-1>");
         QCOMPARE(lines.at(10),"<prayer><mark><--json><fajr><--date><2026-11-22>");
         QCOMPARE(lines.at(11),"<prayer><unmark><--json><fajr><--date><2026-11-22>");
         QCOMPARE(lines.at(12),"<item><parse><--json><--><read -- carefully>");
         QCOMPARE(lines.at(13),"<config><show>");
         QCOMPARE(lines.at(14),"<config><set><--sleep-time><22:45>");
+        QCOMPARE(lines.at(15), "<session><stop><--json><--id><session-2><--value><focus=4>"
+                               "<--note=Finished chapter><--done><--minutes><32>");
     }
     void coreClientQueueCoalescingAndOrdering() {
         QTemporaryDir dir; CoreClient client(nullptr,fakeCore(dir),3000); QSignalSpy spy(&client,&CoreClient::requestFinished);
@@ -1874,7 +1877,7 @@ const int original = model->indexOfItem("<id:4>");
         QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 4, 3000);
         QCOMPARE(lastRequest(daemon, "session.remove").value("params").toObject().value("id").toString(), QString("s-q2"));
 
-        // Pausing sends no values and no note.
+        // Saving a pause without edits keeps these fields optional.
         backend.stopSession("s-run");
         QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 5, 3000);
         QVERIFY(finished.last().at(0).toBool());
@@ -1882,7 +1885,135 @@ const int original = model->indexOfItem("<id:4>");
         QCOMPARE(stop.value("id").toString(), QString("s-run"));
         QVERIFY(!stop.contains("values"));
         QVERIFY(!stop.contains("note"));
+        QVERIFY(!stop.contains("minutes"));
+        QVERIFY(!stop.contains("done"));
         QVERIFY(backend.error().isEmpty());
+    }
+    void pausePanelSendsOnlyChanges() {
+        QTemporaryDir dir;
+        FakeDaemon daemon(dir.filePath("salah.sock"));
+        if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        auto state = trackingState();
+        QJsonObject running = state->status.value("running").toObject();
+        running["values"] = QJsonObject{{"quality", 4}};
+        state->status["running"] = running;
+        daemon.setHandler(trackingHandler(state));
+
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        backend.reload();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.running().value("id").toString(), QString("s-run"), 3000);
+
+        QObject *pause = findByName(root.data(), "runningStopButton");
+        QObject *prompt = findByName(root.data(), "sessionPrompt");
+        QObject *save = findByName(root.data(), "sessionSaveButton");
+        QObject *saveDone = findByName(root.data(), "sessionSaveDoneButton");
+        QObject *worked = findByName(root.data(), "sessionMinutesField");
+        QObject *note = findByName(root.data(), "sessionNoteField");
+        QVERIFY(pause && prompt && save && saveDone && worked && note);
+        QVERIFY(QMetaObject::invokeMethod(pause, "clicked"));
+        QTRY_VERIFY(prompt->property("visible").toBool());
+        QCOMPARE(requestCount(daemon, "session.stop"), 0);
+        QVERIFY(save->property("enabled").toBool());
+        QVERIFY(saveDone->property("visible").toBool());
+
+        QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+        QTRY_VERIFY(!prompt->property("visible").toBool());
+        QJsonObject params = lastRequest(daemon, "session.stop").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("s-run"));
+        QVERIFY(!params.value("op_id").toString().isEmpty());
+        QVERIFY(!params.contains("minutes"));
+        QVERIFY(!params.contains("values"));
+        QVERIFY(!params.contains("note"));
+        QVERIFY(!params.contains("done"));
+
+        QVERIFY(QMetaObject::invokeMethod(pause, "clicked"));
+        QTRY_VERIFY(prompt->property("visible").toBool());
+        worked->setProperty("text", "26");
+        QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+        QTRY_VERIFY(!prompt->property("visible").toBool());
+        params = lastRequest(daemon, "session.stop").value("params").toObject();
+        QCOMPARE(params.value("minutes").toInt(), 26);
+        QVERIFY(!params.contains("done"));
+
+        QVERIFY(QMetaObject::invokeMethod(pause, "clicked"));
+        QTRY_VERIFY(prompt->property("visible").toBool());
+        worked->setProperty("text", "32");
+        note->setProperty("text", "  Finished chapter  ");
+        QVERIFY(QMetaObject::invokeMethod(prompt, "setValue", Q_ARG(QVariant, QVariant("focus")),
+                                          Q_ARG(QVariant, QVariant(5))));
+        QVERIFY(QMetaObject::invokeMethod(saveDone, "clicked"));
+        QTRY_VERIFY(!prompt->property("visible").toBool());
+        params = lastRequest(daemon, "session.stop").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("s-run"));
+        QCOMPARE(params.value("minutes").toInt(), 32);
+        QCOMPARE(params.value("values").toObject(), (QJsonObject{{"focus", 5}}));
+        QCOMPARE(params.value("note").toString(), QString("Finished chapter"));
+        QCOMPARE(params.value("done"), QJsonValue(true));
+        QCOMPARE(requestCount(daemon, "session.stop"), 3);
+        QCOMPARE(requestCount(daemon, "session.log"), 0);
+    }
+    void pausePanelWorkedChipsAndProjectOnlyActions() {
+        QTemporaryDir dir;
+        Backend backend(nullptr, fake(dir), 3000, daemon_path(dir));
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        QObject *prompt = findByName(root.data(), "sessionPrompt");
+        QObject *save = findByName(root.data(), "sessionSaveButton");
+        QObject *saveDone = findByName(root.data(), "sessionSaveDoneButton");
+        QObject *worked = findByName(root.data(), "sessionMinutesField");
+        QVERIFY(prompt && save && saveDone && worked);
+
+        QVariantMap options{{"mode", "pause"}, {"sessionId", "s-run"}, {"itemId", "deep"},
+                            {"title", "Deep work: grammar"}, {"color", "#9b59b6"}, {"minutes", 47},
+                            {"metrics", TrackingFixture::promptFor("study").toVariantList()}};
+        QVERIFY(QMetaObject::invokeMethod(prompt, "show", Q_ARG(QVariant, QVariant(options))));
+        QTRY_VERIFY(prompt->property("visible").toBool());
+        QCOMPARE(worked->property("text").toString(), QString("47"));
+        QVERIFY(hasLabelText(prompt, "Worked"));
+        QVERIFY(save->property("enabled").toBool());
+        QVERIFY(saveDone->property("enabled").toBool());
+        QVERIFY(saveDone->property("visible").toBool());
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        if (!qEnvironmentVariableIsEmpty("SALAH_UI_SHOT_DIR"))
+            shotWindow(window, "prompt-pause-preview.png");
+        auto *content = prompt->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content);
+        int remaining = 47;
+        for (int amount : {5, 15, 30}) {
+            QQuickItem *chip = nullptr;
+            for (QQuickItem *item : quickDescendants(content)) {
+                if (item->objectName() == QStringLiteral("subtractWorked%1").arg(amount)) {
+                    chip = item;
+                    break;
+                }
+            }
+            QVERIFY(chip);
+            QVERIFY(QMetaObject::invokeMethod(chip, "clicked"));
+            remaining = qMax(1, remaining - amount);
+            QCOMPARE(worked->property("text").toInt(), remaining);
+        }
+        worked->setProperty("text", "");
+        QVERIFY(save->property("enabled").toBool());
+        QVERIFY(saveDone->property("enabled").toBool());
+
+        options.remove("itemId");
+        options["title"] = "Study";
+        QVERIFY(QMetaObject::invokeMethod(prompt, "show", Q_ARG(QVariant, QVariant(options))));
+        QVERIFY(!saveDone->property("visible").toBool());
+        QVERIFY(save->property("enabled").toBool());
     }
     void runningSessionComesFromStatus() {
         QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
@@ -1994,6 +2125,12 @@ const int original = model->indexOfItem("<id:4>");
         auto showPrompt = [&](const QVariantMap &options) {
             return QMetaObject::invokeMethod(prompt, "show", Q_ARG(QVariant, QVariant(options)));
         };
+        QObject *pause = findByName(root.data(), "runningStopButton"); QVERIFY(pause);
+        QVERIFY(QMetaObject::invokeMethod(pause, "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(prompt->property("visible").toBool(), 2000);
+        shotWindow(window, "prompt-pause.png");
+        root->setProperty("sessionPromptVisible", false);
+
         // The done panel: the project's metrics, all optional, Done and Skip.
         QVERIFY(showPrompt(QVariantMap{
             {"mode", "done"}, {"itemId", "dhikr"}, {"projectId", "quran"}, {"title", "Dhikr after Dhuhr"}, {"color", "#4c8bf5"}}));

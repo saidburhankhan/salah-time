@@ -130,7 +130,8 @@ public:
     Q_INVOKABLE void logSession(const QString &itemId, const QString &projectId, int minutes,
                                 const QVariantMap &values = {}, const QString &note = {});
     Q_INVOKABLE void startSession(const QString &itemId, const QString &projectId = {});
-    Q_INVOKABLE void stopSession(const QString &sessionId);
+    Q_INVOKABLE void stopSession(const QString &sessionId, const QVariantMap &values = {},
+                                 const QString &note = {}, bool done = false, int minutes = -1);
     Q_INVOKABLE void editSession(const QString &sessionId, int minutes, const QVariantMap &values,
                                  const QString &note);
     Q_INVOKABLE void removeSession(const QString &sessionId);

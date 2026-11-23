@@ -378,13 +378,24 @@ void CoreClient::sessionStart(const QString &id, const QString &projectId, Callb
     enqueue({"session","start","--json"}, params, QStringLiteral("session.start"), std::move(callback), false, true,
             Dto::decodeMutationResult, Dto::decodeMutationResult, opId);
 }
-void CoreClient::sessionStop(const QString &id, const QJsonObject &values, const QString &note, Callback callback) {
+void CoreClient::sessionStop(const QString &id, const QJsonObject &values, const QString &note,
+                             Callback callback, bool done, int minutes) {
     const QString opId = makeOpId();
     QJsonObject params{{"op_id", opId}};
     if (!id.isEmpty()) params.insert(QStringLiteral("id"), id);
     if (!values.isEmpty()) params.insert(QStringLiteral("values"), values);
     if (!note.isEmpty()) params.insert(QStringLiteral("note"), note);
-    enqueue({"session","stop","--json"}, params, QStringLiteral("session.stop"), std::move(callback),
+    if (done) params.insert(QStringLiteral("done"), true);
+    if (minutes >= 0) params.insert(QStringLiteral("minutes"), minutes);
+
+    QStringList args{"session", "stop", "--json"};
+    if (!id.isEmpty()) args << "--id" << id;
+    for (auto it = values.constBegin(); it != values.constEnd(); ++it)
+        args << "--value" << it.key() + "=" + QString::number(it.value().toDouble(), 'g', 16);
+    if (!note.isEmpty()) args << "--note=" + note;
+    if (done) args << "--done";
+    if (minutes >= 0) args << "--minutes" << QString::number(minutes);
+    enqueue(args, params, QStringLiteral("session.stop"), std::move(callback),
             false, true, Dto::decodeMutationResult, Dto::decodeMutationResult, opId);
 }
 void CoreClient::sessionEdit(const QString &id, int minutes, bool hasValues, const QJsonObject &values,

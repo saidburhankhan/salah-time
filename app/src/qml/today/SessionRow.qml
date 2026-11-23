@@ -60,7 +60,7 @@ Rectangle {
             win: sessionRow.win
             primary: true
             text: qsTr("Pause")
-            onClicked: sessionRow.win.stopRunning()
+            onClicked: sessionRow.win.pauseRunning()
         }
         AppButton {
             visible: !sessionRow.running && !sessionRow.confirmingRemove

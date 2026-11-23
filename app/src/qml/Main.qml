@@ -299,11 +299,22 @@ ApplicationWindow {
     function openSessionPrompt(options) {
         sessionPrompt.show(options)
     }
-    // Stopping is a pause: no prompt, no values.
-    function stopRunning() {
+    function pauseRunning() {
         var running = backend.running
-        if (running && running.id)
-            backend.stopSession(String(running.id))
+        if (!running || !running.id)
+            return
+        var started = Date.parse(String(running.started_at || ""))
+        var elapsed = isNaN(started) ? 0 : Math.round((Date.now() - started) / 60000)
+        openSessionPrompt({
+            mode: "pause",
+            sessionId: String(running.id),
+            itemId: String(running.item_id || ""),
+            title: backend.runningTitle,
+            color: backend.runningColor,
+            minutes: Math.max(1, Math.min(1440, elapsed)),
+            metrics: backend.runningPrompt,
+            values: running.values || {}
+        })
     }
     function openSettings(section) {
         entryVisible = false

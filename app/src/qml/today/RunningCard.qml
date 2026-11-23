@@ -3,8 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
 
-// The running session, wherever it was started (here, the bar widget, the
-// CLI). Pause stops it without asking anything.
+// The running session, wherever it was started (here, the bar widget, the CLI).
 Card {
     id: runningCard
     objectName: "runningCard"
@@ -87,7 +86,7 @@ Card {
                 win: runningCard.win
                 primary: true
                 text: qsTr("❚❚  Pause")
-                onClicked: runningCard.win.stopRunning()
+                onClicked: runningCard.win.pauseRunning()
             }
         }
     }

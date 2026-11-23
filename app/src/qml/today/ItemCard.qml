@@ -218,7 +218,7 @@ Rectangle {
             ToolTip.text: qsTr("Pause the running session first")
             onClicked: {
                 if (itemCard.timerRunning)
-                    itemCard.win.stopRunning()
+                    itemCard.win.pauseRunning()
                 else
                     backend.startSession(itemCard.itemId)
             }

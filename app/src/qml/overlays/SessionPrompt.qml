@@ -4,11 +4,11 @@ import QtQuick.Layouts
 import "../controls"
 
 // One dialog for the session writes that carry metrics:
+//   pause — stop a timer, optionally correcting time and marking its item done
 //   done — the done panel: tick the item, with its metrics and a note
 //          ("Done" saves what is filled, "Skip" ticks with no values)
 //   log  — "+ time" on an item: minutes plus metrics
 //   edit — an existing session: minutes (not for a tick), metrics, note
-// Every metric is optional. Pausing a timer never opens this dialog.
 Popup {
     id: prompt
     objectName: "sessionPrompt"
@@ -23,8 +23,11 @@ Popup {
     property bool tick: false
     property var metrics: []
     property var values: ({})
+    property var initialValues: ({})
+    property int initialMinutes: 0
     property bool waiting: false
     property string serverError: ""
+    readonly property bool pauseMode: mode === "pause"
     readonly property bool needsMinutes: mode === "log" || (mode === "edit" && !tick)
     readonly property int minutes: Number(minutesField.text || 0)
     readonly property bool canSave: !waiting && (!needsMinutes || minutes > 0)
@@ -47,7 +50,7 @@ Popup {
     onClosed: win.sessionPromptVisible = false
 
     // options: { mode, sessionId, itemId, projectId, title, color, tick,
-    //            minutes, values, note }
+    //            minutes, metrics, values, note }
     function show(options) {
         mode = options.mode || "log"
         sessionId = options.sessionId || ""
@@ -61,12 +64,15 @@ Popup {
         for (var key in initial)
             copy[key] = Number(initial[key])
         values = copy
-        metrics = win.promptMetrics(projectId, copy)
+        initialValues = copy
+        metrics = options.metrics === undefined ? win.promptMetrics(projectId, copy) : options.metrics
         waiting = false
         serverError = ""
-        minutesField.text = options.minutes ? String(options.minutes) : ""
+        initialMinutes = options.minutes || 0
+        minutesField.text = initialMinutes ? String(initialMinutes) : ""
         noteField.text = options.note || ""
         win.sessionPromptVisible = true
+        scroller.contentY = 0
         if (needsMinutes)
             minutesField.forceActiveFocus()
     }
@@ -82,14 +88,28 @@ Popup {
         values = copy
     }
 
-    function save(skip) {
+    function save(skip, markDone) {
         if (!canSave)
             return
+        if (pauseMode && minutesField.text !== "" && !minutesField.acceptableInput) {
+            serverError = qsTr("Enter 1 to %1 minutes, or leave Worked empty.").arg(initialMinutes)
+            minutesField.forceActiveFocus()
+            return
+        }
         waiting = true
         serverError = ""
         var note = skip ? "" : noteField.text.trim()
         var chosen = skip ? {} : values
-        if (mode === "done")
+        if (pauseMode) {
+            // Preserve any counts added from another surface while this panel is open.
+            var edits = {}
+            for (var key in chosen) {
+                if (chosen[key] !== initialValues[key])
+                    edits[key] = chosen[key]
+            }
+            var adjustedMinutes = minutes > 0 && minutes !== initialMinutes ? minutes : -1
+            backend.stopSession(sessionId, edits, note, markDone === true && itemId !== "", adjustedMinutes)
+        } else if (mode === "done")
             backend.tickItem(itemId, chosen, note)
         else if (mode === "edit")
             backend.editSession(sessionId, tick ? 0 : minutes, chosen, note)
@@ -111,6 +131,7 @@ Popup {
     }
 
     Flickable {
+        id: scroller
         anchors.fill: parent
         anchors.margins: 28
         clip: true
@@ -138,7 +159,8 @@ Popup {
                     Layout.fillWidth: true
                     spacing: 2
                     Label {
-                        text: prompt.mode === "done" ? qsTr("MARK DONE")
+                        text: prompt.pauseMode ? qsTr("PAUSE SESSION")
+                            : prompt.mode === "done" ? qsTr("MARK DONE")
                             : prompt.mode === "edit" ? (prompt.tick ? qsTr("EDIT DONE") : qsTr("EDIT SESSION"))
                             : qsTr("ADD TIME")
                         color: prompt.win.muted
@@ -159,11 +181,11 @@ Popup {
             }
 
             ColumnLayout {
-                visible: prompt.needsMinutes
+                visible: prompt.pauseMode || prompt.needsMinutes
                 Layout.fillWidth: true
                 spacing: 8
                 Label {
-                    text: qsTr("Minutes")
+                    text: prompt.pauseMode ? qsTr("Worked") : qsTr("Minutes")
                     color: prompt.win.muted
                     font.pixelSize: 13
                 }
@@ -173,25 +195,34 @@ Popup {
                         id: minutesField
                         objectName: "sessionMinutesField"
                         Layout.preferredWidth: 110
+                        placeholderText: prompt.pauseMode ? qsTr("min") : ""
                         font.family: prompt.win.mono
                         inputMethodHints: Qt.ImhDigitsOnly
-                        validator: IntValidator { bottom: 1; top: 1440 }
+                        validator: IntValidator {
+                            bottom: 1
+                            top: prompt.pauseMode ? Math.max(1, prompt.initialMinutes) : 1440
+                        }
                         onAccepted: prompt.save(false)
                     }
                     Repeater {
-                        model: [15, 30, 45, 60, 90]
+                        model: prompt.pauseMode ? [5, 15, 30] : [15, 30, 45, 60, 90]
                         ChoiceChip {
                             required property int modelData
+                            objectName: prompt.pauseMode ? "subtractWorked" + modelData : ""
                             win: prompt.win
-                            text: qsTr("%1 min").arg(modelData)
-                            selected: prompt.minutes === modelData
-                            onClicked: minutesField.text = String(modelData)
+                            text: prompt.pauseMode ? qsTr("−%1").arg(modelData) : qsTr("%1 min").arg(modelData)
+                            selected: !prompt.pauseMode && prompt.minutes === modelData
+                            onClicked: {
+                                var current = minutesField.acceptableInput ? prompt.minutes : prompt.initialMinutes
+                                minutesField.text = String(prompt.pauseMode ? Math.max(1, current - modelData) : modelData)
+                            }
                         }
                     }
                 }
             }
 
             Label {
+                visible: !prompt.pauseMode || prompt.metrics.length > 0
                 text: prompt.metrics.length > 0 ? qsTr("HOW DID IT GO?  ·  all optional") : qsTr("This project asks for no metrics.")
                 color: prompt.win.muted
                 font.family: prompt.metrics.length > 0 ? prompt.win.mono : ""
@@ -217,8 +248,9 @@ Popup {
                         elide: Text.ElideRight
                     }
                     // scale: 1..max taps; tapping the chosen one clears it
-                    Row {
+                    Flow {
                         visible: metricRow.modelData.kind === "scale"
+                        Layout.fillWidth: true
                         spacing: 6
                         Repeater {
                             model: metricRow.modelData.kind === "scale"
@@ -271,6 +303,7 @@ Popup {
                         }
                     }
                     Item {
+                        visible: metricRow.modelData.kind !== "scale"
                         Layout.fillWidth: true
                     }
                 }
@@ -278,6 +311,7 @@ Popup {
 
             TextField {
                 id: noteField
+                objectName: "sessionNoteField"
                 Layout.fillWidth: true
                 placeholderText: qsTr("Note (optional)")
                 onAccepted: prompt.save(false)
@@ -318,6 +352,14 @@ Popup {
                     enabled: prompt.canSave
                     text: prompt.mode === "done" ? qsTr("Done") : qsTr("Save")
                     onClicked: prompt.save(false)
+                }
+                AppButton {
+                    objectName: "sessionSaveDoneButton"
+                    visible: prompt.pauseMode && prompt.itemId !== ""
+                    win: prompt.win
+                    enabled: prompt.canSave
+                    text: qsTr("Save & Done")
+                    onClicked: prompt.save(false, true)
                 }
             }
         }

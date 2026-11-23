@@ -66,7 +66,7 @@ public:
                     const QDate &date = {}, Callback callback = {});
     void sessionStart(const QString &itemId, const QString &projectId = {}, Callback callback = {});
     void sessionStop(const QString &sessionId = {}, const QJsonObject &values = {},
-                     const QString &note = {}, Callback callback = {});
+                     const QString &note = {}, Callback callback = {}, bool done = false, int minutes = -1);
     // session.edit: minutes < 0 keeps them; values/note are sent only when
     // the matching has* flag is set (an empty note clears it).
     void sessionEdit(const QString &sessionId, int minutes, bool hasValues, const QJsonObject &values,

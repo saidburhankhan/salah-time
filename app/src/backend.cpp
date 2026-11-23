@@ -727,12 +727,13 @@ void Backend::logSession(const QString &itemId, const QString &projectId, int mi
                         QJsonObject::fromVariantMap(values), note, writeDate(), sessionResponse(itemId));
 }
 
-void Backend::stopSession(const QString &sessionId) {
-    // Stopping is a pause: no metrics, no note.
+void Backend::stopSession(const QString &sessionId, const QVariantMap &values,
+                          const QString &note, bool done, int minutes) {
     const QString itemId = m_running.value(QStringLiteral("id")).toString() == sessionId || sessionId.isEmpty()
         ? m_running.value(QStringLiteral("item_id")).toString() : QString();
     if (!itemId.isEmpty()) setItemPending(itemId, true);
-    m_client.sessionStop(sessionId, {}, {}, sessionResponse(itemId));
+    m_client.sessionStop(sessionId, QJsonObject::fromVariantMap(values), note,
+                         sessionResponse(itemId), done, minutes);
 }
 
 void Backend::editSession(const QString &sessionId, int minutes, const QVariantMap &values, const QString &note) {
