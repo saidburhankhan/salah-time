@@ -157,6 +157,20 @@ the required and optional metrics, and see results in charts. Both surfaces stay
   Result: `{ rows: [SessionView + { day, project: {id,name,color}|null, item: {id,title}|null }],
   next: cursor|null }`. Only finished sessions (ticks included). Fixture `sessions_list.json`
   and `sessions_list_filtered.json`.
+- **Distractions** (user request): a third built-in metric `distractions` (kind count, rollup sum,
+  unit "times", builtin, asked by every project by default and for sessions without a project). It
+  is counted live while a timer runs, without pausing: `session.bump {id?, metric_id, delta: 1|-1,
+  op_id}` adds `delta` to that count metric on the running session (default: the running one;
+  never below 0; count metrics only; replay-safe). Because it is an ordinary session value it
+  appears in stats series, the general table (also as a derived "per hour" column:
+  sum ÷ hours of the sessions in the row), project/task breakdowns and the Notes page range filter,
+  and it is editable in every session editor. Existing projects gain it as an asked metric through
+  the migration. Fixture `session_bump.json`. It is separate from focus (a 1–5 rating).
+- **Bar "+":** a small "+" right after the timer's seconds in the bar. Clicking it sends
+  `session.bump +1` and must NOT open or close the popup (it is its own click target, outside the
+  label's click area; a brief pulse shows it counted). The popup's running card and the app's
+  running card show "Distractions N" with − and + buttons. The pause panel shows the current count
+  (editable) with the other metrics.
 - New fixtures: `stats_table_week.json`, `stats_table_project.json`, `stats_item_filter.json`,
   `session_stop_done.json`.
 
