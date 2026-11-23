@@ -266,6 +266,13 @@ ApplicationWindow {
             return 0
         return Math.max(0, Math.floor((timerNow - ms) / 60000))
     }
+    // A running timer as minutes:seconds, never hours, matching the widget:
+    // "09:05", "62:03", "100:05".
+    function elapsedClock(startedAt) {
+        var ms = Date.parse(String(startedAt || ""))
+        var total = isNaN(ms) ? 0 : Math.max(0, Math.floor((timerNow - ms) / 1000))
+        return String(Math.floor(total / 60)).padStart(2, "0") + ":" + String(total % 60).padStart(2, "0")
+    }
     function durationText(minutes) {
         minutes = Math.max(0, Math.round(Number(minutes || 0)))
         if (minutes < 60)

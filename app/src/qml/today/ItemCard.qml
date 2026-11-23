@@ -211,7 +211,7 @@ Rectangle {
             primary: itemCard.timerRunning
             enabled: !itemCard.pending && (itemCard.timerRunning || !itemCard.otherRunning)
             text: itemCard.timerRunning
-                ? "❚❚ " + itemCard.win.durationText(itemCard.win.elapsedMinutes(itemCard.timerStartedAt))
+                ? "❚❚ " + itemCard.win.elapsedClock(itemCard.timerStartedAt)
                 : (itemCard.actualMinutes > 0 ? qsTr("▶  Resume") : qsTr("▶  Start"))
             font.family: itemCard.win.mono
             ToolTip.visible: hovered && itemCard.otherRunning

@@ -40,7 +40,7 @@ Rectangle {
         Label {
             Layout.preferredWidth: 64
             text: sessionRow.running
-                ? sessionRow.win.durationText(sessionRow.win.elapsedMinutes(sessionRow.session.started_at))
+                ? sessionRow.win.elapsedClock(sessionRow.session.started_at)
                 : (sessionRow.tick ? "✓" : qsTr("%1 min").arg(sessionRow.session.minutes))
             color: sessionRow.win.text
             font.family: sessionRow.win.mono

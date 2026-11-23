@@ -76,7 +76,8 @@ Card {
             Layout.fillWidth: true
             Label {
                 Layout.fillWidth: true
-                text: runningCard.win.durationText(runningCard.elapsed)
+                text: runningCard.win.elapsedClock(runningCard.session ? runningCard.session.started_at : "")
+                font.features: { "tnum": 1 }
                 color: runningCard.win.text
                 font.family: runningCard.win.mono
                 font.pixelSize: 30
