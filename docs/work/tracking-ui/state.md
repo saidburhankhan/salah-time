@@ -50,6 +50,13 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   3. Phase 4 (user chose insights, goals, weekly review; plan.md "Phase 4", data-model.md "005"):
      C8 backend (005 Astra + review gate), C9 app (Insights Astra), C10 widget (Sol).
   4. After reset 2: Astra reviews of phases 3-4, fix rounds, U5 polish.
+  Expected timeline (one 5h window ≈ 31% weekly, so a fresh weekly ≈ 3.2 windows):
+  - 16:27 window: weekly 76→100% around 17:00 → user applies reset 1 (fresh weekly + 5h).
+  - Windows ~17:00, ~22:00, ~03:00 (24th), then ~0.2 of the ~08:00 window → weekly 100% ~08:15
+    on the 24th → reset 2.
+  - Windows ~08:15, ~13:15, ~18:15, then ~0.2 of ~23:15 → weekly 100% ~23:30 on the 24th, before
+    the 25 Nov renewal. Requires every window started on time (overnight too: this session must
+    stay open) and fully used. Recalibrate the 31% after each window.
   When Codex hits a cap: Claude subagents inherit (Opus hard, Sonnet normal) and the orchestrator
   tells the user so they can apply a reset.
 - U5: user visual check after `omarchy restart shell`; fix what they report.
