@@ -79,6 +79,10 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   (tmux-driven). One reset left, expiring 13 Dec 02:46 (the used one would have expired 2 Dec), so
   resets do NOT expire on the 25 Nov renewal. Codex: fresh weekly + 5h at 17:09. Now: C5 resources
   (Sol, inherited a stopped Claude worker's partial diff), R2 review of epics/backlog (Astra).
+- User 17:15: the Codex subscription ENDS on 25 Nov. Use the last reset as soon as the weekly hits
+  100% (expected ~09:00 on the 24th: windows from 17:09, ~22:09, ~03:09, ~08:09), then windows ~09:10,
+  ~14:10, ~19:10 and ~00:10 on the 25th until the subscription stops. Every window must start on time
+  and be fully used (2-3 parallel workers on disjoint dirs).
 - U5: user visual check after `omarchy restart shell`; fix what they report.
 - Optional: app/widget could show `stale` on an overnight timer (backend reports it since 47fb1d1).
 - Codex 5h limit hit at 06:59 (resets 11:26); weekly was 45% at 06:20.
