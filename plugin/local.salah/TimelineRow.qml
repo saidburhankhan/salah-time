@@ -107,6 +107,8 @@ Item {
     anchors.leftMargin: Style.space(28)
     radius: Style.cornerRadius
     color: Style.hoverFillFor(row.foreground, Commons.Color.accent)
+    border.width: Style.spacing.hairline
+    border.color: Style.normalBorderFor(row.foreground, Commons.Color.accent)
   }
 
   Rectangle {
@@ -177,18 +179,20 @@ Item {
       width: Style.space(15)
       height: width
       radius: Math.min(Style.cornerRadius, Style.space(3))
+      // Done is a translucent selected fill with the check in the
+      // foreground colour: no light block on the dark popup.
       color: row.done
-        ? Style.selectedStateColor(row.foreground, Commons.Color.accent) : "transparent"
+        ? Style.selectedFillFor(row.foreground, Commons.Color.accent) : "transparent"
       border.width: Style.spacing.hairline
       border.color: row.done
-        ? Style.selectedStateColor(row.foreground, Commons.Color.accent) : row.mutedForeground
+        ? Style.selectedBorderFor(row.foreground, Commons.Color.accent) : row.mutedForeground
 
       Text {
         visible: row.done
         anchors.centerIn: parent
         textFormat: Text.PlainText
         text: row.strings.t("panel.checkSymbol")
-        color: Commons.Color.background
+        color: row.foreground
         font.family: row.fontFamily
         font.pixelSize: Style.font.caption
       }
@@ -381,7 +385,6 @@ Item {
     foreground: row.foreground
     mutedForeground: row.mutedForeground
     repeat: row.repeat
-    done: row.done
     sessions: row.sessions
     runningElapsed: row.host ? row.host.runningElapsedText : ""
     errorText: row.host && row.host.rowErrorKey === row.rowKey ? row.host.rowErrorText : ""

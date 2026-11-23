@@ -13,7 +13,6 @@ Item {
   property var strings
   property var metric: ({})
   property var value: undefined
-  property bool missing: false
   property string fontFamily
   property color foreground
   property color mutedForeground
@@ -44,10 +43,9 @@ Item {
     width: field.labelWidth
     textFormat: Text.PlainText
     text: String(field.metric && field.metric.name || "")
-    color: field.missing ? Commons.Color.urgent : field.foreground
+    color: field.foreground
     font.family: field.fontFamily
     font.pixelSize: Style.font.bodySmall
-    font.bold: field.missing
     elide: Text.ElideRight
   }
 
@@ -66,15 +64,16 @@ Item {
         width: Style.space(28)
         height: Style.space(24)
         text: String(index + 1)
-        readonly property bool chosen: field.hasValue && Number(field.value) === index + 1
+        // Selected = the theme's translucent selected fill and bold label:
+        // a dark raised tone, never a light block.
+        selected: field.hasValue && Number(field.value) === index + 1
         bordered: true
-        background: chosen ? Style.selectedStateColor(field.foreground, Commons.Color.accent) : "transparent"
-        foreground: chosen && !hot ? Commons.Color.background : field.foreground
+        foreground: field.foreground
         fontFamily: field.fontFamily
         fontSize: Style.font.bodySmall
         horizontalPadding: 0
         verticalPadding: 0
-        onClicked: field.valueEdited(chosen ? null : index + 1)
+        onClicked: field.valueEdited(selected ? null : index + 1)
       }
     }
 

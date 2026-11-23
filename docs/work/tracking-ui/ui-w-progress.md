@@ -1,6 +1,41 @@
 # UI-W progress (widget, slice U4)
 
-Owner: UI-W (`plugin/**`). Status: **U4 done**, ready for the orchestrator to install (U5).
+Owner: UI-W (`plugin/**`). Status: **U4 reworked for the user decisions of 2026-11-23**
+(plan.md), ready for the orchestrator to install (U5).
+
+## Rework (user decisions, 2026-11-23)
+
+- **Timer = play/pause.** The row button ("▶" / "❚❚ 12m") and the running card's "❚❚ Pause" send
+  `session.stop` at once with no values and no note. No stop panel.
+- **Done = explicit tick.** Tapping the done box on an item without a tick opens the done panel:
+  the item's metrics (project metrics in position order, or focus and quality without a project)
+  and a note, all optional, no Required/Optional headings. "Done" sends `session.log` without
+  minutes carrying the filled values; "Skip" ticks with nothing. If the item's timer is running it
+  is stopped first (no values), and the tick is sent once the stop succeeds.
+- **Untick** removes the item's tick session(s); timed sessions stay. The "Done by timed sessions"
+  path is gone: an item with only timed sessions toggles normally.
+- **No gating.** Save/Done/Skip are always enabled. "+ Log time" still needs a target and minutes,
+  but says so when Save is pressed instead of disabling it; its metrics are optional.
+- **Dark surfaces only.** The live "white panels" came from `Commons.Color` used without the
+  `qs.Commons as Commons` import (the Rectangle fell back to its default white); fixed in U4 and
+  now checked in every plugin file. Panels, the running card and the opened row use the hover
+  fill plus a hairline normal border; the current-prayer header uses the hover fill; chosen chips,
+  scale buttons, the done box and a marked prayer use the translucent selected fill (no
+  `selectedStateColor` blocks, no `Color.background` text on light fills). All colours come from
+  `Commons.Color`/`Style` tokens.
+- Node tests updated (35 checks): untick vs done, stop-before-tick id, timed sessions never done,
+  position order (required ignored), built-ins, targets, values (empty = Skip, checks 0/1).
+- Rendered against a scratch daemon with optional metrics (`render/out7`, `out8`): running →
+  pause (no panel), start another, tick it while running → done panel → Done (stored: timed
+  1 min + tick with focus 4), project item → Skip (tick, no values), untick (tick removed),
+  Log panel with a project's metrics, opened row with sessions, current-prayer header. All dark,
+  text in theme foreground / muted foreground.
+- Transitional: until backend C1 lands, day rows' `done` still means "has any session", so an
+  item with only timed sessions shows checked; tapping it opens the done panel (correct under the
+  new rules). The scratch/live daemon may still reject missing required metrics for projects that
+  have required ones.
+
+## Original U4 (superseded where it conflicts)
 
 ## Delivered
 
@@ -48,13 +83,10 @@ Owner: UI-W (`plugin/**`). Status: **U4 done**, ready for the orchestrator to in
 
 ## Requests for the orchestrator
 
-1. `status.get.prompt` is `[]` for a running session without a project. The plan says the built-in
-   focus/quality are still asked (optional); the widget does this client-side. Consider returning
-   them from the backend so app and widget cannot diverge.
-2. `scripts/test` does not run the plugin node tests; please add
-   `node plugin/local.salah/tests/drag_logic_test.js` and `.../session_logic_test.js`.
-3. New files (`MetricField.qml`, `SessionLogic.js`): after install, `omarchy restart shell` may be
-   needed.
+1. Backend C1 as planned: stop enforcing required metrics and make `done` mean "has a tick".
+   The widget already follows those rules; `status.get.prompt` is no longer used.
+2. New files since the last install (`MetricField.qml`, `SessionLogic.js`): after install,
+   `omarchy restart shell` may be needed.
 
 ## Gaps
 

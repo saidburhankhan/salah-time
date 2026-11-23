@@ -5,7 +5,7 @@ import qs.Ui
 
 // Expanded-row controls: edit, a two-step delete, "+ Time", and today's
 // sessions for the item. Each finished session shows its minutes, which can
-// be changed (Enter saves) or removed; this is how a timed item is undone.
+// be changed (Enter saves) or removed.
 Item {
   id: root
 
@@ -16,17 +16,10 @@ Item {
   property color foreground
   property color mutedForeground
   property string repeat
-  property bool done: false
   property var sessions: []
   property string runningElapsed: ""
   property string errorText: ""
   property bool confirmingDelete: false
-  readonly property bool hasTimed: {
-    for (var i = 0; i < sessions.length; i++)
-      if (sessions[i].minutes !== null && sessions[i].minutes !== undefined || sessions[i].running === true)
-        return true
-    return false
-  }
 
   signal beginEdit()
   signal removeConfirmed()
@@ -163,8 +156,7 @@ Item {
       visible: root.sessions.length > 0
       width: parent.width
       textFormat: Text.PlainText
-      text: root.done && root.hasTimed
-        ? root.strings.t("session.timedHint") : root.strings.t("session.sessionsToday")
+      text: root.strings.t("session.sessionsToday")
       color: root.mutedForeground
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption

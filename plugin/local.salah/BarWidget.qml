@@ -38,8 +38,10 @@ BarWidget {
   property var pendingOps: ({})
   property var projects: []
   property var metricCatalogue: []
-  // "" (closed), "stop" (finish the running session) or "log" (record time).
+  // "" (closed), "done" (tick an item with optional metrics) or "log"
+  // (record minutes).
   property string sessionPanelMode: ""
+  property var doneItem: null
   property string sessionPanelOp: ""
   property string sessionPanelError: ""
   // An error from a row's own action, shown inside that expanded row.
@@ -215,43 +217,50 @@ BarWidget {
     return item && item.sessions ? item.sessions : []
   }
 
-  // Done box: tick an item with no sessions today, untick one whose only
-  // sessions are ticks, and open the session list of a timed one (plan.md).
+  // Done box (plan.md, user decisions): an item with a tick is unticked
+  // (its tick sessions removed, timed sessions kept); otherwise the done
+  // panel opens to tick it with optional metrics.
   function toggleItem(row) {
     var rowKey = "item:" + String(row.id)
-    var decision = SessionLogic.doneAction(plannerItem(row.id))
-    if (decision.action === "tick") {
-      var opId = beginOp("tick", rowKey)
-      client.logSession(opId, String(row.id), "", null, {}, "", String(row.block || ""))
-    } else if (decision.action === "untick") {
+    var item = plannerItem(row.id)
+    var decision = SessionLogic.doneAction(item)
+    if (decision.action === "untick") {
       for (var i = 0; i < decision.ids.length; i++)
         client.removeSession(beginOp("untick", rowKey), "untick", decision.ids[i])
-    } else {
-      var content = panel.loadedContent
-      if (content && content.expandedItemId !== String(row.id)) content.toggleExpanded(String(row.id))
+    } else if (item) {
+      openDonePanel(item)
     }
   }
 
-  // The row's timer button: Stop (with the metric panel) on the running
-  // item, otherwise start a timer for this item.
+  // The row's timer button is play/pause: pausing stops the session at
+  // once, with no metrics or note.
   function toggleTimer(row) {
     if (runningTimer && String(runningTimer.item_id || "") === String(row.id)) {
-      openStopPanel()
+      pauseRunning()
       return
     }
     var opId = beginOp("startSession", "item:" + String(row.id))
     client.startSession(opId, String(row.id), "")
   }
 
-  function openStopPanel() {
+  function pauseRunning() {
     if (!runningTimer) return
-    sessionPanelMode = "stop"
+    var opId = beginOp("stopSession", runningItem ? "item:" + String(runningItem.id) : "")
+    client.stopSession(opId, String(runningTimer.id || ""), {}, "")
+  }
+
+  function openDonePanel(item) {
+    doneItem = item
+    sessionPanelMode = "done"
     sessionPanelOp = ""
     sessionPanelError = ""
+    client.loadProjects()
+    client.loadMetrics()
     sessionEditorReset("")
   }
 
   function openLogPanel(presetKey) {
+    doneItem = null
     sessionPanelMode = "log"
     sessionPanelOp = ""
     sessionPanelError = ""
@@ -264,6 +273,7 @@ BarWidget {
     sessionPanelMode = ""
     sessionPanelOp = ""
     sessionPanelError = ""
+    doneItem = null
   }
 
   function sessionEditorReset(presetKey) {
@@ -271,13 +281,30 @@ BarWidget {
     if (content && content.sessionEditor) content.sessionEditor.reset(presetKey)
   }
 
-  function stopRunning(values, note) {
-    if (!runningTimer || sessionPanelOp !== "") return
+  // Ticks the item, carrying the filled values. A running timer on the item
+  // is stopped first (no values), and the tick follows once that succeeds.
+  function tickDone(item, values, note) {
+    if (!item || sessionPanelOp !== "") return
     sessionPanelError = ""
-    var opId = beginOp("stopSession", runningItem ? "item:" + String(runningItem.id) : "")
-    pendingOps[opId].panel = true
-    sessionPanelOp = opId
-    client.stopSession(opId, String(runningTimer.id || ""), values, note)
+    var id = String(item.id || "")
+    var block = String(item.block || "")
+    var rowKey = "item:" + id
+    function sendTick() {
+      var tickOp = beginOp("tick", rowKey)
+      pendingOps[tickOp].panel = true
+      sessionPanelOp = tickOp
+      client.logSession(tickOp, id, "", null, values, note, block)
+    }
+    var stopId = SessionLogic.doneAction(plannerItem(id)).stopId
+    if (stopId === "") {
+      sendTick()
+      return
+    }
+    var stopOp = beginOp("stopSession", rowKey)
+    pendingOps[stopOp].panel = true
+    pendingOps[stopOp].after = sendTick
+    sessionPanelOp = stopOp
+    client.stopSession(stopOp, stopId, {}, "")
   }
 
   function logTime(target, minutes, values, note) {
@@ -354,10 +381,15 @@ BarWidget {
       if (!status || !status.next || !(status.prayers instanceof Array))
         throw new Error("missing next/prayers fields")
       report = status
-      // The running session ended elsewhere (the app, the CLI): nothing is
-      // left to stop.
-      if (sessionPanelMode === "stop" && !status.running && sessionPanelOp === "")
-        closeSessionPanel()
+      // The item being ticked was removed elsewhere (the app, the CLI).
+      if (sessionPanelMode === "done" && doneItem && sessionPanelOp === "") {
+        var stillThere = null
+        var items = status.planner && status.planner.items ? status.planner.items : []
+        for (var i = 0; i < items.length; i++)
+          if (String(items[i].id || "") === String(doneItem.id || "")) stillThere = items[i]
+        if (stillThere) doneItem = stillThere
+        else closeSessionPanel()
+      }
       countdownAtMs = countdownDeadline(status)
       countdownNowMs = Date.now()
       var content = panel.loadedContent
@@ -376,6 +408,13 @@ BarWidget {
   }
 
   function handleMutationSuccess(opId, kind, result) {
+    var after = pendingOps[opId] ? pendingOps[opId].after : null
+    if (after) {
+      // A chained step (stop, then tick) keeps the panel open until the end.
+      clearPending(opId)
+      after()
+      return
+    }
     if (opId === sessionPanelOp) closeSessionPanel()
     if (result && result.fallback) {
       clearPending(opId)
@@ -407,14 +446,7 @@ BarWidget {
     var content = panel.loadedContent
     if (opId === sessionPanelOp) {
       sessionPanelOp = ""
-      var editor = content ? content.sessionEditor : null
-      var missing = data && data.missing instanceof Array ? data.missing : []
-      if (missing.length > 0 && editor) {
-        editor.markMissing(missing)
-        sessionPanelError = strings.t("session.needMetrics").arg(editor.metricNames(missing))
-      } else {
-        sessionPanelError = detail
-      }
+      sessionPanelError = detail
     } else if (pending.rowKey && content
         && "item:" + content.expandedItemId === pending.rowKey) {
       rowErrorKey = pending.rowKey
@@ -1005,11 +1037,13 @@ BarWidget {
           // The running session: colour, what it is, elapsed time, and Stop,
           // which works whether or not its item is already done.
           Rectangle {
-            visible: root.runningTimer !== null && root.sessionPanelMode !== "stop"
+            visible: root.runningTimer !== null
             width: parent.width
             implicitHeight: Style.space(40)
             radius: Style.cornerRadius
             color: Style.hoverFillFor(root.foreground, Commons.Color.accent)
+            border.width: Style.spacing.hairline
+            border.color: Style.normalBorderFor(root.foreground, Commons.Color.accent)
 
             Rectangle {
               id: runningDot
@@ -1063,18 +1097,15 @@ BarWidget {
               fontSize: Style.font.bodySmall
               horizontalPadding: Style.space(8)
               verticalPadding: 0
-              onClicked: root.openStopPanel()
+              onClicked: root.pauseRunning()
             }
           }
 
           SessionPanel {
             id: sessionEditor
             visible: root.sessionPanelMode !== ""
-            mode: root.sessionPanelMode === "log" ? "log" : "stop"
-            sessionTitle: root.runningTitle
-            elapsedText: root.runningElapsedText
-            stopMetrics: SessionLogic.stopMetrics(root.report ? root.report.prompt : [],
-              root.runningTimer, root.metricCatalogue)
+            mode: root.sessionPanelMode === "log" ? "log" : "done"
+            doneItem: root.doneItem
             items: root.planner && root.planner.items ? root.planner.items : []
             projects: root.projects
             metricCatalogue: root.metricCatalogue
@@ -1084,7 +1115,7 @@ BarWidget {
             fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
             foreground: root.foreground
             mutedForeground: root.mutedForeground
-            onStopRequested: function(values, note) { root.stopRunning(values, note) }
+            onDoneRequested: function(item, values, note) { root.tickDone(item, values, note) }
             onLogRequested: function(target, minutes, values, note) {
               root.logTime(target, minutes, values, note)
             }

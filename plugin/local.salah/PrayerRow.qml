@@ -39,17 +39,17 @@ Item {
       height: width
       radius: width / 2
       color: root.marked
-        ? Style.selectedStateColor(root.foreground, Commons.Color.accent) : "transparent"
+        ? Style.selectedFillFor(root.foreground, Commons.Color.accent) : "transparent"
       border.width: Style.spacing.hairline
       border.color: root.marked
-        ? Style.selectedStateColor(root.foreground, Commons.Color.accent) : root.foreground
+        ? Style.selectedBorderFor(root.foreground, Commons.Color.accent) : root.mutedForeground
 
       Text {
         visible: root.marked
         anchors.centerIn: parent
         textFormat: Text.PlainText
         text: root.strings.t("panel.checkSymbol")
-        color: Commons.Color.background
+        color: root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         font.bold: true
