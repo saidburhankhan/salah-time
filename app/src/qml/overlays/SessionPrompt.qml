@@ -24,6 +24,7 @@ Popup {
     property var metrics: []
     property var values: ({})
     property var initialValues: ({})
+    property var notes: []
     property int initialMinutes: 0
     property bool waiting: false
     property string serverError: ""
@@ -50,7 +51,7 @@ Popup {
     onClosed: win.sessionPromptVisible = false
 
     // options: { mode, sessionId, itemId, projectId, title, color, tick,
-    //            minutes, metrics, values, note }
+    //            minutes, metrics, values, note, notes }
     function show(options) {
         mode = options.mode || "log"
         sessionId = options.sessionId || ""
@@ -65,7 +66,8 @@ Popup {
             copy[key] = Number(initial[key])
         values = copy
         initialValues = copy
-        metrics = options.metrics === undefined ? win.promptMetrics(projectId, copy) : options.metrics
+        metrics = win.promptMetrics(projectId, copy, options.metrics, mode === "edit")
+        notes = options.notes || []
         waiting = false
         serverError = ""
         initialMinutes = options.minutes || 0
@@ -223,7 +225,7 @@ Popup {
 
             Label {
                 visible: !prompt.pauseMode || prompt.metrics.length > 0
-                text: prompt.metrics.length > 0 ? qsTr("HOW DID IT GO?  ·  all optional") : qsTr("This project asks for no metrics.")
+                text: prompt.metrics.length > 0 ? qsTr("HOW DID IT GO?  ·  all optional") : qsTr("No metrics asked.")
                 color: prompt.win.muted
                 font.family: prompt.metrics.length > 0 ? prompt.win.mono : ""
                 font.pixelSize: prompt.metrics.length > 0 ? 11 : 13
@@ -270,9 +272,11 @@ Popup {
                     }
                     // count: a number with its unit
                     TextField {
+                        objectName: metricRow.metricId === "distractions" ? "promptDistractions" : ""
                         visible: metricRow.modelData.kind === "count"
                         Layout.preferredWidth: 120
                         text: metricRow.current === undefined ? "" : String(metricRow.current)
+                        placeholderText: metricRow.metricId === "distractions" ? "0" : ""
                         font.family: prompt.win.mono
                         inputMethodHints: Qt.ImhFormattedNumbersOnly
                         validator: DoubleValidator { bottom: 0; decimals: 2 }
@@ -315,6 +319,18 @@ Popup {
                 Layout.fillWidth: true
                 placeholderText: qsTr("Note (optional)")
                 onAccepted: prompt.save(false)
+            }
+
+            Repeater {
+                model: prompt.notes
+                Label {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    text: prompt.win.noteEntryText(modelData)
+                    textFormat: Text.PlainText
+                    color: prompt.win.muted
+                    wrapMode: Text.Wrap
+                }
             }
 
             Label {

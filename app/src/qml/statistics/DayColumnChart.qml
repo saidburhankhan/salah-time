@@ -21,6 +21,13 @@ Rectangle {
         return Math.ceil(top / unit) * unit
     }
     readonly property int axisLines: 4
+    property bool tableMode: false
+    readonly property var tableRows: days.slice().reverse().map(function(row) {
+        var d = Date.fromLocaleString(Qt.locale(), String(row.day), "yyyy-MM-dd")
+        return [Qt.locale("en_US").toString(d, "ddd d MMM"), win.formatMinutes(row.minutes),
+                row.planned_minutes > 0 ? win.formatMinutes(row.planned_minutes) : "—",
+                win.formatMinutes(row.capacity_minutes)]
+    })
     width: parent ? parent.width : 0
     height: 250
     radius: theme.radius
@@ -51,15 +58,38 @@ Rectangle {
         return parts.join("  ·  ")
     }
 
-    Label {
+    Row {
         x: 18
-        y: 15
-        text: chart.title
-        color: chart.win.text
-        font.pixelSize: 15
-        font.weight: Font.Medium
+        y: 12
+        spacing: 14
+        Label {
+            anchors.verticalCenter: parent.verticalCenter
+            text: chart.title
+            color: chart.win.text
+            font.pixelSize: 15
+            font.weight: Font.Medium
+        }
+        ChartModeToggle {
+            id: modeToggle
+            anchors.verticalCenter: parent.verticalCenter
+            win: chart.win
+            table: chart.tableMode
+            onChosen: function(table) { chart.tableMode = table }
+        }
+    }
+    ChartTable {
+        visible: chart.tableMode
+        anchors.fill: parent
+        anchors.leftMargin: 18
+        anchors.rightMargin: 18
+        anchors.topMargin: 50
+        anchors.bottomMargin: 12
+        win: chart.win
+        columns: [qsTr("DAY"), qsTr("TRACKED"), qsTr("PLANNED"), qsTr("CAPACITY")]
+        rows: chart.tableRows
     }
     Row {
+        visible: !chart.tableMode
         anchors.right: parent.right
         anchors.rightMargin: 18
         y: 17
@@ -83,6 +113,7 @@ Rectangle {
     }
     Item {
         id: plot
+        visible: !chart.tableMode
         anchors.fill: parent
         anchors.leftMargin: 58
         anchors.rightMargin: 18

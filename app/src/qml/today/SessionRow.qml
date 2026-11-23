@@ -9,19 +9,25 @@ Rectangle {
     id: sessionRow
     property var win
     property var session: ({})
+    property var promptMetrics
     property string itemTitle: ""
     property string projectColor: ""
     property bool confirmingRemove: false
     readonly property bool running: !!session.running
     readonly property bool tick: !running && (session.minutes === null || session.minutes === undefined)
     readonly property string valuesText: win.valuesText(session.values)
-    height: 46
+    readonly property var notes: session.notes || []
+    readonly property int noteLineHeight: 18
+    height: 46 + (notes.length > 0 ? notes.length * noteLineHeight + 6 : 0)
     radius: theme.radius
     color: "#181714"
     border.color: running ? theme.accent : "transparent"
 
     RowLayout {
-        anchors.fill: parent
+        height: 46
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
         anchors.leftMargin: 14
         anchors.rightMargin: 8
         spacing: 12
@@ -48,8 +54,8 @@ Rectangle {
         }
         Label {
             Layout.fillWidth: true
-            text: [sessionRow.valuesText, sessionRow.session.note ? "“" + sessionRow.session.note + "”" : ""]
-                .filter(function(part) { return part !== "" }).join("  ·  ")
+            text: [sessionRow.valuesText, sessionRow.session.note || ""]
+                .filter(Boolean).join("  ·  ")
             textFormat: Text.PlainText
             color: sessionRow.win.muted
             font.pixelSize: 12
@@ -74,7 +80,9 @@ Rectangle {
                 title: sessionRow.itemTitle,
                 color: sessionRow.projectColor,
                 minutes: sessionRow.session.minutes || 0,
+                metrics: sessionRow.promptMetrics,
                 values: sessionRow.session.values || {},
+                notes: sessionRow.session.notes || [],
                 note: String(sessionRow.session.note || "")
             })
         }
@@ -94,6 +102,45 @@ Rectangle {
             win: sessionRow.win
             text: qsTr("Keep")
             onClicked: sessionRow.confirmingRemove = false
+        }
+    }
+
+    Column {
+        visible: sessionRow.notes.length > 0
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.topMargin: 46
+        anchors.leftMargin: 14
+        anchors.rightMargin: 12
+        Repeater {
+            model: sessionRow.notes
+            Row {
+                id: noteLine
+                required property var modelData
+                width: parent.width
+                height: sessionRow.noteLineHeight
+                spacing: 12
+                Label {
+                    width: 104
+                    height: parent.height
+                    verticalAlignment: Text.AlignVCenter
+                    text: sessionRow.win.clockTime(noteLine.modelData.at)
+                    color: sessionRow.win.muted
+                    font.family: sessionRow.win.mono
+                    font.pixelSize: 12
+                }
+                Label {
+                    width: parent.width - 116
+                    height: parent.height
+                    verticalAlignment: Text.AlignVCenter
+                    text: String(noteLine.modelData.text || "")
+                    textFormat: Text.PlainText
+                    color: sessionRow.win.text
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                }
+            }
         }
     }
 }

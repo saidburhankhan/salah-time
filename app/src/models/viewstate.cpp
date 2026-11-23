@@ -146,6 +146,7 @@ void ItemDraft::update(const QJsonObject &row) {
     m_projectId = row.value(QStringLiteral("project_id")).toString();
     if (m_projectId.isEmpty())
         m_projectId = row.value(QStringLiteral("project")).toObject().value(QStringLiteral("id")).toString();
+    m_metricIds = row.value(QStringLiteral("metric_ids")).toVariant();
     m_plannedMinutes = row.value(QStringLiteral("planned_minutes")).toInt();
     emit changed();
 }
@@ -163,6 +164,7 @@ void ItemDraft::clear() {
     m_measure = QStringLiteral("check");
     m_target = 0;
     m_projectId.clear();
+    m_metricIds.clear();
     m_plannedMinutes = 0;
     emit changed();
 }

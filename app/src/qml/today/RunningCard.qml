@@ -8,15 +8,48 @@ Card {
     id: runningCard
     objectName: "runningCard"
     property var win
+    property bool addingNote: false
+    property bool savingNote: false
     readonly property var session: backend.running
+    readonly property string sessionId: String(session.id || "")
     readonly property bool active: !!(session && session.id)
-    readonly property int elapsed: win.elapsedMinutes(session ? session.started_at : "")
+    readonly property real distractions: Number((session.values || {}).distractions || 0)
+    readonly property var notes: session.notes || []
+    implicitHeight: body.implicitHeight + 36
     visible: active
     border.color: theme.accent
 
+    onSessionIdChanged: {
+        addingNote = false
+        savingNote = false
+        noteField.clear()
+    }
+
+    function saveNote() {
+        var text = noteField.text.trim()
+        if (text === "" || savingNote || backend.offlineMode)
+            return
+        savingNote = true
+        backend.addRunningNote(sessionId, text)
+    }
+
+    Connections {
+        target: backend
+        function onRunningNoteFinished(id, ok) {
+            if (id !== runningCard.sessionId)
+                return
+            runningCard.savingNote = false
+            if (ok) {
+                noteField.clear()
+                runningCard.addingNote = false
+            }
+        }
+    }
+
     ColumnLayout {
+        id: body
         anchors.fill: parent
-        anchors.margins: 20
+        anchors.margins: 18
         spacing: 10
 
         RowLayout {
@@ -87,6 +120,96 @@ Card {
                 primary: true
                 text: qsTr("❚❚  Pause")
                 onClicked: runningCard.win.pauseRunning()
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 6
+            Label {
+                objectName: "runningDistractions"
+                Layout.fillWidth: true
+                text: qsTr("Distractions %1").arg(runningCard.distractions)
+                textFormat: Text.PlainText
+                color: runningCard.win.text
+            }
+            AppButton {
+                objectName: "distractionMinus"
+                win: runningCard.win
+                leftPadding: 11
+                rightPadding: 11
+                text: "−"
+                Accessible.name: qsTr("Subtract a distraction")
+                enabled: !backend.offlineMode && runningCard.distractions > 0
+                onClicked: backend.bumpDistractions(runningCard.sessionId, -1)
+            }
+            AppButton {
+                objectName: "distractionPlus"
+                win: runningCard.win
+                leftPadding: 11
+                rightPadding: 11
+                text: "+"
+                Accessible.name: qsTr("Add a distraction")
+                enabled: !backend.offlineMode
+                onClicked: backend.bumpDistractions(runningCard.sessionId, 1)
+            }
+        }
+
+        ListView {
+            id: notesList
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(contentHeight, 76)
+            visible: count > 0
+            model: runningCard.notes
+            clip: true
+            spacing: 4
+            boundsBehavior: Flickable.StopAtBounds
+            onCountChanged: Qt.callLater(positionViewAtEnd)
+            ScrollBar.vertical: ScrollBar {}
+            delegate: Label {
+                required property var modelData
+                width: notesList.width - 12
+                text: runningCard.win.noteEntryText(modelData)
+                textFormat: Text.PlainText
+                color: runningCard.win.muted
+                font.pixelSize: 12
+                wrapMode: Text.Wrap
+            }
+        }
+
+        AppButton {
+            objectName: "runningAddNoteButton"
+            visible: !runningCard.addingNote
+            enabled: !backend.offlineMode
+            win: runningCard.win
+            text: qsTr("Add note")
+            onClicked: {
+                runningCard.addingNote = true
+                noteField.forceActiveFocus()
+            }
+        }
+
+        RowLayout {
+            visible: runningCard.addingNote
+            Layout.fillWidth: true
+            TextField {
+                id: noteField
+                objectName: "runningNoteField"
+                Layout.fillWidth: true
+                placeholderText: qsTr("Note")
+                maximumLength: 500
+                enabled: !runningCard.savingNote
+                onAccepted: runningCard.saveNote()
+                Keys.onEscapePressed: {
+                    clear()
+                    runningCard.addingNote = false
+                }
+            }
+            AppButton {
+                win: runningCard.win
+                text: qsTr("Save")
+                enabled: !backend.offlineMode && !runningCard.savingNote && noteField.text.trim() !== ""
+                onClicked: runningCard.saveNote()
             }
         }
     }

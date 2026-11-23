@@ -16,6 +16,8 @@
         <file alias="qml/statistics/SummaryTile.qml">qml/statistics/SummaryTile.qml</file>
         <file alias="qml/statistics/DayColumnChart.qml">qml/statistics/DayColumnChart.qml</file>
         <file alias="qml/statistics/LineChart.qml">qml/statistics/LineChart.qml</file>
+        <file alias="qml/statistics/ChartModeToggle.qml">qml/statistics/ChartModeToggle.qml</file>
+        <file alias="qml/statistics/ChartTable.qml">qml/statistics/ChartTable.qml</file>
         <file alias="qml/statistics/BreakdownCard.qml">qml/statistics/BreakdownCard.qml</file>
         <file alias="qml/overlays/QuickAdd.qml">qml/overlays/QuickAdd.qml</file>
         <file alias="qml/overlays/EntryForm.qml">qml/overlays/EntryForm.qml</file>

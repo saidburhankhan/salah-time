@@ -12,10 +12,28 @@ ScrollView {
     objectName: "statsScroll"
     property var win
     property var tip
+    // 7, 28 or 90 days, or 0 for the custom from/to range.
     property int range: 28
-    // "" (all), "tag" or "project"
-    property string filterKind: ""
-    property string filterId: ""
+    property string customFrom: ""
+    property string customTo: ""
+    property string tagId: ""
+    property string projectId: ""
+    property string itemId: ""
+    readonly property int maxTasks: 24
+    readonly property var projectChoices: (backend.projects || []).filter(function(p) {
+        return !p.archived && (tagId === "" || (p.tag_ids || []).indexOf(tagId) >= 0)
+    })
+    readonly property var taskChoices: {
+        var allowed = {}
+        for (var i = 0; i < projectChoices.length; i++)
+            allowed[String(projectChoices[i].id)] = true
+        return (backend.trackingItems || []).filter(function(item) {
+            var project = String(item.project_id || "")
+            if (projectId !== "")
+                return project === projectId
+            return tagId === "" || allowed[project] === true
+        })
+    }
     readonly property var stats: backend.statsData
     readonly property var totals: stats.totals || {}
     readonly property var days: stats.days || []
@@ -43,17 +61,51 @@ ScrollView {
     clip: true
     contentWidth: availableWidth
 
-    function reload() {
-        backend.loadStatsFiltered(range, filterKind === "tag" ? filterId : "",
-                                  filterKind === "project" ? filterId : "")
+    function open() {
+        backend.loadTrackingItems()
+        reload()
     }
+    function validDate(text) {
+        return /^\d{4}-\d{2}-\d{2}$/.test(text) && !isNaN(Date.parse(text))
+    }
+    function reload() {
+        if (range === 0 && validDate(customFrom) && validDate(customTo) && customFrom <= customTo)
+            backend.loadStatsRange(customFrom, customTo, tagId, projectId, itemId)
+        else
+            backend.loadStatsFiltered(range > 0 ? range : 28, tagId, projectId, itemId)
+    }
+    // kind: "" (clear everything), "tag", "project" or "item". Choosing a
+    // wider filter drops a narrower one that no longer fits.
     function setFilter(kind, id) {
-        filterKind = kind
-        filterId = id
+        if (kind === "tag") {
+            tagId = id
+            var fits = projectChoices.some(function(p) { return String(p.id) === projectId })
+            if (projectId !== "" && !fits) {
+                projectId = ""
+                itemId = ""
+            } else if (itemId !== "" && !taskChoices.some(function(t) { return String(t.id) === itemId })) {
+                itemId = ""
+            }
+        } else if (kind === "project") {
+            projectId = id
+            itemId = ""
+        } else if (kind === "item") {
+            itemId = id
+        } else {
+            tagId = ""
+            projectId = ""
+            itemId = ""
+        }
         reload()
     }
     function setRange(days) {
         range = days
+        reload()
+    }
+    function setCustom(from, to) {
+        customFrom = from
+        customTo = to
+        range = 0
         reload()
     }
     function score(value) {
@@ -99,13 +151,20 @@ ScrollView {
         })
     }
     function filterName() {
-        if (filterKind === "tag") {
-            var tag = win.tagById(filterId)
-            return tag ? String(tag.name) : ""
+        var parts = []
+        if (tagId !== "") {
+            var tag = win.tagById(tagId)
+            if (tag)
+                parts.push("# " + String(tag.name))
         }
-        if (filterKind === "project")
-            return win.projectName(filterId)
-        return ""
+        if (projectId !== "")
+            parts.push(win.projectName(projectId))
+        if (itemId !== "") {
+            var task = (backend.trackingItems || []).filter(function(t) { return String(t.id) === itemId })[0]
+            if (task)
+                parts.push(String(task.title))
+        }
+        return parts.join(" / ")
     }
 
     ColumnLayout {
@@ -114,51 +173,177 @@ ScrollView {
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 16
+            spacing: 8
+            Label {
+                text: qsTr("RANGE")
+                color: statsPage.win.muted
+                font.family: statsPage.win.mono
+                font.pixelSize: 11
+                Layout.preferredWidth: 76
+            }
+            Repeater {
+                model: [7, 28, 90]
+                ChoiceChip {
+                    required property int modelData
+                    win: statsPage.win
+                    text: qsTr("%1 days").arg(modelData)
+                    selected: statsPage.range === modelData
+                    onClicked: statsPage.setRange(modelData)
+                }
+            }
+            ChoiceChip {
+                objectName: "statsCustomChip"
+                win: statsPage.win
+                text: qsTr("Custom")
+                selected: statsPage.range === 0
+                onClicked: {
+                    if (!statsPage.validDate(statsPage.customFrom) || !statsPage.validDate(statsPage.customTo)) {
+                        var last = new Date(String(statsPage.stats.range ? statsPage.stats.range.to : Qt.formatDate(new Date(), "yyyy-MM-dd")) + "T12:00:00")
+                        var first = new Date(last.getTime() - 29 * 86400000)
+                        statsPage.customTo = Qt.formatDate(last, "yyyy-MM-dd")
+                        statsPage.customFrom = Qt.formatDate(first, "yyyy-MM-dd")
+                    }
+                    statsPage.setCustom(statsPage.customFrom, statsPage.customTo)
+                }
+            }
+            TextField {
+                id: fromField
+                visible: statsPage.range === 0
+                Layout.preferredWidth: 130
+                text: statsPage.customFrom
+                placeholderText: "YYYY-MM-DD"
+                font.family: statsPage.win.mono
+                onEditingFinished: if (statsPage.validDate(text)) statsPage.setCustom(text, statsPage.customTo)
+            }
+            Label {
+                visible: statsPage.range === 0
+                text: "–"
+                color: statsPage.win.muted
+            }
+            TextField {
+                id: toField
+                visible: statsPage.range === 0
+                Layout.preferredWidth: 130
+                text: statsPage.customTo
+                placeholderText: "YYYY-MM-DD"
+                font.family: statsPage.win.mono
+                onEditingFinished: if (statsPage.validDate(text)) statsPage.setCustom(statsPage.customFrom, text)
+            }
+            Item { Layout.fillWidth: true }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            Label {
+                text: qsTr("TAGS")
+                color: statsPage.win.muted
+                font.family: statsPage.win.mono
+                font.pixelSize: 11
+                Layout.preferredWidth: 76
+                Layout.alignment: Qt.AlignTop
+                Layout.topMargin: 14
+            }
             Flow {
+                objectName: "statsTagList"
                 Layout.fillWidth: true
                 spacing: 8
                 ChoiceChip {
                     win: statsPage.win
                     text: qsTr("All")
-                    selected: statsPage.filterKind === ""
-                    onClicked: statsPage.setFilter("", "")
+                    selected: statsPage.tagId === ""
+                    onClicked: statsPage.setFilter("tag", "")
                 }
                 Repeater {
                     model: backend.tags || []
                     ChoiceChip {
                         required property var modelData
                         win: statsPage.win
-                        text: "# " + String(modelData.name || "")
+                        text: String(modelData.name || "")
                         dotColor: String(modelData.color || "transparent")
-                        selected: statsPage.filterKind === "tag" && statsPage.filterId === String(modelData.id)
+                        selected: statsPage.tagId === String(modelData.id)
                         onClicked: statsPage.setFilter("tag", String(modelData.id))
                     }
                 }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            Label {
+                text: qsTr("PROJECTS")
+                color: statsPage.win.muted
+                font.family: statsPage.win.mono
+                font.pixelSize: 11
+                Layout.preferredWidth: 76
+                Layout.alignment: Qt.AlignTop
+                Layout.topMargin: 14
+            }
+            Flow {
+                objectName: "statsProjectList"
+                Layout.fillWidth: true
+                spacing: 8
+                ChoiceChip {
+                    win: statsPage.win
+                    text: qsTr("All")
+                    selected: statsPage.projectId === ""
+                    onClicked: statsPage.setFilter("project", "")
+                }
                 Repeater {
-                    model: statsPage.win.activeProjects()
+                    model: statsPage.projectChoices
                     ChoiceChip {
                         required property var modelData
                         win: statsPage.win
                         text: String(modelData.name || "")
                         dotColor: String(modelData.color || "transparent")
-                        selected: statsPage.filterKind === "project" && statsPage.filterId === String(modelData.id)
+                        selected: statsPage.projectId === String(modelData.id)
                         onClicked: statsPage.setFilter("project", String(modelData.id))
                     }
                 }
             }
-            Row {
+        }
+
+        RowLayout {
+            visible: statsPage.taskChoices.length > 0
+            Layout.fillWidth: true
+            spacing: 8
+            Label {
+                text: qsTr("TASKS")
+                color: statsPage.win.muted
+                font.family: statsPage.win.mono
+                font.pixelSize: 11
+                Layout.preferredWidth: 76
                 Layout.alignment: Qt.AlignTop
-                spacing: 6
+                Layout.topMargin: 14
+            }
+            Flow {
+                objectName: "statsTaskList"
+                Layout.fillWidth: true
+                spacing: 8
+                ChoiceChip {
+                    win: statsPage.win
+                    text: qsTr("All")
+                    selected: statsPage.itemId === ""
+                    onClicked: statsPage.setFilter("item", "")
+                }
                 Repeater {
-                    model: [7, 28, 90]
+                    model: statsPage.taskChoices.slice(0, statsPage.maxTasks)
                     ChoiceChip {
-                        required property int modelData
+                        required property var modelData
                         win: statsPage.win
-                        text: qsTr("%1 days").arg(modelData)
-                        selected: statsPage.range === modelData
-                        onClicked: statsPage.setRange(modelData)
+                        text: String(modelData.title || "")
+                        selected: statsPage.itemId === String(modelData.id)
+                        onClicked: statsPage.setFilter("item", String(modelData.id))
                     }
+                }
+                Label {
+                    visible: statsPage.taskChoices.length > statsPage.maxTasks
+                    anchors.verticalCenter: undefined
+                    height: 40
+                    verticalAlignment: Text.AlignVCenter
+                    text: qsTr("+%1 more, pick a project to narrow").arg(statsPage.taskChoices.length - statsPage.maxTasks)
+                    color: statsPage.win.muted
                 }
             }
         }

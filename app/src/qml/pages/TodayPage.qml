@@ -27,27 +27,32 @@ RowLayout {
         Layout.minimumWidth: 360
         win: todayPage.win
     }
-    ColumnLayout {
+    ScrollView {
+        id: todaySide
         Layout.preferredWidth: 300
         Layout.minimumWidth: 270
         Layout.maximumWidth: 320
         Layout.fillHeight: true
-        spacing: 18
-        RunningCard {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 156
-            win: todayPage.win
+        clip: true
+        contentWidth: availableWidth
+        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ColumnLayout {
+            width: todaySide.availableWidth
+            spacing: 18
+            RunningCard {
+                Layout.fillWidth: true
+                win: todayPage.win
+            }
+            NowCard {
+                Layout.fillWidth: true
+                height: 210
+                win: todayPage.win
+            }
+            MonthCalendar {
+                Layout.fillWidth: true
+                height: 360
+                win: todayPage.win
+            }
         }
-        NowCard {
-            Layout.fillWidth: true
-            height: 210
-            win: todayPage.win
-        }
-        MonthCalendar {
-            Layout.fillWidth: true
-            height: 360
-            win: todayPage.win
-        }
-        Item { Layout.fillHeight: true }
     }
 }

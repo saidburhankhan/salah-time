@@ -32,7 +32,8 @@ inline QJsonArray metrics() {
         metric("pages", "Pages read", "pages", "count", 0, "sum", false),
         metric("memorised", "Memorised", "", "check", 0, "sum", false),
         metric("reps", "Push-ups", "reps", "count", 0, "sum", false),
-        metric("old", "Old mood", "", "scale", 3, "avg", false, true)};
+        metric("old", "Old mood", "", "scale", 3, "avg", false, true),
+        metric("distractions", "Distractions", "times", "count", 0, "sum", true)};
 }
 
 inline QJsonObject metricById(const QString &id) {
@@ -81,7 +82,7 @@ inline QJsonArray projects() {
         project("quran", "Quran", "#4c8bf5", "Daily recitation", {"faith"},
                 {{"focus", true}, {"quality", true}, {"pages", false}, {"memorised", false}}),
         project("study", "Study", "#9b59b6", "Arabic grammar", {"learning"},
-                {{"focus", true}, {"quality", false}}),
+                {{"focus", true}, {"quality", false}, {"distractions", false}}),
         project("fitness", "Fitness", "#e0663f", "", {"health"},
                 {{"reps", true}, {"focus", false}}),
         project("garden", "Garden", "#26a69a", "", {}, {}, true)};
@@ -99,7 +100,7 @@ inline QJsonObject projectRef(const QString &id) {
 inline QJsonObject session(const QString &id, const QString &itemId, const QString &projectId,
                            const QString &block, int minutes, const QJsonObject &values,
                            const QString &startedAt = {}, bool running = false,
-                           const QString &note = {}) {
+                           const QString &note = {}, const QJsonArray &notes = {}) {
     QJsonValue ended = QJsonValue::Null;
     if (!startedAt.isEmpty() && !running && minutes > 0)
         ended = QDateTime::fromString(startedAt, Qt::ISODate).addSecs(minutes * 60).toString(Qt::ISODate);
@@ -111,7 +112,7 @@ inline QJsonObject session(const QString &id, const QString &itemId, const QStri
         {"ended_at", ended},
         {"minutes", minutes > 0 ? QJsonValue(minutes) : QJsonValue(QJsonValue::Null)},
         {"note", note.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(note)},
-        {"running", running}, {"values", values}, {"version", 1}};
+        {"running", running}, {"values", values}, {"notes", notes}, {"version", 1}};
 }
 
 // The running session started 47 minutes before "now" so elapsed time shows.
@@ -120,7 +121,9 @@ inline QString runningStart() {
 }
 
 inline QJsonObject runningSession() {
-    return session("s-run", "deep", "study", "dhuhr", 0, {}, runningStart(), true);
+    return session("s-run", "deep", "study", "dhuhr", 0, QJsonObject{{"distractions", 3.0}}, runningStart(), true, {},
+                   QJsonArray{QJsonObject{{"id", "n-1"}, {"at", "2031-05-14T07:41:00Z"}, {"text", "Phone buzzed, put it away"}},
+                              QJsonObject{{"id", "n-2"}, {"at", "2031-05-14T07:58:00Z"}, {"text", "Verb forms done, starting exercises"}}});
 }
 
 inline QJsonObject item(const QString &id, const QString &title, const QString &block, int position,
@@ -152,7 +155,9 @@ inline QJsonArray dayItems(const QString &block, bool withRunning = true) {
         return QJsonArray{
             item("quran", "Read Quran", "fajr", 0, "quran", 30,
                  QJsonArray{session("s-q1", "quran", "quran", "fajr", 25, {},
-                                    "2031-05-14T00:30:00Z"),
+                                    "2031-05-14T00:30:00Z", false, {},
+                                    QJsonArray{QJsonObject{{"id", "n-a"}, {"at", "2031-05-14T00:41:00Z"}, {"text", "Calm morning, slow recitation"}},
+                                               QJsonObject{{"id", "n-b"}, {"at", "2031-05-14T00:52:00Z"}, {"text", "Stopped at page 12"}}}),
                             session("s-q2", "quran", "quran", "fajr", 10, {}),
                             session("s-q3", "quran", "quran", "fajr", 0,
                                     QJsonObject{{"focus", 4.0}, {"quality", 5.0}, {"pages", 6.0}},

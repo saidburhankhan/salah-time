@@ -198,6 +198,7 @@ class ItemDraft : public QObject {
     Q_PROPERTY(QString measure READ measure NOTIFY changed)
     Q_PROPERTY(int target READ target NOTIFY changed)
     Q_PROPERTY(QString projectId READ projectId NOTIFY changed)
+    Q_PROPERTY(QVariant metricIds READ metricIds NOTIFY changed)
     Q_PROPERTY(int plannedMinutes READ plannedMinutes NOTIFY changed)
 public:
     explicit ItemDraft(QObject *parent = nullptr);
@@ -210,6 +211,7 @@ public:
     QString measure() const { return m_measure; }
     int target() const { return m_target; }
     QString projectId() const { return m_projectId; }
+    QVariant metricIds() const { return m_metricIds; }
     int plannedMinutes() const { return m_plannedMinutes; }
 
     void update(const QJsonObject &row);
@@ -225,5 +227,6 @@ private:
     QString m_measure = QStringLiteral("check");
     int m_target = 0;
     QString m_projectId;
+    QVariant m_metricIds;
     int m_plannedMinutes = 0;
 };

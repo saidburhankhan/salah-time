@@ -29,6 +29,12 @@ Rectangle {
             sum += Number(present[i].value)
         return series.rollup === "avg" ? sum / present.length : sum
     }
+    property bool tableMode: false
+    readonly property var tableRows: points.slice().reverse().map(function(p) {
+        var d = Date.fromLocaleString(Qt.locale(), String(p.day), "yyyy-MM-dd")
+        return [Qt.locale("en_US").toString(d, "ddd d MMM"),
+                p.value === null || p.value === undefined ? "—" : format(p.value)]
+    })
     height: 190
     radius: theme.radius
     color: win.panel
@@ -43,14 +49,35 @@ Rectangle {
     onWidthChanged: canvas.requestPaint()
     onYTopChanged: canvas.requestPaint()
 
-    Label {
+    Row {
         x: 18
-        y: 14
-        text: String(chart.series.name || "")
-        textFormat: Text.PlainText
-        color: chart.win.text
-        font.pixelSize: 15
-        font.weight: Font.Medium
+        y: 11
+        spacing: 12
+        Label {
+            anchors.verticalCenter: parent.verticalCenter
+            text: String(chart.series.name || "")
+            textFormat: Text.PlainText
+            color: chart.win.text
+            font.pixelSize: 15
+            font.weight: Font.Medium
+        }
+        ChartModeToggle {
+            anchors.verticalCenter: parent.verticalCenter
+            win: chart.win
+            table: chart.tableMode
+            onChosen: function(table) { chart.tableMode = table }
+        }
+    }
+    ChartTable {
+        visible: chart.tableMode
+        anchors.fill: parent
+        anchors.leftMargin: 18
+        anchors.rightMargin: 18
+        anchors.topMargin: 46
+        anchors.bottomMargin: 10
+        win: chart.win
+        columns: [qsTr("DAY"), String(chart.series.name || "").toUpperCase()]
+        rows: chart.tableRows
     }
     Label {
         anchors.right: parent.right
@@ -64,6 +91,7 @@ Rectangle {
         font.pixelSize: 13
     }
     Label {
+        visible: !chart.tableMode
         x: 12
         y: 44
         width: 30
@@ -74,6 +102,7 @@ Rectangle {
         font.pixelSize: 10
     }
     Label {
+        visible: !chart.tableMode
         x: 12
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 18
@@ -86,6 +115,7 @@ Rectangle {
     }
     Canvas {
         id: canvas
+        visible: !chart.tableMode
         anchors.fill: parent
         anchors.leftMargin: 50
         anchors.rightMargin: 18

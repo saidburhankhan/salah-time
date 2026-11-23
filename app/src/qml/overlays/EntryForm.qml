@@ -12,6 +12,21 @@ Popup {
     property string repeat: item.repeat || "none"
     property var days: item.weekdays || []
     property string projectId: ""
+    property var metricIds: null
+    property bool metricIdsEdited: false
+    readonly property bool projectChanged: !!item.id && projectId !== (item.projectId || "")
+    readonly property var projectMetrics: win.promptMetrics(projectId, {}, null, false)
+    readonly property var askChoices: {
+        var list = projectMetrics.slice()
+        var ids = projectChanged ? [] : (item.metricIds || [])
+        for (var i = 0; i < ids.length; i++) {
+            var id = ids[i]
+            var metric = win.metricById(id)
+            if (metric && metric.builtin && !list.some(function(entry) { return entry.metric_id === id }))
+                list.push({ metric_id: id, name: metric.name })
+        }
+        return list
+    }
     property bool confirming: false
     readonly property bool weeklyValid: repeat !== "weekly" || days.length > 0
     readonly property var preview: backend.preview
@@ -30,6 +45,8 @@ Popup {
         repeat = item.repeat || "none"
         days = item.weekdays || []
         projectId = item.projectId || ""
+        metricIds = item.metricIds || null
+        metricIdsEdited = false
         confirming = false
         backend.loadSettings()
         entryFields.initialize(item.title || "", item.plannedMinutes ? String(item.plannedMinutes) : "")
@@ -53,7 +70,7 @@ Popup {
     }
     function draft() {
         var goal = Number(entryFields.goalText)
-        return {
+        var result = {
             id: item.id || "",
             title: entryFields.titleText,
             block: block,
@@ -62,6 +79,38 @@ Popup {
             repeat: repeat,
             weekdays: repeat === "weekly" ? days : []
         }
+        if (metricIdsEdited && !projectChanged)
+            result.metric_ids = metricIds
+        return result
+    }
+    function selectProject(id) {
+        if (projectId === id)
+            return
+        projectId = id
+        metricIds = projectChanged ? null : (item.metricIds || null)
+        metricIdsEdited = false
+    }
+    function asksMetric(id) {
+        return metricIds === null
+            ? projectMetrics.some(function(metric) { return metric.metric_id === id })
+            : metricIds.indexOf(id) >= 0
+    }
+    function toggleMetric(id) {
+        if (projectChanged)
+            return
+        var ids = askChoices.filter(function(metric) { return asksMetric(metric.metric_id) })
+                            .map(function(metric) { return metric.metric_id })
+        var index = ids.indexOf(id)
+        if (index >= 0)
+            ids.splice(index, 1)
+        else
+            ids.push(id)
+        metricIds = ids
+        metricIdsEdited = true
+    }
+    function resetMetrics() {
+        metricIds = null
+        metricIdsEdited = true
     }
     function submitTitle() {
         if (!entryFields.titleText.trim() || !weeklyValid) return
@@ -139,6 +188,8 @@ Popup {
                     entryPopup.win.maybeToast(d)
                     backend.saveItem(d)
                     entryPopup.win.editItem = ({})
+                    entryPopup.metricIds = null
+                    entryPopup.metricIdsEdited = false
                     entryFields.clearTitle()
                 }
             }

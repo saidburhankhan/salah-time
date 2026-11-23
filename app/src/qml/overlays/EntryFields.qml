@@ -39,7 +39,7 @@ ScrollView {
             entryFields.creatingProject = false
             newProjectField.text = ""
             if (id !== "")
-                form.projectId = id
+                form.selectProject(id)
         }
         function onEntitySaveFailed(kind, error) {
             if (kind === "project")
@@ -146,7 +146,7 @@ ScrollView {
                         win: form.win
                         text: qsTr("No project")
                         selected: form.projectId === ""
-                        onClicked: form.projectId = ""
+                        onClicked: form.selectProject("")
                     }
                     Repeater {
                         model: form.win.activeProjects()
@@ -156,7 +156,7 @@ ScrollView {
                             text: String(modelData.name || "")
                             dotColor: String(modelData.color || "transparent")
                             selected: form.projectId === String(modelData.id)
-                            onClicked: form.projectId = String(modelData.id)
+                            onClicked: form.selectProject(String(modelData.id))
                         }
                     }
                 }
@@ -184,6 +184,47 @@ ScrollView {
                         color: form.win.muted
                         font.pixelSize: 12
                         elide: Text.ElideRight
+                    }
+                }
+                ColumnLayout {
+                    visible: !backend.offlineMode
+                    Layout.fillWidth: true
+                    Layout.topMargin: 10
+                    spacing: 8
+                    Label {
+                        text: qsTr("Asks")
+                        color: form.win.text
+                        font.pixelSize: 15
+                        font.weight: Font.Medium
+                    }
+                    Flow {
+                        visible: !form.projectChanged
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Repeater {
+                            model: form.askChoices
+                            ChoiceChip {
+                                required property var modelData
+                                win: form.win
+                                text: String(modelData.name)
+                                selected: form.asksMetric(modelData.metric_id)
+                                onClicked: form.toggleMetric(modelData.metric_id)
+                            }
+                        }
+                        AppButton {
+                            visible: form.metricIds !== null
+                            win: form.win
+                            text: qsTr("Reset to project")
+                            onClicked: form.resetMetrics()
+                        }
+                    }
+                    Label {
+                        visible: form.projectChanged || form.askChoices.length === 0
+                        text: form.projectChanged ? qsTr("Save the project change to customize its metrics.")
+                            : qsTr("No project metrics to ask.")
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        color: form.win.muted
                     }
                 }
                 Rectangle {

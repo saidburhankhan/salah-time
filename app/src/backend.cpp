@@ -88,6 +88,8 @@ DayTimelineModel::Row itemRow(const Dto::DayItem &item, bool pending) {
     const QJsonArray sessions = item.json.value(QStringLiteral("sessions")).toArray();
     row.sessions = sessions.size();
     row.sessionList = sessions.toVariantList();
+    const QJsonValue metrics = item.json.value(QStringLiteral("metrics"));
+    if (metrics.isArray()) row.promptMetrics = metrics.toArray().toVariantList();
     for (const QJsonValue &value : sessions) {
         const QJsonObject session = value.toObject();
         if (session.value(QStringLiteral("running")).toBool()) {
@@ -473,22 +475,39 @@ void Backend::loadStats(int days) {
     loadStatsFiltered(days, {}, {});
 }
 
-void Backend::loadStatsFiltered(int days, const QString &tagId, const QString &projectId) {
+void Backend::loadStatsFiltered(int days, const QString &tagId, const QString &projectId, const QString &itemId) {
     if (days != 7 && days != 28 && days != 90) days = 28;
-    m_client.statsFiltered(days, tagId, projectId, readResponse([this](const CoreClient::Result &result) {
-        if (const auto *stats = std::get_if<Dto::Stats>(&result.value)) applyStats(*stats);
-    }));
+    m_client.statsFiltered(days, tagId, projectId, itemId, statsResponse());
 }
 
-void Backend::loadStatsRange(const QString &from, const QString &to) {
+void Backend::loadStatsRange(const QString &from, const QString &to, const QString &tagId,
+                             const QString &projectId, const QString &itemId) {
     const QDate first = QDate::fromString(from, Qt::ISODate);
     const QDate last = QDate::fromString(to, Qt::ISODate);
-    if (!first.isValid() || !last.isValid() || first > last || first.daysTo(last) >= 366) {
+    if (!first.isValid() || !last.isValid() || first > last || first.daysTo(last) >= 730) {
         fail(tr("Invalid statistics date range."));
         return;
     }
-    m_client.stats(first, last, readResponse([this](const CoreClient::Result &result) {
-        if (const auto *stats = std::get_if<Dto::Stats>(&result.value)) applyStats(*stats);
+    m_client.statsFiltered(0, tagId, projectId, itemId, statsResponse(), first, last);
+}
+
+CoreClient::Callback Backend::statsResponse() {
+    const quint64 request = ++m_statsRequest;
+    return [this, request](const CoreClient::Result &result) {
+        if (request != m_statsRequest) return;
+        if (!result.ok) fail(result.error.message);
+        else if (const auto *stats = std::get_if<Dto::Stats>(&result.value)) applyStats(*stats);
+    };
+}
+
+void Backend::loadTrackingItems() {
+    m_client.itemsList(readResponse([this](const CoreClient::Result &result) {
+        if (const auto *json = std::get_if<Dto::Json>(&result.value)) {
+            const QVariantList items = json->value.toArray().toVariantList();
+            if (m_trackingItems == items) return;
+            m_trackingItems = items;
+            emit trackingItemsChanged();
+        }
     }));
 }
 
@@ -578,6 +597,8 @@ void Backend::saveItem(const QVariantMap &item) {
     fields.repeat = item.value(QStringLiteral("repeat"), QStringLiteral("none")).toString();
     fields.weekdays = item.value(QStringLiteral("weekdays")).toStringList();
     fields.projectId = item.value(QStringLiteral("project_id")).toString();
+    const auto metricIds = item.constFind(QStringLiteral("metric_ids"));
+    if (metricIds != item.cend()) fields.metricIds = QJsonValue::fromVariant(*metricIds);
     fields.plannedMinutes = item.value(QStringLiteral("planned_minutes")).toInt();
     fields.hasPlannedMinutes = fields.plannedMinutes > 0;
     if (id.isEmpty()) {
@@ -743,6 +764,36 @@ void Backend::editSession(const QString &sessionId, int minutes, const QVariantM
 
 void Backend::removeSession(const QString &sessionId) {
     m_client.sessionRemove(sessionId, sessionResponse({}));
+}
+
+void Backend::bumpDistractions(const QString &sessionId, int delta) {
+    m_client.sessionBump(sessionId, QStringLiteral("distractions"), delta,
+                         [this](const CoreClient::Result &result) { applyRunningWrite(result); });
+}
+
+void Backend::addRunningNote(const QString &sessionId, const QString &text) {
+    m_client.sessionNote(sessionId, text, [this, sessionId](const CoreClient::Result &result) {
+        applyRunningWrite(result);
+        emit runningNoteFinished(sessionId, result.ok);
+    });
+}
+
+void Backend::applyRunningWrite(const CoreClient::Result &result) {
+    if (const auto *mutation = std::get_if<Dto::MutationResult>(&result.value)) {
+        const QJsonArray sessions = mutation->json.value(QStringLiteral("changed")).toObject()
+                                        .value(QStringLiteral("sessions")).toArray();
+        const QString runningId = m_running.value(QStringLiteral("id")).toString();
+        for (const QJsonValue &value : sessions) {
+            const QJsonObject session = value.toObject();
+            if (session.value(QStringLiteral("running")).toBool()
+                && session.value(QStringLiteral("id")).toString() == runningId) {
+                m_running = session.toVariantMap();
+                refreshRunning();
+                break;
+            }
+        }
+    }
+    sessionResponse({}, false)(result);
 }
 
 CoreClient::Callback Backend::sessionResponse(const QString &pendingItemId, bool announce) {

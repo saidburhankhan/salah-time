@@ -52,6 +52,7 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList tags READ tags NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList metrics READ metrics NOTIFY settingsChanged)
     Q_PROPERTY(QVariantMap statsData READ statsData NOTIFY statsDataChanged)
+    Q_PROPERTY(QVariantList trackingItems READ trackingItems NOTIFY trackingItemsChanged)
     Q_PROPERTY(QVariantMap running READ running NOTIFY runningChanged)
     Q_PROPERTY(QVariantList runningPrompt READ runningPrompt NOTIFY runningChanged)
     Q_PROPERTY(QString runningTitle READ runningTitle NOTIFY runningChanged)
@@ -100,6 +101,7 @@ public:
     QVariantList projects() const { return m_projects; }
     QVariantList tags() const { return m_tags; }
     QVariantList metrics() const { return m_metrics; }
+    QVariantList trackingItems() const { return m_trackingItems; }
     QVariantMap statsData() const { return m_stats.json.toVariantMap(); }
     QVariantMap running() const { return m_running; }
     QVariantList runningPrompt() const { return m_runningPrompt; }
@@ -108,9 +110,11 @@ public:
 
     Q_INVOKABLE void reload();
     Q_INVOKABLE void loadStats(int days);
-    // The last 7/28/90 days, filtered by one tag or one project (or neither).
-    Q_INVOKABLE void loadStatsFiltered(int days, const QString &tagId, const QString &projectId);
-    Q_INVOKABLE void loadStatsRange(const QString &from, const QString &to);
+    Q_INVOKABLE void loadStatsFiltered(int days, const QString &tagId, const QString &projectId,
+                                       const QString &itemId = {});
+    Q_INVOKABLE void loadStatsRange(const QString &from, const QString &to, const QString &tagId = {},
+                                    const QString &projectId = {}, const QString &itemId = {});
+    Q_INVOKABLE void loadTrackingItems();
     Q_INVOKABLE void moveDay(int amount);
     Q_INVOKABLE void selectDay(const QString &day);
     Q_INVOKABLE void jumpToday();
@@ -135,6 +139,8 @@ public:
     Q_INVOKABLE void editSession(const QString &sessionId, int minutes, const QVariantMap &values,
                                  const QString &note);
     Q_INVOKABLE void removeSession(const QString &sessionId);
+    Q_INVOKABLE void bumpDistractions(const QString &sessionId, int delta);
+    Q_INVOKABLE void addRunningNote(const QString &sessionId, const QString &text);
     Q_INVOKABLE void toggleTimer(const QString &id, bool running);
     Q_INVOKABLE void togglePrayer(const QString &prayer, bool marked);
     Q_INVOKABLE void setSleepTime(const QString &time);
@@ -159,12 +165,14 @@ signals:
     void fulfilmentChanged();
     void settingsChanged();
     void statsDataChanged();
+    void trackingItemsChanged();
     // A project/tag/metric write finished. `id` is the saved row's id (empty
     // for a removal); on failure `error` carries the server message.
     void entitySaved(const QString &kind, const QString &id);
     void entitySaveFailed(const QString &kind, const QString &error);
     // A session write (tick, log, stop, edit, remove) finished.
     void sessionWriteFinished(bool ok, const QString &message);
+    void runningNoteFinished(const QString &sessionId, bool ok);
     void runningChanged();
 
 private:
@@ -186,6 +194,8 @@ private:
     CoreClient::Callback mutationResponse(const QString &pendingId = {}, const QString &pendingOpId = {});
     CoreClient::Callback entityResponse(const QString &kind);
     CoreClient::Callback sessionResponse(const QString &pendingItemId, bool announce = true);
+    CoreClient::Callback statsResponse();
+    void applyRunningWrite(const CoreClient::Result &result);
     void applyStatus(const QJsonObject &status);
     void refreshRunning();
     QJsonArray sessionsOf(const QString &itemId) const;
@@ -241,6 +251,8 @@ private:
     ParseDraftState m_parseDraft;
     PreviewState m_preview;
     QVariantList m_projects, m_tags, m_metrics;
+    QVariantList m_trackingItems;
+    quint64 m_statsRequest = 0;
     QVariantMap m_running, m_lastRunning;
     QVariantList m_runningPrompt, m_lastRunningPrompt;
     QString m_runningTitle, m_runningColor;

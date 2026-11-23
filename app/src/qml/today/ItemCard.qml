@@ -28,6 +28,7 @@ Rectangle {
     property int actualMinutes: 0
     property int sessions: 0
     property var sessionList: []
+    property var promptMetrics
     property bool ticked: false
     property string runningSessionId: ""
     property bool expanded: false
@@ -51,12 +52,12 @@ Rectangle {
             backend.untickItem(itemId)
         else
             win.openSessionPrompt({ mode: "done", itemId: itemId, projectId: projectId,
-                                    title: title, color: projectColor })
+                                    title: title, color: projectColor, metrics: promptMetrics })
     }
 
     function addTime() {
         win.openSessionPrompt({ mode: "log", itemId: itemId, projectId: projectId,
-                                title: title, color: projectColor })
+                                title: title, color: projectColor, metrics: promptMetrics })
     }
 
     MouseArea {
@@ -240,6 +241,7 @@ Rectangle {
                 width: parent.width
                 win: itemCard.win
                 session: modelData
+                promptMetrics: itemCard.promptMetrics
                 itemTitle: itemCard.title
                 projectColor: itemCard.projectColor
             }

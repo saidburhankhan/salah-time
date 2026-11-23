@@ -159,7 +159,7 @@ ApplicationWindow {
         loadStatistics()
     }
     // The Statistics page owns its range (7/28/90 days) and filter.
-    function loadStatistics() { statisticsPage.reload() }
+    function loadStatistics() { statisticsPage.open() }
     function statsRangeLabel() {
         var b = statsBounds(statsMode, statsAnchor, customFrom, customTo), l = Qt.locale("en_US")
         if (statsMode === "month") return l.toString(b.first, "MMMM yyyy")
@@ -230,34 +230,46 @@ ApplicationWindow {
         parts.push(metricNames.length > 0 ? metricNames.join(", ") : qsTr("no metrics"))
         return parts.join("  ·  ")
     }
-    // The metrics the done panel and "+ time" ask for, all optional: the
-    // project's asked metrics in order, or the built-in Focus and Quality
-    // without a project. Metrics that already have a value are kept (edit).
-    function promptMetrics(projectId, values) {
+    function distractionMetric() {
+        return metricById("distractions") || {
+            id: "distractions", name: qsTr("Distractions"), unit: qsTr("times"), kind: "count"
+        }
+    }
+    function promptMetrics(projectId, values, asked, editing) {
         var list = []
         var project = projectById(projectId)
-        var seen = {}
+        var seen = new Set()
         function add(metric) {
-            if (!metric || seen[metric.id])
+            if (!metric)
                 return
-            seen[metric.id] = true
-            list.push({ metric_id: String(metric.id), name: String(metric.name || metric.id),
+            var id = String(metric.metric_id || metric.id)
+            if (seen.has(id))
+                return
+            seen.add(id)
+            list.push({ metric_id: id, name: String(metric.name || id),
                         unit: String(metric.unit || ""), kind: String(metric.kind || "scale"),
                         scale_max: metric.scale_max || 5 })
         }
-        if (project) {
+        if (asked !== null && asked !== undefined) {
+            for (var i = 0; i < asked.length; i++)
+                add(asked[i])
+        } else if (project) {
             var links = project.metrics || []
-            for (var i = 0; i < links.length; i++) {
-                var metric = links[i].metric || metricById(links[i].metric_id)
+            for (var j = 0; j < links.length; j++) {
+                var metric = links[j].metric || metricById(links[j].metric_id)
                 if (metric && !metric.archived)
                     add(metric)
             }
-        } else {
+        } else if (!projectId) {
             add(metricById("focus") || { id: "focus", name: qsTr("Focus"), kind: "scale", scale_max: 5 })
             add(metricById("quality") || { id: "quality", name: qsTr("Quality"), kind: "scale", scale_max: 5 })
+            add(distractionMetric())
         }
+        // Retain fields for recorded values even if the task's asks have changed.
         for (var key in (values || {}))
-            add(metricById(key))
+            add(key === "distractions" ? distractionMetric() : metricById(key))
+        if (editing)
+            add(distractionMetric())
         return list
     }
     function elapsedMinutes(startedAt) {
@@ -282,6 +294,9 @@ ApplicationWindow {
     function clockTime(iso) {
         var ms = Date.parse(String(iso || ""))
         return isNaN(ms) ? "" : Qt.formatTime(new Date(ms), "HH:mm")
+    }
+    function noteEntryText(entry) {
+        return [clockTime(entry.at), String(entry.text || "")].filter(Boolean).join("  ")
     }
     function valuesText(values) {
         var parts = []
@@ -311,6 +326,7 @@ ApplicationWindow {
             itemId: String(running.item_id || ""),
             title: backend.runningTitle,
             color: backend.runningColor,
+            projectId: String(running.project_id || ""),
             minutes: Math.max(1, Math.min(1440, elapsed)),
             metrics: backend.runningPrompt,
             values: running.values || {}

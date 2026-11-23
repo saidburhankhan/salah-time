@@ -395,10 +395,24 @@ esac
             if (method == "day.get") server->respond(socket, request, state->day);
             else if (method == "status.get") server->respond(socket, request, state->status);
             else if (method == "stats.get") {
-                const int days = params.value("days").toInt(28);
-                server->respond(socket, request, TrackingFixture::stats(params.value("tag_id").toString(),
-                                                                        params.value("project_id").toString(),
+                int days = params.value("days").toInt(28);
+                if (params.contains("from"))
+                    days = int(QDate::fromString(params.value("from").toString(), Qt::ISODate)
+                                   .daysTo(QDate::fromString(params.value("to").toString(), Qt::ISODate))) + 1;
+                const QString narrow = params.value("project_id").toString().isEmpty() ? params.value("item_id").toString()
+                                                                                         : params.value("project_id").toString();
+                server->respond(socket, request, TrackingFixture::stats(params.value("tag_id").toString(), narrow,
                                                                         days > 0 ? days : 28));
+            }
+            else if (method == "items.list") {
+                QJsonArray rows;
+                for (const QJsonValue &block : state->day.value("blocks").toArray())
+                    for (const QJsonValue &value : block.toObject().value("items").toArray()) {
+                        const QJsonObject row = value.toObject();
+                        rows.append(QJsonObject{{"id", row.value("id")}, {"title", row.value("title")},
+                                                {"project_id", row.value("project").toObject().value("id")}});
+                    }
+                server->respond(socket, request, rows);
             }
             else if (method == "config.get") server->respond(socket, request, QJsonObject{{"sleep_time", "23:00"}, {"location", "Tashkent"}, {"latitude", 41.2}, {"longitude", 69.2}, {"timezone_offset", 5}, {"method", "uzbekistan"}, {"method_name", "Muslim Board of Uzbekistan"}, {"asr", "hanafi"}, {"auto_location", true}, {"last_location_provider", QJsonValue::Null}, {"last_location_sync", QJsonValue::Null}});
             else if (method == "projects.list") server->respond(socket, request, TrackingFixture::projects());
@@ -439,6 +453,13 @@ esac
         if (dir.isEmpty()) return;
         QDir().mkpath(dir);
         QVERIFY2(image.save(dir + "/" + name), qPrintable(name));
+    }
+    static QObject *findItemByName(QObject *root, const QString &name) {
+        auto *item = qobject_cast<QQuickItem *>(root);
+        if (!item) return nullptr;
+        for (QQuickItem *child : quickDescendants(item))
+            if (child->objectName() == name) return child;
+        return nullptr;
     }
     static QObject *findByName(QObject *root, const QString &name) {
         for (QObject *object : root->findChildren<QObject *>())
@@ -1706,7 +1727,7 @@ const int original = model->indexOfItem("<id:4>");
         QTRY_COMPARE_WITH_TIMEOUT(settings.size(), 3, 3000);
         QCOMPARE(backend.projects().size(), 4);
         QCOMPARE(backend.tags().size(), 3);
-        QCOMPARE(backend.metrics().size(), 6);
+        QCOMPARE(backend.metrics().size(), 7);
         QCOMPARE(backend.tags().first().toMap().value("name").toString(), QString("Faith"));
         QCOMPARE(backend.metrics().first().toMap().value("id").toString(), QString("focus"));
 
@@ -2065,6 +2086,65 @@ const int original = model->indexOfItem("<id:4>");
         QVERIFY(!lastRequest(daemon, "stats.get").value("params").toObject().contains("project_id"));
         QCOMPARE(backend.statsData().value("days").toList().size(), 90);
     }
+    void bumpNoteAndAsksReachTheDaemon() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        daemon.setHandler(trackingHandler(trackingState()));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        QSignalSpy noted(&backend, &Backend::runningNoteFinished);
+        backend.reload(); QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 4, 3000);
+        backend.bumpDistractions("s-run", 1);
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "session.bump").isEmpty(), 3000);
+        QJsonObject params = lastRequest(daemon, "session.bump").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("s-run"));
+        QCOMPARE(params.value("metric_id").toString(), QString("distractions"));
+        QCOMPARE(params.value("delta").toInt(), 1);
+        backend.bumpDistractions("s-run", -1);
+        QTRY_COMPARE_WITH_TIMEOUT(lastRequest(daemon, "session.bump").value("params").toObject().value("delta").toInt(), -1, 3000);
+        backend.addRunningNote("s-run", "  Back on track  ");
+        QTRY_COMPARE_WITH_TIMEOUT(noted.size(), 1, 3000);
+        params = lastRequest(daemon, "session.note").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("s-run"));
+        QCOMPARE(params.value("text").toString(), QString("Back on track"));
+        // Asks: a customised list is sent, "Reset to project" sends null, untouched sends nothing.
+        backend.saveItem(QVariantMap{{"id", "quran"}, {"title", "Read Quran"}, {"block", "fajr"}, {"repeat", "daily"},
+                                     {"project_id", "quran"}, {"metric_ids", QVariantList{"focus", "pages"}}});
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "item.edit").isEmpty(), 3000);
+        QJsonArray ids = lastRequest(daemon, "item.edit").value("params").toObject().value("metric_ids").toArray();
+        QCOMPARE(ids.size(), 2);
+        QCOMPARE(ids.at(1).toString(), QString("pages"));
+        backend.saveItem(QVariantMap{{"id", "quran"}, {"title", "Read Quran"}, {"block", "fajr"}, {"repeat", "daily"},
+                                     {"project_id", "quran"}, {"metric_ids", QVariant()}});
+        QTRY_VERIFY_WITH_TIMEOUT(lastRequest(daemon, "item.edit").value("params").toObject().value("metric_ids").isNull(), 3000);
+        QVERIFY(lastRequest(daemon, "item.edit").value("params").toObject().contains("metric_ids"));
+        backend.saveItem(QVariantMap{{"id", "quran"}, {"title", "Read Quran II"}, {"block", "fajr"}, {"repeat", "daily"}});
+        QTRY_COMPARE_WITH_TIMEOUT(lastRequest(daemon, "item.edit").value("params").toObject().value("title").toString(), QString("Read Quran II"), 3000);
+        QVERIFY(!lastRequest(daemon, "item.edit").value("params").toObject().contains("metric_ids"));
+    }
+    void statsTaskAndCustomRangeFiltersReachTheDaemon() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        daemon.setHandler(trackingHandler(trackingState()));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy stats(&backend, &Backend::statsDataChanged);
+        QSignalSpy items(&backend, &Backend::trackingItemsChanged);
+        backend.loadTrackingItems();
+        QTRY_COMPARE_WITH_TIMEOUT(items.size(), 1, 3000);
+        QVERIFY(backend.trackingItems().size() >= 5);
+        backend.loadStatsFiltered(28, "learning", "study", "deep");
+        QTRY_COMPARE_WITH_TIMEOUT(stats.size(), 1, 3000);
+        QJsonObject params = lastRequest(daemon, "stats.get").value("params").toObject();
+        QCOMPARE(params.value("tag_id").toString(), QString("learning"));
+        QCOMPARE(params.value("project_id").toString(), QString("study"));
+        QCOMPARE(params.value("item_id").toString(), QString("deep"));
+        backend.loadStatsRange("2031-04-01", "2031-05-14", {}, {}, "deep");
+        QTRY_COMPARE_WITH_TIMEOUT(stats.size(), 2, 3000);
+        params = lastRequest(daemon, "stats.get").value("params").toObject();
+        QCOMPARE(params.value("from").toString(), QString("2031-04-01"));
+        QCOMPARE(params.value("to").toString(), QString("2031-05-14"));
+        QVERIFY(!params.contains("days"));
+        QCOMPARE(params.value("item_id").toString(), QString("deep"));
+        QCOMPARE(backend.statsData().value("days").toList().size(), 44);
+    }
     void trackingUiScreens() {
         QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
         daemon.setHandler(trackingHandler(trackingState()));
@@ -2104,6 +2184,12 @@ const int original = model->indexOfItem("<id:4>");
         root->setProperty("page", 0);
         QVERIFY(QMetaObject::invokeMethod(root.data(), "openEntry", Q_ARG(QVariant, QVariant("deep"))));
         shotWindow(window, "item-editor.png");
+        {
+            QObject *entry = findByName(root.data(), "entryPopup");
+            QObject *form = entry ? entry : nullptr;
+            if (form) QVERIFY(QMetaObject::invokeMethod(form, "toggleMetric", Q_ARG(QVariant, QVariant("quality"))));
+            shotWindow(window, "item-editor-asks.png");
+        }
         root->setProperty("entryVisible", false);
 
         // Today with the session lists of a timed, a ticked and a running item open.
@@ -2114,6 +2200,7 @@ const int original = model->indexOfItem("<id:4>");
         for (const char *id : {"quran", "walk", "deep"})
             QVERIFY(QMetaObject::invokeMethod(timeline, "toggleExpanded", Q_ARG(QVariant, QVariant(id))));
         shotWindow(window, "today-sessions.png");
+        shotWindow(window, "session-notes.png");
         QQuickItem *list = timelineView(root.data()); QVERIFY(list);
         list->setProperty("contentY", 420);
         shotWindow(window, "today-sessions-scrolled.png");
@@ -2125,9 +2212,29 @@ const int original = model->indexOfItem("<id:4>");
         auto showPrompt = [&](const QVariantMap &options) {
             return QMetaObject::invokeMethod(prompt, "show", Q_ARG(QVariant, QVariant(options)));
         };
+        // The running card with distractions and Add note open.
+        QObject *addNote = findByName(root.data(), "runningAddNoteButton"); QVERIFY(addNote);
+        QVERIFY(QMetaObject::invokeMethod(addNote, "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(runningCard->property("addingNote").toBool(), 2000);
+        QObject *noteField = findByName(root.data(), "runningNoteField"); QVERIFY(noteField);
+        noteField->setProperty("text", "Reading the dative chapter");
+        QCOMPARE(findByName(root.data(), "runningDistractions")->property("text").toString(), QString("Distractions 3"));
+        shotWindow(window, "running-card.png");
+        QVERIFY(QMetaObject::invokeMethod(noteField, "accepted"));
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "session.note").isEmpty(), 3000);
+        QCOMPARE(lastRequest(daemon, "session.note").value("params").toObject().value("text").toString(), QString("Reading the dative chapter"));
+        QVERIFY(QMetaObject::invokeMethod(findByName(root.data(), "distractionPlus"), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "session.bump").isEmpty(), 3000);
+        QCOMPARE(lastRequest(daemon, "session.bump").value("params").toObject().value("delta").toInt(), 1);
         QObject *pause = findByName(root.data(), "runningStopButton"); QVERIFY(pause);
         QVERIFY(QMetaObject::invokeMethod(pause, "clicked"));
         QTRY_VERIFY_WITH_TIMEOUT(prompt->property("visible").toBool(), 2000);
+        {
+            bool found = false;
+            for (QQuickItem *item : quickDescendants(prompt->property("contentItem").value<QQuickItem *>()))
+                if (item->objectName() == "promptDistractions") found = true;
+            QVERIFY(found);
+        }
         shotWindow(window, "prompt-pause.png");
         root->setProperty("sessionPromptVisible", false);
 
@@ -2164,8 +2271,8 @@ const int original = model->indexOfItem("<id:4>");
         QVERIFY(showPrompt(QVariantMap{
             {"mode", "log"}, {"itemId", "walk"}, {"title", "Morning walk"}}));
         QTRY_VERIFY_WITH_TIMEOUT(prompt->property("visible").toBool(), 2000);
-        // No project: the built-in Focus and Quality.
-        QCOMPARE(prompt->property("metrics").toList().size(), 2);
+        // No project: the built-in Focus, Quality and Distractions.
+        QCOMPARE(prompt->property("metrics").toList().size(), 3);
         QCOMPARE(prompt->property("metrics").toList().first().toMap().value("metric_id").toString(), QString("focus"));
         root->setProperty("sessionPromptVisible", false);
         // Statistics: all, one project, 90 days, scrolled to the breakdowns.
@@ -2178,6 +2285,28 @@ const int original = model->indexOfItem("<id:4>");
         flick->setProperty("contentY", 520);
         shotWindow(window, "stats-all-bottom.png");
         flick->setProperty("contentY", 0);
+        QTRY_VERIFY_WITH_TIMEOUT(!backend.trackingItems().isEmpty(), 3000);
+        QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("tag")), Q_ARG(QVariant, QVariant("learning"))));
+        waitForBackendIdle(backend);
+        QCOMPARE(lastRequest(daemon, "stats.get").value("params").toObject().value("tag_id").toString(), QString("learning"));
+        // Projects are narrowed by the tag, tasks by the project.
+        QCOMPARE(stats->property("projectChoices").toList().size(), 1);
+        QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("project")), Q_ARG(QVariant, QVariant("study"))));
+        waitForBackendIdle(backend);
+        QCOMPARE(stats->property("taskChoices").toList().size(), 2);
+        shotWindow(window, "stats-filters.png");
+        QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("item")), Q_ARG(QVariant, QVariant("deep"))));
+        waitForBackendIdle(backend);
+        QCOMPARE(lastRequest(daemon, "stats.get").value("params").toObject().value("item_id").toString(), QString("deep"));
+        QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("")), Q_ARG(QVariant, QVariant(""))));
+        waitForBackendIdle(backend);
+        // One chart in Table mode.
+        QObject *dayChart = findByName(root.data(), "dayChart"); QVERIFY(dayChart);
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(dayChart, "chartTableButton"), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(dayChart->property("tableMode").toBool(), 2000);
+        shotWindow(window, "stats-chart-table.png");
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(dayChart, "chartChartButton"), "clicked"));
+        QVERIFY(!dayChart->property("tableMode").toBool());
         QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("project")), Q_ARG(QVariant, QVariant("quran"))));
         waitForBackendIdle(backend);
         QCOMPARE(lastRequest(daemon, "stats.get").value("params").toObject().value("project_id").toString(), QString("quran"));

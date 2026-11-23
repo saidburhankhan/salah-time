@@ -35,6 +35,8 @@ public:
         QString repeat = "none";
         QStringList weekdays;
         QString projectId;
+        // Undefined preserves the current selection, null follows the project.
+        QJsonValue metricIds = QJsonValue::Undefined;
         int plannedMinutes = 0;
         bool hasPlannedMinutes = false;
         QDate date;
@@ -54,8 +56,9 @@ public:
     void day(const QDate &date, Callback callback);
     void stats(const QDate &from, const QDate &to, Callback callback);
     void statsDays(int days, Callback callback);
-    // stats.get for the last `days` days, optionally filtered by one tag or project.
-    void statsFiltered(int days, const QString &tagId, const QString &projectId, Callback callback);
+    void statsFiltered(int days, const QString &tagId, const QString &projectId, const QString &itemId,
+                       Callback callback, const QDate &from = {}, const QDate &to = {});
+    void itemsList(Callback callback);
     void itemAdd(const ItemFields &fields, Callback callback = {});
     void itemEdit(const QString &id, const ItemFields &fields, Callback callback = {}, qint64 expectedVersion = -1);
     void itemRemove(const QString &id, Callback callback = {}, qint64 expectedVersion = -1);
@@ -72,6 +75,8 @@ public:
     void sessionEdit(const QString &sessionId, int minutes, bool hasValues, const QJsonObject &values,
                      bool hasNote, const QString &note, Callback callback = {});
     void sessionRemove(const QString &sessionId, Callback callback = {});
+    void sessionBump(const QString &sessionId, const QString &metricId, int delta, Callback callback = {});
+    void sessionNote(const QString &sessionId, const QString &text, Callback callback = {});
     void status(Callback callback);
     void prayerMark(const QString &prayer, const QDate &date, Callback callback = {}, qint64 expectedVersion = -1);
     void prayerUnmark(const QString &prayer, const QDate &date, Callback callback = {}, qint64 expectedVersion = -1);

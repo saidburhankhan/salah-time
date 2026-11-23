@@ -41,7 +41,8 @@ public:
         ProjectNameRole,
         SessionListRole,
         TickedRole,
-        RunningSessionIdRole
+        RunningSessionIdRole,
+        PromptMetricsRole
     };
 
     enum class Kind { Header, Item, Add, Marker };
@@ -81,6 +82,7 @@ public:
         int blockPlannedMinutes = 0;
         int blockActualMinutes = 0;
         QString projectId;
+        QVariant promptMetrics;
         QString projectName;
         // Today's sessions of the item, as day.get returns them.
         QVariantList sessionList;

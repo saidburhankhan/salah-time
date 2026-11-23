@@ -16,6 +16,16 @@ Item {
     property bool dragDone: false
     // Items whose session list is open, by id.
     property var expanded: ({})
+    // Height of an item's expanded session rows: 46 plus 6 spacing each, and a
+    // line per timestamped note (see SessionRow).
+    function sessionsHeight(list) {
+        var total = 0
+        for (var i = 0; i < (list || []).length; i++) {
+            var notes = (list[i].notes || []).length
+            total += 52 + (notes > 0 ? notes * 18 + 6 : 0)
+        }
+        return total
+    }
     function toggleExpanded(id) {
         var copy = {}
         for (var key in expanded)
@@ -220,12 +230,13 @@ Item {
             required property string projectId
             required property string projectName
             required property var sessionList
+            required property var promptMetrics
             required property bool ticked
             required property string runningSessionId
             readonly property bool open: rowKind === "item" && sessions > 0 && !!timeline.expanded[itemId]
             width: todayList.width
             height: rowKind === "header" ? 60
-                : rowKind === "item" ? 82 + (open ? sessions * 52 + 8 : 0)
+                : rowKind === "item" ? 82 + (open ? sessionsHeight(sessionList) + 8 : 0)
                 : rowKind === "add" ? 32 : 26
             PrayerHeader {
                 anchors.fill: parent
@@ -264,6 +275,7 @@ Item {
                 projectId: rowDelegate.projectId
                 projectName: rowDelegate.projectName
                 sessionList: rowDelegate.sessionList
+                promptMetrics: rowDelegate.promptMetrics
                 ticked: rowDelegate.ticked
                 runningSessionId: rowDelegate.runningSessionId
                 expanded: rowDelegate.open
