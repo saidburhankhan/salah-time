@@ -19,6 +19,9 @@ in place (the user has live data now: never drop or rewrite it). One CHECKPOINT 
 (2)-(4). Checks: `cargo test --offline --workspace` (socket tests fail in your sandbox; say which),
 `cargo clippy --offline --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check`.
 
+Epics are optional everywhere and existing projects, tasks, routines, sessions and fixtures must
+keep working unchanged; read plan.md "Optional everywhere" and "Statistics show the gaps" first.
+
 ## Checkpoint protocol
 
 Your sandbox cannot write `.git` or create Unix sockets. Never run `git commit`. At each green

@@ -20,6 +20,9 @@ render them with `SALAH_UI_SHOT_DIR=<dir> app/bin/test`. Readable QML, muted the
 white fills), `Text.PlainText` for dynamic strings, existing tests kept. Checks: `app/bin/build`,
 `app/bin/test` (socket tests skipped in your sandbox), `git diff --check`. One CHECKPOINT per task.
 
+Epics are optional everywhere and existing projects, tasks, routines, sessions and fixtures must
+keep working unchanged; read plan.md "Optional everywhere" and "Statistics show the gaps" first.
+
 ## Checkpoint protocol
 
 Your sandbox cannot write `.git` or create Unix sockets. Never run `git commit`. At each green

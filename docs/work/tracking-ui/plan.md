@@ -274,6 +274,20 @@ Starts after phase 2's backend (C2) is committed, so two workers never edit the 
   Tasks. Backlog grouped by project → epic.
 - **Widget:** the creation sheet and "+ Log" show epic chips after a project is chosen (optional);
   rows show the epic name next to the project dot.
+- **Optional everywhere (user):** an epic is never required. A task may have a project and an
+  epic, a project only, or neither; a session may have any of these. Nothing about existing
+  projects, tasks, routines or sessions changes: `epic_id` is a new nullable column, every existing
+  row stays `null`, and every existing method, result and fixture keeps its shape (additive fields
+  only). Routines can have an epic too, but never need one.
+- **Statistics show the gaps explicitly:** breakdowns and the general table include a
+  **"No project"** row (sessions without a project) and, within a project, a **"No epic"** row
+  (that project's sessions without an epic), so totals always add up to the whole. Filters offer
+  `epic_id: "none"` (the project's work outside any epic) and `project_id: "none"` (work with no
+  project). A filtered view never silently drops unassigned work.
+- **Architecture:** follow the existing layout (domain type in salah-domain, table and queries in
+  salah-store, logic in salah-core modules next to projects/sessions/stats, methods in the
+  protocol's method table, CLI subcommand like `project`). No changes to unrelated modules; no
+  file over ~800 lines; migrations additive and in place on the user's live database.
 - Fixtures: `epics_list.json`, `epic_add.json`, `epic_edit_finish.json`, `session_log_epic.json`,
   `stats_table_epic.json`.
 

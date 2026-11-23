@@ -20,6 +20,9 @@ from parse, URL validation, due ordering). Checks: node checks in plugin/local.s
 `omarchy plugin validate plugin/local.salah`, `git diff --check`. One CHECKPOINT per task; the
 orchestrator renders and reviews the screens.
 
+Epics are optional everywhere and existing projects, tasks, routines, sessions and fixtures must
+keep working unchanged; read plan.md "Optional everywhere" and "Statistics show the gaps" first.
+
 ## Checkpoint protocol
 
 Your sandbox cannot write `.git` or create Unix sockets. Never run `git commit`. At each green
