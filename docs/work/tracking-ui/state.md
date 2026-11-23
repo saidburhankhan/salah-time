@@ -144,3 +144,8 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   detach_item_tag logs op "delete" for removed items (use "update"); stale comments stats.rs:541,
   tags.rs:1, tags::remove doc; item_tag_ids sorts by id but report_tags by name (pick name order).
   C10 idle: tasks 1–2 need C8 goals/review fixtures.
+- 03:4x committed a3603e0 (C9 0, app task tags; 78 app tests, screenshots ok). Tags on tasks is
+  complete in backend, app and widget. INSTALL waits for C8 CHECKPOINT 1 (goals): scripts/install
+  must run from this checkout (ownership marker), and crates/ holds C8's goals WIP. At CHECKPOINT 1:
+  verify + commit, stop the workers, full scripts/test, live-copy diff, ./scripts/install, restart.
+  C9 → task 2 (Goals UI) against C8's draft fixtures; C10 → task 1 (goal chips); both stop after it.
