@@ -179,6 +179,7 @@ BarWidget {
     quickAddBlock = String(block || "")
     var content = panel.loadedContent
     if (content && content.quickField) {
+      content.revealQuickField()
       content.quickField.forceActiveFocus()
       content.quickField.cursorPosition = content.quickField.text.length
     }
@@ -277,7 +278,7 @@ BarWidget {
     if (!runningTimer) return
     var opId = beginOp("bump", "")
     pendingOps[opId].pulse = fromBar
-    client.runningMutation(opId, "session.bump", {
+    client.rpcMutation(opId, "session.bump", {
       "id": runningTimer.id, "metric_id": "distractions", "delta": delta
     })
   }
@@ -303,7 +304,7 @@ BarWidget {
     if (!trimmed || noteOp || !runningTimer || runningTimer.id !== noteSessionId) return
     noteError = ""
     noteOp = beginOp("note", "")
-    client.runningMutation(noteOp, "session.note", { "id": noteSessionId, "text": trimmed })
+    client.rpcMutation(noteOp, "session.note", { "id": noteSessionId, "text": trimmed })
   }
 
   function openDonePanel(item) {
@@ -749,12 +750,35 @@ BarWidget {
       property string expandedItemId: ""
       property string occurrenceHint: ""
       anchors.fill: parent
-      implicitHeight: Math.min(dayColumn.implicitHeight,
-        Math.max(Style.space(240), panel.availableCardHeight - panel.padding * 2))
+      readonly property real maxContentHeight: Math.max(Style.space(240), panel.availableCardHeight - panel.padding * 2)
+      implicitHeight: Math.min(dayColumn.implicitHeight, maxContentHeight)
       blocked: quickField.activeFocus || editingKey !== "" || sessionEditor.textFocus || runningCard.noteFocus
       function revealSessionEditor() {
         if (root.sessionPanelMode === "pause")
           dayScroll.contentY = Math.max(0, Math.min(sessionEditor.y, dayScroll.contentHeight - dayScroll.height))
+      }
+      function revealQuickField() {
+        quickAdd.blockChoice = ""
+        quickAdd.whenChoice = "today"
+        if (quickAdd.y < dayScroll.contentY || quickAdd.y + quickField.height > dayScroll.contentY + dayScroll.height)
+          dayScroll.contentY = Math.min(quickAdd.y, Math.max(0, dayScroll.contentHeight - dayScroll.height))
+      }
+      readonly property string currentBlock: root.planner ? root.planner.block : ""
+      onCurrentBlockChanged: if (quickAdd && quickAdd.expanded) Qt.callLater(keyCatcher.revealCreationBlock)
+
+      // While composing, the timeline has its own viewport directly below
+      // the sheet. Keep the active block in view even late in a busy day.
+      function revealCreationBlock() {
+        if (!quickAdd.expanded) {
+          timelineList.positionViewAtBeginning()
+          return
+        }
+        dayColumn.forceLayout()
+        var index = indexOfKey("header:" + currentBlock)
+        if (index >= 0) timelineList.positionViewAtIndex(index, ListView.Beginning)
+        var bottom = flatTimeline.y + Math.min(flatTimeline.height, Style.space(96))
+        dayScroll.contentY = Math.min(quickAdd.y, Math.max(0, dayScroll.contentHeight - dayScroll.height),
+          Math.max(dayScroll.contentY, bottom - dayScroll.height))
       }
       function collapseExpanded() {
         expandedItemId = ""
@@ -768,6 +792,7 @@ BarWidget {
 
       onCloseRequested: {
         if (dragKey !== "") cancelDrag()
+        else if (quickAdd.expanded) quickAdd.dismiss()
         else if (root.sessionPanelMode !== "") root.closeSessionPanel()
         else if (expandedItemId !== "") collapseExpanded()
         else root.close()
@@ -1054,16 +1079,17 @@ BarWidget {
         running: keyCatcher.dragKey !== ""
         onTriggered: {
           var edge = Style.space(40)
-          var viewportY = flatTimeline.y + keyCatcher.dragPointerY - dayScroll.contentY
+          var scroll = quickAdd.expanded ? timelineList : dayScroll
+          var viewportY = keyCatcher.dragPointerY - scroll.contentY
+          if (!quickAdd.expanded) viewportY += flatTimeline.y
           var delta = 0
           if (viewportY < edge) delta = -Math.min(Style.space(8), edge - viewportY)
-          else if (viewportY > dayScroll.height - edge)
-            delta = Math.min(Style.space(8), viewportY - (dayScroll.height - edge))
-          var nextY = Math.max(0, Math.min(dayScroll.contentHeight - dayScroll.height,
-            dayScroll.contentY + delta))
-          var applied = nextY - dayScroll.contentY
+          else if (viewportY > scroll.height - edge)
+            delta = Math.min(Style.space(8), viewportY - (scroll.height - edge))
+          var nextY = Math.max(0, Math.min(scroll.contentHeight - scroll.height, scroll.contentY + delta))
+          var applied = nextY - scroll.contentY
           if (applied !== 0) {
-            dayScroll.contentY = nextY
+            scroll.contentY = nextY
             keyCatcher.moveDrag(keyCatcher.dragPointerY + applied)
           }
         }
@@ -1181,6 +1207,9 @@ BarWidget {
 
           QuickAdd {
             id: quickAdd
+            transport: client
+            onExpandedChanged: Qt.callLater(keyCatcher.revealCreationBlock)
+            onHeightChanged: if (expanded) Qt.callLater(keyCatcher.revealCreationBlock)
             strings: root.tr
             host: root
             fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
@@ -1212,14 +1241,15 @@ BarWidget {
             id: flatTimeline
             visible: root.report !== null
             width: parent.width
-            height: timelineList.contentHeight
+            height: quickAdd.expanded ? Math.min(timelineList.contentHeight,
+              Math.max(Style.space(96), keyCatcher.maxContentHeight - (y - quickAdd.y))) : timelineList.contentHeight
 
             ListView {
               id: timelineList
               anchors.fill: parent
-              interactive: false
+              interactive: quickAdd.expanded && contentHeight > height
               model: timelineModel
-              clip: false
+              clip: quickAdd.expanded
               focus: keyCatcher.dragKey !== ""
 
               move: Transition {
@@ -1259,7 +1289,7 @@ BarWidget {
               visible: keyCatcher.dragKey !== ""
               x: Style.space(28)
               y: Math.max(0, Math.min(flatTimeline.height - height,
-                keyCatcher.dragPointerY - height / 2))
+                keyCatcher.dragPointerY - timelineList.contentY - height / 2))
               width: flatTimeline.width - Style.space(28)
               height: Style.space(38)
               z: 20

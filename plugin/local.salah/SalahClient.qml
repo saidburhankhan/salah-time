@@ -24,6 +24,7 @@ Item {
 
   signal statusLoaded(var report)
   signal statusFailed(string message)
+  signal itemParsed(string text, var draft, string error)
   signal projectsLoaded(var projects)
   signal metricsLoaded(var metrics)
   // Entity scopes named by a `changed` notification (items, sessions,
@@ -224,6 +225,7 @@ Item {
     if (message.error) {
       var detail = client.errorDetail(message.error)
       if (meta.type === "status") client.handleStatusFailure(detail)
+      else if (meta.type === "parse") client.itemParsed(meta.text, null, detail)
       else if (meta.type === "projects" || meta.type === "metrics") {
         // The planner still works without these lists; the panels say so.
       }
@@ -243,6 +245,8 @@ Item {
       client.handleSubscribed(result)
     } else if (meta.type === "status") {
       client.handleStatusResult(meta, result)
+    } else if (meta.type === "parse") {
+      client.itemParsed(meta.text, result, "")
     } else if (meta.type === "projects") {
       client.projectsLoaded(result || [])
     } else if (meta.type === "metrics") {
@@ -362,9 +366,15 @@ Item {
     }
   }
 
-  function fallback(opId, kind, command, rpcInput) {
+  function fallback(opId, kind, command, rpcInput, readMeta) {
+    if (readMeta) {
+      // Only the latest draft or catalogue needs a turn in the CLI queue.
+      client.fallbackQueue = client.fallbackQueue.filter(function(entry) {
+        return !entry.readMeta || entry.readMeta.type !== readMeta.type
+      })
+    }
     client.fallbackQueue = client.fallbackQueue.concat([{
-      "opId": opId, "kind": kind, "command": command, "rpcInput": rpcInput || ""
+      "opId": opId, "kind": kind, "command": command, "rpcInput": rpcInput || "", "readMeta": readMeta
     }])
     client.runNextFallback()
   }
@@ -448,18 +458,20 @@ Item {
     client.fallback(opId, "stopSession", command)
   }
 
-  function runningMutation(opId, method, params) {
-    if (client.socketActive) {
-      client.sendMutation(opId, method, method, params)
-      return
-    }
-    // The in-process CLI dispatcher accepts the same bump/note protocol.
-    params.op_id = opId
+  function rpcInput(method, params) {
     var hello = { "jsonrpc": "2.0", "id": 1, "method": "hello",
       "params": { "protocol": [1], "client": "salah-widget", "actor": "widget" } }
     var request = { "jsonrpc": "2.0", "id": 2, "method": method, "params": params }
-    client.fallback(opId, method, ["salah", "rpc"],
-      JSON.stringify(hello) + "\n" + JSON.stringify(request) + "\n")
+    return JSON.stringify(hello) + "\n" + JSON.stringify(request) + "\n"
+  }
+
+  function rpcMutation(opId, method, params, kind) {
+    if (client.socketActive) {
+      client.sendMutation(opId, kind || method, method, params)
+      return
+    }
+    params.op_id = opId
+    client.fallback(opId, kind || method, ["salah", "rpc"], client.rpcInput(method, params))
   }
 
   function removeSession(opId, kind, sessionId) {
@@ -541,9 +553,17 @@ Item {
     statusProcess.running = true
   }
 
+  function read(method, params, meta) {
+    if (client.socketActive && client.request(method, params, meta) >= 0) return
+    client.fallback("", "", ["salah", "rpc"], client.rpcInput(method, params), meta)
+  }
+
+  function parseItem(text) {
+    client.read("item.parse", { "text": text }, { "type": "parse", "text": text })
+  }
+
   function loadProjects() {
-    if (client.socketActive)
-      client.request("projects.list", { "archived": false }, { "type": "projects" })
+    client.read("projects.list", { "archived": false }, { "type": "projects" })
   }
 
   function loadMetrics() {
@@ -650,11 +670,13 @@ Item {
       client.activeFallback = null
       if (active) {
         var failure = String(actionStderr.text || "").trim().replace(/[\r\n]+/g, " ")
+        var result = null
         if (exitCode === 0 && active.rpcInput) {
           try {
             var lines = String(actionStdout.text || "").trim().split("\n")
             var reply = JSON.parse(lines[lines.length - 1])
-            if (reply.id !== 2 || !reply.result) {
+            result = reply.result
+            if (reply.id !== 2 || !result) {
               exitCode = 1
               failure = client.errorDetail(reply.error)
             }
@@ -663,14 +685,22 @@ Item {
             failure = String(error)
           }
         }
-        if (exitCode === 0) {
+        if (active.readMeta) {
+          var meta = active.readMeta
+          if (meta.type === "parse")
+            client.itemParsed(meta.text, exitCode === 0 ? result : null, exitCode === 0 ? "" : failure)
+          else if (meta.type === "projects" && exitCode === 0 && !client.socketActive)
+            client.projectsLoaded(result)
+        } else if (exitCode === 0 && active.rpcInput) {
+          client.mutationSucceeded(active.opId, active.kind, result)
+        } else if (exitCode === 0) {
           client.mutationSucceeded(active.opId, active.kind, {
             "fallback": true, "raw": String(actionStdout.text || "")
           })
         } else {
           client.mutationFailed(active.opId, active.kind, failure, {})
         }
-        client.statusAfterFallback = true
+        if (!active.readMeta) client.statusAfterFallback = true
       }
       client.runNextFallback()
       if (!actionProcess.running && client.fallbackQueue.length === 0
