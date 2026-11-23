@@ -13,6 +13,8 @@ Item {
   property var strings
   property var controller
   property string rowKey
+  property var resourceHost
+  property string resourceItemId
   property string fontFamily
   property color foreground
   property color mutedForeground
@@ -150,6 +152,17 @@ Item {
         horizontalPadding: Style.space(6)
         verticalPadding: 0
         onClicked: root.addTimeRequested()
+      }
+    }
+
+    Loader {
+      active: root.visible && root.resourceItemId !== ""
+      width: parent.width
+      sourceComponent: ItemResources {
+        host: root.resourceHost
+        itemId: root.resourceItemId
+        fontFamily: root.fontFamily
+        onTextFocusChanged: root.fieldFocusChanged(textFocus)
       }
     }
 

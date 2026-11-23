@@ -33,3 +33,11 @@ The bell shows the due count beside the prayer label. The popup starts with the 
 All 106 Node checks passed, including three covering due ordering and compatibility with older status reports. Omarchy plugin validation, QML syntax parsing, i18n JSON parsing, and `git diff --check` passed. An offscreen QML test with a stub host checked the list height, literal title rendering, and tick interaction. The full bar and popup render and socket integration remain with the orchestrator.
 
 CHECKPOINT 2a: Show and complete due reminders in the widget (`plugin/local.salah/BarWidget.qml`, `plugin/local.salah/DueReminders.qml`, `plugin/local.salah/ResourceLogic.js`, `plugin/local.salah/i18n/en.json`, `plugin/local.salah/tests/resource_logic_test.js`, `docs/work/tracking-ui/c6-progress.md`)
+
+## Task 2b — day-row resources
+
+The paperclip badge counts notes, links and open reminders from the day row. Expanding the row loads that item's resources in position order, with a bounded scrolling area and quick-add fields for notes and links. Both link controls validate the URL before opening it externally. The reminder control completes the displayed version and shares the due list's pending state. Resource changes reload the opened list, and unchanged quick-add retries reuse their operation ID.
+
+All 110 Node checks passed, including seven resource checks. Omarchy plugin validation, QML syntax checks, i18n JSON parsing, and `git diff --check` passed. A mocked offscreen interaction check covered URL validation and note and link saves, reminder dispatch, stale replies, and retry. An offscreen Quickshell harness with stubbed popup windows and CLI fixtures verified the paperclip count and loading the expanded row over stdio. Socket integration and visual review remain with the orchestrator.
+
+CHECKPOINT 2b: Add resource counts, links, reminder completion and quick add to widget rows (`plugin/local.salah/BarWidget.qml`, `plugin/local.salah/ItemResources.qml`, `plugin/local.salah/ResourceLogic.js`, `plugin/local.salah/RowActions.qml`, `plugin/local.salah/SalahClient.qml`, `plugin/local.salah/TimelineRow.qml`, `plugin/local.salah/i18n/en.json`, `plugin/local.salah/tests/resource_logic_test.js`, `docs/work/tracking-ui/c6-progress.md`)

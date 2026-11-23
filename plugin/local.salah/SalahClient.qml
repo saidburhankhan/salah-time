@@ -28,6 +28,7 @@ Item {
   signal projectsLoaded(var projects)
   signal metricsLoaded(var metrics)
   signal epicsLoaded(var epics)
+  signal resourcesLoaded(string requestId, var resources, string error)
   // Entity scopes named by a `changed` notification (items, sessions,
   // projects, tags, metrics, marks), for lists the status does not carry.
   signal entitiesChanged(var scopes)
@@ -157,6 +158,8 @@ Item {
       } else if (meta.type === "mutation") {
         failures.push({ "type": "mutation", "opId": meta.opId,
           "kind": meta.kind, "reason": reason })
+      } else if (meta.type === "resources") {
+        failures.push({ "type": "resources", "requestId": meta.requestId, "reason": reason })
       }
     }
     if (failures.length === 0) return
@@ -167,6 +170,7 @@ Item {
       for (var i = 0; i < failures.length; i++) {
         var failure = failures[i]
         if (failure.type === "status") client.statusFailed(failure.reason)
+        else if (failure.type === "resources") client.resourcesLoaded(failure.requestId, null, failure.reason)
         else client.mutationFailed(failure.opId, failure.kind, failure.reason, {})
       }
     })
@@ -227,6 +231,7 @@ Item {
       var detail = client.errorDetail(message.error)
       if (meta.type === "status") client.handleStatusFailure(detail)
       else if (meta.type === "parse") client.itemParsed(meta.text, null, detail)
+      else if (meta.type === "resources") client.resourcesLoaded(meta.requestId, null, detail)
       else if (meta.type === "projects" || meta.type === "metrics" || meta.type === "epics") {
         // The planner still works without these lists; the panels say so.
       }
@@ -254,6 +259,8 @@ Item {
       client.epicsLoaded(result || [])
     } else if (meta.type === "metrics") {
       client.metricsLoaded(result || [])
+    } else if (meta.type === "resources") {
+      client.resourcesLoaded(meta.requestId, result, "")
     } else if (meta.type === "mutation") {
       delete client.activeOps[meta.opId]
       var revision = Number(result && result.revision) || 0
@@ -580,6 +587,10 @@ Item {
       client.request("metrics.list", { "archived": false }, { "type": "metrics" })
   }
 
+  function loadItemResources(itemId, requestId) {
+    client.read("resources.list", { "item_id": itemId }, { "type": "resources", "requestId": requestId })
+  }
+
   Component.onCompleted: {
     initialStatusTimer.start()
     client.attemptConnect()
@@ -702,6 +713,8 @@ Item {
             client.projectsLoaded(result)
           else if (meta.type === "epics" && exitCode === 0 && !client.socketActive)
             client.epicsLoaded(result)
+          else if (meta.type === "resources")
+            client.resourcesLoaded(meta.requestId, exitCode === 0 ? result : null, exitCode === 0 ? "" : failure)
         } else if (exitCode === 0 && active.rpcInput) {
           client.mutationSucceeded(active.opId, active.kind, result)
         } else if (exitCode === 0) {

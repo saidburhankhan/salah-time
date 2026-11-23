@@ -19,6 +19,7 @@ BarWidget {
   }
 
   readonly property var tr: strings
+  readonly property alias resourceClient: client
   property var report: null
   property double countdownAtMs: 0
   property double countdownNowMs: Date.now()
@@ -158,13 +159,13 @@ BarWidget {
     client.refreshStatus()
   }
 
-  function beginOp(kind, rowKey, tempKey) {
+  function beginOp(kind, rowKey, tempKey, retryId) {
     actionError = ""
     if (rowErrorKey === String(rowKey || "")) {
       rowErrorKey = ""
       rowErrorText = ""
     }
-    var opId = client.newOpId()
+    var opId = retryId || client.newOpId()
     var entry = { "kind": String(kind || ""), "rowKey": String(rowKey || "") }
     if (tempKey) entry.tempKey = String(tempKey)
     pendingOps[opId] = entry
@@ -185,15 +186,22 @@ BarWidget {
     if (content && pending.tempKey) content.removeItem(pending.tempKey)
   }
 
-  function completeReminder(id) {
+  function completeReminder(id, itemId, version) {
     if (!id || pendingReminders[id]) return
-    reminderError = ""
-    var opId = beginOp("resource.edit", "")
+    if (!itemId) reminderError = ""
+    var opId = beginOp("resource.edit", itemId ? "item:" + itemId : "")
     pendingOps[opId].reminderId = id
     var next = Object.assign({}, pendingReminders)
     next[id] = true
     pendingReminders = next
-    client.rpcMutation(opId, "resource.edit", { "id": id, "done": true })
+    var params = { "id": id, "done": true }
+    if (version) params.expected_version = version
+    client.rpcMutation(opId, "resource.edit", params)
+  }
+
+  function addResource(opId, params) {
+    beginOp("resource.add", "item:" + params.item_id, "", opId)
+    client.rpcMutation(opId, "resource.add", params)
   }
 
   function addItem(title) {
@@ -553,7 +561,7 @@ BarWidget {
     var detail = String(message || "").trim().replace(/[\r\n]+/g, " ")
     detail = detail === "" ? strings.t("panel.commandFailed") : detail.slice(0, 240)
     var content = panel.loadedContent
-    if (pending.reminderId) {
+    if (pending.reminderId && !pending.rowKey) {
       reminderError = detail
     } else if (opId === noteOp) {
       noteOp = ""
@@ -862,7 +870,8 @@ BarWidget {
         return {
           "rowType": type, "rowKey": key, "block": block || "", "itemId": "",
           "title": "", "time": "", "itemState": "", "projectId": "", "projectColor": "transparent", "epicName": "", "plannedMinutes": 0,
-          "minutes": 0, "count": 0, "repeat": "none", "timerRunning": false,
+          "minutes": 0, "count": 0, "resourceCount": 0, "hasResourceSupport": false,
+          "repeat": "none", "timerRunning": false,
           "detailText": "",
           "scheduleText": "", "nextOccurrence": "", "carried": false,
           "current": false, "marked": false, "passed": false, "pending": false
@@ -912,6 +921,8 @@ BarWidget {
             item.epicName = CreationLogic.epicName(root.epics, String(source.epic_id || ""))
             item.plannedMinutes = Number(source.planned_minutes) || 0
             item.minutes = Number(source.actual_minutes) || 0
+            item.hasResourceSupport = !!source.resources
+            item.resourceCount = ResourceLogic.resourceCount(source.resources)
             item.repeat = String(source.repeat || "none")
             item.timerRunning = status.running !== null && status.running !== undefined
               && String(status.running.item_id || "") === item.itemId

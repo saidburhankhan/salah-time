@@ -7,7 +7,7 @@ const path = require("node:path")
 const vm = require("node:vm")
 const { test } = require("node:test")
 
-const logic = {}
+const logic = { URL }
 const filename = path.join(__dirname, "..", "ResourceLogic.js")
 vm.runInNewContext(fs.readFileSync(filename, "utf8").replace(/^\.pragma library\s*/, ""), logic, { filename })
 
@@ -34,4 +34,42 @@ test("equivalent instants keep the server order within a timestamp", () => {
 test("a status snapshot without reminders has no due rows", () => {
   assert.equal(logic.orderedDueReminders(undefined).length, 0)
   assert.equal(logic.orderedDueReminders(null).length, 0)
+})
+
+test("the paperclip count adds notes, links and open reminders", () => {
+  assert.equal(logic.resourceCount({ notes: 2, links: 1, reminders: 4 }), 7)
+  assert.equal(logic.resourceCount({ notes: 0, links: 0, reminders: 0 }), 0)
+  assert.equal(logic.resourceCount(undefined), 0)
+})
+
+test("fixture links and absolute HTTP(S) URLs can open", () => {
+  const saved = fixture("resources_list").find(row => row.kind === "link")
+  assert.equal(logic.webUrl(saved.url), saved.url)
+  assert.equal(logic.webUrl("  HTTP://localhost/path#one  "), "HTTP://localhost/path#one")
+  assert.equal(logic.webUrl("https://bücher.example/"), "https://bücher.example/")
+  assert.equal(logic.webUrl("http://[::1]:8080/"), "http://[::1]:8080/")
+})
+
+test("other schemes, missing hosts and malformed or ambiguous URLs are blocked", () => {
+  const rejected = [
+    null, "", "example.org", "//example.org", "file:///tmp/a", "ftp://example.org",
+    "javascript:alert(1)", "data:text/html,hello", "https:example.org", "https:///path",
+    "https://", "https://:443/path", "https://example.org:65536", "https://user@",
+    "https://[invalid]", "https://\\example.org", "https://example.org/a b",
+    "https://example.org/a\nb", "https://example.org/\u0000"
+  ]
+  for (const url of rejected) assert.equal(logic.webUrl(url), "", String(url))
+})
+
+test("quick add sends the body or validated URL to the expanded item", () => {
+  function same(actual, expected) {
+    assert.deepEqual(JSON.parse(JSON.stringify(actual)), expected)
+  }
+  same(logic.quickResourceParams("item", "note", "  <b>Read</b>  "),
+    { item_id: "item", kind: "note", body: "<b>Read</b>" })
+  same(logic.quickResourceParams("item", "link", "  https://example.org/ "),
+    { item_id: "item", kind: "link", url: "https://example.org/" })
+  assert.equal(logic.quickResourceParams("item", "note", " "), null)
+  assert.equal(logic.quickResourceParams("item", "link", "file:///tmp/example"), null)
+  assert.equal(logic.quickResourceParams("item", "reminder", "tomorrow"), null)
 })

@@ -23,6 +23,8 @@ Item {
   required property int plannedMinutes
   required property int minutes
   required property int count
+  required property int resourceCount
+  required property bool hasResourceSupport
   required property string repeat
   required property bool timerRunning
   required property string detailText
@@ -326,6 +328,23 @@ Item {
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(1)
 
+      Button {
+        visible: row.resourceCount > 0
+        height: Style.space(26)
+        text: row.strings.t("resource.badge").arg(Commons.I18n.formatNumber(row.resourceCount))
+        tooltipText: row.strings.tn("resource.count", row.resourceCount)
+          .arg(Commons.I18n.formatNumber(row.resourceCount))
+        foreground: row.mutedForeground
+        fontFamily: row.fontFamily
+        fontSize: Style.font.caption
+        horizontalPadding: Style.space(4)
+        verticalPadding: 0
+        onClicked: {
+          row.timeline.currentIndex = row.index
+          row.controller.toggleExpanded(row.itemId)
+        }
+      }
+
       Text {
         anchors.verticalCenter: parent.verticalCenter
         textFormat: Text.PlainText
@@ -383,6 +402,8 @@ Item {
     strings: row.strings
     controller: row.controller
     rowKey: row.rowKey
+    resourceHost: row.host
+    resourceItemId: row.hasResourceSupport ? row.itemId : ""
     fontFamily: row.fontFamily
     foreground: row.foreground
     mutedForeground: row.mutedForeground
