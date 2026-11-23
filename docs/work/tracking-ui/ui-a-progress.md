@@ -4,7 +4,8 @@
 
 - 9fae1d6 U1 — Settings pages (projects, tags, metrics), item editor project picker.
 - 49aad8d U2 — Today: pause/resume, done panel + tick/untick, session list edit/remove, + time.
-- (this commit) U3 — Statistics rebuilt with charts and a working filter.
+- 1b51277 U3 — Statistics rebuilt with charts and a working filter.
+- (this commit) Muted selected/primary states: accent tint instead of white fills.
 
 ## Current step
 
@@ -57,6 +58,13 @@ U4/U5 belong to UI-W and the orchestrator.
   values) and tag breakdowns in their colours; time per block against capacity with focus.
 - Removed the orphaned PrayerDayChart, DayTable, TaskBreakdown, RangeBar, RangeDialog.
 - Tests: 52 passed (50 functions + init/cleanup; baseline 43 + 2).
+
+## Follow-up: no bright fills (done)
+
+- Main.qml tokens `selectedFill` (accent at 16%), `selectedFillPressed`, `selectedBorder`
+  (accent at 70%) and `selectedText` (text tinted with the accent). AppButton primary,
+  ChoiceChip selected, the calendar's selected day, the done box, marked prayers and the drag
+  ghost use them; no control has a light or white fill any more.
 
 ## Notes
 

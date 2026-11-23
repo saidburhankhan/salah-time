@@ -48,6 +48,14 @@ ApplicationWindow {
     readonly property color muted: "#8f8a80"
     readonly property color text: "#f1efe9"
     readonly property string mono: "monospace"
+    // Primary and selected controls: a muted tint of the theme accent on the
+    // dark surface, never a light fill. The text mixes the accent into the
+    // normal text colour so it stays readable whatever the accent is.
+    readonly property color accentColor: theme.accent
+    readonly property color selectedFill: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.16)
+    readonly property color selectedFillPressed: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.28)
+    readonly property color selectedBorder: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.7)
+    readonly property color selectedText: Qt.tint(text, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.55))
 
     property alias timelineModel: todayPage.timelineModel
     property alias dragging: todayPage.dragging

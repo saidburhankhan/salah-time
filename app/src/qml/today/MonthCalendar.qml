@@ -62,14 +62,14 @@ Card {
                     Layout.fillWidth: true
                     height: 34
                     radius: 17
-                    color: dayIso === backend.selectedDay ? monthCalendar.win.text : "transparent"
-                    border.width: dayIso === backend.todayDay && dayIso !== backend.selectedDay ? 1 : 0
-                    border.color: theme.accent
+                    color: dayIso === backend.selectedDay ? monthCalendar.win.selectedFill : "transparent"
+                    border.width: dayIso === backend.selectedDay || dayIso === backend.todayDay ? 1 : 0
+                    border.color: dayIso === backend.selectedDay ? monthCalendar.win.selectedBorder : "#5f5a51"
                     Label {
                         anchors.centerIn: parent
                         text: parent.date.getDate()
                         color: parent.dayIso === backend.selectedDay
-                            ? "#151411"
+                            ? monthCalendar.win.selectedText
                             : parent.date.getMonth() === monthCalendar.win.calendarDate(15).getMonth()
                                 ? "#d5d1c9"
                                 : "#5f5a51"

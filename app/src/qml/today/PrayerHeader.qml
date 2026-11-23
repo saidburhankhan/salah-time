@@ -26,14 +26,14 @@ Rectangle {
             width: 28
             height: 28
             radius: 14
-            color: header.marked ? theme.accent : "transparent"
+            color: header.marked ? header.win.selectedFill : "transparent"
             border.width: 2
-            border.color: header.marked ? theme.accent : header.win.text
+            border.color: header.marked ? header.win.selectedBorder : "#8f8a80"
             Label {
                 anchors.centerIn: parent
                 visible: header.marked
                 text: "✓"
-                color: theme.accentForeground
+                color: header.win.selectedText
                 font.weight: Font.Bold
             }
             MouseArea {

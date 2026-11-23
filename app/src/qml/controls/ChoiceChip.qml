@@ -25,23 +25,24 @@ Button {
                 radius: 5
                 anchors.verticalCenter: parent.verticalCenter
                 color: control.dotColor
-                border.width: control.selected ? 1 : 0
-                border.color: "#171612"
+                border.width: 0
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: control.text
                 textFormat: Text.PlainText
-                color: !control.enabled ? "#6f6b63" : (control.selected ? "#171612" : "#d6d2ca")
+                color: !control.enabled ? "#6f6b63" : (control.selected ? control.win.selectedText : "#d6d2ca")
                 font.pixelSize: 14
             }
         }
     }
     background: Rectangle {
         radius: Math.max(6, theme.radius)
-        color: control.selected ? control.win.text : (control.down ? control.win.border : "transparent")
+        color: control.selected
+            ? (control.down ? control.win.selectedFillPressed : control.win.selectedFill)
+            : (control.down ? control.win.border : "transparent")
         border.width: 1
-        border.color: control.selected ? control.win.text : control.win.border
+        border.color: control.selected ? control.win.selectedBorder : control.win.border
         opacity: control.enabled ? 1 : 0.6
     }
 }

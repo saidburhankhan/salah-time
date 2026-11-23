@@ -29,7 +29,7 @@ Rectangle {
             width: 24
             height: 24
             radius: Math.min(5, theme.radius)
-            color: ghost.win.dragDone ? theme.accent : "transparent"
+            color: ghost.win.dragDone ? ghost.win.selectedFill : "transparent"
             border.color: "#777168"
         }
         ColumnLayout {

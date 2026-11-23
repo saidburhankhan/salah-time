@@ -10,7 +10,7 @@ Button {
     rightPadding: 17
     contentItem: Text {
         text: control.text
-        color: control.enabled ? (control.primary ? "#171612" : control.win.text) : control.win.muted
+        color: control.enabled ? (control.primary ? control.win.selectedText : control.win.text) : control.win.muted
         font.pixelSize: 14
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
@@ -18,9 +18,9 @@ Button {
     background: Rectangle {
         radius: Math.max(6, theme.radius)
         color: control.primary
-            ? (control.enabled ? control.win.text : "#2c2a25")
+            ? (!control.enabled ? "#24221e" : (control.down ? control.win.selectedFillPressed : control.win.selectedFill))
             : (control.down ? control.win.border : "transparent")
-        border.width: control.primary ? 0 : 1
-        border.color: control.win.border
+        border.width: 1
+        border.color: control.primary && control.enabled ? control.win.selectedBorder : control.win.border
     }
 }

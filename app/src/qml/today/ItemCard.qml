@@ -114,14 +114,14 @@ Rectangle {
             width: 26
             height: 26
             radius: Math.min(6, theme.radius)
-            color: itemCard.done ? theme.accent : "transparent"
-            border.color: itemCard.done ? theme.accent : "#625e55"
+            color: itemCard.done ? itemCard.win.selectedFill : "transparent"
+            border.color: itemCard.done ? itemCard.win.selectedBorder : "#625e55"
             border.width: 2
             Label {
                 anchors.centerIn: parent
                 text: "✓"
                 visible: itemCard.done
-                color: theme.accentForeground
+                color: itemCard.win.selectedText
                 font.weight: Font.Bold
             }
             MouseArea {
