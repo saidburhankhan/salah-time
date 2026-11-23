@@ -460,3 +460,32 @@ properly:
 - **Worker:** C8 implements the rule first (before goals, since goals and insights use it) with tests:
   a 2-hour session across Fajr→Dhuhr→Asr, a Worked override that shortens it, logged sessions, and
   a timer clamped at Sleep. Fixture: `stats_table_block.json`. C9 shows the matrix and the on-plan rate.
+
+### Addendum: tags on tasks (user decision 2026-11-23 ~18:00; replaces "tags only on projects")
+The user tags topics inside a project (Career → `dmbs` for one course, `arabic` for Quran and for a
+task with no project), so a tag on a whole project cannot say "these tasks". Tags move to tasks:
+- **A task (item) carries any number of tags, across projects.** A project's tags become its
+  **default tags**: a new task in that project starts with them (item.add without `tag_ids`), and
+  can drop or add any. Changing a project's defaults never changes existing tasks.
+- **A session's tags are read at query time:** its item's tags; a session with no item (bare
+  project work) has its project's default tags. Re-tagging a task re-labels its history (tags are
+  labels, not facts; project/epic stay copied at write).
+- **Migration 005 copies** each project's tags onto every item of that project, so every existing
+  statistic by tag is unchanged on day one.
+- **Removing a tag** takes it off tasks and projects; sessions are kept.
+- **Statistics FilterBar order:** Range, Projects, Epics, Tasks, Tags, Metrics. Tags no longer
+  narrow the project list. The Tags row shows the tags used by the tasks currently shown (all tags
+  when no project is picked) plus "No tag"; picking a tag narrows the Tasks row to tagged tasks and
+  keeps the chosen project. `stats.table` group "tag" counts a session once in each of its tags
+  (unchanged rule: totals never double count).
+- **Backlog** tag filter and **widget creation sheet** use task tags: the sheet shows tag chips for
+  the new task, pre-selected from the chosen project's defaults; picking a tag no longer filters
+  the project list.
+- **App:** task editor (Today/Backlog edit) gets Tags chips; project editor's Tags section is
+  labelled "Default tags for new tasks"; Settings → Tags counts tasks and projects.
+- **Protocol (additive):** item views gain `tag_ids`; `item.add`/`item.edit` accept `tag_ids`
+  (unknown or removed ids are refused); `backlog.list` rows use task tags; the `tag_id` filter of
+  `stats.*`, `sessions.list` and `backlog.list` matches the session/task tag set above, `"none"` =
+  empty set. Fixtures: `item_add_tags.json`, `stats_table_tag_items.json`.
+- **Workers:** C8 adds `item_tags` to 005 (task 0) and the rules (task 0c, before goals);
+  the app part goes to C9 before Insights; the widget part to C10 first (or C6 if free sooner).

@@ -207,6 +207,17 @@ CREATE TABLE reviews (
     version     INTEGER NOT NULL CHECK (version >= 1)
 );
 CREATE UNIQUE INDEX reviews_by_week ON reviews (week) WHERE deleted_at IS NULL;
+
+-- Tags on tasks (plan.md "Addendum: tags on tasks"); project_tags stays as each
+-- project's default tags for new tasks.
+CREATE TABLE item_tags (
+    item_id TEXT NOT NULL REFERENCES items (id),
+    tag_id  TEXT NOT NULL REFERENCES tags (id),
+    PRIMARY KEY (item_id, tag_id)
+);
+CREATE INDEX item_tags_by_tag ON item_tags (tag_id);
+INSERT INTO item_tags (item_id, tag_id)
+    SELECT i.id, pt.tag_id FROM items i JOIN project_tags pt ON pt.project_id = i.project_id;
 ```
 
 Rules:
@@ -221,6 +232,11 @@ Rules:
   `day` value sessions carry.
 - Removing a project/epic/item ends its goals (`ends_on` = last full period), never deletes them.
 - `changes` entity names: `goals`, `reviews`.
+- Item tags: changing an item's tags bumps the item's `version`/`updated_at` (entity `items`);
+  `tag.remove` deletes its `item_tags` rows as it does its `project_tags` rows. A session's tag
+  set = its item's tags, or its project's tags when it has no item, resolved at read time. The
+  migration test checks every pre-005 item of a tagged project ends up with that project's tags
+  and that `stats.table` group "tag" totals are identical before and after 005.
 
 ## Review gates
 

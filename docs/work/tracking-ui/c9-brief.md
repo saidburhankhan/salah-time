@@ -9,6 +9,11 @@ progress files, `docs/work/architecture/protocol-v1.md`, and the phase 4 fixture
 `review_*.json`, `status_goals.json`).
 
 Tasks:
+0. Tags on tasks (plan.md "Addendum: tags on tasks"; needs C8 CHECKPOINT 0c): Tags chips in the
+   task editor (new tasks pre-selected from the project's default tags), project editor section
+   "Default tags for new tasks", Settings → Tags counts, Statistics FilterBar order Range, Projects,
+   Epics, Tasks, Tags, Metrics (tags no longer narrow projects; the Tags row shows the tags of the
+   shown tasks plus "No tag"), Backlog tag filter on task tags. Tests + screenshots. CHECKPOINT 0.
 1. Insights page as plan.md describes: block / hour / weekday groups as compact bar rows with
    minutes, focus and distractions per hour; the distractions-per-hour line; Best and Hardest
    sessions with notes, opening the session; the On-plan rate per task and the planned × actual

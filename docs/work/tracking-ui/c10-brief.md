@@ -8,6 +8,10 @@ Read: `docs/AGENTS.md`, `plan.md` ("User decisions", "Phase 4"), `ui-w-progress.
 `crates/salah-cli/tests/fixtures/rpc/status_goals.json`.
 
 Tasks:
+0. Tags on tasks (plan.md "Addendum: tags on tasks"; needs C8 CHECKPOINT 0c): the creation sheet
+   shows tag chips for the new task, pre-selected from the chosen project's default tags, sends
+   `tag_ids`; picking a tag no longer filters the project list (CreationLogic.js + its test).
+   CHECKPOINT 0.
 1. Panel header goal chips from `status.get.goals`: today's and this week's goals as compact
    progress chips (label, value/target, a thin progress bar, a check when met), at most 3 then
    "+N"; nothing shown when there are no goals.

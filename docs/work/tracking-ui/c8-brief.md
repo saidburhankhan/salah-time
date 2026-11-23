@@ -13,7 +13,12 @@ Tasks:
    (day view block bars, `stats.table` group "block", `stats.series` split "block") with its tests and
    `stats_table_block.json`. CHECKPOINT 0a.
 0. Migration 005 exactly as data-model.md specifies, with its migration test on realistic rows
-   (follow the existing migration tests). CHECKPOINT 0 alone, for the independent review.
+   (follow the existing migration tests). 005 includes `item_tags` (plan.md "Addendum: tags on tasks").
+   CHECKPOINT 0 alone, for the independent review.
+0c. Tags on tasks: item views `tag_ids`, `item.add` defaults from the project, `item.edit`,
+   `tag.remove`, the session tag set in `stats.*`/`sessions.list`/`backlog.list` filters and the
+   "tag" group, fixtures `item_add_tags.json`, `stats_table_tag_items.json`, CLI
+   `salah item add/edit --tag`. CHECKPOINT 0c.
 1. Goals: domain types, store queries, `salah-core` module `goals` (progress from sessions for
    minutes and for metrics using each metric's rollup and the minutes weighting stats uses),
    `goals.list`, `goal.add`, `goal.edit` (successor rule), `goal.end`, `goal.remove`,
