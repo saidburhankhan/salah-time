@@ -96,3 +96,8 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - U5: user visual check after `omarchy restart shell`; fix what they report.
 - Optional: app/widget could show `stale` on an overnight timer (backend reports it since 47fb1d1).
 - Codex 5h limit hit at 06:59 (resets 11:26); weekly was 45% at 06:20.
+- 22:30 render of c514311 (scratch daemon from HEAD, 2 overdue reminders): no bar badge, no Due
+  section. `ResourceLogic.orderedDueReminders` uses `Array.isArray(rows)`, which is false for the
+  QML-converted `status.reminders` (debug print: report.reminders has 2 rows, dueReminders 0).
+  Send to C6 at 2b: accept any array-like (`rows && typeof rows.length === "number"`, copy with
+  `Array.prototype.slice.call`) and add a node test with an array-like object.
