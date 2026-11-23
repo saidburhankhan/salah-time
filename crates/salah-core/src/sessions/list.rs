@@ -2,14 +2,15 @@
 //! predicate, the cursor and the limit run in SQL.
 
 use super::SessionView;
+use crate::Store;
+pub use crate::stats::measures::{Measures, ValueRange};
 use crate::stats::{Filter, Range, report_scope};
-use crate::{Store, metrics};
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use salah_domain::{
     error::Error,
     tracking::{ItemRef, ProjectRef},
 };
-use salah_store::reports::{Bounds, SessionPage};
+use salah_store::reports::SessionPage;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -39,6 +40,17 @@ pub struct SessionQuery {
     pub before: Option<String>,
 }
 
+impl SessionQuery {
+    /// The duration and metric bounds, shared with the statistics reports.
+    fn measures(&self) -> Measures {
+        Measures {
+            minutes_min: self.minutes_min,
+            minutes_max: self.minutes_max,
+            values: self.values.clone(),
+        }
+    }
+}
+
 impl Default for SessionQuery {
     fn default() -> Self {
         Self {
@@ -55,14 +67,6 @@ impl Default for SessionQuery {
 
 fn yes() -> bool {
     true
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize)]
-pub struct ValueRange {
-    #[serde(default)]
-    pub min: Option<f64>,
-    #[serde(default)]
-    pub max: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -90,6 +94,10 @@ pub fn list(
     filter: Filter,
     query: SessionQuery,
 ) -> Result<SessionList, Error> {
+    let filter = Filter {
+        measures: query.measures(),
+        ..filter
+    };
     let scope = report_scope(store, &range, &filter)?;
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT);
     if !(1..=MAX_LIMIT).contains(&limit) {
@@ -97,41 +105,6 @@ pub fn list(
             "limit",
             format!("limit must be between 1 and {MAX_LIMIT}"),
         ));
-    }
-    for (field, minutes) in [
-        ("minutes_min", query.minutes_min),
-        ("minutes_max", query.minutes_max),
-    ] {
-        if minutes.is_some_and(|m| m < 0) {
-            return Err(Error::validation(field, "minutes cannot be negative"));
-        }
-    }
-    if let (Some(min), Some(max)) = (query.minutes_min, query.minutes_max)
-        && min > max
-    {
-        return Err(Error::validation(
-            "minutes_max",
-            "minutes_max is below minutes_min",
-        ));
-    }
-    let mut values = BTreeMap::new();
-    for (metric_id, range) in &query.values {
-        metrics::find(store, metric_id)?;
-        if let (Some(min), Some(max)) = (range.min, range.max)
-            && min > max
-        {
-            return Err(Error::validation(
-                "values",
-                format!("the {metric_id} range ends below its start"),
-            ));
-        }
-        values.insert(
-            metric_id.as_str(),
-            Bounds {
-                min: range.min,
-                max: range.max,
-            },
-        );
     }
     let q = query
         .q
@@ -143,9 +116,6 @@ pub fn list(
     let page = SessionPage {
         with_note: query.with_note,
         q: q.as_deref(),
-        minutes_min: query.minutes_min,
-        minutes_max: query.minutes_max,
-        values,
         before,
         fetch: limit as usize + 1,
     };

@@ -4,11 +4,12 @@
 use crate::dispatcher::{Call, Context, parse, to_value};
 use crate::error::RpcError;
 use crate::methods::{
-    DayParams, ListParams, ParseParams, PreviewParams, SessionsListParams, StatsParams,
-    StatsTableParams, SubscribeParams, SubscribeResult,
+    DayParams, ListParams, ParseParams, PreviewParams, ScopeParams, SessionsListParams,
+    StatsParams, StatsTableParams, SubscribeParams, SubscribeResult,
 };
 use chrono::{Duration, NaiveDate};
 use salah_core::items::ItemView;
+use salah_core::stats::measures::Measures;
 use salah_core::stats::{Filter, MAX_DAYS, Range};
 use salah_core::{
     day, items, metrics, projects, quick, sessions, stats as statistics, status, tags,
@@ -47,14 +48,14 @@ pub(crate) fn stats(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcE
     let params: StatsParams = parse(call.params)?;
     let config = ctx.config.load()?;
     let today = day::current(&config, ctx.now())?;
-    let (range, filter) = scope(params, today)?;
+    let (range, filter) = scope(params.scope, today, params.measures)?;
     to_value(statistics::stats(ctx.store, &config, today, range, filter)?)
 }
 
 pub(crate) fn stats_table(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let params: StatsTableParams = parse(call.params)?;
     let today = day::current(&ctx.config.load()?, ctx.now())?;
-    let (range, filter) = scope(params.stats, today)?;
+    let (range, filter) = scope(params.stats.scope, today, params.stats.measures)?;
     to_value(statistics::table::table(
         ctx.store,
         range,
@@ -66,12 +67,16 @@ pub(crate) fn stats_table(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value
 pub(crate) fn sessions_list(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let params: SessionsListParams = parse(call.params)?;
     let today = day::current(&ctx.config.load()?, ctx.now())?;
-    let (range, filter) = scope(params.stats, today)?;
+    let (range, filter) = scope(params.stats, today, Measures::default())?;
     to_value(sessions::list(ctx.store, range, filter, params.query)?)
 }
 
 /// `from` and `to` together, or `days` ending today (default 30), and the filter.
-fn scope(params: StatsParams, today: NaiveDate) -> Result<(Range, Filter), RpcError> {
+fn scope(
+    params: ScopeParams,
+    today: NaiveDate,
+    measures: Measures,
+) -> Result<(Range, Filter), RpcError> {
     let range = match (params.from, params.to, params.days) {
         (Some(from), Some(to), None) => Range { from, to },
         (None, None, days) => {
@@ -102,6 +107,7 @@ fn scope(params: StatsParams, today: NaiveDate) -> Result<(Range, Filter), RpcEr
         tag_id: params.tag_id,
         project_id: params.project_id,
         item_id: params.item_id,
+        measures,
     };
     Ok((range, filter))
 }

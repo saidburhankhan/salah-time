@@ -1,0 +1,462 @@
+{
+  "id": 3,
+  "jsonrpc": "2.0",
+  "result": {
+    "blocks": [
+      {
+        "avg_focus": null,
+        "block": "night",
+        "capacity_minutes": 3687,
+        "minutes": 0
+      },
+      {
+        "avg_focus": 3.0,
+        "block": "fajr",
+        "capacity_minutes": 7508,
+        "minutes": 25
+      },
+      {
+        "avg_focus": 4.0,
+        "block": "dhuhr",
+        "capacity_minutes": 4203,
+        "minutes": 30
+      },
+      {
+        "avg_focus": null,
+        "block": "asr",
+        "capacity_minutes": 1773,
+        "minutes": 0
+      },
+      {
+        "avg_focus": null,
+        "block": "maghrib",
+        "capacity_minutes": 1444,
+        "minutes": 0
+      },
+      {
+        "avg_focus": null,
+        "block": "isha",
+        "capacity_minutes": 1545,
+        "minutes": 0
+      }
+    ],
+    "days": [
+      {
+        "capacity_minutes": 1165,
+        "day": "2031-05-01",
+        "fulfilment_ratio": null,
+        "minutes": 0,
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
+      },
+      {
+        "capacity_minutes": 1167,
+        "day": "2031-05-02",
+        "fulfilment_ratio": null,
+        "minutes": 0,
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
+      },
+      {
+        "capacity_minutes": 1169,
+        "day": "2031-05-03",
+        "fulfilment_ratio": null,
+        "minutes": 0,
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
+      },
+      {
+        "capacity_minutes": 1171,
+        "day": "2031-05-04",
+        "fulfilment_ratio": null,
+        "minutes": 0,
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
+      },
+      {
+        "capacity_minutes": 1172,
+        "day": "2031-05-05",
+        "fulfilment_ratio": null,
+        "minutes": 0,
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
+      },
+      {
+        "capacity_minutes": 1174,
+        "day": "2031-05-06",
+        "fulfilment_ratio": null,
+        "minutes": 0,
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
+      },
+      {
+        "capacity_minutes": 1176,
+        "day": "2031-05-07",
+        "fulfilment_ratio": null,
+        "minutes": 0,
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
+      },
+      {
+        "capacity_minutes": 1178,
+        "day": "2031-05-08",
+        "fulfilment_ratio": null,
+        "minutes": 30,
+        "planned_minutes": 0,
+        "unplanned_minutes": 30
+      },
+      {
+        "capacity_minutes": 1179,
+        "day": "2031-05-09",
+        "fulfilment_ratio": null,
+        "minutes": 0,
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
+      },
+      {
+        "capacity_minutes": 1181,
+        "day": "2031-05-10",
+        "fulfilment_ratio": null,
+        "minutes": 0,
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
+      },
+      {
+        "capacity_minutes": 1183,
+        "day": "2031-05-11",
+        "fulfilment_ratio": null,
+        "minutes": 0,
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
+      },
+      {
+        "capacity_minutes": 1184,
+        "day": "2031-05-12",
+        "fulfilment_ratio": null,
+        "minutes": 0,
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
+      },
+      {
+        "capacity_minutes": 1186,
+        "day": "2031-05-13",
+        "fulfilment_ratio": null,
+        "minutes": 0,
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
+      },
+      {
+        "capacity_minutes": 1188,
+        "day": "2031-05-14",
+        "fulfilment_ratio": 0.8333333333333334,
+        "minutes": 25,
+        "planned_minutes": 30,
+        "unplanned_minutes": 0
+      }
+    ],
+    "filter": {
+      "item_id": null,
+      "minutes_max": null,
+      "minutes_min": 10,
+      "project_id": null,
+      "tag_id": "<id:1>",
+      "values": {
+        "focus": {
+          "max": null,
+          "min": 3.0
+        }
+      }
+    },
+    "projects": [
+      {
+        "color": "#335577",
+        "id": "<id:2>",
+        "metrics": {
+          "distractions": 2.0,
+          "focus": 3.5454545454545454,
+          "quality": 5.0
+        },
+        "minutes": 55,
+        "name": "Quran",
+        "sessions": 2
+      }
+    ],
+    "range": {
+      "from": "2031-05-01",
+      "to": "2031-05-14"
+    },
+    "series": [
+      {
+        "metric_id": "minutes",
+        "name": "Minutes",
+        "points": [
+          {
+            "day": "2031-05-01",
+            "value": 0.0
+          },
+          {
+            "day": "2031-05-02",
+            "value": 0.0
+          },
+          {
+            "day": "2031-05-03",
+            "value": 0.0
+          },
+          {
+            "day": "2031-05-04",
+            "value": 0.0
+          },
+          {
+            "day": "2031-05-05",
+            "value": 0.0
+          },
+          {
+            "day": "2031-05-06",
+            "value": 0.0
+          },
+          {
+            "day": "2031-05-07",
+            "value": 0.0
+          },
+          {
+            "day": "2031-05-08",
+            "value": 30.0
+          },
+          {
+            "day": "2031-05-09",
+            "value": 0.0
+          },
+          {
+            "day": "2031-05-10",
+            "value": 0.0
+          },
+          {
+            "day": "2031-05-11",
+            "value": 0.0
+          },
+          {
+            "day": "2031-05-12",
+            "value": 0.0
+          },
+          {
+            "day": "2031-05-13",
+            "value": 0.0
+          },
+          {
+            "day": "2031-05-14",
+            "value": 25.0
+          }
+        ],
+        "rollup": "sum",
+        "unit": "min"
+      },
+      {
+        "metric_id": "focus",
+        "name": "Focus",
+        "points": [
+          {
+            "day": "2031-05-01",
+            "value": null
+          },
+          {
+            "day": "2031-05-02",
+            "value": null
+          },
+          {
+            "day": "2031-05-03",
+            "value": null
+          },
+          {
+            "day": "2031-05-04",
+            "value": null
+          },
+          {
+            "day": "2031-05-05",
+            "value": null
+          },
+          {
+            "day": "2031-05-06",
+            "value": null
+          },
+          {
+            "day": "2031-05-07",
+            "value": null
+          },
+          {
+            "day": "2031-05-08",
+            "value": 4.0
+          },
+          {
+            "day": "2031-05-09",
+            "value": null
+          },
+          {
+            "day": "2031-05-10",
+            "value": null
+          },
+          {
+            "day": "2031-05-11",
+            "value": null
+          },
+          {
+            "day": "2031-05-12",
+            "value": null
+          },
+          {
+            "day": "2031-05-13",
+            "value": null
+          },
+          {
+            "day": "2031-05-14",
+            "value": 3.0
+          }
+        ],
+        "rollup": "avg",
+        "unit": ""
+      },
+      {
+        "metric_id": "quality",
+        "name": "Quality",
+        "points": [
+          {
+            "day": "2031-05-01",
+            "value": null
+          },
+          {
+            "day": "2031-05-02",
+            "value": null
+          },
+          {
+            "day": "2031-05-03",
+            "value": null
+          },
+          {
+            "day": "2031-05-04",
+            "value": null
+          },
+          {
+            "day": "2031-05-05",
+            "value": null
+          },
+          {
+            "day": "2031-05-06",
+            "value": null
+          },
+          {
+            "day": "2031-05-07",
+            "value": null
+          },
+          {
+            "day": "2031-05-08",
+            "value": 5.0
+          },
+          {
+            "day": "2031-05-09",
+            "value": null
+          },
+          {
+            "day": "2031-05-10",
+            "value": null
+          },
+          {
+            "day": "2031-05-11",
+            "value": null
+          },
+          {
+            "day": "2031-05-12",
+            "value": null
+          },
+          {
+            "day": "2031-05-13",
+            "value": null
+          },
+          {
+            "day": "2031-05-14",
+            "value": null
+          }
+        ],
+        "rollup": "avg",
+        "unit": ""
+      },
+      {
+        "metric_id": "distractions",
+        "name": "Distractions",
+        "points": [
+          {
+            "day": "2031-05-01",
+            "value": null
+          },
+          {
+            "day": "2031-05-02",
+            "value": null
+          },
+          {
+            "day": "2031-05-03",
+            "value": null
+          },
+          {
+            "day": "2031-05-04",
+            "value": null
+          },
+          {
+            "day": "2031-05-05",
+            "value": null
+          },
+          {
+            "day": "2031-05-06",
+            "value": null
+          },
+          {
+            "day": "2031-05-07",
+            "value": null
+          },
+          {
+            "day": "2031-05-08",
+            "value": 2.0
+          },
+          {
+            "day": "2031-05-09",
+            "value": null
+          },
+          {
+            "day": "2031-05-10",
+            "value": null
+          },
+          {
+            "day": "2031-05-11",
+            "value": null
+          },
+          {
+            "day": "2031-05-12",
+            "value": null
+          },
+          {
+            "day": "2031-05-13",
+            "value": null
+          },
+          {
+            "day": "2031-05-14",
+            "value": null
+          }
+        ],
+        "rollup": "sum",
+        "unit": "times"
+      }
+    ],
+    "tags": [
+      {
+        "color": "#223344",
+        "id": "<id:1>",
+        "minutes": 55,
+        "name": "Study"
+      }
+    ],
+    "totals": {
+      "active_days": 2,
+      "avg_focus": 3.5454545454545454,
+      "avg_quality": 5.0,
+      "minutes": 55,
+      "sessions": 2
+    }
+  }
+}

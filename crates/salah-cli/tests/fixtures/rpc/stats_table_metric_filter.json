@@ -1,0 +1,113 @@
+{
+  "id": 11,
+  "jsonrpc": "2.0",
+  "result": {
+    "columns": [
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "minutes",
+        "kind": "count",
+        "name": "Minutes",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "min"
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "sessions",
+        "kind": "count",
+        "name": "Sessions",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "sessions"
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "focus",
+        "kind": "scale",
+        "name": "Focus",
+        "rollup": "avg",
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "quality",
+        "kind": "scale",
+        "name": "Quality",
+        "rollup": "avg",
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "distractions",
+        "kind": "count",
+        "name": "Distractions",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "times"
+      },
+      {
+        "archived": false,
+        "derived_from": "distractions",
+        "id": "distractions_per_hour",
+        "kind": "count",
+        "name": "Distractions per hour",
+        "rollup": "avg",
+        "scale_max": null,
+        "unit": "per hour"
+      }
+    ],
+    "filter": {
+      "item_id": null,
+      "minutes_max": null,
+      "minutes_min": 10,
+      "project_id": null,
+      "tag_id": "<id:1>",
+      "values": {
+        "focus": {
+          "max": 4.0,
+          "min": 3.0
+        }
+      }
+    },
+    "group": "project",
+    "range": {
+      "from": "2031-05-01",
+      "to": "2031-05-14"
+    },
+    "rows": [
+      {
+        "color": "#335577",
+        "from": null,
+        "key": "<id:2>",
+        "label": "Quran",
+        "minutes": 55,
+        "sessions": 2,
+        "to": null,
+        "values": {
+          "distractions": 2.0,
+          "distractions_per_hour": 2.1818181818181817,
+          "focus": 3.5454545454545454,
+          "quality": 5.0
+        }
+      }
+    ],
+    "totals": {
+      "minutes": 55,
+      "sessions": 2,
+      "values": {
+        "distractions": 2.0,
+        "distractions_per_hour": 2.1818181818181817,
+        "focus": 3.5454545454545454,
+        "quality": 5.0
+      }
+    }
+  }
+}

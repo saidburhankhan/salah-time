@@ -331,6 +331,7 @@ fn tag_project_and_item_filters_accept_none() {
             tag_id: tag.map(str::to_owned),
             project_id: project.map(str::to_owned),
             item_id: item.map(str::to_owned),
+            ..Filter::default()
         };
         run(&w, filter, all())
     };

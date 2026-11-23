@@ -7,15 +7,17 @@ use crate::config::Config;
 use crate::day::{self, Fulfilment, Snapshot, block_minutes, day_capacity, total_minutes};
 use crate::{Store, projects, tags};
 use chrono::NaiveDate;
+use measures::Measures;
 use salah_domain::{
     day::BoundaryId,
     error::Error,
     tracking::{Metric, Rollup, Session, Tag},
 };
-use salah_store::reports::{Choice, SessionScope};
+use salah_store::reports::{Choice, ReportSession, SessionScope};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod measures;
 pub mod table;
 
 /// The longest range one request covers.
@@ -29,6 +31,9 @@ pub struct Filter {
     pub tag_id: Option<String>,
     pub project_id: Option<String>,
     pub item_id: Option<String>,
+    /// Narrows the aggregated sessions by minutes and metric values.
+    #[serde(flatten)]
+    pub measures: Measures,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -89,6 +94,7 @@ pub(crate) fn report_scope<'a>(
             Some(_) => Ok(()),
             None => Err(crate::guard::not_found("item", id)),
         })?,
+        measures: filter.measures.resolve(store)?,
     })
 }
 
@@ -176,14 +182,18 @@ pub fn stats(
 ) -> Result<Stats, Error> {
     range.check()?;
     let days = range.days();
-    let scope = Scope::new(store, &filter)?;
+    let (scope, sessions) = store.read_snapshot(|store| {
+        let scope = report_scope(store, &range, &filter)?;
+        let sessions = store.report_sessions(&scope, None)?;
+        Ok((Scope::new(store, &scope)?, sessions))
+    })?;
     if range.from < today {
         store.write(|tx| {
             days.iter()
                 .try_for_each(|d| day::freeze(tx, config, *d, today))
         })?;
     }
-    let ledger = Ledger::load(store, config, today, days, scope)?;
+    let ledger = Ledger::load(store, config, today, days, scope, sessions)?;
     Ok(Stats {
         days: ledger.day_stats(),
         series: ledger.series(),
@@ -213,15 +223,12 @@ impl Ledger {
         today: NaiveDate,
         days: Vec<NaiveDate>,
         scope: Scope,
+        sessions: Vec<ReportSession>,
     ) -> Result<Self, Error> {
-        let (Some(first), Some(last)) = (days.first(), days.last()) else {
+        if days.is_empty() {
             return Err(Error::validation("from", "the range is empty"));
-        };
-        let sessions = store
-            .sessions_between_for_item(*first, *last, scope.item_id.as_deref())?
-            .into_iter()
-            .filter(|s| s.is_live() && !s.is_running() && scope.covers(s.project_id.as_deref()))
-            .collect();
+        }
+        let sessions = sessions.into_iter().map(|s| s.session).collect();
         let days = days
             .into_iter()
             .map(|d| Ok((d, day::snapshot(store, config, d, today)?)))
@@ -254,18 +261,11 @@ impl Ledger {
                 // a plan line to a different project must not turn a session
                 // attached to that line into unplanned work.
                 let unplanned_minutes = day_plan.unplanned_minutes;
-                let fulfilment = if self.scope.projects.is_some() || self.scope.item_id.is_some() {
+                let fulfilment = if self.scope.narrows_plan() {
                     let lines = snapshot
                         .plan
                         .iter()
-                        .filter(|line| {
-                            self.scope.covers(line.project_id.as_deref())
-                                && self
-                                    .scope
-                                    .item_id
-                                    .as_ref()
-                                    .is_none_or(|id| id == &line.item_id)
-                        })
+                        .filter(|line| self.scope.keeps(line.project_id.as_deref(), &line.item_id))
                         .cloned()
                         .collect::<Vec<_>>();
                     Fulfilment::of(&lines, &sessions)
@@ -433,47 +433,63 @@ pub(crate) fn rollup<'a>(
     })
 }
 
-/// The projects a filter keeps; `None` keeps everything.
+/// One filter dimension of the plan lines a report keeps.
+enum Pick {
+    Unassigned,
+    Is(String),
+}
+
+impl Pick {
+    fn of(choice: Option<Choice<'_>>) -> Option<Self> {
+        choice.map(|choice| match choice {
+            Choice::Unassigned => Self::Unassigned,
+            Choice::Is(id) => Self::Is(id.to_owned()),
+        })
+    }
+}
+
+/// Which plan lines a report's project, tag and task filters keep, so the
+/// fulfilment ratio compares like with like. Duration and metric bounds do
+/// not apply: they narrow sessions, never the plan.
 struct Scope {
-    projects: Option<BTreeSet<String>>,
-    item_id: Option<String>,
+    project: Option<Pick>,
+    tag: Option<Pick>,
+    item: Option<Pick>,
+    /// Each project's live tag ids.
+    tags: BTreeMap<String, Vec<String>>,
 }
 
 impl Scope {
-    fn new(store: &Store, filter: &Filter) -> Result<Self, Error> {
-        let mut projects: Option<BTreeSet<String>> = None;
-        if let Some(id) = &filter.project_id {
-            projects = Some(BTreeSet::from([projects::find(store, id)?.id]));
-        }
-        if let Some(id) = &filter.tag_id {
-            let tag = tags::find(store, id)?;
-            let tagged: BTreeSet<String> = store
-                .projects()?
-                .into_iter()
-                .filter(|p| p.tag_ids.contains(&tag.id))
-                .map(|p| p.id)
-                .collect();
-            projects = Some(match projects {
-                Some(chosen) => chosen.intersection(&tagged).cloned().collect(),
-                None => tagged,
-            });
-        }
-        if let Some(id) = &filter.item_id
-            && store.item(id)?.is_none()
-        {
-            return Err(crate::guard::not_found("item", id));
-        }
+    fn new(store: &Store, scope: &SessionScope<'_>) -> Result<Self, Error> {
         Ok(Self {
-            projects,
-            item_id: filter.item_id.clone(),
+            project: Pick::of(scope.project),
+            tag: Pick::of(scope.tag),
+            item: Pick::of(scope.item),
+            tags: store
+                .project_tags()?
+                .into_iter()
+                .map(|(project, tags)| (project, tags.into_iter().map(|t| t.id).collect()))
+                .collect(),
         })
     }
 
-    fn covers(&self, project_id: Option<&str>) -> bool {
-        match &self.projects {
-            None => true,
-            Some(chosen) => project_id.is_some_and(|id| chosen.contains(id)),
-        }
+    fn narrows_plan(&self) -> bool {
+        self.project.is_some() || self.tag.is_some() || self.item.is_some()
+    }
+
+    /// Plan lines always name a task, so `none` for tasks keeps no line.
+    fn keeps(&self, project_id: Option<&str>, item_id: &str) -> bool {
+        let tags = project_id.and_then(|id| self.tags.get(id));
+        self.project.as_ref().is_none_or(|pick| match pick {
+            Pick::Unassigned => project_id.is_none(),
+            Pick::Is(id) => project_id == Some(id.as_str()),
+        }) && self.tag.as_ref().is_none_or(|pick| match pick {
+            Pick::Unassigned => tags.is_none_or(Vec::is_empty),
+            Pick::Is(id) => tags.is_some_and(|tags| tags.contains(id)),
+        }) && self.item.as_ref().is_none_or(|pick| match pick {
+            Pick::Unassigned => false,
+            Pick::Is(id) => id == item_id,
+        })
     }
 }
 
@@ -569,6 +585,7 @@ mod tests {
                 tag_id: Some(tag.id),
                 project_id: None,
                 item_id: None,
+                ..Filter::default()
             },
         )
         .unwrap();

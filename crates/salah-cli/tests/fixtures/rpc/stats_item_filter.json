@@ -52,8 +52,11 @@
     ],
     "filter": {
       "item_id": "<id:1>",
+      "minutes_max": null,
+      "minutes_min": null,
       "project_id": "<id:2>",
-      "tag_id": "<id:3>"
+      "tag_id": "<id:3>",
+      "values": {}
     },
     "projects": [
       {

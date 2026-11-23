@@ -383,6 +383,8 @@ pub struct StatsArgs {
     #[arg(long, value_name = "ID")]
     item: Option<String>,
     #[command(flatten)]
+    measures: Box<crate::reports::MeasureArgs>,
+    #[command(flatten)]
     output: Output,
 }
 
@@ -690,6 +692,10 @@ pub fn stats(local: &mut Local<'_>, args: StatsArgs) -> Result<(), String> {
         .opt("project_id", args.project)
         .opt("tag_id", args.tag)
         .opt("item_id", item);
-    let result = local.call("stats.get", params.done())?;
+    let mut params = params.done();
+    if let Value::Object(map) = &mut params {
+        crate::reports::measures(map, &args.measures)?;
+    }
+    let result = local.call("stats.get", params)?;
     print(&args.output, &result, render::stats)
 }

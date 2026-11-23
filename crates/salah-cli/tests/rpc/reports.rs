@@ -328,3 +328,147 @@ fn sessions_list_filters_in_sql_and_pages_by_cursor() {
         None,
     );
 }
+
+fn totals(result: &Value) -> (i64, i64) {
+    (
+        result["totals"]["minutes"].as_i64().unwrap(),
+        result["totals"]["sessions"].as_i64().unwrap(),
+    )
+}
+
+#[test]
+fn stats_get_and_table_narrow_sessions_by_duration_and_metric_values() {
+    let h = Harness::new();
+    let s = seed(&h);
+    let mut rpc = Session::open(&h, NOW);
+    let mut fixtures = Fixtures::default();
+    let range = json!({"from":"2031-05-01","to":"2031-05-14"});
+    let with = |extra: Value| {
+        let mut params = range.clone();
+        for (key, value) in extra.as_object().unwrap() {
+            params[key] = value.clone();
+        }
+        params
+    };
+    let everything = good(&mut rpc, "stats.get", range.clone());
+    assert_eq!(totals(&everything), (90, 5));
+    assert_eq!(everything["filter"]["minutes_min"], Value::Null);
+    assert_eq!(everything["filter"]["values"], json!({}));
+
+    // Tag Study, 10+ minutes, focus 3 or more: the read log (4) and the timer (3).
+    let narrowed = fixtures.check(
+        "stats_metric_filter",
+        rpc.request(
+            "stats.get",
+            with(json!({"tag_id":s.tag,"minutes_min":10,"values":{"focus":{"min":3}}})),
+        ),
+    );
+    assert_eq!(totals(&narrowed), (55, 2));
+    assert_eq!(narrowed["filter"]["minutes_min"], 10);
+    assert_eq!(
+        narrowed["filter"]["values"]["focus"],
+        json!({"min":3.0,"max":null})
+    );
+    // Plan and capacity do not depend on the session bounds.
+    let plan = |stats: &Value| {
+        stats["days"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| (d["planned_minutes"].clone(), d["capacity_minutes"].clone()))
+            .collect::<Vec<_>>()
+    };
+    let tagged = good(&mut rpc, "stats.get", with(json!({"tag_id":s.tag})));
+    assert_eq!(plan(&narrowed), plan(&tagged));
+
+    let duration = good(&mut rpc, "stats.get", with(json!({"minutes_max":20})));
+    // A tick has no minutes, so no duration bound matches it.
+    assert_eq!(totals(&duration), (35, 2), "gym and walk");
+    let by_project = good(
+        &mut rpc,
+        "stats.get",
+        with(json!({"project_id":s.gym,"values":{"focus":{"max":2}}})),
+    );
+    assert_eq!(totals(&by_project), (20, 1));
+    let unassigned = good(
+        &mut rpc,
+        "stats.get",
+        with(json!({"project_id":"none","minutes_max":20})),
+    );
+    assert_eq!(totals(&unassigned), (15, 1));
+    let no_item = good(
+        &mut rpc,
+        "stats.get",
+        with(json!({"item_id":"none","values":{"focus":{"min":2}}})),
+    );
+    assert_eq!(totals(&no_item), (20, 1), "the gym log has no task");
+    let no_tag = good(
+        &mut rpc,
+        "stats.get",
+        with(json!({"tag_id":"none","values":{"distractions":{"min":1}}})),
+    );
+    assert_eq!(totals(&no_tag), (20, 1));
+    let empty = good(
+        &mut rpc,
+        "stats.get",
+        with(json!({"values":{"focus":{"min":6}}})),
+    );
+    assert_eq!(totals(&empty), (0, 0));
+    assert_eq!(empty["projects"], json!([]));
+
+    let table = fixtures.check(
+        "stats_table_metric_filter",
+        rpc.request(
+            "stats.table",
+            with(json!({"group":"project","tag_id":s.tag,"minutes_min":10,
+                        "values":{"focus":{"min":3,"max":4}}})),
+        ),
+    );
+    assert_eq!(keys(&table), [s.quran.as_str()]);
+    assert_eq!(totals(&table), (55, 2));
+    assert_eq!(
+        table["filter"]["values"]["focus"],
+        json!({"min":3.0,"max":4.0})
+    );
+    for (extra, expected, group) in [
+        (json!({"minutes_max":20}), (35, 2), "week"),
+        (
+            json!({"project_id":"none","minutes_max":20}),
+            (15, 1),
+            "item",
+        ),
+        (
+            json!({"item_id":"none","values":{"focus":{"min":2}}}),
+            (20, 1),
+            "day",
+        ),
+        (
+            json!({"tag_id":"none","values":{"distractions":{"min":1}}}),
+            (20, 1),
+            "project",
+        ),
+        (json!({"values":{"focus":{"min":6}}}), (0, 0), "tag"),
+    ] {
+        let mut params = with(extra);
+        params["group"] = json!(group);
+        let result = good(&mut rpc, "stats.table", params);
+        assert_eq!(totals(&result), expected, "{group}");
+    }
+
+    for method in ["stats.get", "stats.table"] {
+        for (params, field) in [
+            (json!({"minutes_min":20,"minutes_max":10}), "minutes_max"),
+            (json!({"minutes_min":-1}), "minutes_min"),
+            (json!({"values":{"focus":{"min":5,"max":1}}}), "values"),
+        ] {
+            bad(&mut rpc, method, with(params), "validation", Some(field));
+        }
+        bad(
+            &mut rpc,
+            method,
+            with(json!({"values":{"unknown":{"min":1}}})),
+            "not_found",
+            None,
+        );
+    }
+}

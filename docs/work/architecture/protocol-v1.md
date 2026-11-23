@@ -98,9 +98,9 @@ store-wide counter, never a precondition.
 | `status.get` | — | `Status`: prayer projection, `planner` (today's rows), `running: SessionView\|null`, `prompt: [PromptMetric]` | config, source, storage | — | — |
 | `day.get` | `date?` | `DayPlan`: prayers, blocks with `capacity_minutes`/`planned_minutes`/`actual_minutes`/`unplanned_minutes` and rows, `open`, `fulfilment` | validation, source, storage | — | — |
 | `items.list` | — | `[ItemView]` | storage | — | — |
-| `stats.get` | `from,to` or `days?` (default 30, max 730), `tag_id?`, `project_id?`, `item_id?` | `range`, `filter`, `days` (with `unplanned_minutes`, nullable `fulfilment_ratio`), `series` (minutes first), `projects`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
-| `stats.table` | `stats.get`'s range and filter (`project_id`, `tag_id` and `item_id` also accept `"none"`), `group?` (`week` default, `day`, `project`, `tag`, `item`) | `range`, `filter`, `group`, `columns`, `rows`, `totals` | validation, not_found, storage | — | — |
-| `sessions.list` | `stats.get`'s range and filter (each also `"none"`), `with_note?` (default true), `q?`, `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}`, `limit?` (default 100, 1–500), `before?` (a previous `next`) | `rows: [SessionView + project + item]`, `next: cursor\|null` | validation, not_found, storage | — | — |
+| `stats.get` | `from,to` or `days?` (default 30, max 730), `tag_id?`, `project_id?`, `item_id?` (each also `"none"`), `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}` | `range`, `filter`, `days` (with `unplanned_minutes`, nullable `fulfilment_ratio`), `series` (minutes first), `projects`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
+| `stats.table` | `stats.get`'s range and filter (including the session bounds), `group?` (`week` default, `day`, `project`, `tag`, `item`) | `range`, `filter`, `group`, `columns`, `rows`, `totals` | validation, not_found, storage | — | — |
+| `sessions.list` | `stats.get`'s range and project, tag and item filters, `with_note?` (default true), `q?`, `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}`, `limit?` (default 100, 1–500), `before?` (a previous `next`) | `rows: [SessionView + project + item]`, `next: cursor\|null` | validation, not_found, storage | — | — |
 | `item.parse` | `text` | draft `{title, block, repeat, weekdays, planned_minutes}` | validation | — | — |
 | `item.preview` | `block`, `repeat`, `weekdays?`, `planned_minutes?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
 | `item.add` | `op_id`, `title` or `quick_text`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `planned_minutes?`, `date?`, `metric_ids?` | mutation result (`changed.items`) | validation, not_found, source, storage | yes | no |
@@ -203,6 +203,18 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
     and `totals` count each session once. Task rows are coloured by the session's
     project. A row `key` is a valid filter value for its dimension.
   - `totals`: `{minutes, sessions, values}` over every session in scope.
+- Session bounds (`stats.get`, `stats.table`, `sessions.list`): `minutes_min?`,
+  `minutes_max?` and `values?` share one predicate. `minutes_*` are inclusive and never
+  match a tick; each `values` entry needs the session to have that metric within the
+  inclusive bounds (a session lacking it does not match); an unknown metric is
+  `not_found`; reversed bounds or a negative duration are `validation` errors naming
+  the field. On `stats.get` and `stats.table` they narrow which sessions are
+  aggregated (days, series, projects, tags, blocks, totals, rows). Planned minutes,
+  capacity and the fulfilment denominator are unaffected. The result's `filter` echoes
+  `minutes_min`, `minutes_max` (`null` when absent) and `values` (`{}` when absent)
+  beside `tag_id`, `project_id` and `item_id`. `stats.get` also accepts `"none"` for
+  the project, tag and item filters, as `stats.table` does; under `item_id: "none"`
+  or a project/tag filter the plan lines narrow the same way.
 - `sessions.list` is the Notes page query. Every predicate, the cursor, and the limit
   run in SQL. Rows are finished live sessions (ticks included): newest planning day
   first, then the newest end instant (creation for manual logs and ticks), then id.

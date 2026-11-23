@@ -7,6 +7,7 @@ use salah_core::items::{ItemChanges, ItemView};
 use salah_core::metrics::{MetricChanges, NewMetric};
 use salah_core::projects::{NewProject, ProjectChanges, ProjectView};
 use salah_core::sessions::{NewLog, SessionChanges, SessionQuery, SessionView, Stop, Target};
+use salah_core::stats::measures::Measures;
 use salah_core::stats::table::Group;
 use salah_domain::day::BoundaryId;
 use salah_domain::item::{PrayerMark, Repeat, Weekdays};
@@ -57,7 +58,7 @@ pub struct DayParams {
 
 /// `from` and `to` together, or `days` ending today (default 30).
 #[derive(Clone, Debug, Default, Deserialize)]
-pub struct StatsParams {
+pub struct ScopeParams {
     #[serde(default)]
     pub from: Option<NaiveDate>,
     #[serde(default)]
@@ -70,6 +71,15 @@ pub struct StatsParams {
     pub project_id: Option<String>,
     #[serde(default)]
     pub item_id: Option<String>,
+}
+
+/// `stats.get`: the range and filter plus the session bounds that narrow it.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct StatsParams {
+    #[serde(flatten)]
+    pub scope: ScopeParams,
+    #[serde(flatten)]
+    pub measures: Measures,
 }
 
 /// `stats.get`'s range and filter plus the row grouping (default `week`).
@@ -85,7 +95,7 @@ pub struct StatsTableParams {
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct SessionsListParams {
     #[serde(flatten)]
-    pub stats: StatsParams,
+    pub stats: ScopeParams,
     #[serde(flatten)]
     pub query: SessionQuery,
 }

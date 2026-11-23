@@ -29,6 +29,8 @@ pub struct SessionScope<'a> {
     /// `Unassigned`: the session's project has no live tag (or there is no project).
     pub tag: Option<Choice<'a>>,
     pub item: Option<Choice<'a>>,
+    /// Duration and metric bounds on the sessions themselves.
+    pub measures: SessionFilter<'a>,
 }
 
 /// Inclusive bounds on one metric value.
@@ -38,6 +40,16 @@ pub struct Bounds {
     pub max: Option<f64>,
 }
 
+/// Predicates on a session's own minutes and recorded metric values, shared
+/// by every report that narrows by them.
+#[derive(Clone, Debug, Default)]
+pub struct SessionFilter<'a> {
+    pub minutes_min: Option<i64>,
+    pub minutes_max: Option<i64>,
+    /// A session lacking a listed metric does not match.
+    pub values: BTreeMap<&'a str, Bounds>,
+}
+
 /// The Notes page's extra predicates and its newest-first page.
 #[derive(Clone, Debug, Default)]
 pub struct SessionPage<'a> {
@@ -45,10 +57,6 @@ pub struct SessionPage<'a> {
     pub with_note: bool,
     /// Lowercased text matched against the main note and every live entry.
     pub q: Option<&'a str>,
-    pub minutes_min: Option<i64>,
-    pub minutes_max: Option<i64>,
-    /// A session lacking a listed metric does not match.
-    pub values: BTreeMap<&'a str, Bounds>,
     /// Rows strictly after this `(day, instant, id)` cursor in page order.
     pub before: Option<(NaiveDate, DateTime<Utc>, &'a str)>,
     pub fetch: usize,
@@ -132,7 +140,31 @@ impl Query {
             Some(Choice::Is(id)) => query.push("s.item_id = ?", [text(id)]),
             None => {}
         }
+        query.measures(&scope.measures);
         query
+    }
+
+    /// The duration and metric predicates of one [`SessionFilter`].
+    fn measures(&mut self, filter: &SessionFilter<'_>) {
+        if let Some(min) = filter.minutes_min {
+            self.push("s.minutes >= ?", [min.into()]);
+        }
+        if let Some(max) = filter.minutes_max {
+            self.push("s.minutes <= ?", [max.into()]);
+        }
+        for (metric_id, bounds) in &filter.values {
+            self.push(
+                "EXISTS (SELECT 1 FROM session_values v WHERE v.session_id = s.id
+                 AND v.metric_id = ? AND (? IS NULL OR v.value >= ?) AND (? IS NULL OR v.value <= ?))",
+                [
+                    text(metric_id),
+                    bounds.min.into(),
+                    bounds.min.into(),
+                    bounds.max.into(),
+                    bounds.max.into(),
+                ],
+            );
+        }
     }
 
     fn push<const N: usize>(&mut self, condition: &str, args: [Value; N]) {
@@ -152,25 +184,6 @@ impl Query {
             );
         } else if page.with_note {
             self.push(&format!("(length(s.note) > 0 OR {HAS_ENTRY}))"), []);
-        }
-        if let Some(min) = page.minutes_min {
-            self.push("s.minutes >= ?", [min.into()]);
-        }
-        if let Some(max) = page.minutes_max {
-            self.push("s.minutes <= ?", [max.into()]);
-        }
-        for (metric_id, bounds) in &page.values {
-            self.push(
-                "EXISTS (SELECT 1 FROM session_values v WHERE v.session_id = s.id
-                 AND v.metric_id = ? AND (? IS NULL OR v.value >= ?) AND (? IS NULL OR v.value <= ?))",
-                [
-                    text(metric_id),
-                    bounds.min.into(),
-                    bounds.min.into(),
-                    bounds.max.into(),
-                    bounds.max.into(),
-                ],
-            );
         }
         if let Some((day, at, id)) = page.before {
             self.push(

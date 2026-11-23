@@ -311,6 +311,7 @@ fn filters_intersect_and_none_selects_unassigned_work() {
         tag_id: tag.map(str::to_owned),
         project_id: project.map(str::to_owned),
         item_id: item.map(str::to_owned),
+        ..Filter::default()
     };
     let totals = |f: Filter| {
         let t = build(&w, Group::Project, f);

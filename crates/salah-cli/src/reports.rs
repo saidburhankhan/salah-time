@@ -26,37 +26,9 @@ pub struct ReportScope {
     item: Option<String>,
 }
 
-#[derive(Subcommand)]
-pub enum StatsCommand {
-    /// The general table: one row per week, day, project, tag or task
-    Table(StatsTableArgs),
-}
-
+/// Duration and metric bounds that narrow which sessions a report covers.
 #[derive(Args)]
-pub struct StatsTableArgs {
-    #[command(flatten)]
-    scope: ReportScope,
-    /// week (default), day, project, tag or item
-    #[arg(long)]
-    group: Option<String>,
-}
-
-#[derive(Subcommand)]
-pub enum SessionsCommand {
-    /// Finished sessions newest first, with notes (the Notes page)
-    List(SessionsListArgs),
-}
-
-#[derive(Args)]
-pub struct SessionsListArgs {
-    #[command(flatten)]
-    scope: ReportScope,
-    /// Include sessions without a note
-    #[arg(long)]
-    all: bool,
-    /// Case-insensitive text in the note or any timestamped entry
-    #[arg(long)]
-    q: Option<String>,
+pub struct MeasureArgs {
     #[arg(long, value_name = "MINUTES")]
     min_minutes: Option<i64>,
     #[arg(long, value_name = "MINUTES")]
@@ -75,6 +47,43 @@ pub struct SessionsListArgs {
     /// Upper bound of any metric, repeatable
     #[arg(long = "max", value_name = "METRIC=VALUE")]
     max: Vec<String>,
+}
+
+#[derive(Subcommand)]
+pub enum StatsCommand {
+    /// The general table: one row per week, day, project, tag or task
+    Table(StatsTableArgs),
+}
+
+#[derive(Args)]
+pub struct StatsTableArgs {
+    #[command(flatten)]
+    scope: ReportScope,
+    /// week (default), day, project, tag or item
+    #[arg(long)]
+    group: Option<String>,
+    #[command(flatten)]
+    measures: MeasureArgs,
+}
+
+#[derive(Subcommand)]
+pub enum SessionsCommand {
+    /// Finished sessions newest first, with notes (the Notes page)
+    List(SessionsListArgs),
+}
+
+#[derive(Args)]
+pub struct SessionsListArgs {
+    #[command(flatten)]
+    scope: ReportScope,
+    /// Include sessions without a note
+    #[arg(long)]
+    all: bool,
+    /// Case-insensitive text in the note or any timestamped entry
+    #[arg(long)]
+    q: Option<String>,
+    #[command(flatten)]
+    measures: MeasureArgs,
     /// Rows per page (default 100, at most 500)
     #[arg(long)]
     limit: Option<i64>,
@@ -105,37 +114,16 @@ fn scope(local: &Local<'_>, scope: ReportScope) -> Result<Map<String, Value>, St
     Ok(params)
 }
 
-fn print(result: &Value) -> Result<(), String> {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(result).map_err(|e| e.to_string())?
-    );
-    Ok(())
-}
-
-pub fn stats(local: &mut Local<'_>, command: StatsCommand) -> Result<(), String> {
-    let StatsCommand::Table(args) = command;
-    let mut params = scope(local, args.scope)?;
-    if let Some(group) = args.group {
-        params.insert("group".into(), group.into());
-    }
-    print(&local.call("stats.table", Value::Object(params))?)
-}
-
-pub fn sessions(local: &mut Local<'_>, command: SessionsCommand) -> Result<(), String> {
-    let SessionsCommand::List(args) = command;
-    let mut params = scope(local, args.scope)?;
-    params.insert("with_note".into(), json!(!args.all));
-    let mut put = |key: &str, value: Option<Value>| {
+/// Adds `minutes_min`, `minutes_max` and `values` for the bounds given.
+pub fn measures(params: &mut Map<String, Value>, args: &MeasureArgs) -> Result<(), String> {
+    for (key, value) in [
+        ("minutes_min", args.min_minutes),
+        ("minutes_max", args.max_minutes),
+    ] {
         if let Some(value) = value {
-            params.insert(key.into(), value);
+            params.insert(key.into(), value.into());
         }
-    };
-    put("q", args.q.map(Value::from));
-    put("minutes_min", args.min_minutes.map(Value::from));
-    put("minutes_max", args.max_minutes.map(Value::from));
-    put("limit", args.limit.map(Value::from));
-    put("before", args.before.map(Value::from));
+    }
     let mut bounds = Map::new();
     let mut bound = |metric: &str, side: &str, value: f64| {
         let entry = bounds.entry(metric).or_insert_with(|| json!({}));
@@ -166,5 +154,39 @@ pub fn sessions(local: &mut Local<'_>, command: SessionsCommand) -> Result<(), S
     if !bounds.is_empty() {
         params.insert("values".into(), Value::Object(bounds));
     }
+    Ok(())
+}
+
+fn print(result: &Value) -> Result<(), String> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(result).map_err(|e| e.to_string())?
+    );
+    Ok(())
+}
+
+pub fn stats(local: &mut Local<'_>, command: StatsCommand) -> Result<(), String> {
+    let StatsCommand::Table(args) = command;
+    let mut params = scope(local, args.scope)?;
+    if let Some(group) = args.group {
+        params.insert("group".into(), group.into());
+    }
+    measures(&mut params, &args.measures)?;
+    print(&local.call("stats.table", Value::Object(params))?)
+}
+
+pub fn sessions(local: &mut Local<'_>, command: SessionsCommand) -> Result<(), String> {
+    let SessionsCommand::List(args) = command;
+    let mut params = scope(local, args.scope)?;
+    params.insert("with_note".into(), json!(!args.all));
+    let mut put = |key: &str, value: Option<Value>| {
+        if let Some(value) = value {
+            params.insert(key.into(), value);
+        }
+    };
+    put("q", args.q.map(Value::from));
+    put("limit", args.limit.map(Value::from));
+    put("before", args.before.map(Value::from));
+    measures(&mut params, &args.measures)?;
     print(&local.call("sessions.list", Value::Object(params))?)
 }
