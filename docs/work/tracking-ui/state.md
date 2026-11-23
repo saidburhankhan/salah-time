@@ -47,7 +47,8 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
      creation sheet (Astra, plugin; user asked for it; Backlog button goes live when C5 task 1 lands);
      C4 tasks 4-5 were done by Claude (0b1cf3e). Small Sol fixes in the same window: widget Worked
      cap at `max_minutes` + stale display (plugin, after C6 task 1), app running card for a stale
-     timer (app).
+     timer (app) = tr-brief.md task 2. TR task 1 = app Trends line chart (Astra, app; needs
+     stats.series, being built by Claude now).
   2. After reset 1: C5 rest (backlog/epic rules Astra; resources, CLI, fixtures Sol), C6 widget
      phase 3 (creation sheet Astra, rest Sol), C7 app phase 3 (Sol).
   3. Phase 4 (user chose insights, goals, weekly review; plan.md "Phase 4", data-model.md "005"):
