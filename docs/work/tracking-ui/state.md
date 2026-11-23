@@ -111,3 +111,11 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   `stats.get` `blocks` (app ChartsView "By prayer block") still counts sessions whole in their
   start block, so it can disagree with stats.table group "block": queue C8 0b = switch it to
   block_minutes (values change, no field change; note it in protocol-v1.md).
+- 23:4x migration 005 (goals, reviews, item_tags seeded from live project tags) by Claude Opus,
+  independent review APPROVE (Opus). Live copy v3→v5 in scratch: integrity/FK ok, every table's row
+  count unchanged, item_tags = Dream Intensive|arabic, Mumtoz alifbo|arabic, CMU - DBMS homework 2|dmbs.
+  INSTALL GATE: no build containing 005 goes onto the live DB until C8 0c's write side (item.add
+  project defaults, item.edit tag_ids, tag.remove cleaning item_tags) is in the same install.
+  0c must also: an RPC test of stats.table group "tag" on the v4 fixture before/after migrating
+  (incl. the moved-task case). Goals/reviews write code must validate numbers and YYYY-MM-DD dates
+  (review week = a Monday) since SQLite CHECKs don't enforce types.

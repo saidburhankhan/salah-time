@@ -23,3 +23,46 @@
   included), `git diff --check`. Existing fixtures unchanged.
 
 CHECKPOINT 0a: Core: shared block_minutes rule for day block bars, stats.table group "block" and stats.series split "block" — files: crates/salah-core/src/day/{allocation.rs,mod.rs,snapshot.rs,view.rs}, crates/salah-core/src/stats.rs, crates/salah-core/src/stats/{blocks.rs,series.rs,table.rs,series/tests.rs,table/tests.rs}, crates/salah-core/src/sessions/tests.rs, crates/salah-protocol/src/reads.rs, crates/salah-cli/src/reports.rs, crates/salah-cli/tests/rpc/reports.rs, crates/salah-cli/tests/fixtures/rpc/stats_table_block.json, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md
+
+## 0 — migration 005 (Claude standing in for Codex C8, 2026-11-23)
+
+- `crates/salah-store/src/migrations/005_goals_reviews_item_tags.sql`: `goals`, `goals_active`,
+  `reviews`, `reviews_by_week` (unique, partial on live rows), `item_tags`, `item_tags_by_tag` and
+  the copy of each project's live tags onto every item of that project. Its statements match
+  data-model.md "005" as of 4916877 exactly; only header and section comments were added. Wired as step 5 with
+  `foreign_keys_off: false`, because nothing is rebuilt. The existing runner handles the rest:
+  numbering by user_version, the `salah.db.bak-v4-<ts>` backup, keeping 3 copies, discarding its
+  own copy on failure. `schema_version()` comes from `STEPS.len()`, so it is 5 with no other
+  change. The core `status::SCHEMA_VERSION` is the status JSON version and is left alone.
+- Orchestrator decisions (4916877): the copy joins `tags t ON t.id = pt.tag_id AND
+  t.deleted_at IS NULL`, so a `project_tags` link to a removed tag is not copied. Removed tasks
+  still get their project's live tags, so their sessions keep their labels (accepted). The
+  moved-task relabel described below is accepted and stays pinned by its test.
+- Existing migration tests now stop at 004 where they check 004-era backups or `user_version 4`
+  (`run(.., &STEPS[..4])`), or compare against `schema_version()`. Their assertions are otherwise
+  unchanged. No RPC fixtures changed.
+- New `migrations/tests/phase4.rs` plus the fixture `tests/tracking_v4.sql`, on top of the
+  v1 and v3 rows. The fixture has a second tagged project with two epics (active and finished)
+  and a link to a removed tag, an untagged project, a backlog task, a removed task with live
+  work, epic-only work, bare work in the archived project, a no-project task, timed, tick,
+  logged and removed sessions, values, notes, a day_plan epic and all resource kinds. The
+  tests check:
+  every v4 row is byte-identical after the step and in the v4 backup; table counts; integrity and
+  foreign-key checks; the exact `item_tags` rows; that they equal items × live project_tags both
+  ways, with the removed tag's link left in `project_tags` but not copied; the goals/reviews/item_tags CHECK, NOT NULL, FK and unique rules, with the accepted edges;
+  that rerunning the runner, `STEPS[..5]` or reopening is a no-op (no second copy, no new
+  backup); rollback plus discarding only its own backup when the step fails after its
+  tables exist (a stray `item_tags_by_tag` index), then retry and keep-3 rotation; a full v1→v5 upgrade keeps exactly the v2, v3 and v4 copies.
+- Tag totals: the real `stats.table` cannot be run on a v4 file from `salah-core`, because the
+  runner is crate-private, and before 0c `stats.table` does not read `item_tags`. So the test
+  models both rules in SQL over the same session scope `stats.table` uses: v4 = the live tags of
+  the session's project, v5 = the item's tags, or the project's when there is no item. The
+  per-session tag sets and the per-tag (sessions, minutes) rows match exactly on the fixture.
+  Accepted divergence, pinned by `v5_labels_work_of_a_moved_task_with_its_current_project_tags`:
+  a session whose item changed project after it was written (`s.project_id IS NOT i.project_id`)
+  takes the item's current project tags. On the live copy these are 6 sessions logged before
+  their task had a project; they go from "No tag" to the task's tags.
+- Checks: `cargo fmt --all --check`, `cargo clippy --offline --all-targets -- -D warnings`,
+  `cargo test --offline --workspace` 223 passed (socket tests included), `git diff --check`.
+
+CHECKPOINT 0: Store: migration 005 (goals, reviews, item_tags seeded from project tags) with v4→v5 migration tests — files: crates/salah-store/src/migrations.rs, crates/salah-store/src/migrations/005_goals_reviews_item_tags.sql, crates/salah-store/src/migrations/tests.rs, crates/salah-store/src/migrations/tests/phase3.rs, crates/salah-store/src/migrations/tests/phase4.rs, crates/salah-store/src/migrations/tests/tracking_v4.sql, docs/work/tracking-ui/c8-progress.md

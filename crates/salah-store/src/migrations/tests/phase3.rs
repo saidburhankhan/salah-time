@@ -2,7 +2,7 @@ use super::{Database, STEPS, assert_preserved, check_integrity, original_rows, r
 use crate::{Store, user_version};
 use rusqlite::{Connection, ErrorCode, types::Value};
 
-fn populated_v3(db: &Database) -> Connection {
+pub(super) fn populated_v3(db: &Database) -> Connection {
     let mut conn = db.at(2, true);
     crate::migrations::run(&mut conn, None, &STEPS[..3]).unwrap();
     conn.execute_batch(
@@ -20,19 +20,19 @@ fn populated_v3(db: &Database) -> Connection {
 #[test]
 fn v4_preserves_every_v3_row_and_reference_in_place() {
     let db = Database::new("phase3");
-    let seed = populated_v3(&db);
+    let mut seed = populated_v3(&db);
     let before = original_rows(&seed);
     let item_rowids = rows(&seed, "SELECT rowid,id FROM items ORDER BY rowid");
-    drop(seed);
 
-    let store = Store::open(&db.path).unwrap();
-    let conn = &store.conn;
+    // Stop at 004; phase4.rs covers the next step.
+    crate::migrations::run(&mut seed, Some(&db.path), &STEPS[..4]).unwrap();
+    let conn = &seed;
     assert_eq!(db.backups().len(), 1);
     let backup = db.backup(3);
     assert_preserved(&backup, &before);
     assert!(!backup.table_exists(None, "epics").unwrap());
     assert_eq!(user_version(conn).unwrap(), 4);
-    assert!(store.foreign_keys_enabled().unwrap());
+    assert_eq!(rows(conn, "PRAGMA foreign_keys"), [[Value::Integer(1)]]);
     assert_preserved(conn, &before);
     assert_eq!(
         rows(conn, "SELECT rowid,id FROM items ORDER BY rowid"),
@@ -180,7 +180,7 @@ fn v4_rolls_back_the_rebuild_if_a_v3_reference_is_broken() {
     .unwrap();
     let repaired = original_rows(&conn);
     let store = Store::open(&db.path).unwrap();
-    assert_eq!(store.version().unwrap(), 4);
+    assert_eq!(store.version().unwrap(), crate::schema_version());
     assert_preserved(&store.conn, &repaired);
 }
 
@@ -194,7 +194,8 @@ fn full_upgrade_from_v1_keeps_exactly_the_v1_v2_and_v3_backups() {
     }
     let before = original_rows(&seed);
 
-    crate::migrations::apply(&mut seed, Some(&db.path)).unwrap();
+    // Stop at 004; phase4.rs covers the full chain to 005.
+    crate::migrations::run(&mut seed, Some(&db.path), &STEPS[..4]).unwrap();
     assert_eq!(user_version(&seed).unwrap(), 4);
     assert_preserved(&seed, &before);
     for path in &older {

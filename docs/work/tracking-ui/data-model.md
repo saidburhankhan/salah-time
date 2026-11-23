@@ -239,8 +239,8 @@ Rules:
   set = its item's tags, or its project's tags when it has no item, resolved at read time. The
   migration test checks every pre-005 item of a tagged project ends up with that project's tags
   and that `stats.table` group "tag" totals are identical before and after 005.
-  Accepted change (orchestrator, 23:20): a session whose task later moved to another project, or
-  was given one, takes the task's current tags (live copy: 6 sessions, 21 min, logged before their
+  Accepted change (orchestrator, 23:20): a session whose task later changed, gained or lost its
+  project takes the task's current tags (live copy: 6 sessions, 21 min, logged before their
   task had a project, move from "No tag" to the task's tags). Removed tags are not copied.
 
 ## Review gates

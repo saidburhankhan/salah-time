@@ -4,6 +4,7 @@ use rusqlite::{Connection, types::Value};
 use std::{fs, path::PathBuf};
 
 mod phase3;
+mod phase4;
 
 struct Database {
     root: PathBuf,
@@ -145,7 +146,10 @@ fn assert_preserved(conn: &Connection, before: &[(String, Vec<Vec<Value>>)]) {
 #[test]
 fn fresh_database_runs_all_steps_and_skips_the_empty_version_zero_backup() {
     let db = Database::new("fresh");
-    let store = Store::open(&db.path).unwrap();
+    // Stop after 004 first: with every step the v1 copy would rotate out.
+    let mut conn = Connection::open(&db.path).unwrap();
+    conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+    super::run(&mut conn, Some(&db.path), &STEPS[..4]).unwrap();
     let v1 = db.backup(1);
     assert!(v1.table_exists(None, "items").unwrap());
     assert!(!v1.table_exists(None, "day_clocks").unwrap());
@@ -158,10 +162,22 @@ fn fresh_database_runs_all_steps_and_skips_the_empty_version_zero_backup() {
     );
     assert!(db.backup(2).table_exists(None, "day_clocks").unwrap());
     assert!(db.backup(3).table_exists(None, "item_metrics").unwrap());
+    assert_eq!(db.backups().len(), 3);
+    drop((v1, conn));
+
+    let store = Store::open(&db.path).unwrap();
     assert_eq!(store.version().unwrap(), crate::schema_version());
+    let v4 = db.backup(4);
+    assert!(v4.table_exists(None, "epics").unwrap());
+    assert!(!v4.table_exists(None, "goals").unwrap());
     check_integrity(&store.conn);
     let paths = db.backups();
     assert_eq!(paths.len(), 3);
+    let versions: Vec<i64> = paths
+        .iter()
+        .map(|path| user_version(&Connection::open(path).unwrap()).unwrap())
+        .collect();
+    assert_eq!(versions, [2, 3, 4]);
     drop(Store::open(&db.path).unwrap());
     assert_eq!(db.backups(), paths);
 }
@@ -170,9 +186,10 @@ fn fresh_database_runs_all_steps_and_skips_the_empty_version_zero_backup() {
 fn history_step_preserves_each_v1_row_with_or_without_preinstalled_history() {
     for history in [false, true] {
         let db = Database::new(if history { "preinstalled" } else { "plain" });
-        let conn = db.at(1, history);
+        let mut conn = db.at(1, history);
         let before = original_rows(&conn);
-        let store = Store::open(&db.path).unwrap();
+        // Stop after 004 so the v1 copy is still among the three kept.
+        super::run(&mut conn, Some(&db.path), &STEPS[..4]).unwrap();
         let v2 = db.backup(2);
         assert_preserved(&db.backup(1), &before);
         assert_preserved(&v2, &before);
@@ -182,7 +199,9 @@ fn history_step_preserves_each_v1_row_with_or_without_preinstalled_history() {
                 usize::from(history)
             );
         }
-        assert_preserved(&store.conn, &before);
+        assert_preserved(&conn, &before);
+        drop((v2, conn));
+        assert_preserved(&Store::open(&db.path).unwrap().conn, &before);
     }
 }
 
