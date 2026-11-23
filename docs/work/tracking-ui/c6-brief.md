@@ -10,7 +10,8 @@ in `docs/work/tracking-ui/` for how this area was built and verified, and the co
 
 Tasks: (1) the creation sheet exactly as plan.md describes (tag filter chips, project colour chips,
 minutes chips, When = block chips with Today/Tomorrow or Backlog, Add / To backlog, prefill from the
-parsed text, Enter keeps the fast path, Esc closes); (2) the bar bell with the due-reminder count and
+parsed text, Enter keeps the fast path, Esc closes); (1b) epic chips after the project in the creation sheet and "+ Log" (optional), and the epic name
+on rows; (2) the bar bell with the due-reminder count and
 the due list at the top of the popup with tick-off (`resource.edit done`); (3) the 📎 count on rows
 and the resource list in the opened row (links open with Qt.openUrlExternally for http/https only,
 reminders tickable, quick add of a note or link). Keep the dark theme tokens (no light fills),

@@ -12,7 +12,8 @@ Tasks: (1) nullable day/block for one-time items with a CHECK, backlog semantics
 snapshots, stats and fulfilment (backlog items never count), `item.add backlog`, `item.schedule`,
 `item.backlog`, `backlog.list`, `item.move` in the backlog; (2) resources table and methods with
 validation, day-row resource counts, `status.get.reminders`, `changed` entity `resources`;
-(3) CLI `salah backlog [list|add|schedule]`, `salah resource [list|add|edit|remove]`; (4) fixtures
+(2b) epics as plan.md "Epics" specifies: table, methods, item/session `epic_id`, epic resources,
+the stats/table/sessions.list filters and grouping, its own CHECKPOINT; (3) CLI `salah epic ...`, `salah backlog [list|add|schedule]`, `salah resource [list|add|edit|remove]`; (4) fixtures
 named in plan.md and protocol-v1.md. Schema changes are additive and migrate an existing database
 in place (the user has live data now: never drop or rewrite it). One CHECKPOINT after (1), one after
 (2)-(4). Checks: `cargo test --offline --workspace` (socket tests fail in your sandbox; say which),

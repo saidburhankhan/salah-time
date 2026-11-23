@@ -12,7 +12,9 @@ Tasks: (1) task drawer beside a selected task on Today (and Backlog) listing its
 add/edit/remove for note, link (opens the browser), reminder (date-time picker, done toggle);
 (2) Backlog page in the sidebar: grouped by project, tag/project filter, manual order (drag),
 planned minutes and resource counts, Schedule (Today / Tomorrow / date + block chips), drag a
-backlog task onto a block on Today, "→ Backlog" on one-time Today items; (3) tests for every new
+backlog task onto a block on Today, "→ Backlog" on one-time Today items; (2b) epics as plan.md "Epics" specifies: project epics in Settings, the Epic page, epic chips in the
+item editor and Log, the Epics filter row on Stats and Notes, backlog grouped by project → epic;
+(3) tests for every new
 request shape and screenshot coverage (drawer, backlog page, schedule dialog) so the orchestrator can
 render them with `SALAH_UI_SHOT_DIR=<dir> app/bin/test`. Readable QML, muted theme tints (never
 white fills), `Text.PlainText` for dynamic strings, existing tests kept. Checks: `app/bin/build`,

@@ -248,6 +248,35 @@ Starts after phase 2's backend (C2) is committed, so two workers never edit the 
   `resources_list.json`, `resource_add_link.json`, `resource_add_reminder.json`,
   `resource_edit_done.json`, `status_reminders.json`.
 
+### Epics (user request 2026-11-23 ~08:30; replaces the "ongoing task" idea)
+- **Hierarchy:** Project → Epic → tasks/sessions. An epic belongs to exactly one project, has no
+  fixed duration or end date, and is not a task: each day's work is its own task or session; nothing
+  migrates between days. Colour and tags come from the project.
+- Epic `{id, project_id, name, note|null, status: "active"|"finished", finished_at|null, position,
+  sync fields}`. Methods: `epics.list {project_id?, status?}` → epics with
+  `{total_minutes, sessions, days_worked, last_worked|null, open_tasks, done_tasks}`;
+  `epic.add {project_id, name, note?}`, `epic.edit {id, name?, note?, status?, expected_version?}`
+  (finishing sets `finished_at`; reopening clears it), `epic.remove {id}` (only with no sessions;
+  otherwise finish it).
+- Items gain `epic_id?` (must belong to the item's project; cleared if the project changes).
+  Sessions gain `epic_id`, copied from the item when written (like `project_id`), or given
+  directly by `session.log`/`session.start` with `epic_id` for work logged against the epic
+  without a task. Changing an item's epic later never rewrites past sessions.
+- Resources (notes, links, reminders) can belong to an epic as well as an item: `resource.add`
+  takes `item_id` or `epic_id`.
+- **Metrics/stats:** `stats.get`, `stats.table`, `sessions.list` gain `epic_id?` filters;
+  `stats.table` gains `group: "epic"`; `stats.get` gains `epics: [{id, name, project_id, minutes,
+  sessions, metrics}]`. So every view can go Project → Epic → Task/Routine.
+- **App:** Settings → Projects: each project lists its epics (add, rename, finish/reopen). An Epic
+  page (from the project, Backlog or a task's chip) shows totals, days worked, a minutes-per-day
+  chart, metric trends, its tasks history and its notes/resources. Item editor and Log: an optional
+  epic chip row under the project chips. Stats/Notes filter bar: Tags / Projects / **Epics** /
+  Tasks. Backlog grouped by project → epic.
+- **Widget:** the creation sheet and "+ Log" show epic chips after a project is chosen (optional);
+  rows show the epic name next to the project dot.
+- Fixtures: `epics_list.json`, `epic_add.json`, `epic_edit_finish.json`, `session_log_epic.json`,
+  `stats_table_epic.json`.
+
 ### Workers (Codex gpt-6.2-astra high, or Claude if Codex is limited)
 - C5 backend (`crates/**`): the contract above, schema additive (new table, nullable day/block with a
   CHECK tying them to repeat), tests, CLI (`salah backlog`, `salah resource`), fixtures, protocol-v1.md.
@@ -255,7 +284,7 @@ Starts after phase 2's backend (C2) is committed, so two workers never edit the 
 - C7 app (`app/**`): task drawer, Backlog page, schedule dialog, drag from backlog, "→ Backlog".
 
 ### Slices
-- [ ] R1 backend (C5)
+- [ ] R1 backend (C5): backlog + resources, then epics
 - [ ] R2 widget (C6)
 - [ ] R3 app (C7)
 - [ ] R4 integration, screenshots reviewed, install, user check
