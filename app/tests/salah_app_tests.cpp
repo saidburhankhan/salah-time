@@ -145,6 +145,8 @@ class SalahAppTests : public QObject {
         script += "rpc='" TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/rpc/'\n"
                   "if [ \"$1\" = day ]; then jq -c .result \"${rpc}day_tracking.json\"; exit 0; fi\n"
                   "if [ \"$1\" = stats ]; then jq -c .result \"${rpc}stats.json\"; exit 0; fi\n";
+        const QByteArray status = dir.filePath("status.json").toUtf8();
+        script += "if [ \"$1\" = status ] && [ -f '" + status + "' ]; then cat '" + status + "'; exit 0; fi\n";
         script += R"SH(
 if [ "$5" = "slow" ]; then sleep 2; printf '{}\n'; exit 0; fi
 if [ "$1 $2" = "item done" ]; then sleep 1; printf '{}\n'; exit 0; fi
@@ -2395,6 +2397,49 @@ const int original = model->indexOfItem("<id:4>");
         QCOMPARE(worked->property("text").toString(), QString("47"));
         QVERIFY(!staleNote->isVisible());
     }
+    void staleRunningCardFreezesAtSleepClamp() {
+        QTemporaryDir dir;
+        Backend backend(nullptr, fake(dir), 3000, daemon_path(dir));
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        window->resize(1440, 900);
+        auto *card = findByName(root.data(), "runningCard");
+        QVERIFY(card);
+        auto *elapsed = findByName(card, "runningElapsed");
+        auto *note = findByName(card, "runningStaleNote");
+        QVERIFY(elapsed && note);
+        auto status = TrackingFixture::status(fixture("status_running"));
+        auto reloadStatus = [&] {
+            write(dir.filePath("status.json"), QJsonDocument(status).toJson(QJsonDocument::Compact));
+            backend.reload();
+            waitForBackendIdle(backend);
+        };
+        reloadStatus();
+        QVERIFY(card->property("visible").toBool());
+        QVERIFY(!note->property("visible").toBool());
+        const auto started = QDateTime::fromString(backend.running().value("started_at").toString(), Qt::ISODate);
+        QVERIFY(started.isValid());
+        root->setProperty("timerNow", started.addSecs(47 * 60 + 5).toMSecsSinceEpoch());
+        QCOMPARE(elapsed->property("text").toString(), QString("47:05"));
+        root->setProperty("timerNow", started.addSecs(47 * 60 + 6).toMSecsSinceEpoch());
+        QCOMPARE(elapsed->property("text").toString(), QString("47:06"));
+
+        status["running"] = TrackingFixture::staleRunningSession();
+        reloadStatus();
+        QVERIFY(note->property("visible").toBool());
+        QCOMPARE(note->property("text").toString(), QString("Ran past Sleep: stop it to save up to 120 min"));
+        QCOMPARE(elapsed->property("text").toString(), QString("120:00"));
+        root->setProperty("timerNow", QDateTime::currentMSecsSinceEpoch() + 60 * 60 * 1000);
+        QCOMPARE(elapsed->property("text").toString(), QString("120:00"));
+        shotWindow(window, "running-card-stale.png");
+    }
     void filterBarTableAndTabsFollowTheUser() {
         QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
         daemon.setHandler(trackingHandler(trackingState()));
@@ -2797,17 +2842,13 @@ fi
         waitForBackendIdle(backend);
 
         // A timer that ran past Sleep: Worked is capped and the panel says why.
-        {
-            QJsonObject stale = state->status.value("running").toObject();
-            stale["started_at"] = QDateTime::currentDateTimeUtc().addSecs(-10 * 3600).toString(Qt::ISODate);
-            stale["stale"] = true;
-            stale["max_minutes"] = 120;
-            state->status["running"] = stale;
-        }
+        state->status["running"] = TrackingFixture::staleRunningSession();
         root->setProperty("page", 0);
         backend.reload();
         waitForBackendIdle(backend);
         QTRY_VERIFY_WITH_TIMEOUT(backend.running().value("stale").toBool(), 3000);
+        QCOMPARE(findByName(runningCard, "runningElapsed")->property("text").toString(), QString("120:00"));
+        shotWindow(window, "running-card-stale.png");
         QVERIFY(QMetaObject::invokeMethod(root.data(), "pauseRunning"));
         QTRY_VERIFY_WITH_TIMEOUT(prompt->property("visible").toBool(), 2000);
         QCOMPARE(findByName(root.data(), "sessionMinutesField")->property("text").toString(), QString("120"));

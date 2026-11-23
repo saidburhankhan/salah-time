@@ -127,6 +127,14 @@ inline QJsonObject runningSession() {
                               QJsonObject{{"id", "n-2"}, {"at", "2031-05-14T07:58:00Z"}, {"text", "Verb forms done, starting exercises"}}});
 }
 
+inline QJsonObject staleRunningSession() {
+    QJsonObject running = runningSession();
+    running["started_at"] = QDateTime::currentDateTimeUtc().addSecs(-10 * 3600).toString(Qt::ISODate);
+    running["stale"] = true;
+    running["max_minutes"] = 120;
+    return running;
+}
+
 inline QJsonObject item(const QString &id, const QString &title, const QString &block, int position,
                         const QString &projectId, int planned, const QJsonArray &sessions,
                         const QString &repeat = "daily") {

@@ -13,6 +13,8 @@ Card {
     readonly property var session: backend.running
     readonly property string sessionId: String(session.id || "")
     readonly property bool active: !!(session && session.id)
+    readonly property bool stale: session.stale === true
+    readonly property int maxMinutes: Number(session.max_minutes || 0)
     readonly property real distractions: Number((session.values || {}).distractions || 0)
     readonly property var notes: session.notes || []
     implicitHeight: body.implicitHeight + 36
@@ -79,6 +81,7 @@ Card {
             }
             Label {
                 text: qsTr("since %1").arg(runningCard.win.clockTime(runningCard.session ? runningCard.session.started_at : ""))
+                textFormat: Text.PlainText
                 color: runningCard.win.muted
                 font.family: runningCard.win.mono
                 font.pixelSize: 12
@@ -107,8 +110,12 @@ Card {
         RowLayout {
             Layout.fillWidth: true
             Label {
+                objectName: "runningElapsed"
                 Layout.fillWidth: true
-                text: runningCard.win.elapsedClock(runningCard.session ? runningCard.session.started_at : "")
+                text: runningCard.stale
+                    ? (runningCard.maxMinutes > 0 ? runningCard.win.formatElapsed(runningCard.maxMinutes * 60) : "—")
+                    : runningCard.win.elapsedClock(runningCard.session.started_at)
+                textFormat: Text.PlainText
                 font.features: { "tnum": 1 }
                 color: runningCard.win.text
                 font.family: runningCard.win.mono
@@ -121,6 +128,20 @@ Card {
                 text: qsTr("❚❚  Pause")
                 onClicked: runningCard.win.pauseRunning()
             }
+        }
+        Label {
+            objectName: "runningStaleNote"
+            Layout.fillWidth: true
+            visible: runningCard.stale
+            text: runningCard.maxMinutes > 0
+                ? qsTr("Ran past Sleep: stop it to save up to %1 min").arg(runningCard.maxMinutes)
+                : qsTr("Ran past Sleep: stop it to save the session")
+            textFormat: Text.PlainText
+            color: runningCard.win.muted
+            font.pixelSize: 12
+            fontSizeMode: Text.HorizontalFit
+            minimumPixelSize: 10
+            elide: Text.ElideRight
         }
 
         RowLayout {
