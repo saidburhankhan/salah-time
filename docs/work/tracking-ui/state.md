@@ -101,3 +101,13 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   QML-converted `status.reminders` (debug print: report.reminders has 2 rows, dueReminders 0).
   Send to C6 at 2b: accept any array-like (`rows && typeof rows.length === "number"`, copy with
   `Array.prototype.slice.call`) and add a node test with an array-like object.
+- 22:28 Codex 5h cap (window opened 22:10; weekly 16→31%, so one window ≈ 15% weekly, burned in
+  ~16 min by 3 workers). Next window 03:12. Committed: c514311 + d9b5f8f (C6 reminders, resources in
+  rows), 9ceb3db (C5 R2 fixes, 214 tests incl. sockets), d7a3423 (C8 0a block_minutes, Claude Opus
+  inherited), eb8bfb2 (C6 R3w widget fixes + reminder array-like bug, Claude Sonnet inherited;
+  render shows 🔔 2 and the Due section). Claude now holds: C8 task 0 = migration 005 (Opus; then
+  the independent review gate), C7 R3a app fixes (Opus, inheriting Codex's +801/−339 WIP).
+- 0a decisions: leftover minutes use standard largest remainder (start block wins ties only), kept.
+  `stats.get` `blocks` (app ChartsView "By prayer block") still counts sessions whole in their
+  start block, so it can disagree with stats.table group "block": queue C8 0b = switch it to
+  block_minutes (values change, no field change; note it in protocol-v1.md).
