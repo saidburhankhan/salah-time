@@ -3,6 +3,7 @@
 mod codec;
 mod migrations;
 mod read;
+pub mod reports;
 mod write;
 
 pub use write::WriteTx;
@@ -87,7 +88,19 @@ impl Store {
             .or(path)
             .filter(|p| !p.as_os_str().is_empty());
         migrations::apply(&mut conn, file)?;
+        reports::register_search(&conn)?;
         Ok(Self { conn })
+    }
+
+    /// Read a report's facts and related rows from the same SQLite snapshot.
+    pub fn read_snapshot<T>(
+        &self,
+        read: impl FnOnce(&Store) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let tx = self.conn.unchecked_transaction().map_err(storage_error)?;
+        let result = read(self)?;
+        tx.commit().map_err(storage_error)?;
+        Ok(result)
     }
 
     pub fn version(&self) -> Result<i64, Error> {

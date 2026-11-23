@@ -339,7 +339,7 @@ pub(crate) fn session_bump(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Valu
     let config = ctx.config.load()?;
     let now = ctx.now();
     mutate(ctx.store, call.method, &p.op_id, |tx| {
-        let session = sessions::bump(tx, now, p.id.as_deref(), &p.metric_id, p.delta)?;
+        let session = sessions::bump(tx, &config, now, p.id.as_deref(), &p.metric_id, p.delta)?;
         session_views(tx, &config, now, [&session])
     })
 }
@@ -349,7 +349,7 @@ pub(crate) fn session_note(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Valu
     let config = ctx.config.load()?;
     let (now, ids) = (ctx.now(), ctx.ids);
     mutate(ctx.store, call.method, &p.op_id, |tx| {
-        let session = sessions::append_note(tx, now, ids, p.id.as_deref(), &p.text)?;
+        let session = sessions::append_note(tx, &config, now, ids, p.id.as_deref(), &p.text)?;
         session_views(tx, &config, now, [&session])
     })
 }

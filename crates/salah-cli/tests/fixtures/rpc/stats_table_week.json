@@ -1,0 +1,135 @@
+{
+  "id": 2,
+  "jsonrpc": "2.0",
+  "result": {
+    "columns": [
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "minutes",
+        "kind": "count",
+        "name": "Minutes",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "min"
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "sessions",
+        "kind": "count",
+        "name": "Sessions",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "sessions"
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "focus",
+        "kind": "scale",
+        "name": "Focus",
+        "rollup": "avg",
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "quality",
+        "kind": "scale",
+        "name": "Quality",
+        "rollup": "avg",
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "distractions",
+        "kind": "count",
+        "name": "Distractions",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "times"
+      },
+      {
+        "archived": false,
+        "derived_from": "distractions",
+        "id": "distractions_per_hour",
+        "kind": "count",
+        "name": "Distractions per hour",
+        "rollup": "avg",
+        "scale_max": null,
+        "unit": "per hour"
+      }
+    ],
+    "filter": {
+      "item_id": null,
+      "project_id": null,
+      "tag_id": null
+    },
+    "group": "week",
+    "range": {
+      "from": "2031-05-01",
+      "to": "2031-05-14"
+    },
+    "rows": [
+      {
+        "color": null,
+        "from": "2031-05-01",
+        "key": "2031-W18",
+        "label": "1–4 May 2031",
+        "minutes": 0,
+        "sessions": 0,
+        "to": "2031-05-04",
+        "values": {
+          "distractions": null,
+          "distractions_per_hour": null,
+          "focus": null,
+          "quality": null
+        }
+      },
+      {
+        "color": null,
+        "from": "2031-05-05",
+        "key": "2031-W19",
+        "label": "5–11 May 2031",
+        "minutes": 30,
+        "sessions": 1,
+        "to": "2031-05-11",
+        "values": {
+          "distractions": 2.0,
+          "distractions_per_hour": 4.0,
+          "focus": 4.0,
+          "quality": 5.0
+        }
+      },
+      {
+        "color": null,
+        "from": "2031-05-12",
+        "key": "2031-W20",
+        "label": "12–14 May 2031",
+        "minutes": 60,
+        "sessions": 4,
+        "to": "2031-05-14",
+        "values": {
+          "distractions": 1.0,
+          "distractions_per_hour": 1.0,
+          "focus": 2.6086956521739126,
+          "quality": null
+        }
+      }
+    ],
+    "totals": {
+      "minutes": 90,
+      "sessions": 5,
+      "values": {
+        "distractions": 3.0,
+        "distractions_per_hour": 2.0,
+        "focus": 3.1578947368421053,
+        "quality": 5.0
+      }
+    }
+  }
+}

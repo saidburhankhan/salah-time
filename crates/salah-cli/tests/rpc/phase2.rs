@@ -1,13 +1,13 @@
 use super::{DATE, Fixtures, Harness, LATER, NOW, Session, id};
 use serde_json::{Value, json};
 
-fn good(rpc: &mut Session, method: &str, params: Value) -> Value {
+pub(super) fn good(rpc: &mut Session, method: &str, params: Value) -> Value {
     let response = rpc.request(method, params);
     assert!(response.get("error").is_none(), "{method}: {response}");
     response["result"].clone()
 }
 
-fn bad(rpc: &mut Session, method: &str, params: Value, kind: &str, field: Option<&str>) {
+pub(super) fn bad(rpc: &mut Session, method: &str, params: Value, kind: &str, field: Option<&str>) {
     let response = rpc.request(method, params);
     assert_eq!(response["error"]["data"]["kind"], kind, "{response}");
     if let Some(field) = field {
@@ -15,7 +15,7 @@ fn bad(rpc: &mut Session, method: &str, params: Value, kind: &str, field: Option
     }
 }
 
-fn added(rpc: &mut Session, method: &str, kind: &str, params: Value) -> String {
+pub(super) fn added(rpc: &mut Session, method: &str, kind: &str, params: Value) -> String {
     id(&good(rpc, method, params), kind)
 }
 
@@ -379,10 +379,14 @@ fn effective_item_metrics_follow_project_order_and_cleanup_persists() {
         "item.edit",
         json!({"op_id":"leave-project","id":item,"project_id":null,"metric_ids":["quality"]}),
     );
-    assert!(switched["changed"]["items"][0]["metric_ids"].is_null());
+    // metric_ids sent with a project change apply to the new project (R1).
+    assert_eq!(
+        switched["changed"]["items"][0]["metric_ids"],
+        json!(["quality"])
+    );
     assert_eq!(
         metric_ids(&switched["changed"]["items"][0]["metrics"]),
-        ["focus", "quality", "distractions"]
+        ["quality"]
     );
     assert_eq!(
         good(&mut rpc, "status.get", json!({}))["running"]["project_id"],
@@ -390,8 +394,14 @@ fn effective_item_metrics_follow_project_order_and_cleanup_persists() {
     );
     assert_eq!(
         metric_ids(&good(&mut rpc, "status.get", json!({}))["prompt"]),
-        ["focus", "quality", "distractions"]
+        ["quality"]
     );
+    let reset = good(
+        &mut rpc,
+        "item.edit",
+        json!({"op_id":"rejoin-project","id":item,"project_id":project}),
+    );
+    assert!(reset["changed"]["items"][0]["metric_ids"].is_null());
 }
 
 #[test]

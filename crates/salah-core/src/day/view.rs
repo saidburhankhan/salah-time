@@ -17,23 +17,7 @@ use salah_domain::{
 use salah_prayer::schedule;
 use serde::Serialize;
 
-/// The colour-coded project a row belongs to.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct ProjectRef {
-    pub id: String,
-    pub name: String,
-    pub color: String,
-}
-
-impl From<&Project> for ProjectRef {
-    fn from(project: &Project) -> Self {
-        Self {
-            id: project.id.clone(),
-            name: project.name.clone(),
-            color: project.color.clone(),
-        }
-    }
-}
+pub use salah_domain::tracking::ProjectRef;
 
 /// One planned item on one day.
 #[derive(Clone, Debug, Serialize)]
@@ -245,7 +229,7 @@ pub fn today(store: &mut Store, config: &Config, now: DateTime<Utc>) -> Result<T
 
 /// The snapshots, items, projects, and sessions of one day.
 struct Ledger {
-    past_sleep: bool,
+    now: DateTime<Utc>,
     clock: DayClock,
     day: NaiveDate,
     blocks: Vec<DayBlock>,
@@ -272,7 +256,7 @@ impl Ledger {
             plan,
         } = snapshot(store, config, day, today)?;
         Ok(Self {
-            past_sleep: now > clock.sleep_at,
+            now,
             day,
             clock,
             blocks,
@@ -371,7 +355,7 @@ impl Ledger {
             done: has_tick(&self.sessions, &item.id),
             sessions: sessions
                 .into_iter()
-                .map(|session| SessionView::for_day(store, session, Some(self.past_sleep)))
+                .map(|session| SessionView::timed(store, session, self.now, self.clock.sleep_at))
                 .collect::<Result<_, _>>()?,
             next_occurrence: item.next_occurrence(self.day),
             schedule_text,

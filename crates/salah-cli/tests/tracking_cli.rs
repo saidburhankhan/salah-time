@@ -364,3 +364,63 @@ fn save_done_and_item_filtered_stats_are_available_without_a_daemon() {
     assert_eq!(stats["totals"]["minutes"], 20);
     assert_eq!(stats["totals"]["sessions"], 2);
 }
+
+#[test]
+fn stats_table_and_sessions_list_print_the_rpc_json() {
+    let fixture = Fixture::new();
+    let item = fixture.added("items", &["item", "add", "Read", "--json"]);
+    for (minutes, focus, note) in [("30", "focus=4", "Āyat review"), ("10", "focus=1", "")] {
+        let mut args = vec![
+            "session",
+            "log",
+            "--item",
+            &item,
+            "--minutes",
+            minutes,
+            "--value",
+            focus,
+            "--json",
+        ];
+        if !note.is_empty() {
+            args.extend(["--note", note]);
+        }
+        fixture.json(&args);
+    }
+    let table = fixture.json(&["stats", "table", "--days", "7", "--group", "item"]);
+    assert_eq!(table["group"], "item");
+    assert_eq!(table["rows"][0]["key"], item);
+    assert_eq!(table["totals"]["minutes"], 40);
+    let weeks = fixture.json(&["stats", "table", "--days", "7", "--project", "none"]);
+    assert_eq!(weeks["group"], "week");
+    assert_eq!(weeks["filter"]["project_id"], "none");
+    assert_eq!(weeks["totals"]["sessions"], 2, "the item has no project");
+    let old_form = fixture.json(&["stats", "--days", "7", "--json"]);
+    assert_eq!(old_form["totals"]["minutes"], 40);
+
+    let noted = fixture.json(&["sessions", "list", "--days", "7"]);
+    assert_eq!(noted["rows"].as_array().unwrap().len(), 1);
+    let found = fixture.json(&[
+        "sessions",
+        "list",
+        "--all",
+        "--q",
+        "ĀYAT",
+        "--min-focus",
+        "3",
+        "--max-focus",
+        "5",
+        "--min-minutes",
+        "20",
+        "--item",
+        &item[..8],
+    ]);
+    assert_eq!(found["rows"][0]["note"], "Āyat review");
+    let generic = fixture.json(&[
+        "sessions", "list", "--all", "--max", "focus=2", "--limit", "1",
+    ]);
+    assert_eq!(generic["rows"][0]["minutes"], 10);
+    assert!(generic["next"].is_null());
+    let bad = fixture.run(&["sessions", "list", "--limit", "0"]);
+    assert!(!bad.status.success());
+    assert!(stderr(&bad).contains("limit"), "{}", stderr(&bad));
+}

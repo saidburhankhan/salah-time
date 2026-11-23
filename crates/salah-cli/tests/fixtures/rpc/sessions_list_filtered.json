@@ -1,0 +1,38 @@
+{
+  "id": 3,
+  "jsonrpc": "2.0",
+  "result": {
+    "next": null,
+    "rows": [
+      {
+        "block": "dhuhr",
+        "day": "2031-05-08",
+        "ended_at": null,
+        "id": "<id:7>",
+        "item": {
+          "id": "<id:2>",
+          "title": "Read"
+        },
+        "item_id": "<id:2>",
+        "minutes": 30,
+        "note": "Āyat 1–10 of al-Mulk",
+        "notes": [],
+        "project": {
+          "color": "#335577",
+          "id": "<id:4>",
+          "name": "Quran"
+        },
+        "project_id": "<id:4>",
+        "running": false,
+        "stale": false,
+        "started_at": null,
+        "values": {
+          "distractions": 2.0,
+          "focus": 4.0,
+          "quality": 5.0
+        },
+        "version": 1
+      }
+    ]
+  }
+}

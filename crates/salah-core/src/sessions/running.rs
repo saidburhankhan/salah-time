@@ -82,9 +82,30 @@ fn require_running(store: &Store, id: Option<&str>) -> Result<Session, Error> {
         .ok_or_else(|| not_found("running session", id.unwrap_or("")))
 }
 
+/// The running timer, refused once it ran past its planning day's Sleep
+/// boundary: a count or note at `now` would land on the earlier day's
+/// session after the instant it will be cut off at.
+fn require_live_timer(
+    tx: &WriteTx<'_>,
+    config: &Config,
+    now: DateTime<Utc>,
+    id: Option<&str>,
+) -> Result<Session, Error> {
+    let session = require_running(tx, id)?;
+    let today = day::current(config, now)?;
+    if now > day::clock_for_day(tx, config, session.block.day, today)?.sleep_at {
+        return Err(Error::validation(
+            "id",
+            "the timer ran past Sleep; stop it first",
+        ));
+    }
+    Ok(session)
+}
+
 /// Adjusts one active count metric on the running timer.
 pub fn bump(
     tx: &WriteTx<'_>,
+    config: &Config,
     now: DateTime<Utc>,
     id: Option<&str>,
     metric_id: &str,
@@ -93,7 +114,7 @@ pub fn bump(
     if !matches!(delta, -1 | 1) {
         return Err(Error::validation("delta", "delta must be 1 or -1"));
     }
-    let mut session = require_running(tx, id)?;
+    let mut session = require_live_timer(tx, config, now, id)?;
     let metric = metrics::find(tx, metric_id)?;
     if metric.kind != MetricKind::Count || metric.archived {
         return Err(Error::validation(
@@ -122,13 +143,14 @@ pub fn bump(
 /// Appends one timestamped entry to the running timer.
 pub fn append_note(
     tx: &WriteTx<'_>,
+    config: &Config,
     now: DateTime<Utc>,
     ids: &dyn IdGenerator,
     id: Option<&str>,
     text: &str,
 ) -> Result<Session, Error> {
     let text = label("text", text, 500)?;
-    let mut session = require_running(tx, id)?;
+    let mut session = require_live_timer(tx, config, now, id)?;
     let entry = SessionNote {
         id: ids.new_id(),
         at: now,
@@ -151,7 +173,7 @@ pub(super) fn finish(
     let today = day::current(config, now)?;
     day::freeze(tx, config, day, today)?;
     let day_end = day::clock_for_day(tx, config, day, today)?.sleep_at;
-    let ended = now.min(day_end).max(started);
+    let ended = cutoff(started, now, day_end);
     let elapsed = elapsed_minutes(started, ended);
     let worked = options.minutes.unwrap_or(elapsed);
     if !(1..=elapsed).contains(&worked) {
@@ -175,6 +197,17 @@ pub(super) fn finish(
     session.updated_at = now;
     session.version = tx.put_session(&session)?;
     Ok(session)
+}
+
+/// Where a timer stopped at `now` ends: never past its day's Sleep boundary.
+fn cutoff(started: DateTime<Utc>, now: DateTime<Utc>, sleep_at: DateTime<Utc>) -> DateTime<Utc> {
+    now.min(sleep_at).max(started)
+}
+
+/// The upper bound of `session.stop.minutes` for `timer` at `now`.
+pub(super) fn max_minutes(timer: &Session, now: DateTime<Utc>, sleep_at: DateTime<Utc>) -> i64 {
+    let started = timer.started_at.unwrap_or(now);
+    elapsed_minutes(started, cutoff(started, now, sleep_at))
 }
 
 /// Whole minutes between two instants, rounded, from 1 to a day's 1440.

@@ -1,0 +1,135 @@
+{
+  "id": 3,
+  "jsonrpc": "2.0",
+  "result": {
+    "columns": [
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "minutes",
+        "kind": "count",
+        "name": "Minutes",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "min"
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "sessions",
+        "kind": "count",
+        "name": "Sessions",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "sessions"
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "focus",
+        "kind": "scale",
+        "name": "Focus",
+        "rollup": "avg",
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "quality",
+        "kind": "scale",
+        "name": "Quality",
+        "rollup": "avg",
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "distractions",
+        "kind": "count",
+        "name": "Distractions",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "times"
+      },
+      {
+        "archived": false,
+        "derived_from": "distractions",
+        "id": "distractions_per_hour",
+        "kind": "count",
+        "name": "Distractions per hour",
+        "rollup": "avg",
+        "scale_max": null,
+        "unit": "per hour"
+      }
+    ],
+    "filter": {
+      "item_id": null,
+      "project_id": null,
+      "tag_id": null
+    },
+    "group": "project",
+    "range": {
+      "from": "2031-05-01",
+      "to": "2031-05-14"
+    },
+    "rows": [
+      {
+        "color": "#335577",
+        "from": null,
+        "key": "<id:1>",
+        "label": "Quran",
+        "minutes": 55,
+        "sessions": 3,
+        "to": null,
+        "values": {
+          "distractions": 2.0,
+          "distractions_per_hour": 2.1818181818181817,
+          "focus": 3.571428571428571,
+          "quality": 5.0
+        }
+      },
+      {
+        "color": "#775533",
+        "from": null,
+        "key": "<id:2>",
+        "label": "Gym",
+        "minutes": 20,
+        "sessions": 1,
+        "to": null,
+        "values": {
+          "distractions": 1.0,
+          "distractions_per_hour": 3.0,
+          "focus": 2.0,
+          "quality": null
+        }
+      },
+      {
+        "color": null,
+        "from": null,
+        "key": "none",
+        "label": "No project",
+        "minutes": 15,
+        "sessions": 1,
+        "to": null,
+        "values": {
+          "distractions": null,
+          "distractions_per_hour": null,
+          "focus": null,
+          "quality": null
+        }
+      }
+    ],
+    "totals": {
+      "minutes": 90,
+      "sessions": 5,
+      "values": {
+        "distractions": 3.0,
+        "distractions_per_hour": 2.0,
+        "focus": 3.1578947368421053,
+        "quality": 5.0
+      }
+    }
+  }
+}

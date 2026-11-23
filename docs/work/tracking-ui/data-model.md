@@ -166,8 +166,9 @@ Rules:
   `project_id` on the session (enforced in core; CHECK added only if it does not need a sessions
   rebuild).
 - `epic.remove` is a soft delete allowed only with no sessions; otherwise finish it.
-- Unassigned work is first-class in stats: rows `project: null` ("No project") and, within a
-  project, `epic: null` ("No epic"); filters accept `"none"`.
+- Unassigned work is first-class in stats: `stats.table` rows with `key: "none"` ("No project",
+  "No tag", "No task", and with 004 "No epic"); `sessions.list` rows carry `project`/`item` null;
+  filters accept `"none"` (C5 also adds `"none"` to `stats.get`, which lacks it after phase 2).
 - `changes` entity names: `epics`, `resources`; session notes are reported under `sessions`.
 
 ## 005 — phase 4 (worker C8)

@@ -505,6 +505,8 @@ fn a_timer_becomes_stale_only_after_its_own_sleep_boundary() {
         assert_eq!(running["stale"], stale);
         assert_eq!(running["version"], started["version"]);
         assert!(running["minutes"].is_null());
+        // 09:30 to the 00:30 Sleep cut-off, however late the request.
+        assert_eq!(running["max_minutes"], 900);
         let day = read.request("day.get", json!({"date":DATE}));
         assert_eq!(
             day["result"]["blocks"][1]["items"][0]["sessions"][0],
@@ -512,6 +514,17 @@ fn a_timer_becomes_stale_only_after_its_own_sleep_boundary() {
         );
         if stale {
             Fixtures::default().check("status_stale", status);
+            // Past Sleep: counts and notes are refused until the timer stops.
+            for (method, params) in [
+                (
+                    "session.bump",
+                    json!({"op_id":"stale-bump","metric_id":"distractions","delta":1}),
+                ),
+                ("session.note", json!({"op_id":"stale-note","text":"Late"})),
+            ] {
+                let refused = read.request(method, params);
+                assert_eq!(refused["error"]["data"]["kind"], "validation", "{refused}");
+            }
         }
     }
 
@@ -540,3 +553,5 @@ fn a_timer_becomes_stale_only_after_its_own_sleep_boundary() {
 
 #[path = "rpc/phase2.rs"]
 mod phase2;
+#[path = "rpc/reports.rs"]
+mod reports;

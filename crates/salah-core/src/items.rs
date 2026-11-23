@@ -214,10 +214,12 @@ pub fn edit(
     if let Some(project_id) = changes.project_id {
         item.project_id = checked_project(tx, project_id)?;
     }
-    if item.project_id != previous_project {
-        item.metric_ids = None;
-    } else if let Some(ids) = changes.metric_ids {
-        item.metric_ids = checked_metric_ids(tx, item.project_id.as_deref(), ids)?;
+    // A new project resets the selection unless the same edit chooses one,
+    // which is then checked against the new project.
+    match changes.metric_ids {
+        Some(ids) => item.metric_ids = checked_metric_ids(tx, item.project_id.as_deref(), ids)?,
+        None if item.project_id != previous_project => item.metric_ids = None,
+        None => {}
     }
     if let Some(planned) = changes.planned_minutes {
         item.planned_minutes = planned.map(|m| minutes("planned_minutes", m)).transpose()?;
@@ -549,5 +551,94 @@ mod tests {
             )
         });
         assert_eq!(back_dated.unwrap_err().code(), "validation");
+    }
+
+    #[test]
+    fn a_project_change_keeps_metric_ids_sent_with_it_checked_against_the_new_project() {
+        use crate::metrics::NewMetric;
+        use crate::projects::{MetricChoice, NewProject};
+        use salah_domain::tracking::MetricKind;
+        let mut store = Store::open_in_memory().unwrap();
+        let first = project(&mut store, "Quran");
+        let (pages, second, item) = store
+            .write(|tx| {
+                let pages = metrics::add(
+                    tx,
+                    at(20, 9, 0),
+                    ids(),
+                    NewMetric {
+                        name: "Pages".into(),
+                        unit: "pages".into(),
+                        kind: MetricKind::Count,
+                        scale_max: None,
+                        rollup: None,
+                    },
+                )?;
+                let second = projects::add(
+                    tx,
+                    at(20, 9, 0),
+                    ids(),
+                    NewProject {
+                        name: "Books".into(),
+                        metrics: Some(vec![MetricChoice {
+                            metric_id: pages.id.clone(),
+                            required: false,
+                        }]),
+                        ..NewProject::default()
+                    },
+                )?;
+                let item = add(
+                    tx,
+                    &config(),
+                    at(20, 13, 0),
+                    ids(),
+                    NewItem {
+                        project_id: Some(first.id.clone()),
+                        metric_ids: Some(vec!["focus".into()]),
+                        ..titled("Read")
+                    },
+                )?;
+                Ok((pages, second, item))
+            })
+            .unwrap();
+        let edit = |store: &mut Store, body: serde_json::Value| {
+            let changes: ItemChanges = serde_json::from_value(body).unwrap();
+            store.write(|tx| {
+                edit(
+                    tx,
+                    &config(),
+                    at(20, 14, 0),
+                    &item.id,
+                    changes.clone(),
+                    None,
+                )
+            })
+        };
+        let moved = edit(
+            &mut store,
+            serde_json::json!({"project_id": second.id, "metric_ids": [pages.id, "focus"]}),
+        )
+        .unwrap();
+        assert_eq!(moved.project_id.as_deref(), Some(second.id.as_str()));
+        assert_eq!(
+            moved.metric_ids,
+            Some(vec![pages.id.clone(), "focus".into()])
+        );
+        let refused = edit(
+            &mut store,
+            serde_json::json!({"project_id": first.id, "metric_ids": [pages.id]}),
+        );
+        assert!(matches!(
+            refused,
+            Err(Error::Validation {
+                field: "metric_ids",
+                ..
+            })
+        ));
+        let reset = edit(&mut store, serde_json::json!({"project_id": first.id})).unwrap();
+        assert_eq!(
+            reset.metric_ids, None,
+            "without metric_ids a new project resets"
+        );
     }
 }

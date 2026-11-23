@@ -82,3 +82,35 @@ The derived distractions-per-hour column belongs to the upcoming `stats.table` s
 - `docs/work/architecture/protocol-v1.md`, `docs/work/tracking-ui/c2-progress.md`
 
 CHECKPOINT 2d: Add task-filtered stats, atomic Save & Done, live counters, task metrics and timestamped notes
+
+## Tasks 3, 3b, 4, 5 and R1 fixes (Claude, taking over from Codex)
+
+- `stats.table` (`crates/salah-core/src/stats/table.rs`): groups week (default, Monday first, ISO keys, clipped `from`/`to`, empty weeks kept), day, project, tag, item. Weighting reuses `stats::rollup`. Unassigned work is a `key: "none"` row ("No project" / "No tag" / "No task"). Tag rows count a session once per project tag; totals count it once. Columns: minutes, sessions, active metrics plus archived ones with data, in catalog or single-project prompt order, each `{…, archived, derived_from}`. The derived `distractions_per_hour` (sum × 60 ÷ row minutes) follows distractions. Grouping is a key function per `Group` and filters are `Choice` values, so an epic group and an `epic_id` filter are one variant each.
+- Filters: `project_id`, `tag_id` and `item_id` accept `"none"` in `stats.table` and `sessions.list`. `stats.get` is unchanged. Range validation and filter resolution are shared (`Range::check`, `stats::report_scope`).
+- `sessions.list` (`crates/salah-core/src/sessions/list.rs`): SQL-side predicates in `crates/salah-store/src/reports.rs`. `q` uses a registered Unicode `salah_lower()` and `instr`, so there are no LIKE wildcards. Notes are batch-loaded in the same read snapshot. Order: day DESC, then end instant (creation for logs and ticks) DESC, then id DESC. Cursor `<day>|<instant>|<id>`, fetching limit + 1.
+- CLI: `salah stats table [--from --to | --days] [--project|--tag|--item ID|none] [--group G]` and `salah sessions list [--all] [--q] [--min-minutes] [--max-minutes] [--min-focus] [--max-focus] [--min-quality] [--max-quality] [--min M=V] [--max M=V] [--limit] [--before]` both print the RPC JSON. `salah stats --days N` still works.
+- R1 (a): a running `SessionView` has `max_minutes` (the stop bound at the request instant, cut off at Sleep) in status, day rows and mutation results. (b) `item.edit` with a project change and `metric_ids` validates and keeps the list against the new project. (c) `session.bump` and `session.note` on a stale timer return `validation` (`id`): "the timer ran past Sleep; stop it first".
+- Indexes: none missing. Reports filter on `sessions_by_day` or `sessions_by_item_day`. Notes use `session_notes_by_session`. The Notes order sorts in memory after the day-range filter.
+
+### Verification
+
+179 workspace tests passed, including the 8 daemon socket tests. New tests: 11 for `stats.table`, 9 for `sessions.list`, 3 for the R1 fixes (core), 2 for RPC reports, 1 CLI, plus R1 assertions in `rpc.rs`, `phase2.rs` and daemon method coverage. Strict Clippy, `cargo fmt --check` and `git diff --check` passed. Fixtures were regenerated. Five existing fixtures gained only `max_minutes`, which a structural check confirmed is additive. Four fixtures are new.
+
+### Checkpoint files
+
+- `crates/salah-domain/src/tracking.rs`
+- `crates/salah-store/Cargo.toml`, `crates/salah-store/src/{lib.rs,reports.rs}`
+- `crates/salah-core/src/{stats.rs,stats/table.rs,stats/table/tests.rs,sessions.rs,sessions/list.rs,sessions/list/tests.rs,sessions/running.rs,sessions/tests.rs,items.rs,day/view.rs}`
+- `crates/salah-protocol/src/{dispatcher.rs,methods.rs,reads.rs,writes.rs}`
+- `crates/salah-cli/src/{main.rs,reports.rs,tracking.rs}`
+- `crates/salah-cli/tests/{daemon.rs,rpc.rs,rpc/phase2.rs,rpc/reports.rs,tracking_cli.rs}`
+- `crates/salah-cli/tests/fixtures/rpc/`: new `stats_table_week.json`, `stats_table_project.json`, `sessions_list.json`, `sessions_list_filtered.json`; additive `session_bump.json`, `session_note.json`, `session_start.json`, `status_running.json`, `status_stale.json`
+- `docs/work/architecture/protocol-v1.md`, `docs/work/tracking-ui/c2-progress.md`
+
+CHECKPOINT 5: Add stats.table and sessions.list with unassigned rows and SQL filters, report CLI, running max_minutes, and refuse stale counts and notes
+
+## Orchestrator decisions on CHECKPOINT 5 questions
+1. `sessions.list` order day → end instant → id with an opaque `day|instant|id` cursor: accepted (supersedes plan.md's `ended_at|id`).
+2. Table rows use `key:"none"` for unassigned work; list rows carry `project`/`item`: accepted, data-model.md updated.
+3. `stats.get` `"none"` filters: added to C5's scope.
+4. Distractions per hour divides by all of a row's minutes (absent value = 0 distractions): accepted.

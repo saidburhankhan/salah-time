@@ -1,0 +1,92 @@
+{
+  "id": 2,
+  "jsonrpc": "2.0",
+  "result": {
+    "next": null,
+    "rows": [
+      {
+        "block": "fajr",
+        "day": "2031-05-14",
+        "ended_at": "2031-05-14T04:55:00Z",
+        "id": "<id:1>",
+        "item": {
+          "id": "<id:2>",
+          "title": "Read"
+        },
+        "item_id": "<id:2>",
+        "minutes": 25,
+        "note": null,
+        "notes": [
+          {
+            "at": "2031-05-14T04:30:00Z",
+            "id": "<id:3>",
+            "text": "Halfway through"
+          }
+        ],
+        "project": {
+          "color": "#335577",
+          "id": "<id:4>",
+          "name": "Quran"
+        },
+        "project_id": "<id:4>",
+        "running": false,
+        "stale": false,
+        "started_at": "2031-05-14T04:30:00Z",
+        "values": {
+          "focus": 3.0
+        },
+        "version": 3
+      },
+      {
+        "block": "maghrib",
+        "day": "2031-05-13",
+        "ended_at": null,
+        "id": "<id:5>",
+        "item": {
+          "id": "<id:6>",
+          "title": "Walk"
+        },
+        "item_id": "<id:6>",
+        "minutes": 15,
+        "note": "Evening walk",
+        "notes": [],
+        "project": null,
+        "project_id": null,
+        "running": false,
+        "stale": false,
+        "started_at": null,
+        "values": {},
+        "version": 1
+      },
+      {
+        "block": "dhuhr",
+        "day": "2031-05-08",
+        "ended_at": null,
+        "id": "<id:7>",
+        "item": {
+          "id": "<id:2>",
+          "title": "Read"
+        },
+        "item_id": "<id:2>",
+        "minutes": 30,
+        "note": "Āyat 1–10 of al-Mulk",
+        "notes": [],
+        "project": {
+          "color": "#335577",
+          "id": "<id:4>",
+          "name": "Quran"
+        },
+        "project_id": "<id:4>",
+        "running": false,
+        "stale": false,
+        "started_at": null,
+        "values": {
+          "distractions": 2.0,
+          "focus": 4.0,
+          "quality": 5.0
+        },
+        "version": 1
+      }
+    ]
+  }
+}

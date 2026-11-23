@@ -395,3 +395,87 @@ fn archived_metrics_reject_new_samples_and_preserve_existing_samples() {
     });
     assert_eq!(rejected.unwrap_err().code(), "validation");
 }
+
+#[test]
+fn a_running_view_caps_max_minutes_at_its_day_sleep_boundary() {
+    let mut store = Store::open_in_memory().unwrap();
+    let quran = project(&mut store, "Quran");
+    let started = store
+        .write(|tx| start(tx, &config(), at(20, 21, 0), ids(), on_project(&quran.id)))
+        .unwrap();
+    let view = |now| SessionView::at(&store, &config(), now, &started).unwrap();
+    assert_eq!(
+        view(at(20, 21, 0)).max_minutes,
+        Some(1),
+        "stop accepts at least 1"
+    );
+    assert_eq!(view(at(20, 21, 40)).max_minutes, Some(40));
+    // Overnight: the 23:00 Sleep boundary cuts it to 120, not 600.
+    let overnight = view(at(21, 7, 0));
+    assert_eq!(
+        (overnight.max_minutes, overnight.stale),
+        (Some(120), Some(true))
+    );
+    let json = serde_json::to_value(&overnight).unwrap();
+    assert_eq!(json["max_minutes"], 120);
+    let too_many = store.write(|tx| {
+        super::stop(
+            tx,
+            &config(),
+            at(21, 7, 0),
+            ids(),
+            None,
+            Stop {
+                minutes: Some(121),
+                ..Stop::default()
+            },
+        )
+    });
+    assert_eq!(too_many.err().map(|e| e.code()), Some("validation"));
+    let stopped = store
+        .write(|tx| stop(tx, &config(), at(21, 7, 0), None, Values::new(), None))
+        .unwrap();
+    let finished = SessionView::at(&store, &config(), at(21, 7, 0), &stopped).unwrap();
+    assert_eq!(finished.max_minutes, None);
+    assert!(
+        serde_json::to_value(&finished)
+            .unwrap()
+            .get("max_minutes")
+            .is_none()
+    );
+}
+
+#[test]
+fn a_timer_past_sleep_refuses_counts_and_notes_until_stopped() {
+    let mut store = Store::open_in_memory().unwrap();
+    let quran = project(&mut store, "Quran");
+    store
+        .write(|tx| start(tx, &config(), at(20, 21, 0), ids(), on_project(&quran.id)))
+        .unwrap();
+    store
+        .write(|tx| super::bump(tx, &config(), at(20, 22, 0), None, "distractions", 1))
+        .unwrap();
+    store
+        .write(|tx| super::append_note(tx, &config(), at(20, 22, 59), ids(), None, "late"))
+        .unwrap();
+    let bumped =
+        store.write(|tx| super::bump(tx, &config(), at(21, 8, 0), None, "distractions", 1));
+    let noted =
+        store.write(|tx| super::append_note(tx, &config(), at(21, 8, 0), ids(), None, "morning"));
+    for result in [bumped, noted] {
+        match result {
+            Err(Error::Validation { field, message }) => {
+                assert_eq!(field, "id");
+                assert!(message.contains("past Sleep"), "{message}");
+            }
+            other => panic!("expected a validation error, got {other:?}"),
+        }
+    }
+    let timer = running(&store).unwrap().unwrap();
+    assert_eq!(timer.value("distractions"), Some(1.0));
+    assert_eq!(store.session_notes(&timer.id).unwrap().len(), 1);
+    let stopped = store
+        .write(|tx| stop(tx, &config(), at(21, 8, 0), None, Values::new(), None))
+        .unwrap();
+    assert_eq!(stopped.ended_at, Some(at(20, 23, 0)));
+}

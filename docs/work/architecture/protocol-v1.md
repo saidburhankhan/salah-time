@@ -99,6 +99,8 @@ store-wide counter, never a precondition.
 | `day.get` | `date?` | `DayPlan`: prayers, blocks with `capacity_minutes`/`planned_minutes`/`actual_minutes`/`unplanned_minutes` and rows, `open`, `fulfilment` | validation, source, storage | — | — |
 | `items.list` | — | `[ItemView]` | storage | — | — |
 | `stats.get` | `from,to` or `days?` (default 30, max 730), `tag_id?`, `project_id?`, `item_id?` | `range`, `filter`, `days` (with `unplanned_minutes`, nullable `fulfilment_ratio`), `series` (minutes first), `projects`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
+| `stats.table` | `stats.get`'s range and filter (`project_id`, `tag_id` and `item_id` also accept `"none"`), `group?` (`week` default, `day`, `project`, `tag`, `item`) | `range`, `filter`, `group`, `columns`, `rows`, `totals` | validation, not_found, storage | — | — |
+| `sessions.list` | `stats.get`'s range and filter (each also `"none"`), `with_note?` (default true), `q?`, `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}`, `limit?` (default 100, 1–500), `before?` (a previous `next`) | `rows: [SessionView + project + item]`, `next: cursor\|null` | validation, not_found, storage | — | — |
 | `item.parse` | `text` | draft `{title, block, repeat, weekdays, planned_minutes}` | validation | — | — |
 | `item.preview` | `block`, `repeat`, `weekdays?`, `planned_minutes?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
 | `item.add` | `op_id`, `title` or `quick_text`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `planned_minutes?`, `date?`, `metric_ids?` | mutation result (`changed.items`) | validation, not_found, source, storage | yes | no |
@@ -143,6 +145,11 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
 - `SessionView`: `id`, `item_id`, `project_id`, `day`, `block`, `started_at`,
   `ended_at`, `minutes` (`null` while running and for a tick), `running`, `stale`,
   `note`, `notes: [{id, at, text}]`, `values` (`{metric_id: number}`), and `version`.
+  A running session also has `max_minutes`, the largest `session.stop.minutes` the
+  server accepts at the request instant: the rounded elapsed minutes up to the planning
+  day's Sleep cut-off, at least 1. It appears in `status.get`, day rows and mutation
+  results. Finished sessions omit it, as do running sessions whose Sleep instant
+  cannot be resolved.
   A session of an item copies the item's project when written. Timestamped notes are
   ordered oldest first and `at` is a UTC instant.
 - `ItemView` and day rows expose `metric_ids` and the effective `metrics` list.
@@ -152,7 +159,8 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   built-in. Effective prompts follow project order, with extra selected built-ins
   appended in selection order. Historical rows use the current item's metric selection
   for their session editors.
-- Changing an item's project resets its selection to `null`. When a project drops an
+- Changing an item's project resets its selection to `null`, unless the same
+  `item.edit` sends `metric_ids`: that list is then validated against the new project. When a project drops an
   asked metric, the server removes that ID from the project's custom item selections
   in the same write. Updated live items appear in `changed.items`.
 - `status.get.prompt` uses the running item's effective `metrics` list, or the active
@@ -172,6 +180,42 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   `unplanned_minutes` (every other session: unplanned items, bare projects).
   Each day block carries `capacity_minutes`, `planned_minutes`,
   `actual_minutes` and `unplanned_minutes` the same way.
+- `stats.table` is the general statistics table. It reads finished live sessions only
+  (ticks included) and never writes. Filters intersect; `"none"` selects unassigned
+  work: no project, no live project tag, or no task. A named id must exist (a removed
+  item still matches its sessions). `columns` lists `minutes`, `sessions`, then every
+  active metric and each archived metric with a value in scope. The order follows the
+  catalog, or the project's prompt order under a single `project_id`. Each column is
+  `{id, name, unit, kind, rollup, scale_max, archived, derived_from}`. After
+  `distractions` comes the derived `distractions_per_hour` (`derived_from:
+  "distractions"`, unit `per hour`): the row's distraction sum times 60 over its
+  minutes, `null` without a sample or without minutes. Rows are `{key, label, color,
+  from, to, minutes, sessions, values}` and `values` has a key per metric column
+  (`null` without a sample). `avg` metrics are weighted by session minutes, a tick
+  weighing 1; `sum` metrics add up.
+  - `week`: every Monday-first week touching the range, oldest first, keyed by ISO
+    week (`2031-W20`) with `from`/`to` clipped to the range, empty weeks included
+    with zeros and nulls. `day`: every day, keyed by date.
+  - `project`, `tag`, `item`: only keys with sessions, most minutes first; `from`/`to`
+    are `null`. Unassigned work is the row `key: "none"` ("No project", "No tag",
+    "No task", `color: null`), so the rows cover every session in scope. A tag row
+    counts each session of a project carrying that tag; a session counts once per tag,
+    and `totals` count each session once. Task rows are coloured by the session's
+    project. A row `key` is a valid filter value for its dimension.
+  - `totals`: `{minutes, sessions, values}` over every session in scope.
+- `sessions.list` is the Notes page query. Every predicate, the cursor, and the limit
+  run in SQL. Rows are finished live sessions (ticks included): newest planning day
+  first, then the newest end instant (creation for manual logs and ticks), then id.
+  Each row is a `SessionView` (with its timestamped `notes`) plus `project:
+  {id,name,color}|null` and `item: {id,title}|null`, the session's recorded project
+  and task with their current labels. `with_note` keeps sessions with a main note or
+  a live timestamped entry. `q` is trimmed and matches either case-insensitively
+  (Unicode lowercase, literal text). `minutes_min`/`minutes_max` are inclusive and
+  never match a tick. Each `values` entry needs the session to have that value within
+  the inclusive bounds; an unknown metric is `not_found`. `next` is
+  `"<day>|<instant>|<id>"` of the page's last row when more rows follow; pass it back
+  as `before`. Reversed bounds, a negative duration, a limit outside 1–500 or a
+  malformed cursor are `validation` errors naming the field.
 - `stats.get` accepts an inclusive range of 1–730 planning days. The item, project, and
   tag filters intersect. Only finished sessions count. The item filter uses the session's
   recorded item ID, including historical sessions for removed items. It also narrows
@@ -206,6 +250,8 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   zero. `distractions` is a built-in count with sum rollup and unit `times`. It can be
   bumped regardless of the prompt. When stopping, supplied values override the corresponding
   live values and omitted values retain them.
+- `session.bump` and `session.note` refuse a stale timer (the request is past its
+  planning day's Sleep instant) with `validation` on `id`: stop it first.
 - `session.note` appends a separate timestamped entry to the running timer. Trimmed text
   must contain 1–500 characters. `session.edit.note` edits the main note.
   `session.edit.remove_note_ids` soft-deletes the named entries belonging to the session.

@@ -21,6 +21,31 @@ pub struct Project {
     pub version: i64,
 }
 
+/// The colour-coded project a row belongs to.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ProjectRef {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+}
+
+impl From<&Project> for ProjectRef {
+    fn from(project: &Project) -> Self {
+        Self {
+            id: project.id.clone(),
+            name: project.name.clone(),
+            color: project.color.clone(),
+        }
+    }
+}
+
+/// Task label returned alongside historical work.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ItemRef {
+    pub id: String,
+    pub title: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Tag {
     pub id: String,

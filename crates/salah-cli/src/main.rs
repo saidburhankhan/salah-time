@@ -14,6 +14,7 @@ use tracking::{
 mod daemon;
 mod local;
 mod render;
+mod reports;
 mod tracking;
 
 #[derive(Parser)]
@@ -79,6 +80,11 @@ enum Command {
     },
     /// Show time and metric statistics
     Stats(StatsArgs),
+    /// List finished sessions and their notes
+    Sessions {
+        #[command(subcommand)]
+        command: reports::SessionsCommand,
+    },
     /// Read JSON-RPC 2.0 requests from stdin and write responses to stdout
     Rpc(RpcArgs),
     /// Run the single-writer JSON-RPC daemon on the user Unix socket
@@ -233,7 +239,11 @@ fn run(cli: Cli) -> Result<(), String> {
         Some(Command::Metric { command }) => tracking::metric(&mut local()?, command),
         Some(Command::Day(args)) => tracking::day(&mut local()?, args),
         Some(Command::Prayer { command }) => tracking::prayer(&mut local()?, command),
-        Some(Command::Stats(args)) => tracking::stats(&mut local()?, args),
+        Some(Command::Stats(mut args)) => match args.command.take() {
+            Some(command) => reports::stats(&mut local()?, command),
+            None => tracking::stats(&mut local()?, args),
+        },
+        Some(Command::Sessions { command }) => reports::sessions(&mut local()?, command),
         Some(Command::Rpc(args)) => match args.socket {
             Some(path) if path.is_empty() => daemon::bridge(None),
             Some(path) => daemon::bridge(Some(std::path::Path::new(&path))),

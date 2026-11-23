@@ -1,7 +1,9 @@
 //! Sessions: time spent on an item or project, from a timer or logged by
 //! hand, with the metric values recorded when it ended.
 
+mod list;
 mod running;
+pub use list::{ListRow, SessionList, SessionQuery, ValueRange, list};
 pub use running::{Stop, StopResult, append_note, bump, stop};
 
 use crate::config::Config;
@@ -81,6 +83,10 @@ pub struct SessionView {
     /// An open timer observed strictly after its planning day's Sleep boundary.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stale: Option<bool>,
+    /// The most minutes `session.stop` accepts right now (a running timer
+    /// only): elapsed time, cut off at its planning day's Sleep boundary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_minutes: Option<i64>,
     pub note: Option<String>,
     pub notes: Vec<SessionNote>,
     pub values: Values,
@@ -99,7 +105,21 @@ impl SessionView {
         }
         let today = day::current(config, now)?;
         let clock = day::clock_for_day(store, config, session.block.day, today)?;
-        Self::for_day(store, session, Some(now > clock.sleep_at))
+        Self::timed(store, session, now, clock.sleep_at)
+    }
+
+    /// The view at `now` given the Sleep boundary of the session's day.
+    pub(crate) fn timed(
+        store: &Store,
+        session: &Session,
+        now: DateTime<Utc>,
+        sleep_at: DateTime<Utc>,
+    ) -> Result<Self, Error> {
+        let mut view = Self::for_day(store, session, Some(now > sleep_at))?;
+        if session.is_running() {
+            view.max_minutes = Some(running::max_minutes(session, now, sleep_at));
+        }
+        Ok(view)
     }
 
     pub(crate) fn for_day(
@@ -107,7 +127,19 @@ impl SessionView {
         session: &Session,
         past_sleep: Option<bool>,
     ) -> Result<Self, Error> {
-        Ok(Self {
+        Ok(Self::with_notes(
+            session,
+            store.session_notes(&session.id)?,
+            past_sleep,
+        ))
+    }
+
+    pub(crate) fn with_notes(
+        session: &Session,
+        notes: Vec<SessionNote>,
+        past_sleep: Option<bool>,
+    ) -> Self {
+        Self {
             id: session.id.clone(),
             item_id: session.item_id.clone(),
             project_id: session.project_id.clone(),
@@ -118,15 +150,16 @@ impl SessionView {
             minutes: session.minutes,
             running: session.is_running(),
             stale: past_sleep.map(|past| session.is_running() && past),
+            max_minutes: None,
             note: session.note.clone(),
-            notes: store.session_notes(&session.id)?,
+            notes,
             values: session
                 .values
                 .iter()
                 .map(|v| (v.metric_id.clone(), v.value))
                 .collect(),
             version: session.version,
-        })
+        }
     }
 }
 

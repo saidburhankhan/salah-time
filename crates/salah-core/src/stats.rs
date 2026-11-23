@@ -12,8 +12,11 @@ use salah_domain::{
     error::Error,
     tracking::{Metric, Rollup, Session, Tag},
 };
+use salah_store::reports::{Choice, SessionScope};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
+
+pub mod table;
 
 /// The longest range one request covers.
 pub const MAX_DAYS: i64 = 730;
@@ -32,6 +35,61 @@ pub struct Filter {
 pub struct Range {
     pub from: NaiveDate,
     pub to: NaiveDate,
+}
+
+impl Range {
+    /// Rejects a reversed range or one longer than [`MAX_DAYS`].
+    pub fn check(&self) -> Result<(), Error> {
+        if self.to < self.from {
+            return Err(Error::validation("to", "the range ends before it starts"));
+        }
+        if (self.to - self.from).num_days() >= MAX_DAYS {
+            return Err(Error::validation(
+                "from",
+                format!("a range covers at most {MAX_DAYS} days"),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn days(&self) -> Vec<NaiveDate> {
+        let to = self.to;
+        self.from.iter_days().take_while(|d| *d <= to).collect()
+    }
+}
+
+/// The filter value that selects unassigned work in reports.
+pub const NONE: &str = "none";
+
+/// The store scope of a report's range and filter. Each named id must exist
+/// (a removed item still matches its historical sessions); [`NONE`] selects
+/// work without a project, tag or item.
+pub(crate) fn report_scope<'a>(
+    store: &Store,
+    range: &Range,
+    filter: &'a Filter,
+) -> Result<SessionScope<'a>, Error> {
+    range.check()?;
+    let choice = |id: &'a Option<String>, exists: &dyn Fn(&str) -> Result<(), Error>| {
+        id.as_deref()
+            .map(|id| match id {
+                NONE => Ok(Choice::Unassigned),
+                id => exists(id).map(|()| Choice::Is(id)),
+            })
+            .transpose()
+    };
+    Ok(SessionScope {
+        from: range.from,
+        to: range.to,
+        project: choice(&filter.project_id, &|id| {
+            projects::find(store, id).map(drop)
+        })?,
+        tag: choice(&filter.tag_id, &|id| tags::find(store, id).map(drop))?,
+        item: choice(&filter.item_id, &|id| match store.item(id)? {
+            Some(_) => Ok(()),
+            None => Err(crate::guard::not_found("item", id)),
+        })?,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -116,20 +174,8 @@ pub fn stats(
     range: Range,
     filter: Filter,
 ) -> Result<Stats, Error> {
-    if range.to < range.from {
-        return Err(Error::validation("to", "the range ends before it starts"));
-    }
-    if (range.to - range.from).num_days() >= MAX_DAYS {
-        return Err(Error::validation(
-            "from",
-            format!("a range covers at most {MAX_DAYS} days"),
-        ));
-    }
-    let days: Vec<NaiveDate> = range
-        .from
-        .iter_days()
-        .take_while(|d| *d <= range.to)
-        .collect();
+    range.check()?;
+    let days = range.days();
     let scope = Scope::new(store, &filter)?;
     if range.from < today {
         store.write(|tx| {
@@ -371,7 +417,7 @@ impl Ledger {
 
 /// A metric's values over `sessions`, summed or minute-weighted; `None`
 /// when no session recorded it.
-fn rollup<'a>(
+pub(crate) fn rollup<'a>(
     kind: Rollup,
     sessions: impl Iterator<Item = &'a Session>,
     metric_id: &str,

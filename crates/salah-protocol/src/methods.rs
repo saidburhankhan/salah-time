@@ -6,7 +6,8 @@ use salah_core::config::Config;
 use salah_core::items::{ItemChanges, ItemView};
 use salah_core::metrics::{MetricChanges, NewMetric};
 use salah_core::projects::{NewProject, ProjectChanges, ProjectView};
-use salah_core::sessions::{NewLog, SessionChanges, SessionView, Stop, Target};
+use salah_core::sessions::{NewLog, SessionChanges, SessionQuery, SessionView, Stop, Target};
+use salah_core::stats::table::Group;
 use salah_domain::day::BoundaryId;
 use salah_domain::item::{PrayerMark, Repeat, Weekdays};
 use salah_domain::tracking::{Metric, Tag};
@@ -69,6 +70,24 @@ pub struct StatsParams {
     pub project_id: Option<String>,
     #[serde(default)]
     pub item_id: Option<String>,
+}
+
+/// `stats.get`'s range and filter plus the row grouping (default `week`).
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct StatsTableParams {
+    #[serde(flatten)]
+    pub stats: StatsParams,
+    #[serde(default)]
+    pub group: Group,
+}
+
+/// `stats.get`'s range and filter plus the Notes page predicates and cursor.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct SessionsListParams {
+    #[serde(flatten)]
+    pub stats: StatsParams,
+    #[serde(flatten)]
+    pub query: SessionQuery,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]

@@ -194,6 +194,7 @@
       "ended_at": null,
       "id": "<id:1>",
       "item_id": "<id:2>",
+      "max_minutes": 900,
       "minutes": null,
       "note": null,
       "notes": [],

@@ -365,7 +365,10 @@ pub struct DayArgs {
 }
 
 #[derive(Args)]
+#[command(args_conflicts_with_subcommands = true)]
 pub struct StatsArgs {
+    #[command(subcommand)]
+    pub command: Option<crate::reports::StatsCommand>,
     #[arg(long, value_name = "YYYY-MM-DD", requires = "to")]
     from: Option<String>,
     #[arg(long, value_name = "YYYY-MM-DD", requires = "from")]
