@@ -157,3 +157,10 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   live-copy run (arabic 182/12, dmbs 68/3, No tag 0/3; total 250 min / 18 sessions).
   Claude Opus now holds C8 task 1 (goals) + the 0c review nits. C9 task 2 and C10 task 1 wait for
   CHECKPOINT 1 (then Sonnet, or Codex at 08:13).
+- 03:5x committed b2548aa (goals backend + 0c nits, Claude Opus; 230 tests incl. sockets). Open
+  for the user: archiving a project leaves its goals active (no project.remove exists); goal.end in
+  the first period sets ends_on to the period end (CHECK), goal leaves the active list at once.
+  Known flake (not fixed): stats running mean depends on random-id order of sessions with equal
+  created_at (stats_table_week.json focus last digit) — fix later with a stable order.
+  Claude Sonnet now holds C9 task 2 (app Goals UI, app/) and C10 task 1 (goal chips, plugin/).
+  08:13 Codex: C8 (Astra) tasks 2 insights → 3 reviews → 4 CLI; C9/C10 continue after the Sonnets.
