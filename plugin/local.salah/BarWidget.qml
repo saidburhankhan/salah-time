@@ -4,6 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "CreationLogic.js" as CreationLogic
 import "DragLogic.js" as DragLogic
 import "SessionLogic.js" as SessionLogic
 
@@ -37,6 +38,7 @@ BarWidget {
   property string quickAddBlock: ""
   property var pendingOps: ({})
   property var projects: []
+  property var epics: []
   property var metricCatalogue: []
   property string sessionPanelMode: ""
   property var doneItem: null
@@ -317,6 +319,7 @@ BarWidget {
     sessionPanelOp = ""
     sessionPanelError = ""
     client.loadProjects()
+    client.loadEpics()
     client.loadMetrics()
     sessionEditorReset("")
   }
@@ -328,6 +331,7 @@ BarWidget {
     sessionPanelOp = ""
     sessionPanelError = ""
     client.loadProjects()
+    client.loadEpics()
     client.loadMetrics()
     sessionEditorReset(presetKey)
   }
@@ -371,14 +375,14 @@ BarWidget {
     client.stopSession(stopOp, { "id": stopId })
   }
 
-  function logTime(target, minutes, values, note) {
+  function logTime(target, minutes, values, note, epicId) {
     if (!target || sessionPanelOp !== "") return
     sessionPanelError = ""
     var opId = beginOp("logSession", target.kind === "item" ? "item:" + String(target.id) : "")
     pendingOps[opId].panel = true
     sessionPanelOp = opId
     if (target.kind === "item") client.logSession(opId, String(target.id), "", minutes, values, note, "")
-    else client.logSession(opId, "", String(target.id), minutes, values, note, "")
+    else client.logSession(opId, "", String(target.id), minutes, values, note, "", String(epicId || ""))
   }
 
   function removeSession(row, sessionId) {
@@ -579,16 +583,19 @@ BarWidget {
     onMutationSucceeded: function(opId, kind, result) { root.handleMutationSuccess(opId, kind, result) }
     onMutationFailed: function(opId, kind, message, data) { root.handleMutationFailure(opId, kind, message, data) }
     onProjectsLoaded: function(rows) { root.projects = rows || [] }
+    onEpicsLoaded: function(rows) { root.epics = rows || [] }
     onMetricsLoaded: function(rows) { root.metricCatalogue = rows || [] }
     onEntitiesChanged: function(scopes) {
       if (scopes.indexOf("projects") >= 0 || scopes.indexOf("tags") >= 0
           || scopes.indexOf("metrics") >= 0) client.loadProjects()
       if (scopes.indexOf("metrics") >= 0) client.loadMetrics()
+      if (scopes.indexOf("epics") >= 0 || scopes.indexOf("projects") >= 0) client.loadEpics()
     }
     onTransportChanged: function(active) {
       if (!active) root.refresh()
       else {
         client.loadProjects()
+        client.loadEpics()
         client.loadMetrics()
       }
     }
@@ -813,7 +820,7 @@ BarWidget {
       function baseRow(type, key, block) {
         return {
           "rowType": type, "rowKey": key, "block": block || "", "itemId": "",
-          "title": "", "time": "", "itemState": "", "projectId": "", "projectColor": "transparent", "plannedMinutes": 0,
+          "title": "", "time": "", "itemState": "", "projectId": "", "projectColor": "transparent", "epicName": "", "plannedMinutes": 0,
           "minutes": 0, "count": 0, "repeat": "none", "timerRunning": false,
           "detailText": "",
           "scheduleText": "", "nextOccurrence": "", "carried": false,
@@ -861,6 +868,7 @@ BarWidget {
             item.itemState = source.done === true ? "done" : "open"
             item.projectId = source.project ? String(source.project.id || "") : ""
             item.projectColor = source.project ? String(source.project.color || "transparent") : "transparent"
+            item.epicName = CreationLogic.epicName(root.epics, String(source.epic_id || ""))
             item.plannedMinutes = Number(source.planned_minutes) || 0
             item.minutes = Number(source.actual_minutes) || 0
             item.repeat = String(source.repeat || "none")
@@ -1106,6 +1114,11 @@ BarWidget {
 
       Component.onCompleted: if (root.report) syncTimeline(root.report)
 
+      Connections {
+        target: root
+        function onEpicsChanged() { if (root.report) keyCatcher.syncTimeline(root.report) }
+      }
+
       Flickable {
         id: dayScroll
         anchors.fill: parent
@@ -1192,6 +1205,7 @@ BarWidget {
             elapsed: root.workedMinutes
             items: root.planner && root.planner.items ? root.planner.items : []
             projects: root.projects
+            epics: root.epics
             metricCatalogue: root.metricCatalogue
             busy: root.sessionPanelOp !== ""
             errorText: root.sessionPanelError
@@ -1201,8 +1215,8 @@ BarWidget {
             mutedForeground: root.mutedForeground
             onDoneRequested: function(item, values, note) { root.tickDone(item, values, note) }
             onPauseRequested: function(params) { root.savePause(params) }
-            onLogRequested: function(target, minutes, values, note) {
-              root.logTime(target, minutes, values, note)
+            onLogRequested: function(target, minutes, values, note, epicId) {
+              root.logTime(target, minutes, values, note, epicId)
             }
             onCancelRequested: root.closeSessionPanel()
             onOpenAppRequested: root.openApp()

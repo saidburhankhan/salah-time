@@ -19,6 +19,7 @@ Item {
   required property string itemState
   required property string projectId
   required property color projectColor
+  required property string epicName
   required property int plannedMinutes
   required property int minutes
   required property int count
@@ -68,7 +69,7 @@ Item {
 
   readonly property var itemData: ({
     "id": itemId, "title": title, "block": block, "state": itemState,
-    "projectId": projectId, "projectColor": projectColor, "plannedMinutes": plannedMinutes, "minutes": minutes,
+    "projectId": projectId, "projectColor": projectColor, "epicName": epicName, "plannedMinutes": plannedMinutes, "minutes": minutes,
     "count": count, "repeat": repeat, "timerRunning": timerRunning,
     "detailText": detailText, "scheduleText": scheduleText,
     "nextOccurrence": nextOccurrence, "carried": carried
@@ -290,7 +291,7 @@ Item {
       }
 
       Row {
-        visible: !row.editing && detail.text !== ""
+        visible: !row.editing && (row.detailText !== "" || row.pending)
         width: parent.width
         spacing: Style.space(4)
 
@@ -307,7 +308,8 @@ Item {
           id: detail
           width: parent.width - (row.projectId !== "" ? Style.space(10) : 0)
           textFormat: Text.PlainText
-          text: row.pending ? row.strings.t("panel.pending") : row.detailText
+          text: row.pending ? row.strings.t("panel.pending")
+            : (row.epicName !== "" ? row.detailText + " \u00b7 " + row.epicName : row.detailText)
           color: row.mutedForeground
           font.family: row.fontFamily
           font.pixelSize: Style.font.caption

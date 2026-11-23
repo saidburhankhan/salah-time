@@ -17,3 +17,11 @@ The creation sheet uses a parsed `start_day` or `day` to select When and set the
 All 99 Node checks passed (8 creation, 29 drag, 62 session), along with Omarchy plugin validation, QML syntax parsing, translation JSON parsing and `git diff --check`. The cap tests use the `status_stale.json` fixture. Socket and visual review of this update remain with the orchestrator.
 
 CHECKPOINT 1c: Cap widget pause minutes at Sleep and prefill When from the parsed day (`plugin/local.salah/BarWidget.qml`, `plugin/local.salah/CreationLogic.js`, `plugin/local.salah/QuickAdd.qml`, `plugin/local.salah/RunningCard.qml`, `plugin/local.salah/SessionLogic.js`, `plugin/local.salah/SessionPanel.qml`, `plugin/local.salah/i18n/en.json`, `plugin/local.salah/tests/creation_logic_test.js`, `plugin/local.salah/tests/session_logic_test.js`, `docs/work/tracking-ui/c6-progress.md`)
+
+## Checkpoint 1b — epics
+
+The creation sheet shows an optional Epic chip row after Project, offering only that project's active epics from `epics.list` ("No epic" default) and sending `epic_id` with `item.add` only alongside its project. "+ Log" shows the same chips when a project target is chosen (task targets carry their own epic) and `session.log` takes `epic_id`, so epic-only logging works. Day rows append the epic name in muted text to the detail line. Epics reload on `changed` scopes `epics` and `projects`, on reconnect and when the sheet or panels open; rows resync when the list changes. Chip choices reset when the project changes or the epic disappears.
+
+All 16 creation, 29 drag and 62 session Node checks passed (4 new epic checks), plus Omarchy plugin validation, i18n JSON parsing and `git diff --check`. Not rendered here; the orchestrator reviews the screens.
+
+CHECKPOINT 1b: Add optional epic chips to the widget creation sheet and Log panel and show epic names on day rows (`plugin/local.salah/BarWidget.qml`, `plugin/local.salah/CreationLogic.js`, `plugin/local.salah/QuickAdd.qml`, `plugin/local.salah/SalahClient.qml`, `plugin/local.salah/SessionPanel.qml`, `plugin/local.salah/TimelineRow.qml`, `plugin/local.salah/i18n/en.json`, `plugin/local.salah/tests/creation_logic_test.js`, `docs/work/tracking-ui/c6-progress.md`)

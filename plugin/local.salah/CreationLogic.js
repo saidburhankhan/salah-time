@@ -54,11 +54,37 @@ function schedule(parsed, whenChoice, today) {
   return { when: when, date: date }
 }
 
-function addParams(parsed, fields, projectId, backlog, date) {
+// A project's active epics in the core's order. Finished epics are not offered.
+function epicsForProject(epics, projectId) {
+  if (!projectId) return []
+  return (epics || []).filter(function(epic) {
+    return epic && epic.project_id === projectId && (epic.status || "active") === "active"
+  }).sort(function(a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0) })
+}
+
+// The chosen epic if it still belongs to the project and is active, else "".
+function validEpicId(epics, projectId, epicId) {
+  if (!epicId) return ""
+  return epicsForProject(epics, projectId).some(function(epic) { return epic.id === epicId }) ? epicId : ""
+}
+
+// Name for a day row; finished epics keep their name, an unknown id shows nothing.
+function epicName(epics, epicId) {
+  if (!epicId) return ""
+  var list = epics || []
+  for (var i = 0; i < list.length; i++)
+    if (list[i] && list[i].id === epicId) return String(list[i].name || "")
+  return ""
+}
+
+function addParams(parsed, fields, projectId, backlog, date, epicId) {
   if (!parsed || !parsed.title || (backlog && parsed.repeat !== "none")) return null
   var params = { title: parsed.title }
   if (fields.minutes != null) params.planned_minutes = fields.minutes
-  if (projectId) params.project_id = projectId
+  if (projectId) {
+    params.project_id = projectId
+    if (epicId) params.epic_id = epicId
+  }
   if (backlog) {
     params.backlog = true
   } else {

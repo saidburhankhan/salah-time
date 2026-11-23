@@ -86,3 +86,44 @@ test("explicit When choices override the parsed day", () => {
   same(logic.schedule({ day: today }, "tomorrow", today), { when: "tomorrow", date: "2028-03-01" })
   same(logic.schedule({ day: "2028-03-01" }, "backlog", today), { when: "backlog", date: "" })
 })
+
+test("only the project's active epics are offered, in position order", () => {
+  const listed = fixture("epics_list")
+  const projectId = listed[0].project_id
+  const epics = [
+    { id: "b", project_id: projectId, name: "Second", status: "active", position: 1 },
+    { ...listed[0], status: "active", position: 0 },
+    { id: "f", project_id: projectId, name: "Done", status: "finished", position: 2 },
+    { id: "o", project_id: "other", name: "Other", status: "active", position: 0 }
+  ]
+  same(logic.epicsForProject(epics, projectId).map(e => e.name), ["Read", "Second"])
+  same(logic.epicsForProject(epics, ""), [])
+  same(logic.epicsForProject(null, projectId), [])
+})
+
+test("a stale or foreign epic choice falls back to No epic", () => {
+  const epics = [
+    { id: "a", project_id: "p", name: "A", status: "active", position: 0 },
+    { id: "f", project_id: "p", name: "F", status: "finished", position: 1 }
+  ]
+  assert.equal(logic.validEpicId(epics, "p", "a"), "a")
+  assert.equal(logic.validEpicId(epics, "p", "f"), "")
+  assert.equal(logic.validEpicId(epics, "q", "a"), "")
+  assert.equal(logic.validEpicId(epics, "p", ""), "")
+})
+
+test("epic_id is sent with item.add only alongside its project", () => {
+  const draft = { title: "Read", repeat: "none" }
+  const withEpic = logic.addParams(draft, { minutes: 15, block: "fajr" }, "p", false, "2031-05-14", "e")
+  assert.equal(withEpic.epic_id, "e")
+  assert.equal(logic.addParams(draft, {}, "p", false, "", "").epic_id, undefined)
+  assert.equal(logic.addParams(draft, {}, "", false, "", "e").epic_id, undefined)
+  assert.equal(logic.addParams(draft, {}, "p", true, "", "e").epic_id, "e")
+})
+
+test("day rows name their epic, finished ones included", () => {
+  const epics = [{ id: "a", name: "Spring", status: "finished" }]
+  assert.equal(logic.epicName(epics, "a"), "Spring")
+  assert.equal(logic.epicName(epics, "zz"), "")
+  assert.equal(logic.epicName(epics, null), "")
+})

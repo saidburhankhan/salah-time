@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "CreationLogic.js" as CreationLogic
 import "SessionLogic.js" as SessionLogic
 
 // Inline editor for pausing a timer, ticking an item or logging minutes.
@@ -19,6 +20,7 @@ Rectangle {
   property int initialMinutes: 1
   property var items: []
   property var projects: []
+  property var epics: []
   property var metricCatalogue: []
   property bool busy: false
   property string errorText: ""
@@ -27,6 +29,7 @@ Rectangle {
   property color mutedForeground
 
   property string targetKey: ""
+  property string epicId: ""
   property var values: ({})
   property string minutesText: ""
   property string hintText: ""
@@ -35,6 +38,9 @@ Rectangle {
   readonly property bool pauseMode: mode === "pause"
   readonly property var targets: SessionLogic.logTargets(items, projects)
   readonly property var itemTargets: targets.filter(function(t) { return t.kind === "item" })
+  // Epic chips follow a chosen project; a task already carries its own epic.
+  readonly property var targetEpics: logMode && target && target.kind === "project"
+    ? CreationLogic.epicsForProject(epics, target.id) : []
   readonly property var projectTargets: targets.filter(function(t) { return t.kind === "project" })
   readonly property var target: {
     if (!logMode) {
@@ -60,6 +66,7 @@ Rectangle {
     if (JSON.stringify(askedMetrics) !== JSON.stringify(metrics)) metrics = askedMetrics
   }
   Component.onCompleted: metrics = askedMetrics
+  onTargetEpicsChanged: epicId = CreationLogic.validEpicId(epics, target ? target.projectId : "", epicId)
   readonly property var minutes: SessionLogic.parseMinutes(minutesText)
   onElapsedChanged: {
     if (pauseMode && minutesField && !minutesField.activeFocus && minutes === initialMinutes) {
@@ -77,7 +84,7 @@ Rectangle {
 
   signal doneRequested(var item, var values, string note)
   signal pauseRequested(var params)
-  signal logRequested(var target, int minutes, var values, string note)
+  signal logRequested(var target, int minutes, var values, string note, string epicId)
   signal cancelRequested()
   signal openAppRequested()
 
@@ -92,6 +99,7 @@ Rectangle {
     minutesField.text = minutesText
     noteField.text = ""
     targetKey = String(presetKey || "")
+    epicId = ""
     if (targetKey === "" && targets.length === 1) targetKey = targets[0].kind + ":" + targets[0].id
     resetMetricFields()
   }
@@ -114,6 +122,7 @@ Rectangle {
   function selectTarget(key) {
     if (targetKey === key) return
     targetKey = key
+    epicId = ""
     values = ({})
     hintText = ""
     resetMetricFields()
@@ -156,7 +165,8 @@ Rectangle {
       return
     }
     hintText = ""
-    logRequested(target, minutes, SessionLogic.collectValues(metrics, values), noteField.text.trim())
+    logRequested(target, minutes, SessionLogic.collectValues(metrics, values), noteField.text.trim(),
+      CreationLogic.validEpicId(epics, target.projectId, epicId))
   }
 
   width: parent ? parent.width : 0
@@ -272,6 +282,18 @@ Rectangle {
           }
         }
       }
+    }
+
+    CreationChipRow {
+      visible: panel.targetEpics.length > 0
+      width: form.width
+      caption: panel.strings.t("creation.epic")
+      options: [{ id: "", name: panel.strings.t("creation.noEpic") }].concat(panel.targetEpics)
+      selection: panel.epicId
+      foreground: panel.foreground
+      mutedForeground: panel.mutedForeground
+      fontFamily: panel.fontFamily
+      onPicked: value => panel.epicId = value
     }
 
     // ---- minutes ----------------------------------------------------------

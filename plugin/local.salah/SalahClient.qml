@@ -27,6 +27,7 @@ Item {
   signal itemParsed(string text, var draft, string error)
   signal projectsLoaded(var projects)
   signal metricsLoaded(var metrics)
+  signal epicsLoaded(var epics)
   // Entity scopes named by a `changed` notification (items, sessions,
   // projects, tags, metrics, marks), for lists the status does not carry.
   signal entitiesChanged(var scopes)
@@ -226,7 +227,7 @@ Item {
       var detail = client.errorDetail(message.error)
       if (meta.type === "status") client.handleStatusFailure(detail)
       else if (meta.type === "parse") client.itemParsed(meta.text, null, detail)
-      else if (meta.type === "projects" || meta.type === "metrics") {
+      else if (meta.type === "projects" || meta.type === "metrics" || meta.type === "epics") {
         // The planner still works without these lists; the panels say so.
       }
       else if (meta.type === "mutation") {
@@ -249,6 +250,8 @@ Item {
       client.itemParsed(meta.text, result, "")
     } else if (meta.type === "projects") {
       client.projectsLoaded(result || [])
+    } else if (meta.type === "epics") {
+      client.epicsLoaded(result || [])
     } else if (meta.type === "metrics") {
       client.metricsLoaded(result || [])
     } else if (meta.type === "mutation") {
@@ -409,11 +412,12 @@ Item {
     return args
   }
 
-  function logSession(opId, itemId, projectId, minutes, values, note, block) {
+  function logSession(opId, itemId, projectId, minutes, values, note, block, epicId) {
     if (client.socketActive) {
       var params = { "values": values || {} }
       if (String(itemId || "") !== "") params.item_id = String(itemId)
       if (String(projectId || "") !== "") params.project_id = String(projectId)
+      if (String(epicId || "") !== "") params.epic_id = String(epicId)
       if (minutes !== undefined && minutes !== null) params.minutes = Number(minutes)
       if (String(note || "") !== "") params.note = String(note)
       if (String(block || "") !== "") params.block = String(block)
@@ -423,6 +427,7 @@ Item {
     var command = ["salah", "session", "log", "--json"]
     if (String(itemId || "") !== "") command = command.concat(["--item", String(itemId)])
     if (String(projectId || "") !== "") command = command.concat(["--project", String(projectId)])
+    if (String(epicId || "") !== "") command = command.concat(["--epic", String(epicId)])
     if (minutes !== undefined && minutes !== null) command = command.concat(["--minutes", String(Number(minutes))])
     if (String(block || "") !== "") command = command.concat(["--block", String(block)])
     command = command.concat(client.valueArgs(values))
@@ -566,6 +571,10 @@ Item {
     client.read("projects.list", { "archived": false }, { "type": "projects" })
   }
 
+  function loadEpics() {
+    client.read("epics.list", { "status": "active" }, { "type": "epics" })
+  }
+
   function loadMetrics() {
     if (client.socketActive)
       client.request("metrics.list", { "archived": false }, { "type": "metrics" })
@@ -691,6 +700,8 @@ Item {
             client.itemParsed(meta.text, exitCode === 0 ? result : null, exitCode === 0 ? "" : failure)
           else if (meta.type === "projects" && exitCode === 0 && !client.socketActive)
             client.projectsLoaded(result)
+          else if (meta.type === "epics" && exitCode === 0 && !client.socketActive)
+            client.epicsLoaded(result)
         } else if (exitCode === 0 && active.rpcInput) {
           client.mutationSucceeded(active.opId, active.kind, result)
         } else if (exitCode === 0) {

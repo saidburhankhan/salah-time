@@ -13,6 +13,8 @@
   "creation.all": "All",
   "creation.backlog": "Backlog",
   "creation.block": "Block",
+  "creation.epic": "Epic",
+  "creation.noEpic": "No epic",
   "creation.noProject": "No project",
   "creation.project": "Project",
   "creation.tags": "Tags",

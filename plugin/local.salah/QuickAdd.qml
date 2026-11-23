@@ -26,6 +26,7 @@ Column {
   property string whenChoice: ""
   property string tagId: ""
   property string projectId: ""
+  property string epicId: ""
   property string submitting: ""
   readonly property var planning: host.planner ? host.planner.planning_block : null
   readonly property string today: planning ? planning.day : (host.planner ? host.planner.day : "")
@@ -34,6 +35,7 @@ Column {
     host.quickAddBlock, schedule.when === "tomorrow" ? "fajr" : (planning ? planning.start : ""))
   readonly property var tags: CreationLogic.tagsForProjects(host.projects)
   readonly property var filteredProjects: CreationLogic.projectsForTag(host.projects, tagId)
+  readonly property var projectEpics: CreationLogic.epicsForProject(host.epics, projectId)
   readonly property bool backlogAllowed: !!parsed && parsed.repeat === "none"
 
   function resetChoices() {
@@ -42,6 +44,7 @@ Column {
     whenChoice = ""
     tagId = ""
     projectId = ""
+    epicId = ""
   }
 
   function dismiss() {
@@ -53,7 +56,7 @@ Column {
 
   function submit(backlog) {
     if (submitting || !parsed || (schedule.when === "tomorrow" && !schedule.date && !backlog)) return
-    var params = CreationLogic.addParams(parsed, fields, projectId, backlog, schedule.date)
+    var params = CreationLogic.addParams(parsed, fields, projectId, backlog, schedule.date, epicId)
     if (!params) return
     submitting = host.beginOp("add", "")
     transport.rpcMutation(submitting, "item.add", params, "add")
@@ -63,7 +66,12 @@ Column {
   onFilteredProjectsChanged: {
     if (projectId && !filteredProjects.some(project => project.id === projectId)) projectId = ""
   }
-  onExpandedChanged: if (expanded) transport.loadProjects()
+  onProjectIdChanged: epicId = ""
+  onProjectEpicsChanged: epicId = CreationLogic.validEpicId(host.epics, projectId, epicId)
+  onExpandedChanged: if (expanded) {
+    transport.loadProjects()
+    transport.loadEpics()
+  }
 
   Timer {
     id: parseTimer
@@ -150,6 +158,14 @@ Column {
       options: [{ id: "", name: root.strings.t("creation.noProject") }].concat(root.filteredProjects)
       selection: root.projectId
       onPicked: value => root.projectId = value
+    }
+
+    ChipRow {
+      visible: root.projectEpics.length > 0
+      caption: root.strings.t("creation.epic")
+      options: [{ id: "", name: root.strings.t("creation.noEpic") }].concat(root.projectEpics)
+      selection: root.epicId
+      onPicked: value => root.epicId = value
     }
 
     ChipRow {
