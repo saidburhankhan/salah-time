@@ -69,6 +69,9 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList epicSessions READ epicSessions NOTIFY epicPageChanged)
     Q_PROPERTY(QVariantList resources READ resources NOTIFY resourcesChanged)
     Q_PROPERTY(bool resourcesLoading READ resourcesLoading NOTIFY resourcesChanged)
+    Q_PROPERTY(QVariantList goals READ goals NOTIFY goalsChanged)
+    Q_PROPERTY(QVariantList goalHistory READ goalHistory NOTIFY goalHistoryChanged)
+    Q_PROPERTY(QString goalHistoryId READ goalHistoryId NOTIFY goalHistoryChanged)
 public:
     explicit Backend(QObject *parent = nullptr, const QString &program = {}, int timeoutMs = 10000,
                      const QString &socketPath = {});
@@ -117,6 +120,9 @@ public:
     QVariantList epicSessions() const { return m_epicSessions; }
     QVariantList resources() const { return m_resources; }
     bool resourcesLoading() const { return m_resourcesLoading; }
+    QVariantList goals() const { return m_goals; }
+    QVariantList goalHistory() const { return m_goalHistory; }
+    QString goalHistoryId() const { return m_goalHistoryId; }
     QVariantList metrics() const { return m_metrics; }
     QVariantList trackingItems() const { return m_trackingItems; }
     QVariantList backlogItems() const { return m_backlogItems; }
@@ -209,6 +215,18 @@ public:
     Q_INVOKABLE void addResource(const QVariantMap &fields);
     Q_INVOKABLE void editResource(const QString &id, const QVariantMap &fields);
     Q_INVOKABLE void removeResource(const QString &id);
+    // Goals (backend_goals.cpp). `goals` holds the active goals with today's
+    // progress (GoalView rows, position order). addGoal takes period, target,
+    // optionally one of project_id/epic_id/item_id, metric_id and direction;
+    // editGoal starts a successor with the new target; endGoal stops a goal
+    // after its current period; removeGoal deletes one still in its first
+    // period. loadGoalHistory("") closes the history.
+    Q_INVOKABLE void loadGoals();
+    Q_INVOKABLE void loadGoalHistory(const QString &id);
+    Q_INVOKABLE void addGoal(const QVariantMap &fields);
+    Q_INVOKABLE void editGoal(const QString &id, double target);
+    Q_INVOKABLE void endGoal(const QString &id);
+    Q_INVOKABLE void removeGoal(const QString &id);
     Q_INVOKABLE ItemDraft *itemForId(const QString &id);
     Q_INVOKABLE ItemDraft *itemFromParse(const QString &fallbackTitle = {});
     Q_INVOKABLE QString hijriHeader(const QString &isoDate) const;
@@ -245,6 +263,10 @@ signals:
     void sessionsLoadingChanged();
     void epicPageChanged();
     void resourcesChanged();
+    void goalsChanged();
+    void goalHistoryChanged();
+    // A goal add/edit/end/remove finished; `message` is the server error on failure.
+    void goalWriteFinished(bool ok, const QString &message);
     // A resource add/edit/remove finished; `message` is the server error on failure.
     void resourceWriteFinished(bool ok, const QString &message);
 
@@ -266,6 +288,8 @@ private:
                                       bool reloadAfter = false);
     CoreClient::Callback mutationResponse(const QString &pendingId = {}, const QString &pendingOpId = {});
     CoreClient::Callback entityResponse(const QString &kind);
+    CoreClient::Callback goalResponse();
+    qint64 goalVersion(const QString &id) const;
     CoreClient::Callback sessionResponse(const QString &pendingItemId, bool announce = true);
     CoreClient::Callback statsResponse();
     void applyRunningWrite(const CoreClient::Result &result);
@@ -337,6 +361,10 @@ private:
     bool m_resourcesOpen = false;
     bool m_resourcesLoading = false;
     QVariantList m_epicSessions;
+    QVariantList m_goals, m_goalHistory;
+    QString m_goalHistoryId;
+    quint64 m_goalsRequest = 0;
+    quint64 m_goalHistoryRequest = 0;
     quint64 m_epicRequest = 0;
     QVariantList m_trackingItems;
     QVariantList m_backlogItems;

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
+import "../goals"
 
 Popup {
     id: entryPopup
@@ -262,12 +263,13 @@ Popup {
                 form: entryPopup
             }
             ColumnLayout {
-                visible: !entryPopup.backlog
+                visible: !entryPopup.backlog || !!entryPopup.item.id
                 Layout.preferredWidth: 340
                 Layout.minimumWidth: 280
                 Layout.maximumWidth: 360
                 Layout.fillHeight: true
                 Rectangle {
+                    visible: !entryPopup.backlog
                     Layout.fillWidth: true
                     height: 285
                     radius: theme.radius
@@ -369,7 +371,25 @@ Popup {
                         }
                     }
                 }
-                Item { Layout.fillHeight: true }
+                // Goals for an existing task; a new task has no id to scope one to.
+                ScrollView {
+                    visible: !!entryPopup.item.id
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.topMargin: 6
+                    contentWidth: availableWidth
+                    clip: true
+                    GoalsSection {
+                        width: parent.width
+                        win: entryPopup.win
+                        scopeKind: "item"
+                        scopeId: entryPopup.item.id ? String(entryPopup.item.id) : ""
+                    }
+                }
+                Item {
+                    visible: !entryPopup.item.id
+                    Layout.fillHeight: true
+                }
             }
         }
     }

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
+import "../goals"
 import "../resources"
 import "../statistics"
 
@@ -283,6 +284,23 @@ ScrollView {
                         }
                     }
                 }
+            }
+        }
+
+        Card {
+            visible: !!epicPage.epic
+            win: epicPage.win
+            Layout.fillWidth: true
+            Layout.preferredHeight: goalsColumn.implicitHeight + 36
+            GoalsSection {
+                id: goalsColumn
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: 18
+                win: epicPage.win
+                scopeKind: "epic"
+                scopeId: epicPage.epic ? String(epicPage.epic.id) : ""
             }
         }
 

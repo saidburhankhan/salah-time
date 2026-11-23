@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
+import "../goals"
 
 // Projects: a list on the left, the editor on the right. A project groups
 // items and sessions and decides which metrics a session asks for.
@@ -295,6 +296,7 @@ RowLayout {
 
         Flickable {
             id: editorFlick
+            objectName: "projectEditorFlick"
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: editorRule.bottom
@@ -358,6 +360,14 @@ RowLayout {
                     Layout.fillWidth: true
                     win: projects.win
                     projectId: projects.editId
+                }
+
+                GoalsSection {
+                    visible: projects.editId !== ""
+                    Layout.fillWidth: true
+                    win: projects.win
+                    scopeKind: "project"
+                    scopeId: projects.editId
                 }
 
                 ColumnLayout {

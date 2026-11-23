@@ -12,6 +12,12 @@
         <file alias="qml/resources/ResourceChip.qml">qml/resources/ResourceChip.qml</file>
         <file alias="qml/resources/ResourceRow.qml">qml/resources/ResourceRow.qml</file>
         <file alias="qml/resources/ResourceForm.qml">qml/resources/ResourceForm.qml</file>
+        <file alias="qml/pages/GoalsPage.qml">qml/pages/GoalsPage.qml</file>
+        <file alias="qml/goals/GoalText.js">qml/goals/GoalText.js</file>
+        <file alias="qml/goals/GoalRow.qml">qml/goals/GoalRow.qml</file>
+        <file alias="qml/goals/GoalForm.qml">qml/goals/GoalForm.qml</file>
+        <file alias="qml/goals/GoalHistory.qml">qml/goals/GoalHistory.qml</file>
+        <file alias="qml/goals/GoalsSection.qml">qml/goals/GoalsSection.qml</file>
         <file alias="qml/backlog/BacklogRow.qml">qml/backlog/BacklogRow.qml</file>
         <file alias="qml/backlog/BacklogDrag.qml">qml/backlog/BacklogDrag.qml</file>
         <file alias="qml/backlog/ScheduleDialog.qml">qml/backlog/ScheduleDialog.qml</file>

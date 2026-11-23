@@ -74,6 +74,13 @@ Rectangle {
                 loadStatsOnClick: index === 1
             }
         }
+        SidebarItem {
+            objectName: "goalsSidebarItem"
+            appWindow: sidebar.win
+            pageIndex: 6
+            label: qsTr("Goals")
+            iconKind: "goals"
+        }
         Rectangle {
             Layout.fillWidth: true
             height: 1

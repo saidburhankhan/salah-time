@@ -438,6 +438,8 @@ esac
         QJsonObject status;
         QJsonArray backlog;
         QJsonArray resources;
+        QJsonArray goals;
+        QJsonArray goalHistory;
         qint64 revision = 100;
     };
     static QJsonObject resourceRow(const QString &kind, const QString &id, const QJsonValue &item, const QJsonValue &epic,
@@ -458,7 +460,7 @@ esac
     static QJsonObject emptyChanged() {
         return QJsonObject{{"items", QJsonArray{}}, {"sessions", QJsonArray{}}, {"projects", QJsonArray{}},
                            {"epics", QJsonArray{}}, {"tags", QJsonArray{}}, {"metrics", QJsonArray{}}, {"marks", QJsonArray{}},
-                           {"resources", QJsonArray{}}, {"deleted", QJsonArray{}}};
+                           {"resources", QJsonArray{}}, {"goals", QJsonArray{}}, {"deleted", QJsonArray{}}};
     }
     static FakeDaemon::Handler trackingHandler(std::shared_ptr<TrackingState> state) {
         return [state](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
@@ -552,6 +554,8 @@ esac
                 }
                 server->respond(socket, request, rows);
             }
+            else if (method == "goals.list") server->respond(socket, request, state->goals);
+            else if (method == "goals.history") server->respond(socket, request, state->goalHistory);
             else if (method == "tags.list") server->respond(socket, request, TrackingFixture::tags());
             else if (method == "metrics.list") server->respond(socket, request, TrackingFixture::metrics());
             else if (method == "item.preview") server->respond(socket, request, fixture("item_preview"));
@@ -578,6 +582,10 @@ esac
                         }
                 }
                 else if (method == "resource.remove")
+                    changed["deleted"] = QJsonArray{params.value("id")};
+                else if (method == "goal.add" || method == "goal.edit" || method == "goal.end")
+                    changed["goals"] = QJsonArray{QJsonObject{{"id", params.value("id").toString("new-goal")}}};
+                else if (method == "goal.remove")
                     changed["deleted"] = QJsonArray{params.value("id")};
                 else if (method == "epic.remove")
                     changed["deleted"] = QJsonArray{params.value("id")};
@@ -679,6 +687,12 @@ esac
         for (QQuickItem *item : quickDescendants(window->contentItem()))
             if (item->objectName() == name) found.append(item);
         return found;
+    }
+    // The first visible item with this name (hidden pages keep their own copies).
+    static QObject *firstShown(QQuickWindow *window, const QString &name) {
+        for (QObject *object : visualNamed(window, name))
+            if (auto *item = qobject_cast<QQuickItem *>(object); item && item->isVisible()) return object;
+        return nullptr;
     }
     static bool hasVisualText(QQuickWindow *window, const QString &text) {
         for (QQuickItem *item : quickDescendants(window->contentItem()))
@@ -4242,6 +4256,265 @@ fi
         QTRY_VERIFY_WITH_TIMEOUT(lastRequest(daemon, "resources.list").value("params").toObject().value("item_id").toString() == "b1", 3000);
         shotWindow(window, "resource-drawer-backlog.png");
         QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "resourceClose").value(0), "clicked"));
+        QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
+        window->hide();
+    }
+
+    // goals_list.json with its placeholder ids mapped onto the tracking
+    // fixture's rows: g1 all work, g2 Quran, g3 the Juz epic, g4 the dhikr
+    // task, g5 a Focus goal and g6 a Distractions limit.
+    static QJsonArray goalRows() {
+        QByteArray text = QJsonDocument(rpcFixture("goals_list").value("result").toArray()).toJson(QJsonDocument::Compact);
+        const QList<QPair<QByteArray, QByteArray>> ids{
+            {"<id:1>", "g1"}, {"<id:2>", "g2"}, {"<id:3>", "quran"}, {"<id:4>", "e-juz"}, {"<id:5>", "g3"},
+            {"<id:6>", "g4"}, {"<id:7>", "dhikr"}, {"<id:8>", "g5"}, {"<id:9>", "g6"}};
+        for (const auto &id : ids) text.replace(id.first, id.second);
+        return QJsonDocument::fromJson(text).array();
+    }
+    static std::shared_ptr<TrackingState> goalsState() {
+        auto state = trackingState();
+        state->goals = goalRows();
+        state->goalHistory = rpcFixture("goals_history").value("result").toArray();
+        return state;
+    }
+    void goalFixturesDecode() {
+        for (const char *name : {"goal_add", "goal_edit_successor"})
+            QVERIFY2(Dto::decode<Dto::MutationResult>(fixture(name)), name);
+        const QJsonArray listed = rpcFixture("goals_list").value("result").toArray();
+        QCOMPARE(listed.size(), 6);
+        for (const char *key : {"id", "project_id", "epic_id", "item_id", "period", "metric_id", "direction", "target",
+                                "starts_on", "ends_on", "replaces_id", "position", "progress", "version"})
+            QVERIFY2(listed.first().toObject().contains(key), key);
+        QCOMPARE(goalRows().size(), 6);
+        QCOMPARE(goalRows().at(1).toObject().value("project_id").toString(), QString("quran"));
+        QCOMPARE(rpcFixture("goals_history").value("result").toArray().size(), 2);
+        QCOMPARE(rpcFixture("status_goals").value("result").toObject().value("goals").toArray().size(), 6);
+    }
+    void goalRequestsFollowCanonicalFixtures() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        auto state = goalsState();
+        daemon.setHandler(trackingHandler(state));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy finished(&backend, &Backend::goalWriteFinished);
+        backend.reload();
+        waitForBackendIdle(backend);
+        backend.loadGoals();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.goals().size(), 6, 3000);
+        QVERIFY(lastRequest(daemon, "goals.list").value("params").toObject().isEmpty());
+
+        const int listsBefore = requestCount(daemon, "goals.list");
+        // Add: a minutes goal for a project sends no metric or direction.
+        backend.addGoal({{"period", "day"}, {"target", 45}, {"project_id", "quran"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "goal.add").isEmpty(), 3000);
+        QJsonObject params = lastRequest(daemon, "goal.add").value("params").toObject();
+        QCOMPARE(params.value("period").toString(), QString("day"));
+        QCOMPARE(params.value("target").toDouble(), 45.0);
+        QCOMPARE(params.value("project_id").toString(), QString("quran"));
+        QVERIFY(params.contains("op_id") && !params.contains("metric_id") && !params.contains("direction")
+                && !params.contains("epic_id") && !params.contains("item_id"));
+        // A metric goal carries its direction; all work has no scope id.
+        backend.addGoal({{"period", "week"}, {"target", 3.5}, {"metric_id", "distractions"}, {"direction", "at_most"}});
+        QTRY_COMPARE_WITH_TIMEOUT(requestCount(daemon, "goal.add"), 2, 3000);
+        params = lastRequest(daemon, "goal.add").value("params").toObject();
+        QCOMPARE(params.value("metric_id").toString(), QString("distractions"));
+        QCOMPARE(params.value("direction").toString(), QString("at_most"));
+        QCOMPARE(params.value("target").toDouble(), 3.5);
+        QVERIFY(!params.contains("project_id") && !params.contains("epic_id") && !params.contains("item_id"));
+        backend.addGoal({{"period", "day"}, {"target", 20}, {"epic_id", "e-juz"}});
+        backend.addGoal({{"period", "day"}, {"target", 10}, {"item_id", "dhikr"}});
+        QTRY_COMPARE_WITH_TIMEOUT(requestCount(daemon, "goal.add"), 4, 3000);
+        QCOMPARE(lastRequest(daemon, "goal.add").value("params").toObject().value("item_id").toString(), QString("dhikr"));
+        // A target of zero never reaches the daemon.
+        backend.addGoal({{"period", "day"}, {"target", 0}});
+        QCOMPARE(requestCount(daemon, "goal.add"), 4);
+
+        // Edit and end send the row's version; remove too.
+        backend.editGoal("g1", 75);
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "goal.edit").isEmpty(), 3000);
+        params = lastRequest(daemon, "goal.edit").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("g1"));
+        QCOMPARE(params.value("target").toDouble(), 75.0);
+        QCOMPARE(params.value("expected_version").toInt(), 1);
+        QVERIFY(params.contains("op_id"));
+        backend.endGoal("g5");
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "goal.end").isEmpty(), 3000);
+        params = lastRequest(daemon, "goal.end").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("g5"));
+        QCOMPARE(params.value("expected_version").toInt(), 1);
+        backend.removeGoal("g6");
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "goal.remove").isEmpty(), 3000);
+        QCOMPARE(lastRequest(daemon, "goal.remove").value("params").toObject().value("id").toString(), QString("g6"));
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 7, 3000);
+        QVERIFY(finished.at(0).at(0).toBool());
+        // Every write reloads the list.
+        QTRY_VERIFY_WITH_TIMEOUT(requestCount(daemon, "goals.list") > listsBefore, 3000);
+
+        // History: the chain of any goal, ending today, at most 730 days.
+        backend.loadGoalHistory("g1");
+        QTRY_COMPARE_WITH_TIMEOUT(backend.goalHistory().size(), 2, 3000);
+        params = lastRequest(daemon, "goals.history").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("g1"));
+        const QDate from = QDate::fromString(params.value("from").toString(), Qt::ISODate);
+        const QDate to = QDate::fromString(params.value("to").toString(), Qt::ISODate);
+        QVERIFY(from.isValid() && to.isValid() && from.daysTo(to) < 730 && from.daysTo(to) > 700);
+        QCOMPARE(backend.goalHistoryId(), QString("g1"));
+        QCOMPARE(backend.goalHistory().first().toMap().value("target").toDouble(), 50.0);
+        backend.loadGoalHistory("");
+        QVERIFY(backend.goalHistory().isEmpty());
+
+        // A `changed` notification with the goals scope reloads the list.
+        const int lists = requestCount(daemon, "goals.list");
+        state->goals = QJsonArray{state->goals.first()};
+        daemon.notifyChanged(600, {"goals"});
+        QTRY_COMPARE_WITH_TIMEOUT(backend.goals().size(), 1, 3000);
+        QVERIFY(requestCount(daemon, "goals.list") > lists);
+        QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
+    }
+    void goalWritesUseStdioRpcOffline() {
+        QTemporaryDir dir; Backend b(nullptr, fake(dir)); QSignalSpy spy(&b, &Backend::requestFinished);
+        b.reload(); QTRY_COMPARE(spy.size(), 4);
+        b.addGoal({{"period", "week"}, {"target", 120}});
+        b.editGoal("g1", 90);
+        b.endGoal("g1");
+        QTRY_COMPARE_WITH_TIMEOUT(offlineRequests(dir).size(), 3, 3000);
+        const auto requests = offlineRequests(dir);
+        QCOMPARE(requests[0].value("method").toString(), QString("goal.add"));
+        QCOMPARE(requests[1].value("method").toString(), QString("goal.edit"));
+        QCOMPARE(requests[2].value("method").toString(), QString("goal.end"));
+    }
+    void goalsPageAndEditors() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        auto state = goalsState();
+        state->backlog = backlogRows();
+        daemon.setHandler(trackingHandler(state));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        Theme theme(dir.path());
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create()); QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data()); QVERIFY(window);
+        window->setWidth(1440); window->setHeight(900); window->show();
+        backend.reload();
+        waitForBackendIdle(backend);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.goals().size(), 6, 3000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.epics().size(), 5, 3000);
+
+        // The sidebar entry opens the Goals page.
+        QObject *sidebar = findByName(root.data(), "goalsSidebarItem"); QVERIFY(sidebar);
+        auto *sidebarItem = qobject_cast<QQuickItem *>(sidebar); QVERIFY(sidebarItem);
+        QTest::mouseClick(window, Qt::LeftButton, {}, sidebarItem->mapToScene(QPointF(sidebarItem->width() / 2, sidebarItem->height() / 2)).toPoint());
+        QCOMPARE(root->property("page").toInt(), 6);
+        QObject *page = findByName(root.data(), "goalsPage"); QVERIFY(page);
+        QTRY_COMPARE_WITH_TIMEOUT(visualNamed(window, "goalRow_g1").size(), 1, 3000);
+        QCOMPARE(visualNamed(window, "goalRow_g6").size(), 1);
+        // Every row names its scope; the project and epic goals read as such.
+        auto titleOf = [&](const QString &id) {
+            return findItemByName(visualNamed(window, "goalRow_" + id).value(0), "goalTitle")->property("text").toString();
+        };
+        auto subtitleOf = [&](const QString &id) {
+            return findItemByName(visualNamed(window, "goalRow_" + id).value(0), "goalSubtitle")->property("text").toString();
+        };
+        QCOMPARE(titleOf("g1"), QString("All work"));
+        QCOMPARE(titleOf("g2"), QString("Quran"));
+        QCOMPARE(titleOf("g3"), QString("Memorise Juz 30  ·  Quran"));
+        QCOMPARE(subtitleOf("g1"), QString("Minutes  ·  Day  ·  at least 1h 00m"));
+        QCOMPARE(subtitleOf("g6"), QString("Distractions  ·  Week  ·  at most 3 times"));
+        auto valueOf = [&](const QString &id) {
+            return findItemByName(visualNamed(window, "goalRow_" + id).value(0), "goalValue")->property("text").toString();
+        };
+        QCOMPARE(valueOf("g1"), QString("1h 02m"));
+        QCOMPARE(valueOf("g5"), QString("4.4"));
+        QCOMPARE(valueOf("g6"), QString("3 times"));
+        QVERIFY(findItemByName(visualNamed(window, "goalRow_g1").value(0), "goalMet")->property("visible").toBool());
+        // History for the first goal: one row per period, with the counts.
+        QObject *button = findItemByName(visualNamed(window, "goalRow_g1").value(0), "goalHistoryButton"); QVERIFY(button);
+        QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.goalHistory().size(), 2, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(!visualNamed(window, "goalHistoryRow_1").isEmpty(), 3000);
+        QCOMPARE(visualNamed(window, "goalHistorySummary").value(0)->property("text").toString(), QString("Met in 1 of 2 periods"));
+        QCOMPARE(lastRequest(daemon, "goals.history").value("params").toObject().value("id").toString(), QString("g1"));
+        shotWindow(window, "goals-page.png");
+
+        // Edit the target inline; the row sends the edit with its version.
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(visualNamed(window, "goalRow_g2").value(0), "goalEditButton"), "clicked"));
+        QObject *field = findItemByName(visualNamed(window, "goalRow_g2").value(0), "goalTargetField"); QVERIFY(field);
+        QCOMPARE(field->property("text").toString(), QString("50"));
+        field->setProperty("text", "55");
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(visualNamed(window, "goalRow_g2").value(0), "goalEditSave"), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "goal.edit").isEmpty(), 3000);
+        QJsonObject params = lastRequest(daemon, "goal.edit").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("g2"));
+        QCOMPARE(params.value("target").toDouble(), 55.0);
+        // Ending asks first.
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(visualNamed(window, "goalRow_g3").value(0), "goalEndButton"), "clicked"));
+        QCOMPARE(requestCount(daemon, "goal.end"), 0);
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(visualNamed(window, "goalRow_g3").value(0), "goalEndConfirm"), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "goal.end").isEmpty(), 3000);
+        QCOMPARE(lastRequest(daemon, "goal.end").value("params").toObject().value("id").toString(), QString("g3"));
+        // The page adds an all-work goal.
+        QObject *pageForm = findByName(page, "goalsPageForm"); QVERIFY(pageForm);
+        QVERIFY(QMetaObject::invokeMethod(firstShown(window, "goalPeriod_week"), "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(firstShown(window, "goalWhat_focus"), "clicked"));
+        QObject *add = firstShown(window, "goalAddButton"); QVERIFY(add);
+        QVERIFY(!add->property("enabled").toBool());
+        QObject *newTarget = firstShown(window, "goalNewTarget"); QVERIFY(newTarget);
+        newTarget->setProperty("text", "4");
+        QTRY_VERIFY(add->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(add, "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "goal.add").isEmpty(), 3000);
+        params = lastRequest(daemon, "goal.add").value("params").toObject();
+        QCOMPARE(params.value("period").toString(), QString("week"));
+        QCOMPARE(params.value("metric_id").toString(), QString("focus"));
+        QCOMPARE(params.value("direction").toString(), QString("at_least"));
+        QVERIFY(!params.contains("project_id"));
+
+        // The project editor lists its goals and adds one.
+        root->setProperty("page", 3);
+        QObject *settings = findByName(root.data(), "settingsPage"); QVERIFY(settings);
+        settings->setProperty("section", "projects");
+        QObject *projectsPane = findByName(root.data(), "projectsSettings"); QVERIFY(projectsPane);
+        QVERIFY(QMetaObject::invokeMethod(projectsPane, "startEdit", Q_ARG(QVariant, backend.projects().first())));
+        // The Goals page is hidden now; only visible rows count.
+        auto shown = [&](const QString &name) {
+            int count = 0;
+            for (QObject *object : visualNamed(window, name))
+                if (qobject_cast<QQuickItem *>(object)->isVisible()) ++count;
+            return count;
+        };
+        QTRY_COMPARE_WITH_TIMEOUT(shown("goalRow_g2"), 1, 3000);
+        QCOMPARE(shown("goalRow_g6"), 1);   // Quran's distractions limit
+        QCOMPARE(shown("goalRow_g1"), 0);   // all-work goals are not a project's
+        QObject *toggle = firstShown(window, "goalAddToggle"); QVERIFY(toggle);
+        QVERIFY(QMetaObject::invokeMethod(toggle, "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(firstShown(window, "goalWhat_focus"), "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(firstShown(window, "goalDirection_at_most"), "clicked"));
+        // Only the project's asked metrics are offered (not Distractions here).
+        QCOMPARE(shown("goalWhat_pages"), 1);
+        QCOMPARE(shown("goalWhat_reps"), 0);
+        auto *flick = findByName(projectsPane, "projectEditorFlick");
+        if (flick) flick->setProperty("contentY", 400);
+        shotWindow(window, "goals-project-editor.png");
+        newTarget = firstShown(window, "goalNewTarget"); QVERIFY(newTarget);
+        newTarget->setProperty("text", "4,5");
+        QVERIFY(QMetaObject::invokeMethod(firstShown(window, "goalAddButton"), "clicked"));
+        QTRY_COMPARE_WITH_TIMEOUT(requestCount(daemon, "goal.add"), 2, 3000);
+        params = lastRequest(daemon, "goal.add").value("params").toObject();
+        QCOMPARE(params.value("project_id").toString(), QString("quran"));
+        QCOMPARE(params.value("direction").toString(), QString("at_most"));
+        QCOMPARE(params.value("target").toDouble(), 4.5);
+
+        // The epic page and the task editor have the section as well.
+        root->setProperty("epicId", "e-juz");
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "openEpic", Q_ARG(QVariant, QVariant("e-juz"))));
+        QTRY_COMPARE_WITH_TIMEOUT(shown("goalRow_g3"), 1, 3000);
+        window->setHeight(1250);  // the whole page, goals included
+        shotWindow(window, "goals-epic-page.png");
+        window->setHeight(900);
+        root->setProperty("page", 0);
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "openEntry", Q_ARG(QVariant, QVariant("dhikr"))));
+        QTRY_COMPARE_WITH_TIMEOUT(shown("goalRow_g4"), 1, 3000);
+        shotWindow(window, "goals-task-editor.png");
         QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
         window->hide();
     }

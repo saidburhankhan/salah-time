@@ -24,7 +24,7 @@ ApplicationWindow {
     Material.accent: theme.accent
     Material.roundedScale: theme.radius
 
-    // 0 Today, 1 Routines, 2 Statistics, 3 Settings, 4 an Epic, 5 Backlog.
+    // 0 Today, 1 Routines, 2 Statistics, 3 Settings, 4 an Epic, 5 Backlog, 6 Goals.
     property int page: 0
     property string epicId: ""
     // The task or epic whose resource drawer is open ("" for none).
@@ -509,6 +509,15 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     Layout.margins: 26
                     win: win
+                }
+                GoalsPage {
+                    id: goalsPage
+                    visible: win.page === 6
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.margins: 26
+                    win: win
+                    onVisibleChanged: if (visible) open()
                 }
                 SettingsPage {
                     id: settingsPage

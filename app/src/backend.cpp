@@ -861,6 +861,7 @@ void Backend::loadSettings() {
     load(QStringLiteral("epics.list"), &m_epics);
     load(QStringLiteral("tags.list"), &m_tags);
     load(QStringLiteral("metrics.list"), &m_metrics);
+    loadGoals();
 }
 
 void Backend::saveEntity(const QString &kind, const QVariantMap &fields) {
