@@ -73,7 +73,7 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - 004 review (independent, APPROVE, 5f88483). For C5's next resume: (a) the foreign_key_check error
   names table, rowid, parent and fkid; (b) a full v1→v4 rotation test asserting kept backups are
   v1, v2, v3; (c) backlog work makes the codec's `block`/`start_day` Option and old item_history JSON
-  still decodes; (e) fix all 8 findings in r2-findings.md (after resources, Astra); (d) `item.parse` understands "today"/"tomorrow" (sets the day, drops the word
+  still decodes; (f) r3-findings.md (31 app/widget bugs, 8 high; review was cut off before DONE): app ones → an Astra app fixer after C7, plugin ones → C6; (e) fix all 8 findings in r2-findings.md (after resources, Astra); (d) `item.parse` understands "today"/"tomorrow" (sets the day, drops the word
   from the title) so the widget sheet and Enter fast path schedule tomorrow. Spec fix: 005 no longer re-creates `sessions_by_day` (001 has it).
 - 17:09 reset 1 used by the orchestrator (user's OK) via the Codex TUI `/usage` → Redeem reset
   (tmux-driven). One reset left, expiring 13 Dec 02:46 (the used one would have expired 2 Dec), so
