@@ -104,8 +104,8 @@ store-wide counter, never a precondition.
 | `resource.edit` | `op_id`, `id`, `title?`, `body?`, `url?`, `remind_at?`, `done?`, `expected_version?` | mutation result (`changed.resources`) | validation, not_found, conflict, storage | yes | yes |
 | `resource.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`) | not_found, conflict, storage | yes | yes |
 | `stats.get` | `from,to` or `days?` (default 30, max 730), `tag_id?`, `project_id?`, `epic_id?`, `item_id?` (each also `"none"`), `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}` | `range`, `filter`, `days` (with `unplanned_minutes`, nullable `fulfilment_ratio`), `series` (minutes first), `projects`, `epics`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
-| `stats.table` | `stats.get`'s range and filter (including the session bounds), `group?` (`week` default, `day`, `project`, `epic`, `tag`, `item`) | `range`, `filter`, `group`, `columns`, `rows`, `totals` | validation, not_found, storage | — | — |
-| `stats.series` | `stats.get`'s range and filter (including the session bounds), `interval?` (`day` default, `week`), `split?` (`project`, `epic`, `tag`, `item`), `measures: [id]` (required, non-empty: `minutes`, `sessions`, a metric id or `distractions_per_hour`) | `range`, `filter`, `interval`, `split`, `periods`, `series` | validation (empty `measures`, range over 730 days), not_found (unknown measure), storage | — | — |
+| `stats.table` | `stats.get`'s range and filter (including the session bounds), `group?` (`week` default, `day`, `block`, `project`, `epic`, `tag`, `item`) | `range`, `filter`, `group`, `columns`, `rows`, `totals` | validation, not_found, storage | — | — |
+| `stats.series` | `stats.get`'s range and filter (including the session bounds), `interval?` (`day` default, `week`), `split?` (`block`, `project`, `epic`, `tag`, `item`), `measures: [id]` (required, non-empty: `minutes`, `sessions`, a metric id or `distractions_per_hour`) | `range`, `filter`, `interval`, `split`, `periods`, `series` | validation (empty `measures`, range over 730 days), not_found (unknown measure), storage | — | — |
 | `sessions.list` | `stats.get`'s range and project, epic, tag and item filters, `with_note?` (default true), `q?`, `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}`, `limit?` (default 100, 1–500), `before?` (a previous `next`) | `rows: [SessionView + project + epic + item]`, `next: cursor\|null` | validation, not_found, storage | — | — |
 | `item.parse` | `text` | draft `{title, block, repeat, weekdays, planned_minutes, start_day}` | validation (and, only when the text names a day, config/source) | — | — |
 | `item.preview` | `block`, `repeat`, `weekdays?`, `planned_minutes?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
@@ -267,6 +267,20 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
     counts each session of a project carrying that tag; a session counts once per tag,
     and `totals` count each session once. Task and epic rows are coloured by the session's
     project. A row `key` is a valid filter value for its dimension.
+  - `block`: rows with work or ticks, in prayer order. A timed session's recorded
+    minutes are apportioned across the blocks it overlapped, proportional to elapsed
+    time in each block. Remaining whole minutes go to the largest fractional
+    remainders, with the starting block first on ties. This also applies to a Worked
+    override. A manual log stays in its recorded block. A tick contributes zero
+    minutes and one metric sample in its recorded block. Each block with assigned
+    minutes counts the session once. Averages use those minutes as weights, and
+    sums use that block's share of recorded minutes. Day block bars use the same
+    allocation for actual and unplanned minutes. Each session keeps one row, its
+    original block, and its full duration on the task and day. A row `key` is the
+    block id (`fajr` … `isha`, or `night` for work before Fajr), `label` its name,
+    `color`/`from`/`to` `null`. A past day uses its frozen block boundaries; other
+    days use the timetable of the config in force that day. `stats.get` `blocks`
+    is unchanged: it still counts each session whole in its recorded block.
   - `totals`: `{minutes, sessions, values}` over every session in scope.
 - `stats.series` feeds the Trends line chart and aggregates exactly like `stats.table`
   (same filters, minute weighting, rollups, `distractions_per_hour`, `key: "none"`). One
@@ -276,7 +290,8 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   scale_max, points: [{value, sessions}]}` with one point per period. `value` is `null`
   for a period without data, except `minutes` and `sessions`, which are 0; `sessions`
   counts the sessions behind the point. Without `split`, `key` is `"all"`, `label` the
-  measure's name and `color` `null`. With a split, `key` is the project, epic, tag or item
+  measure's name and `color` `null`. A block split uses the table's block keys, order and
+  allocation. For other splits, `key` is the project, epic, tag or item
   id (`"none"` for unassigned work), `color` its colour, and `label` the key's label
   (`key label · measure name` when several measures). At most 8 keys are kept, most
   minutes first; further keys merge into one `key: "other"`, `label: "Other"` series

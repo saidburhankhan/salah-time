@@ -569,3 +569,89 @@ fn tag_breakdown_includes_unassigned_minutes_after_a_tag_is_removed() {
         json!([{"id":"none","name":"No tag","color":null,"minutes":22}])
     );
 }
+
+#[test]
+fn block_reports_share_worked_minutes_with_the_day_bars() {
+    let h = Harness::new();
+    // The harness's Dhuhr is 12:19. Work 30 minutes either side of it.
+    let mut start = Session::open(&h, "2031-05-14T11:49:00+05:00");
+    let task = added(
+        &mut start,
+        "item.add",
+        "items",
+        json!({"op_id":"task","title":"Read","block":"fajr"}),
+    );
+    let project = added(
+        &mut start,
+        "project.add",
+        "projects",
+        json!({"op_id":"project","name":"Study"}),
+    );
+    good(
+        &mut start,
+        "session.start",
+        json!({"op_id":"start","item_id":task}),
+    );
+    drop(start);
+
+    let mut rpc = Session::open(&h, "2031-05-14T12:49:00+05:00");
+    good(
+        &mut rpc,
+        "session.stop",
+        json!({"op_id":"stop","minutes":30,"values":{"focus":4,"distractions":2}}),
+    );
+    good(
+        &mut rpc,
+        "session.log",
+        json!({"op_id":"log","project_id":project,"minutes":5,"values":{"focus":2}}),
+    );
+    good(
+        &mut rpc,
+        "session.log",
+        json!({"op_id":"tick","item_id":task,"block":"asr","values":{"focus":5}}),
+    );
+
+    let table = Fixtures::default().check(
+        "stats_table_block",
+        rpc.request("stats.table", json!({"days":1,"group":"block"})),
+    );
+    assert_eq!(keys(&table), ["fajr", "dhuhr", "asr"]);
+    let rows = table["rows"].as_array().unwrap();
+    assert_eq!(table["totals"]["minutes"], 35);
+    assert_eq!(table["totals"]["sessions"], 3);
+    assert_eq!(rows[0]["minutes"], 15);
+    assert_eq!(rows[1]["minutes"], 20);
+    assert_eq!(rows[2]["minutes"], 0);
+    assert_eq!(rows[0]["values"]["distractions"], 1.0);
+    assert_eq!(rows[1]["values"]["focus"], 3.5);
+    assert_eq!(rows[1]["values"]["distractions_per_hour"], 3.0);
+
+    let plan = good(&mut rpc, "day.get", json!({}));
+    let fajr = &plan["blocks"][1];
+    let dhuhr = &plan["blocks"][2];
+    assert_eq!(fajr["actual_minutes"], 15);
+    assert_eq!(dhuhr["actual_minutes"], 15);
+    assert_eq!(dhuhr["unplanned_minutes"], 5);
+    let task_row = &fajr["items"][0];
+    assert_eq!(task_row["actual_minutes"], 30);
+    assert_eq!(task_row["sessions"].as_array().unwrap().len(), 2);
+    assert_eq!(plan["fulfilment"]["actual_minutes"], 30);
+
+    for interval in ["day", "week"] {
+        let trends = good(
+            &mut rpc,
+            "stats.series",
+            json!({"days":1,"interval":interval,
+            "split":"block","measures":["minutes","sessions","focus","distractions_per_hour"]}),
+        );
+        for line in trends["series"].as_array().unwrap() {
+            let row = rows.iter().find(|row| row["key"] == line["key"]).unwrap();
+            let measure = line["measure"].as_str().unwrap();
+            let expected = row.get(measure).unwrap_or(&row["values"][measure]);
+            let point = &line["points"][0];
+            assert_eq!(point["value"].as_f64(), expected.as_f64());
+            assert_eq!(point["sessions"], row["sessions"]);
+        }
+        assert_eq!(trends["series"].as_array().unwrap().len(), 12);
+    }
+}

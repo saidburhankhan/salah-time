@@ -1,0 +1,139 @@
+{
+  "id": 5,
+  "jsonrpc": "2.0",
+  "result": {
+    "columns": [
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "minutes",
+        "kind": "count",
+        "name": "Minutes",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "min"
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "sessions",
+        "kind": "count",
+        "name": "Sessions",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "sessions"
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "focus",
+        "kind": "scale",
+        "name": "Focus",
+        "rollup": "avg",
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "quality",
+        "kind": "scale",
+        "name": "Quality",
+        "rollup": "avg",
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "distractions",
+        "kind": "count",
+        "name": "Distractions",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "times"
+      },
+      {
+        "archived": false,
+        "derived_from": "distractions",
+        "id": "distractions_per_hour",
+        "kind": "count",
+        "name": "Distractions per hour",
+        "rollup": "avg",
+        "scale_max": null,
+        "unit": "per hour"
+      }
+    ],
+    "filter": {
+      "epic_id": null,
+      "item_id": null,
+      "minutes_max": null,
+      "minutes_min": null,
+      "project_id": null,
+      "tag_id": null,
+      "values": {}
+    },
+    "group": "block",
+    "range": {
+      "from": "2031-05-14",
+      "to": "2031-05-14"
+    },
+    "rows": [
+      {
+        "color": null,
+        "from": null,
+        "key": "fajr",
+        "label": "Fajr",
+        "minutes": 15,
+        "sessions": 1,
+        "to": null,
+        "values": {
+          "distractions": 1.0,
+          "distractions_per_hour": 4.0,
+          "focus": 4.0,
+          "quality": null
+        }
+      },
+      {
+        "color": null,
+        "from": null,
+        "key": "dhuhr",
+        "label": "Dhuhr",
+        "minutes": 20,
+        "sessions": 2,
+        "to": null,
+        "values": {
+          "distractions": 1.0,
+          "distractions_per_hour": 3.0,
+          "focus": 3.5,
+          "quality": null
+        }
+      },
+      {
+        "color": null,
+        "from": null,
+        "key": "asr",
+        "label": "Asr",
+        "minutes": 0,
+        "sessions": 1,
+        "to": null,
+        "values": {
+          "distractions": null,
+          "distractions_per_hour": null,
+          "focus": 5.0,
+          "quality": null
+        }
+      }
+    ],
+    "totals": {
+      "minutes": 35,
+      "sessions": 3,
+      "values": {
+        "distractions": 2.0,
+        "distractions_per_hour": 3.4285714285714284,
+        "focus": 3.75,
+        "quality": null
+      }
+    }
+  }
+}

@@ -103,6 +103,7 @@ pub(crate) fn tag(store: &mut Store, name: &str, projects: &[&Project]) -> Tag {
 
 /// Quran (tags Deen, Study), Gym (Study), and a task without a project.
 pub(crate) struct World {
+    config: crate::config::Config,
     pub(crate) store: Store,
     pub(crate) quran: Project,
     pub(crate) gym: Project,
@@ -110,6 +111,15 @@ pub(crate) struct World {
     pub(crate) loose: String,
     pub(crate) deen: Tag,
     pub(crate) study: Tag,
+}
+
+impl World {
+    pub(crate) fn calendar(&self) -> Calendar<'_> {
+        Calendar {
+            config: &self.config,
+            today: date(25),
+        }
+    }
 }
 
 pub(crate) fn world() -> World {
@@ -144,6 +154,7 @@ pub(crate) fn world() -> World {
         })
         .unwrap();
     World {
+        config: config(),
         store,
         quran,
         gym,
@@ -155,7 +166,7 @@ pub(crate) fn world() -> World {
 }
 
 pub(crate) fn build(w: &World, group: Group, filter: Filter) -> Table {
-    table(&w.store, range(14, 25), filter, group).unwrap()
+    table(&w.store, w.calendar(), range(14, 25), filter, group).unwrap()
 }
 
 pub(crate) fn value(values: &BTreeMap<String, Option<f64>>, id: &str) -> Option<f64> {
@@ -340,7 +351,7 @@ fn filters_intersect_and_none_selects_unassigned_work() {
         filter(None, Some("missing"), None),
         filter(None, None, Some("missing")),
     ] {
-        let error = table(&w.store, range(14, 25), missing, Group::Week).unwrap_err();
+        let error = table(&w.store, w.calendar(), range(14, 25), missing, Group::Week).unwrap_err();
         assert_eq!(error.code(), "not_found");
     }
 }
@@ -356,21 +367,41 @@ fn ranges_are_checked_and_running_or_removed_sessions_do_not_count() {
             Ok(())
         })
         .unwrap();
-    let t = table(&w.store, range(14, 25), Filter::default(), Group::Project).unwrap();
+    let t = table(
+        &w.store,
+        w.calendar(),
+        range(14, 25),
+        Filter::default(),
+        Group::Project,
+    )
+    .unwrap();
     assert_eq!((t.totals.minutes, t.totals.sessions), (60, 4));
-    let reversed = table(&w.store, range(20, 14), Filter::default(), Group::Week);
+    let reversed = table(
+        &w.store,
+        w.calendar(),
+        range(20, 14),
+        Filter::default(),
+        Group::Week,
+    );
     assert_eq!(reversed.unwrap_err().code(), "validation");
     let long = Range {
         from: date(1),
         to: date(1) + Days::new(730),
     };
-    let error = table(&w.store, long, Filter::default(), Group::Day).unwrap_err();
+    let error = table(&w.store, w.calendar(), long, Filter::default(), Group::Day).unwrap_err();
     assert_eq!(error.code(), "validation");
     let widest = Range {
         from: date(1),
         to: date(1) + Days::new(729),
     };
-    let t = table(&w.store, widest, Filter::default(), Group::Week).unwrap();
+    let t = table(
+        &w.store,
+        w.calendar(),
+        widest,
+        Filter::default(),
+        Group::Week,
+    )
+    .unwrap();
     assert_eq!(t.totals.sessions, 4);
 }
 

@@ -228,6 +228,49 @@ fn a_forgotten_timer_ends_at_its_day_sleep_boundary() {
     // 13:00 to the 23:00 sleep boundary of the session's day.
     assert_eq!(stopped.minutes, Some(600));
     assert_eq!(stopped.ended_at, Some(at(20, 23, 0)));
+
+    // The frozen windows still govern this timer after bedtime is changed.
+    let changed = Config {
+        sleep_time: "14:00".into(),
+        ..config()
+    };
+    let past = day::day_plan(&mut store, &changed, at(23, 9, 0), Some(date(20))).unwrap();
+    let report = crate::stats::table::table(
+        &store,
+        crate::stats::Calendar {
+            config: &changed,
+            today: date(23),
+        },
+        crate::stats::Range {
+            from: date(20),
+            to: date(23),
+        },
+        crate::stats::Filter::default(),
+        crate::stats::table::Group::Block,
+    )
+    .unwrap();
+    assert_eq!(report.totals.sessions, 1);
+    assert_eq!(report.totals.minutes, 600);
+    assert_eq!(
+        report
+            .rows
+            .iter()
+            .map(|row| row.key.as_str())
+            .collect::<Vec<_>>(),
+        ["dhuhr", "asr", "maghrib", "isha"]
+    );
+    for row in &report.rows {
+        let block = past
+            .blocks
+            .iter()
+            .find(|b| b.start.as_str() == row.key)
+            .unwrap();
+        assert_eq!(row.minutes, block.unplanned_minutes);
+        if block.start != BoundaryId::Dhuhr {
+            assert_eq!(row.minutes, block.capacity_minutes);
+        }
+    }
+    assert_eq!(report.rows.iter().map(|row| row.minutes).sum::<i64>(), 600);
 }
 
 #[test]

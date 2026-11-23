@@ -5,7 +5,16 @@ use crate::test_support::date;
 
 fn run(w: &World, interval: Interval, split: Option<Split>, ids: &[&str], f: Filter) -> Trend {
     let ids: Vec<String> = ids.iter().map(|s| (*s).to_owned()).collect();
-    series(&w.store, range(14, 25), f, interval, split, &ids).unwrap()
+    series(
+        &w.store,
+        w.calendar(),
+        range(14, 25),
+        f,
+        interval,
+        split,
+        &ids,
+    )
+    .unwrap()
 }
 
 fn find<'a>(t: &'a Trend, key: &str, measure: &str) -> &'a Series {
@@ -211,9 +220,17 @@ fn bad_requests_are_rejected() {
     let w = world();
     let go = |r: Range, ids: &[&str]| {
         let ids: Vec<String> = ids.iter().map(|s| (*s).to_owned()).collect();
-        series(&w.store, r, Filter::default(), Interval::Day, None, &ids)
-            .unwrap_err()
-            .code()
+        series(
+            &w.store,
+            w.calendar(),
+            r,
+            Filter::default(),
+            Interval::Day,
+            None,
+            &ids,
+        )
+        .unwrap_err()
+        .code()
     };
     assert_eq!(go(range(14, 25), &[]), "validation");
     assert_eq!(go(range(14, 25), &["nope"]), "not_found");

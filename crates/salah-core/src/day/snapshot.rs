@@ -116,7 +116,7 @@ pub fn freeze_past(tx: &WriteTx<'_>, config: &Config, today: NaiveDate) -> Resul
 }
 
 /// The length of one block in minutes.
-pub fn block_minutes(block: &DayBlock) -> i64 {
+pub fn block_capacity(block: &DayBlock) -> i64 {
     (block.ends_at - block.starts_at).num_minutes().max(0)
 }
 
@@ -125,8 +125,21 @@ pub fn day_capacity<'a>(blocks: impl IntoIterator<Item = &'a DayBlock>) -> i64 {
     blocks
         .into_iter()
         .filter(|block| block.block != BoundaryId::Night)
-        .map(block_minutes)
+        .map(block_capacity)
         .sum()
+}
+
+/// Frozen block boundaries take precedence over recomputing a historical timetable.
+pub(crate) fn report_blocks(
+    store: &Store,
+    config: &Config,
+    day: NaiveDate,
+    today: NaiveDate,
+) -> Result<Vec<DayBlock>, Error> {
+    if day < today && store.day_written(day)? {
+        return store.day_blocks(day);
+    }
+    Ok(blocks_for_day(store, config, day, today)?.0)
 }
 
 fn blocks_for_day(

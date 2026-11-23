@@ -1,7 +1,7 @@
 //! The day timeline and the widget's view of the day in progress.
 
 use super::fulfilment::has_tick;
-use super::{Fulfilment, Snapshot, block_minutes, freeze, snapshot, total_minutes};
+use super::{Fulfilment, Snapshot, block_capacity, block_minutes, freeze, snapshot, total_minutes};
 use crate::Store;
 use crate::config::Config;
 use crate::marks::live_marks;
@@ -17,7 +17,7 @@ use salah_domain::{
 };
 use salah_prayer::schedule;
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub use salah_domain::tracking::ProjectRef;
 
@@ -164,9 +164,16 @@ pub fn day_plan(
         .collect();
     let night_start = ledger.blocks.first().map(|block| block.starts_at);
     let sleep_at = ledger.clock.sleep_at;
+    let worked = ledger.worked_by_block();
     let blocks: Vec<BlockPlan> = BoundaryId::AWAKE
         .into_iter()
-        .map(|start| ledger.block_plan(store, start))
+        .map(|start| {
+            ledger.block_plan(
+                store,
+                start,
+                worked.get(&start).copied().unwrap_or_default(),
+            )
+        })
         .collect::<Result<_, _>>()?;
     let open = blocks
         .iter()
@@ -286,15 +293,33 @@ impl Ledger {
         Fulfilment::of(&self.plan, &self.sessions)
     }
 
-    fn block_plan(&self, store: &Store, start: BoundaryId) -> Result<BlockPlan, Error> {
+    fn worked_by_block(&self) -> BTreeMap<BoundaryId, (i64, i64)> {
+        let planned: BTreeSet<_> = self.plan.iter().map(|line| line.item_id.as_str()).collect();
+        let mut worked = BTreeMap::new();
+        for session in &self.sessions {
+            let is_planned = session
+                .item_id
+                .as_deref()
+                .is_some_and(|id| planned.contains(id));
+            for (block, minutes) in block_minutes(session, &self.blocks) {
+                let (actual, unplanned) = worked.entry(block).or_default();
+                if is_planned {
+                    *actual += minutes;
+                } else {
+                    *unplanned += minutes;
+                }
+            }
+        }
+        worked
+    }
+
+    fn block_plan(
+        &self,
+        store: &Store,
+        start: BoundaryId,
+        (actual_minutes, unplanned_minutes): (i64, i64),
+    ) -> Result<BlockPlan, Error> {
         let items = self.rows(store, start)?;
-        let inside: Vec<Session> = self
-            .sessions
-            .iter()
-            .filter(|s| s.block.start == start)
-            .cloned()
-            .collect();
-        let fulfilment = Fulfilment::of(&self.plan, &inside);
         Ok(BlockPlan {
             start,
             end: start.next().unwrap_or(BoundaryId::Sleep),
@@ -302,11 +327,11 @@ impl Ledger {
                 .blocks
                 .iter()
                 .filter(|block| block.block == start)
-                .map(block_minutes)
+                .map(block_capacity)
                 .sum(),
             planned_minutes: items.iter().filter_map(|row| row.planned_minutes).sum(),
-            actual_minutes: fulfilment.actual_minutes,
-            unplanned_minutes: fulfilment.unplanned_minutes,
+            actual_minutes,
+            unplanned_minutes,
             items,
         })
     }

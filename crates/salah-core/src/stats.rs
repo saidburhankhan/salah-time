@@ -4,7 +4,7 @@
 //! An `avg` rollup is weighted by session minutes; a tick weighs 1.
 
 use crate::config::Config;
-use crate::day::{self, Fulfilment, Snapshot, block_minutes, day_capacity, total_minutes};
+use crate::day::{self, Fulfilment, Snapshot, block_capacity, day_capacity, total_minutes};
 use crate::{Store, projects, tags};
 use chrono::NaiveDate;
 use measures::Measures;
@@ -17,6 +17,8 @@ use salah_store::reports::{Choice, ReportSession, SessionScope};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
+mod blocks;
+pub use blocks::Calendar;
 pub mod measures;
 pub mod series;
 pub mod table;
@@ -432,7 +434,7 @@ impl Ledger {
                         .iter()
                         .flat_map(|(_, snapshot)| &snapshot.blocks)
                         .filter(|b| b.block == block)
-                        .map(block_minutes)
+                        .map(block_capacity)
                         .sum(),
                     avg_focus: rollup(Rollup::Avg, inside(), "focus"),
                 }
@@ -522,7 +524,13 @@ pub(crate) fn rollup<'a>(
     sessions: impl Iterator<Item = &'a Session>,
     metric_id: &str,
 ) -> Option<f64> {
-    let mut samples = sessions.filter_map(|s| Some((s.value(metric_id)?, s.weight())));
+    aggregate(
+        kind,
+        sessions.filter_map(|s| Some((s.value(metric_id)?, s.weight()))),
+    )
+}
+
+fn aggregate(kind: Rollup, mut samples: impl Iterator<Item = (f64, f64)>) -> Option<f64> {
     let (first, mut weight) = samples.next()?;
     Some(match kind {
         Rollup::Sum => samples.fold(first, |sum, (value, _)| sum + value),

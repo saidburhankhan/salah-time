@@ -7,9 +7,9 @@
 //! project, tag or task table always cover every session in scope. A session
 //! counts once in each tag of its project; totals never double count.
 
-use super::{Filter, NONE, Range, report_scope, rollup};
+use super::{Calendar, Filter, NONE, Range, aggregate, blocks, report_scope};
 use crate::Store;
-use crate::day::total_minutes;
+
 use chrono::{Datelike, Days, NaiveDate};
 use salah_domain::{
     error::Error,
@@ -30,6 +30,7 @@ pub enum Group {
     #[default]
     Week,
     Day,
+    Block,
     Project,
     Epic,
     Tag,
@@ -83,27 +84,29 @@ pub struct Totals {
 }
 
 /// Reads the sessions in scope and builds the table. It never writes.
-pub fn table(store: &Store, range: Range, filter: Filter, group: Group) -> Result<Table, Error> {
+pub fn table(
+    store: &Store,
+    calendar: Calendar<'_>,
+    range: Range,
+    filter: Filter,
+    group: Group,
+) -> Result<Table, Error> {
     let scope = report_scope(store, &range, &filter)?;
-    let (sessions, metrics, positions, tags) = store.read_snapshot(|store| {
-        let positions = match scope.project {
-            Some(Choice::Is(id)) => store.project_metrics(id)?,
-            _ => Vec::new(),
-        };
-        let tags = match group {
-            Group::Tag => store.project_tags()?,
-            _ => BTreeMap::new(),
-        };
-        Ok((
-            store.report_sessions(&scope, None)?,
-            store.metrics()?,
-            positions,
-            tags,
-        ))
-    })?;
-    let metrics = metric_columns(metrics, &positions, &sessions);
-    let everything: Vec<&Session> = sessions.iter().map(|s| &s.session).collect();
+    let ReportData {
+        sessions,
+        metrics,
+        tags,
+        windows,
+    } = ReportData::load(
+        store,
+        calendar,
+        &scope,
+        group == Group::Tag,
+        group == Group::Block,
+    )?;
+    let everything: Vec<_> = sessions.iter().map(|s| Sample::whole(&s.session)).collect();
     let buckets = match group {
+        Group::Block => blocks::buckets(&sessions, &windows),
         Group::Week => dated(&everything, weeks(&range)),
         Group::Day => dated(&everything, days(&range)),
         Group::Project => keyed(&sessions, |s| vec![project_key(s)]),
@@ -140,6 +143,47 @@ pub fn table(store: &Store, range: Range, filter: Filter, group: Group) -> Resul
         filter,
         group,
     })
+}
+
+/// Report inputs from one consistent snapshot. Only block grouping needs
+/// prayer times, and only tag grouping needs the project's tags.
+pub(super) struct ReportData {
+    pub sessions: Vec<ReportSession>,
+    pub metrics: Vec<Metric>,
+    pub tags: BTreeMap<String, Vec<Tag>>,
+    pub windows: blocks::Windows,
+}
+
+impl ReportData {
+    pub(super) fn load(
+        store: &Store,
+        calendar: Calendar<'_>,
+        scope: &salah_store::reports::SessionScope<'_>,
+        by_tag: bool,
+        by_block: bool,
+    ) -> Result<Self, Error> {
+        store.read_snapshot(|store| {
+            let sessions = store.report_sessions(scope, None)?;
+            let positions = match scope.project {
+                Some(Choice::Is(id)) => store.project_metrics(id)?,
+                _ => Vec::new(),
+            };
+            Ok(Self {
+                metrics: metric_columns(store.metrics()?, &positions, &sessions),
+                tags: if by_tag {
+                    store.project_tags()?
+                } else {
+                    BTreeMap::new()
+                },
+                windows: if by_block {
+                    calendar.windows(store, &sessions)?
+                } else {
+                    blocks::Windows::new()
+                },
+                sessions,
+            })
+        })
+    }
 }
 
 /// Active metrics, and archived ones only when a session in scope recorded
@@ -206,15 +250,43 @@ pub(super) fn columns(metrics: &[Metric]) -> Vec<Column> {
     columns
 }
 
+/// A whole session or the portion of its recorded minutes assigned to a block.
+#[derive(Clone, Copy)]
+pub(super) struct Sample<'a> {
+    pub session: &'a Session,
+    pub minutes: Option<i64>,
+}
+
+impl<'a> Sample<'a> {
+    pub(super) fn whole(session: &'a Session) -> Self {
+        Self {
+            session,
+            minutes: session.minutes,
+        }
+    }
+
+    fn metric(&self, metric: &Metric) -> Option<(f64, f64)> {
+        let mut value = self.session.value(&metric.id)?;
+        let weight = self.minutes.unwrap_or(1).max(1) as f64;
+        if metric.rollup == Rollup::Sum && self.minutes != self.session.minutes {
+            value *= weight / self.session.weight();
+        }
+        Some((value, weight))
+    }
+}
+
 /// Minutes, session count and one value per metric column.
 pub(super) fn cells(
     metrics: &[Metric],
-    sessions: &[&Session],
+    sessions: &[Sample<'_>],
 ) -> (i64, i64, BTreeMap<String, Option<f64>>) {
-    let minutes = total_minutes(sessions.iter().copied());
+    let minutes = sessions.iter().filter_map(|s| s.minutes).sum();
     let mut values = BTreeMap::new();
     for metric in metrics {
-        let value = rollup(metric.rollup, sessions.iter().copied(), &metric.id);
+        let value = aggregate(
+            metric.rollup,
+            sessions.iter().filter_map(|s| s.metric(metric)),
+        );
         if metric.id == DISTRACTIONS {
             let rate = value
                 .filter(|_| minutes > 0)
@@ -233,7 +305,7 @@ pub(super) struct Bucket<'a> {
     pub(super) color: Option<String>,
     pub(super) from: Option<NaiveDate>,
     pub(super) to: Option<NaiveDate>,
-    pub(super) sessions: Vec<&'a Session>,
+    pub(super) sessions: Vec<Sample<'a>>,
 }
 
 /// A row key of a project, tag or task table, with its label and colour.
@@ -255,12 +327,12 @@ impl Key {
 
 /// Every week or day of the range, including those without sessions.
 pub(super) fn dated<'a>(
-    sessions: &[&'a Session],
+    sessions: &[Sample<'a>],
     spans: Vec<(String, String, NaiveDate, NaiveDate)>,
 ) -> Vec<Bucket<'a>> {
-    let mut by_day = BTreeMap::<NaiveDate, Vec<&Session>>::new();
+    let mut by_day = BTreeMap::<NaiveDate, Vec<Sample>>::new();
     for s in sessions {
-        by_day.entry(s.block.day).or_default().push(*s);
+        by_day.entry(s.session.block.day).or_default().push(*s);
     }
     spans
         .into_iter()
@@ -344,13 +416,13 @@ pub(super) fn keyed<'a>(
                     sessions: Vec::new(),
                 })
                 .sessions
-                .push(&s.session);
+                .push(Sample::whole(&s.session));
         }
     }
     let mut rows: Vec<Bucket<'a>> = buckets.into_values().collect();
     rows.sort_by_cached_key(|b| {
         (
-            std::cmp::Reverse(total_minutes(b.sessions.iter().copied())),
+            std::cmp::Reverse(b.sessions.iter().filter_map(|s| s.minutes).sum::<i64>()),
             std::cmp::Reverse(b.sessions.len()),
             b.label.to_lowercase(),
             b.key.clone(),

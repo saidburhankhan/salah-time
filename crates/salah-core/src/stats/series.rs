@@ -9,15 +9,15 @@
 //! into one `other` series, counting each session once.
 
 use super::table::{
-    Bucket, Column, cells, columns, dated, days, epic_key, item_key, keyed, metric_columns,
+    Bucket, Column, ReportData, Sample, cells, columns, dated, days, epic_key, item_key, keyed,
     project_key, tag_keys, weeks,
 };
-use super::{Filter, Range, report_scope};
+use super::{Calendar, Filter, Range, blocks, report_scope};
 use crate::{Store, guard::not_found};
 use chrono::NaiveDate;
-use salah_domain::{error::Error, tracking::Session};
+use salah_domain::error::Error;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 /// The most split keys one request returns, before the combined "Other".
 pub const MAX_KEYS: usize = 8;
@@ -37,6 +37,7 @@ pub enum Interval {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Split {
+    Block,
     Project,
     Epic,
     Tag,
@@ -79,6 +80,7 @@ pub struct Point {
 /// Reads the sessions in scope and builds the series. It never writes.
 pub fn series(
     store: &Store,
+    calendar: Calendar<'_>,
     range: Range,
     filter: Filter,
     interval: Interval,
@@ -89,14 +91,18 @@ pub fn series(
         return Err(Error::validation("measures", "name at least one measure"));
     }
     let scope = report_scope(store, &range, &filter)?;
-    let (sessions, metrics, tags) = store.read_snapshot(|store| {
-        let tags = match split {
-            Some(Split::Tag) => store.project_tags()?,
-            _ => BTreeMap::new(),
-        };
-        Ok((store.report_sessions(&scope, None)?, store.metrics()?, tags))
-    })?;
-    let metrics = metric_columns(metrics, &[], &sessions);
+    let ReportData {
+        sessions,
+        metrics,
+        tags,
+        windows,
+    } = ReportData::load(
+        store,
+        calendar,
+        &scope,
+        split == Some(Split::Tag),
+        split == Some(Split::Block),
+    )?;
     let known = columns(&metrics);
     let mut chosen: Vec<&Column> = Vec::new();
     for id in measures {
@@ -112,7 +118,6 @@ pub fn series(
         Interval::Day => days(&range),
         Interval::Week => weeks(&range),
     };
-    let everything: Vec<&Session> = sessions.iter().map(|s| &s.session).collect();
     let groups: Vec<Bucket<'_>> = match split {
         None => vec![Bucket {
             key: ALL.into(),
@@ -120,9 +125,10 @@ pub fn series(
             color: None,
             from: None,
             to: None,
-            sessions: everything,
+            sessions: sessions.iter().map(|s| Sample::whole(&s.session)).collect(),
         }],
         Some(split) => top(match split {
+            Split::Block => blocks::buckets(&sessions, &windows),
             Split::Project => keyed(&sessions, |s| vec![project_key(s)]),
             Split::Epic => keyed(&sessions, |s| vec![epic_key(s)]),
             Split::Tag => keyed(&sessions, |s| tag_keys(s, &tags)),
@@ -181,7 +187,7 @@ fn top(mut groups: Vec<Bucket<'_>>) -> Vec<Bucket<'_>> {
             .split_off(MAX_KEYS)
             .into_iter()
             .flat_map(|g| g.sessions)
-            .filter(|s| seen.insert(s.id.clone()))
+            .filter(|s| seen.insert(s.session.id.clone()))
             .collect();
         groups.push(Bucket {
             key: OTHER.into(),

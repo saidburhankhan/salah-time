@@ -54,10 +54,15 @@ pub(crate) fn stats(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcE
 
 pub(crate) fn stats_table(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let params: StatsTableParams = parse(call.params)?;
-    let today = day::current(&ctx.config.load()?, ctx.now())?;
+    let config = ctx.config.load()?;
+    let today = day::current(&config, ctx.now())?;
     let (range, filter) = scope(params.stats.scope, today, params.stats.measures)?;
     to_value(statistics::table::table(
         ctx.store,
+        statistics::Calendar {
+            config: &config,
+            today,
+        },
         range,
         filter,
         params.group,
@@ -66,10 +71,15 @@ pub(crate) fn stats_table(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value
 
 pub(crate) fn stats_series(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let params: StatsSeriesParams = parse(call.params)?;
-    let today = day::current(&ctx.config.load()?, ctx.now())?;
+    let config = ctx.config.load()?;
+    let today = day::current(&config, ctx.now())?;
     let (range, filter) = scope(params.stats.scope, today, params.stats.measures)?;
     to_value(statistics::series::series(
         ctx.store,
+        statistics::Calendar {
+            config: &config,
+            today,
+        },
         range,
         filter,
         params.interval,

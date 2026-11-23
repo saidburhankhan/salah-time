@@ -54,7 +54,7 @@ pub struct MeasureArgs {
 
 #[derive(Subcommand)]
 pub enum StatsCommand {
-    /// The general table: one row per week, day, project, epic, tag or task
+    /// The general table: one row per week, day, block, project, epic, tag or task
     Table(StatsTableArgs),
     /// Trend lines: one point per day or week, one series per measure and split key
     Series(StatsSeriesArgs),
@@ -67,7 +67,7 @@ pub struct StatsSeriesArgs {
     /// day (default) or week
     #[arg(long)]
     interval: Option<String>,
-    /// project, epic, tag or item: one series per key (top 8 plus Other)
+    /// block, project, epic, tag or item: one series per key (top 8 plus Other)
     #[arg(long)]
     split: Option<String>,
     /// minutes, sessions, a metric id or distractions_per_hour, repeatable
@@ -81,7 +81,7 @@ pub struct StatsSeriesArgs {
 pub struct StatsTableArgs {
     #[command(flatten)]
     scope: ReportScope,
-    /// week (default), day, project, epic, tag or item
+    /// week (default), day, block, project, epic, tag or item
     #[arg(long)]
     group: Option<String>,
     #[command(flatten)]
