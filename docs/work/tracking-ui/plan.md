@@ -104,7 +104,9 @@ the required and optional metrics, and see results in charts. Both surfaces stay
 - **Pause asks optional metrics.** Pause opens a compact panel: the item's metrics (or focus and
   quality without a project) and a note, all optional. Buttons: **Save** (pause; empty = plain
   pause) and **Save & Done** (pause + tick). Values and note go on the timed session; the tick
-  carries no values. If the session already has values from pause, the done panel still opens on
+  carries no values. Nothing in the pause panel is ever required: Save and Save & Done are always
+  enabled, there are no required markers or "Fill in" hints, and an empty panel is a plain pause.
+  If the session already has values from pause, the done panel still opens on
   a later tick but may be skipped.
 - **Stats filters:** separate rows/lists for Tags, Projects (narrowed by the chosen tag), Tasks
   (narrowed by the chosen project). Every chart and table follows the filter.
