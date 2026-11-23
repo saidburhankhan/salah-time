@@ -23,11 +23,14 @@ Tasks, in order, one CHECKPOINT each:
 4. General table section: group Week (default) / Day / Project / Tag / Task, column chips
    (remembered via QSettings), muted red→amber→green tint for scale metrics, in-cell minutes bar,
    totals row, sortable headers. Use `stats.table`.
+5. Notes page (plan.md): sidebar entry, the shared filter bar, duration and per-metric range
+   filters, text search, with-notes switch, rows with metric values and the note, "Load more" via
+   the cursor, clicking a row opens the session editor. Use `sessions.list`.
 Write normal readable QML (one property per line; no minified files); muted theme tints, never
 white fills; `Text.PlainText` for dynamic strings. Add tests for each new request shape. Keep
 all existing tests passing and do not reduce their number. Extend the screenshot test so the
 orchestrator can render: the pause panel, the stats filters with Custom range, a chart in table
-mode, and the general table grouped by week and by project.
+mode, the general table grouped by week and by project, and the Notes page with a focus range filter.
 
 Checks: `app/bin/build`, `app/bin/test` (socket tests are skipped in your sandbox; that is
 expected), `git diff --check`.

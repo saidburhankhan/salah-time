@@ -142,6 +142,19 @@ the required and optional metrics, and see results in charts. Both surfaces stay
   sessions keep their Edit (minutes) in both surfaces.
 - **Notes:** a session's note is shown wherever its sessions are listed (app session rows already
   do; the widget's opened row must too).
+- **Notes page** (user request): a new "Notes" page in the app sidebar listing sessions with
+  their notes, newest first. It shares the Stats filter bar (Tags / Projects / Tasks, range presets
+  and Custom) and adds range filters: duration (min–max minutes) and any metric (min–max, e.g.
+  focus 1–2), a text search, and a "with notes only" switch (on by default). Each row shows date,
+  time, project colour and name, task, minutes, metric values (scale values tinted like the
+  table) and the note; clicking a row opens the session editor.
+- `sessions.list` params: `from,to` or `days`, `tag_id?`, `project_id?`, `item_id?`,
+  `with_note?` (default true), `q?` (case-insensitive note text search), `minutes_min?`,
+  `minutes_max?`, `values?: {metric_id: {min?, max?}}` (a session lacking that value does not
+  match), `limit?` (default 100, max 500), `before?` (cursor: the last row's `ended_at|id`).
+  Result: `{ rows: [SessionView + { day, project: {id,name,color}|null, item: {id,title}|null }],
+  next: cursor|null }`. Only finished sessions (ticks included). Fixture `sessions_list.json`
+  and `sessions_list_filtered.json`.
 - New fixtures: `stats_table_week.json`, `stats_table_project.json`, `stats_item_filter.json`,
   `session_stop_done.json`.
 
@@ -156,4 +169,5 @@ the required and optional metrics, and see results in charts. Both surfaces stay
 - [ ] P1 backend: stats.table, item filter, custom range, session.stop done (C2)
 - [ ] P2 widget pause panel (C3)
 - [ ] P3 app pause panel + stats filters/range/table (C4)
+- [ ] P3b app Notes page (C4, after the stats work)
 - [ ] P4 integration, screenshots reviewed by the orchestrator, install, user check
