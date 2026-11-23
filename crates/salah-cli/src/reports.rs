@@ -116,11 +116,7 @@ pub struct SessionsListArgs {
 
 fn scope(local: &Local<'_>, scope: ReportScope) -> Result<Map<String, Value>, String> {
     let mut params = Map::new();
-    let item = match scope.item {
-        Some(id) if id == "none" => Some(id),
-        Some(id) => Some(local.item_id(&id)?),
-        None => None,
-    };
+    let item = scope.item.map(|id| local.report_item_id(&id)).transpose()?;
     for (key, value) in [
         ("from", scope.from.map(Value::from)),
         ("to", scope.to.map(Value::from)),

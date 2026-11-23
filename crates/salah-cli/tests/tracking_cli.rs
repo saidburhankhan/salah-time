@@ -671,3 +671,27 @@ fn quick_items_join_the_epic_project_and_backlog_tasks_get_scheduled() {
     let items = fixture.run(&["item", "list"]);
     assert!(String::from_utf8_lossy(&items.stdout).contains("backlog  Call"));
 }
+
+#[test]
+fn main_stats_item_none_counts_epic_only_work() {
+    let fixture = Fixture::new();
+    let p = fixture.added("projects", &["project", "add", "Book", "--json"]);
+    let e = fixture.added(
+        "epics",
+        &["epic", "add", "Chapter", "--project", &p, "--json"],
+    );
+    let task = fixture.added("items", &["item", "add", "Read", "--epic", &e, "--json"]);
+    fixture.json(&["session", "log", "--epic", &e, "--minutes", "20", "--json"]);
+    fixture.json(&[
+        "session",
+        "log",
+        "--item",
+        &task,
+        "--minutes",
+        "5",
+        "--json",
+    ]);
+    let stats = fixture.json(&["stats", "--days", "1", "--item", "none", "--json"]);
+    assert_eq!(stats["totals"]["minutes"], 20);
+    assert_eq!(stats["filter"]["item_id"], "none");
+}

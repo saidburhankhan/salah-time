@@ -15,7 +15,7 @@ use salah_domain::{
 };
 use salah_store::reports::{Choice, ReportSession, SessionScope};
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 pub mod measures;
 pub mod series;
@@ -170,7 +170,7 @@ pub struct EpicStat {
 pub struct TagStat {
     pub id: String,
     pub name: String,
-    pub color: String,
+    pub color: Option<String>,
     pub minutes: i64,
 }
 
@@ -201,10 +201,12 @@ pub fn stats(
 ) -> Result<Stats, Error> {
     range.check()?;
     let days = range.days();
-    let (scope, sessions) = store.read_snapshot(|store| {
+    let (scope, sessions, tags) = store.read_snapshot(|store| {
         let scope = report_scope(store, &range, &filter)?;
         let sessions = store.report_sessions(&scope, None)?;
-        Ok((Scope::new(store, &scope)?, sessions))
+        let scope = Scope::new(store, &scope)?;
+        let tags = tag_breakdown(tags::list(store)?, &scope.tags, &sessions);
+        Ok((scope, sessions, tags))
     })?;
     if range.from < today {
         store.write(|tx| {
@@ -217,13 +219,55 @@ pub fn stats(
         days: ledger.day_stats(),
         series: ledger.series(),
         projects: ledger.project_stats(),
-        tags: ledger.tag_stats(),
+        tags,
         blocks: ledger.block_stats(),
         totals: ledger.totals(),
         epics: ledger.epic_stats,
         range,
         filter,
     })
+}
+
+fn tag_breakdown(
+    tags: Vec<Tag>,
+    project_tags: &BTreeMap<String, Vec<String>>,
+    sessions: &[ReportSession],
+) -> Vec<TagStat> {
+    let mut minutes = BTreeMap::<&str, i64>::new();
+    for row in sessions {
+        let session = &row.session;
+        let worked = session.minutes.unwrap_or(0);
+        match session
+            .project_id
+            .as_ref()
+            .and_then(|id| project_tags.get(id))
+        {
+            Some(ids) => {
+                for id in ids {
+                    *minutes.entry(id).or_default() += worked;
+                }
+            }
+            None => *minutes.entry(NONE).or_default() += worked,
+        }
+    }
+    let mut rows: Vec<_> = tags
+        .into_iter()
+        .map(|tag| TagStat {
+            minutes: minutes.get(tag.id.as_str()).copied().unwrap_or(0),
+            id: tag.id,
+            name: tag.name,
+            color: Some(tag.color),
+        })
+        .collect();
+    if let Some(&minutes) = minutes.get(NONE) {
+        rows.push(TagStat {
+            id: NONE.into(),
+            name: "No tag".into(),
+            color: None,
+            minutes,
+        });
+    }
+    rows
 }
 
 /// Everything in range that the filter keeps.
@@ -234,7 +278,6 @@ struct Ledger {
     scope: Scope,
     metrics: Vec<Metric>,
     projects: Vec<salah_domain::tracking::Project>,
-    tags: Vec<Tag>,
 }
 
 impl Ledger {
@@ -268,7 +311,6 @@ impl Ledger {
             metrics,
             epic_stats,
             projects,
-            tags: tags::list(store)?,
         })
     }
 
@@ -373,30 +415,6 @@ impl Ledger {
                     sessions: mine.len() as i64,
                     metrics: recorded_metrics(&self.metrics, &mine),
                 })
-            })
-            .collect()
-    }
-
-    fn tag_stats(&self) -> Vec<TagStat> {
-        self.tags
-            .iter()
-            .map(|tag| {
-                let tagged: BTreeSet<&str> = self
-                    .projects
-                    .iter()
-                    .filter(|p| p.tag_ids.contains(&tag.id))
-                    .map(|p| p.id.as_str())
-                    .collect();
-                TagStat {
-                    id: tag.id.clone(),
-                    name: tag.name.clone(),
-                    color: tag.color.clone(),
-                    minutes: total_minutes(
-                        self.sessions.iter().filter(|s| {
-                            s.project_id.as_deref().is_some_and(|p| tagged.contains(p))
-                        }),
-                    ),
-                }
             })
             .collect()
     }

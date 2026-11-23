@@ -266,3 +266,122 @@ fn backlog_tasks_stay_out_of_every_plan_until_scheduled() {
     // Today's plan only has what is still scheduled for it.
     assert_eq!(titles(&mut next, TOMORROW), ["Walk", "Read chapter"]);
 }
+
+#[test]
+fn scheduling_into_the_same_block_on_another_day_appends_after_its_tasks() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    let a = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"a","title":"A","block":"fajr","date":DATE}),
+    );
+    added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"b","title":"B","block":"fajr","date":TOMORROW}),
+    );
+    good(
+        &mut rpc,
+        "item.schedule",
+        json!({"op_id":"schedule","id":a,"day":TOMORROW,"block":"fajr"}),
+    );
+    assert_eq!(titles(&mut rpc, TOMORROW), ["B", "A"]);
+}
+
+#[test]
+fn moving_sleep_later_does_not_reopen_a_frozen_day_for_scheduling() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    good(
+        &mut rpc,
+        "config.set",
+        json!({"op_id":"early","sleep_time":"22:00"}),
+    );
+    let task = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"task","title":"Read","backlog":true}),
+    );
+    let mut late = Session::open(&h, "2031-05-14T22:30:00+05:00");
+    assert!(titles(&mut late, DATE).is_empty());
+    let store = salah_store::Store::open(&h.data).unwrap();
+    assert!(store.day_written(DATE.parse().unwrap()).unwrap());
+    good(
+        &mut late,
+        "config.set",
+        json!({"op_id":"later","sleep_time":"23:30"}),
+    );
+    assert_eq!(good(&mut late, "day.get", json!({}))["day"], DATE);
+    bad(
+        &mut late,
+        "item.schedule",
+        json!({"op_id":"schedule","id":task,"day":DATE,"block":"fajr"}),
+        "validation",
+        Some("day"),
+    );
+    assert_eq!(backlog_titles(&mut late, json!({})), ["Read"]);
+    good(
+        &mut late,
+        "item.schedule",
+        json!({"op_id":"schedule","id":task,"day":TOMORROW,"block":"fajr"}),
+    );
+    assert!(store.day_plan(DATE.parse().unwrap()).unwrap().is_empty());
+}
+
+#[test]
+fn backlog_filters_and_project_labels_share_the_item_snapshot() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    let p = added(
+        &mut rpc,
+        "project.add",
+        "projects",
+        json!({"op_id":"p","name":"Initial"}),
+    );
+    let task = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"task","title":"Initial","project_id":p,"backlog":true}),
+    );
+    let mut writer = salah_store::Store::open(&h.data).unwrap();
+    let mut project = writer.project(&p).unwrap().unwrap();
+    let mut item = writer.item(&task).unwrap().unwrap();
+    // Each transaction creates a project and assigns the task to it. Every
+    // committed state has a project and matching task and project names.
+    let barrier = std::sync::Barrier::new(2);
+    std::thread::scope(|scope| {
+        let start = &barrier;
+        scope.spawn(move || {
+            start.wait();
+            for i in 0..160 {
+                project.id = format!("project-{i}");
+                project.name = format!("Project {i}");
+                item.project_id = Some(project.id.clone());
+                item.title = project.name.clone();
+                writer
+                    .write(|tx| {
+                        tx.put_project(&project)?;
+                        tx.put_item(&item)
+                    })
+                    .unwrap();
+                std::thread::yield_now();
+            }
+        });
+        barrier.wait();
+        for _ in 0..80 {
+            assert_eq!(
+                good(&mut rpc, "backlog.list", json!({"project_id":"none"})),
+                json!([])
+            );
+            let rows = good(&mut rpc, "backlog.list", json!({}));
+            let row = &rows[0];
+            assert_eq!(row["project"]["id"], row["project_id"]);
+            assert_eq!(row["project"]["name"], row["title"]);
+        }
+    });
+}

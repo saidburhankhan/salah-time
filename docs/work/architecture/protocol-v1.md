@@ -156,8 +156,9 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
 
 - Each epic has an `id`, `project_id`, `name`, nullable `note`, `position`, `status`,
   nullable `finished_at`, and the usual sync fields. Finishing sets the timestamp once.
-  Reopening clears it. Removal soft-deletes an epic with no recorded sessions and
-  detaches its current items in the same revision. Frozen plans retain their epic.
+  Reopening clears it. Removal requires zero live sessions, including running timers. It
+  soft-deletes the epic and detaches all its items in one revision. Only live items
+  appear in `changed.items`. Frozen plans and removed sessions retain their epic.
 - `epics.list` includes `total_minutes`, `sessions`, `days_worked`, and `last_worked`
   (latest tracking day, or null). Finished, live sessions supply these totals.
   A tick counts as a session and a day worked. Each live task contributes once to
@@ -173,7 +174,8 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   cannot be resolved.
   An item session copies its project and epic at creation. A session logged or started
   against an epic alone takes its project from the epic. Later item edits preserve both
-  recorded IDs. Timestamped notes are
+  recorded IDs. Save & Done copies the item’s current project and live epic onto a
+  new tick. A removed epic yields a null `epic_id`. Timestamped notes are
   ordered oldest first and `at` is a UTC instant.
 - `ItemView` and day rows expose nullable `epic_id`. An assigned epic must belong
   to the item’s project. Changing projects clears the old epic. The same edit can
@@ -187,13 +189,16 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   snapshot, capacity or fulfilment; work logged on it is unplanned. `item.add
   {backlog: true}` takes no `block` or `date` (with `quick_text` the parsed day and
   block are dropped) and appends to the backlog. `item.schedule` sets a day from
-  today on and a block, appending to that block; it also moves a planned one-time
-  item. `item.backlog` clears both and appends to the backlog; an item already there
-  is returned unchanged. A past day that already lists the item keeps it. Both
+  today on and a block. A change of day or block appends the task to the destination
+  block. A frozen destination returns `validation` on `day`, including when a later
+  Sleep setting makes that date current again. `item.backlog` clears both and appends
+  to the backlog. An item already there keeps its position. A past day that already lists the item keeps it. Both
   reject repeating items (`validation`, field `repeat`). `item.move` with `block:
   null` reorders the backlog; a move between the backlog and a block, `item.edit`
   of a backlog item's `block`, or a repeat on it is a `validation` error.
-  `backlog.list` filters by project and by the project's tags.
+  `backlog.list` reads its rows and filters from one snapshot. A `project_id` of
+  `"none"` selects items with a null stored project ID. `tag_id` filters by the
+  project's live tags.
 - A `Resource` carries `id`, `item_id`, `epic_id`, `kind`, `title`, `body`,
   `url`, `remind_at`, `done`, `position`, and sync fields (`created_at`, `updated_at`,
   `deleted_at`, `version`). One parent ID is null. The other names a live item or
@@ -313,6 +318,10 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
 - `stats.get.projects` lists each project with work in scope, in project order, then
   one `{id: "none", name: "No project", color: null}` row when sessions without a
   project are in scope, so the rows add up to `totals`.
+- `stats.get.tags` counts a session’s minutes in each live tag of its recorded
+  project. A session without a project or without a live project tag contributes
+  to the final `{id: "none", name: "No tag", color: null, minutes}` row. An
+  untagged tick contributes zero minutes. See `stats_with_untagged_tick.json`.
 - `stats.get.epics` contains `{id, name, project_id, minutes, sessions, metrics}`
   for each epic with work in scope. Within each project, work without an epic
   has `id: "none"` and the name "No epic". Work without a project has a null

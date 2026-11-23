@@ -241,3 +241,53 @@ daemon tests below.
 - `docs/work/architecture/protocol-v1.md`, `docs/work/tracking-ui/c5-progress.md`
 
 CHECKPOINT 2-4: Add item and epic resources, due reminders, resource CLI and backlog move
+
+## R2 independent review
+
+All eight findings reproduced on the committed backend. Before the fixes seven
+new RPC tests and one CLI test failed. All eight now pass.
+
+| Finding | Regression verified |
+| --- | --- |
+| Save & Done | A timer started before assignment keeps its recorded ownership. Its new tick keeps the item's project and clears a removed epic, including for a stale link in a pre-fix item tombstone. |
+| Reschedule order | Moving A to B’s day in the same Fajr block places A after B. |
+| Tag breakdown | Projectless minutes and minutes on a project whose last tag was removed appear under “No tag”. The filtered breakdown agrees with its total. |
+| Concurrent backlog reads | A writer creates projects and reassigns a task in one transaction. Concurrent lists consistently return the matching project ID and label, and the unassigned list stays empty. |
+| Deleted items in an epic | Removal detaches the tombstone in the epic’s revision and omits it from the live response. A later project metric edit succeeds. Metric cleanup can also save a tombstone left by older versions. |
+| Main stats CLI | `salah stats --item none` counts 20 epic-only minutes and excludes the timed task. |
+| Deleted sessions on an epic | A running timer vetoes removal. After both the tick and timer are soft-deleted, removal succeeds and both session tombstones retain the epic ID. |
+| Frozen destination | After moving Sleep later, scheduling onto the now-current frozen day fails on `day`. The task remains in the backlog and the same operation ID succeeds for tomorrow. |
+
+The archived `stats.json` and all other existing fixtures are byte-for-byte intact.
+The current `stats_with_untagged_tick.json` matches the earlier example plus the
+zero-minute “No tag” row for its projectless tick.
+
+### Verification
+
+`cargo test --offline --workspace --no-fail-fast` ran all 214 tests. 206 passed.
+The eight Unix socket tests in the `daemon` target require an outside-sandbox run.
+
+- `methods::every_protocol_method_has_a_success_and_an_error_over_the_socket`
+- `transport::a_second_daemon_refuses_to_steal_the_live_socket`
+- `transport::a_stale_socket_file_is_replaced_and_sigterm_removes_it`
+- `transport::clock_boundary_is_pushed_when_the_next_boundary_changes`
+- `transport::concurrent_writers_keep_revisions_gapless`
+- `transport::rpc_socket_bridges_stdio_to_the_daemon`
+- `transport::socket_permissions_and_handshake`
+- `transport::subscribers_receive_changed_for_socket_and_plain_cli_writes`
+
+`cargo clippy --offline --all-targets -- -D warnings`, `cargo fmt --check` and
+`git diff --check` passed.
+
+### Files
+
+- `crates/salah-cli/src/{local,reports,tracking}.rs`
+- `crates/salah-cli/tests/{rpc,tracking_cli}.rs`
+- `crates/salah-cli/tests/rpc/{backlog,epics,reports}.rs`
+- `crates/salah-cli/tests/fixtures/rpc/stats_with_untagged_tick.json`
+- `crates/salah-core/src/{backlog,epics,projects,stats}.rs`
+- `crates/salah-core/src/sessions/running.rs`
+- `crates/salah-store/src/{epics,read}.rs`
+- `docs/work/architecture/protocol-v1.md`, `docs/work/tracking-ui/c5-progress.md`
+
+CHECKPOINT R2: Fix epic removal and tick ownership, backlog consistency and scheduling, and unassigned stats

@@ -41,6 +41,17 @@ pub fn find(store: &Store, id: &str) -> Result<Epic, Error> {
         .ok_or_else(|| not_found("epic", id))
 }
 
+/// Older databases can retain a removed epic on an item tombstone. Clear
+/// that link before reusing the item as a session target or saving it again.
+pub(crate) fn detach_removed(store: &Store, item: &mut Item) -> Result<(), Error> {
+    if let Some(id) = &item.epic_id
+        && store.epic(id)?.is_none_or(|epic| epic.deleted_at.is_some())
+    {
+        item.epic_id = None;
+    }
+    Ok(())
+}
+
 /// A live epic that can take new tasks: a finished one still accepts late
 /// sessions, but not tasks.
 pub(crate) fn assignable(store: &Store, id: &str) -> Result<Epic, Error> {
@@ -132,5 +143,6 @@ pub fn remove(
     epic.deleted_at = Some(now);
     epic.updated_at = now;
     tx.put_epic(&epic)?;
+    items.retain(Item::is_live);
     Ok(items)
 }

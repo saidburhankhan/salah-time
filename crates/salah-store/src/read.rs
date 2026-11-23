@@ -104,10 +104,7 @@ impl Store {
     }
 
     pub fn items_in_epic(&self, id: &str) -> Result<Vec<Item>, Error> {
-        self.items_where(
-            "SELECT * FROM items WHERE epic_id=?1 AND deleted_at IS NULL ORDER BY id",
-            [id],
-        )
+        self.items_where("SELECT * FROM items WHERE epic_id=?1 ORDER BY id", [id])
     }
 
     pub fn items(&self) -> Result<Vec<Item>, Error> {

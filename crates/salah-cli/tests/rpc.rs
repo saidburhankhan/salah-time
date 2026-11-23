@@ -434,7 +434,12 @@ fn tracking_methods_match_fixtures() {
         json!({"op_id":"op-prayer-mark","prayer":"fajr"}),
     );
     check(&mut rpc, "day_tracking", "day.get", json!({}));
-    check(&mut rpc, "stats", "stats.get", json!({"days":7}));
+    check(
+        &mut rpc,
+        "stats_with_untagged_tick",
+        "stats.get",
+        json!({"days":7}),
+    );
     check(
         &mut rpc,
         "stats_by_tag",

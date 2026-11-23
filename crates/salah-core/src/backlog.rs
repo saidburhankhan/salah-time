@@ -42,47 +42,49 @@ pub fn list(
     project_id: Option<&str>,
     tag_id: Option<&str>,
 ) -> Result<Vec<BacklogRow>, Error> {
-    if let Some(id) = project_id.filter(|id| *id != NONE) {
-        projects::find(store, id)?;
-    }
-    if let Some(id) = tag_id.filter(|id| *id != NONE) {
-        tags::find(store, id)?;
-    }
-    let projects = store.projects()?;
-    let live_tags: Vec<String> = tags::list(store)?.into_iter().map(|t| t.id).collect();
-    let mut counts = store.item_resource_counts()?;
-    let mut rows = Vec::new();
-    for item in items::list(store)?.into_iter().filter(Item::is_backlog) {
-        let project = item
-            .project_id
-            .as_deref()
-            .and_then(|id| projects.iter().find(|p| p.id == id));
-        let tag_ids: Vec<String> = project
-            .map(|p| p.tag_ids.clone())
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|id| live_tags.contains(id))
-            .collect();
-        let keeps_project = match project_id {
-            None => true,
-            Some(NONE) => project.is_none(),
-            Some(id) => project.is_some_and(|p| p.id == id),
-        };
-        let keeps_tag = match tag_id {
-            None => true,
-            Some(NONE) => tag_ids.is_empty(),
-            Some(id) => tag_ids.iter().any(|t| t == id),
-        };
-        if !(keeps_project && keeps_tag) {
-            continue;
+    store.read_snapshot(|store| {
+        if let Some(id) = project_id.filter(|id| *id != NONE) {
+            projects::find(store, id)?;
         }
-        rows.push(BacklogRow {
-            resources: counts.remove(&item.id).unwrap_or_default(),
-            project: project.map(|p| backlog_project(p, tag_ids)),
-            view: ItemView::new(store, item, today)?,
-        });
-    }
-    Ok(rows)
+        if let Some(id) = tag_id.filter(|id| *id != NONE) {
+            tags::find(store, id)?;
+        }
+        let projects = store.projects()?;
+        let live_tags: Vec<String> = tags::list(store)?.into_iter().map(|t| t.id).collect();
+        let mut counts = store.item_resource_counts()?;
+        let mut rows = Vec::new();
+        for item in items::list(store)?.into_iter().filter(Item::is_backlog) {
+            let project = item
+                .project_id
+                .as_deref()
+                .and_then(|id| projects.iter().find(|p| p.id == id));
+            let tag_ids: Vec<String> = project
+                .map(|p| p.tag_ids.clone())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|id| live_tags.contains(id))
+                .collect();
+            let keeps_project = match project_id {
+                None => true,
+                Some(NONE) => item.project_id.is_none(),
+                Some(id) => item.project_id.as_deref() == Some(id),
+            };
+            let keeps_tag = match tag_id {
+                None => true,
+                Some(NONE) => tag_ids.is_empty(),
+                Some(id) => tag_ids.iter().any(|t| t == id),
+            };
+            if !(keeps_project && keeps_tag) {
+                continue;
+            }
+            rows.push(BacklogRow {
+                resources: counts.remove(&item.id).unwrap_or_default(),
+                project: project.map(|p| backlog_project(p, tag_ids)),
+                view: ItemView::new(store, item, today)?,
+            });
+        }
+        Ok(rows)
+    })
 }
 
 fn backlog_project(project: &Project, tag_ids: Vec<String>) -> BacklogProject {
@@ -116,9 +118,15 @@ pub fn schedule(
             "a task cannot be scheduled before today; past days are not re-planned",
         ));
     }
+    if tx.day_written(date)? {
+        return Err(Error::validation(
+            "day",
+            "the destination day is already frozen",
+        ));
+    }
     day::freeze_past(tx, config, today)?;
     tx.preserve_item(&item, today)?;
-    if item.block != Some(block) {
+    if item.day != Some(date) || item.block != Some(block) {
         item.position = next_position(tx, Some(block))?;
     }
     item.block = Some(block);

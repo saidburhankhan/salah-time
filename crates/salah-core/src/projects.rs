@@ -220,6 +220,9 @@ fn drop_removed_choices(
         let count = ids.len();
         ids.retain(|id| !removed.contains(id));
         if ids.len() != count {
+            if !item.is_live() {
+                crate::epics::detach_removed(tx, &mut item)?;
+            }
             item.updated_at = now;
             item.version = tx.put_item(&item)?;
             if item.is_live() {

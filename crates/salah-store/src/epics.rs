@@ -24,7 +24,7 @@ impl Store {
     pub fn epic_has_sessions(&self, id: &str) -> Result<bool, Error> {
         self.conn
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sessions WHERE epic_id=?1)",
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE epic_id=?1 AND deleted_at IS NULL)",
                 [id],
                 |row| row.get(0),
             )

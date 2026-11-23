@@ -522,3 +522,50 @@ fn stats_get_and_table_narrow_sessions_by_duration_and_metric_values() {
         );
     }
 }
+
+#[test]
+fn tag_breakdown_includes_unassigned_minutes_after_a_tag_is_removed() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    let tag = added(
+        &mut rpc,
+        "tag.add",
+        "tags",
+        json!({"op_id":"tag","name":"Study","color":"#334455"}),
+    );
+    let p = added(
+        &mut rpc,
+        "project.add",
+        "projects",
+        json!({"op_id":"project","name":"Library","tag_ids":[tag]}),
+    );
+    let task = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"item","title":"Stretch"}),
+    );
+    good(
+        &mut rpc,
+        "session.log",
+        json!({"op_id":"project-work","project_id":p,"minutes":15}),
+    );
+    good(
+        &mut rpc,
+        "session.log",
+        json!({"op_id":"task-work","item_id":task,"minutes":7}),
+    );
+    let all = good(&mut rpc, "stats.get", json!({"days":1}));
+    assert_eq!(all["tags"][0]["minutes"], 15);
+    assert_eq!(
+        all["tags"][1],
+        json!({"id":"none","name":"No tag","color":null,"minutes":7})
+    );
+    good(&mut rpc, "tag.remove", json!({"op_id":"untag","id":tag}));
+    let filtered = good(&mut rpc, "stats.get", json!({"days":1,"tag_id":"none"}));
+    assert_eq!(filtered["totals"]["minutes"], 22);
+    assert_eq!(
+        filtered["tags"],
+        json!([{"id":"none","name":"No tag","color":null,"minutes":22}])
+    );
+}

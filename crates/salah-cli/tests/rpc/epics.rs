@@ -428,3 +428,163 @@ fn an_item_with_only_an_epic_joins_the_epic_project() {
         Some("epic_id"),
     );
 }
+
+fn reading_epic(rpc: &mut Session, project: &str) -> String {
+    added(
+        rpc,
+        "epic.add",
+        "epics",
+        json!({"op_id":"epic","project_id":project,"name":"Reading"}),
+    )
+}
+
+#[test]
+fn save_and_done_ignores_a_removed_epic_on_a_legacy_item_tombstone() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    let p = project(&mut rpc, "Library");
+    let e = reading_epic(&mut rpc, &p);
+    let item = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"task","title":"Read","project_id":p,"metric_ids":["focus"]}),
+    );
+    good(
+        &mut rpc,
+        "session.start",
+        json!({"op_id":"start","item_id":item}),
+    );
+    good(
+        &mut rpc,
+        "item.edit",
+        json!({"op_id":"assign","id":item,"epic_id":e}),
+    );
+    good(&mut rpc, "item.remove", json!({"op_id":"drop","id":item}));
+
+    // Earlier versions removed the epic without detaching the item tombstone.
+    let mut store = salah_store::Store::open(&h.data).unwrap();
+    store
+        .write(|tx| {
+            let mut epic = tx.epic(&e)?.unwrap();
+            epic.deleted_at = Some(epic.updated_at);
+            tx.put_epic(&epic)
+        })
+        .unwrap();
+    let stopped = good(
+        &mut rpc,
+        "session.stop",
+        json!({"op_id":"stop","done":true}),
+    );
+    let sessions = stopped["changed"]["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 2);
+    let tick = sessions.iter().find(|s| s["minutes"].is_null()).unwrap();
+    assert_eq!(tick["item_id"], item);
+    assert_eq!(tick["project_id"], p);
+    assert!(tick["epic_id"].is_null(), "{tick}");
+    assert!(
+        store
+            .session(tick["id"].as_str().unwrap())
+            .unwrap()
+            .unwrap()
+            .epic_id
+            .is_none()
+    );
+    // Dropping a project metric also has to save this legacy tombstone.
+    good(
+        &mut rpc,
+        "project.edit",
+        json!({"op_id":"drop-focus","id":p,"metrics":[]}),
+    );
+    let cleaned = store.item(&item).unwrap().unwrap();
+    assert!(cleaned.deleted_at.is_some() && cleaned.epic_id.is_none());
+    assert_eq!(cleaned.metric_ids, Some(vec![]));
+}
+
+#[test]
+fn removing_an_epic_detaches_deleted_custom_metric_items_in_one_revision() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    let pages = added(
+        &mut rpc,
+        "metric.add",
+        "metrics",
+        json!({"op_id":"metric","name":"Pages","kind":"count"}),
+    );
+    let p = added(
+        &mut rpc,
+        "project.add",
+        "projects",
+        json!({"op_id":"project","name":"Library","metrics":[{"metric_id":pages,"required":false}]}),
+    );
+    let e = reading_epic(&mut rpc, &p);
+    let item = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"task","title":"Read","epic_id":e,"metric_ids":[pages]}),
+    );
+    good(&mut rpc, "item.remove", json!({"op_id":"drop","id":item}));
+    let store = salah_store::Store::open(&h.data).unwrap();
+    let tombstone = store.item(&item).unwrap().unwrap();
+    let seq = store.last_change_seq().unwrap();
+    let removed = good(&mut rpc, "epic.remove", json!({"op_id":"remove","id":e}));
+    assert_eq!(removed["changed"]["items"], json!([]));
+    let detached = store.item(&item).unwrap().unwrap();
+    assert_eq!(detached.deleted_at, tombstone.deleted_at);
+    assert!(detached.epic_id.is_none());
+    assert_eq!(detached.version, tombstone.version + 1);
+    let changes = store.changes_since(seq, 10).unwrap();
+    assert_eq!(changes.len(), 2);
+    assert_eq!(changes[0].revision, changes[1].revision);
+    good(
+        &mut rpc,
+        "project.edit",
+        json!({"op_id":"drop-metric","id":p,"metrics":[]}),
+    );
+    assert_eq!(store.item(&item).unwrap().unwrap().metric_ids, Some(vec![]));
+}
+
+#[test]
+fn epic_removal_ignores_removed_sessions_and_rejects_a_running_timer() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    let p = project(&mut rpc, "Library");
+    let e = reading_epic(&mut rpc, &p);
+    let tick = added(
+        &mut rpc,
+        "session.log",
+        "sessions",
+        json!({"op_id":"tick","epic_id":e}),
+    );
+    good(
+        &mut rpc,
+        "session.remove",
+        json!({"op_id":"undo","id":tick}),
+    );
+    let timer = added(
+        &mut rpc,
+        "session.start",
+        "sessions",
+        json!({"op_id":"timer","epic_id":e}),
+    );
+    bad(
+        &mut rpc,
+        "epic.remove",
+        json!({"op_id":"remove","id":e}),
+        "conflict",
+        None,
+    );
+    good(
+        &mut rpc,
+        "session.remove",
+        json!({"op_id":"undo-timer","id":timer}),
+    );
+    good(&mut rpc, "epic.remove", json!({"op_id":"remove","id":e}));
+    let store = salah_store::Store::open(&h.data).unwrap();
+    for id in [tick, timer] {
+        let historical = store.session(&id).unwrap().unwrap();
+        assert!(historical.deleted_at.is_some());
+        assert_eq!(historical.epic_id.as_deref(), Some(e.as_str()));
+    }
+}

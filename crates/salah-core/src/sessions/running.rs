@@ -53,7 +53,7 @@ pub fn stop(
     };
     let stopped = finish(tx, config, now, timer, options)?;
     let tick = tick_item
-        .map(|item| -> Result<Session, Error> {
+        .map(|mut item| -> Result<Session, Error> {
             let day = stopped.block.day;
             if let Some(tick) = tx
                 .sessions_between_for_item(day, day, Some(&item.id))?
@@ -62,6 +62,7 @@ pub fn stop(
             {
                 return Ok(tick);
             }
+            crate::epics::detach_removed(tx, &mut item)?;
             let mut tick = new_session(
                 ids.new_id(),
                 now,

@@ -73,6 +73,15 @@ impl<'a> Local<'a> {
         self.call(method, params)
     }
 
+    /// Reports also accept the literal `none` for sessions without a task.
+    pub fn report_item_id(&self, id: &str) -> Result<String, String> {
+        if id == salah_core::stats::NONE {
+            Ok(id.to_owned())
+        } else {
+            self.item_id(id)
+        }
+    }
+
     /// Expands a unique item id prefix of at least four characters.
     pub fn item_id(&self, prefix: &str) -> Result<String, String> {
         Ok(salah_core::items::resolve_id(&self.store, prefix)?)

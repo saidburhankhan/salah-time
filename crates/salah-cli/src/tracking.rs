@@ -713,7 +713,7 @@ pub fn day(local: &mut Local<'_>, args: DayArgs) -> Result<(), String> {
 }
 
 pub fn stats(local: &mut Local<'_>, args: StatsArgs) -> Result<(), String> {
-    let item = args.item.map(|id| local.item_id(&id)).transpose()?;
+    let item = args.item.map(|id| local.report_item_id(&id)).transpose()?;
     let params = Params::default()
         .opt("from", args.from)
         .opt("to", args.to)
