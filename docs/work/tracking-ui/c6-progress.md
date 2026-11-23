@@ -25,3 +25,11 @@ The creation sheet shows an optional Epic chip row after Project, offering only 
 All 16 creation, 29 drag and 62 session Node checks passed (4 new epic checks), plus Omarchy plugin validation, i18n JSON parsing and `git diff --check`. Not rendered here; the orchestrator reviews the screens.
 
 CHECKPOINT 1b: Add optional epic chips to the widget creation sheet and Log panel and show epic names on day rows (`plugin/local.salah/BarWidget.qml`, `plugin/local.salah/CreationLogic.js`, `plugin/local.salah/QuickAdd.qml`, `plugin/local.salah/SalahClient.qml`, `plugin/local.salah/SessionPanel.qml`, `plugin/local.salah/TimelineRow.qml`, `plugin/local.salah/i18n/en.json`, `plugin/local.salah/tests/creation_logic_test.js`, `docs/work/tracking-ui/c6-progress.md`)
+
+## Task 2a — due reminders
+
+The bell shows the due count beside the prayer label. The popup starts with the oldest due reminders, including reminders attached to epics. The list shows up to three rows at a time and scrolls for more. Ticking a reminder sends `resource.edit` with `done: true`, disables that control until the reply, and removes the reminder on acknowledgement. The 30-second status refresh catches reminders that become due between prayer boundaries.
+
+All 106 Node checks passed, including three covering due ordering and compatibility with older status reports. Omarchy plugin validation, QML syntax parsing, i18n JSON parsing, and `git diff --check` passed. An offscreen QML test with a stub host checked the list height, literal title rendering, and tick interaction. The full bar and popup render and socket integration remain with the orchestrator.
+
+CHECKPOINT 2a: Show and complete due reminders in the widget (`plugin/local.salah/BarWidget.qml`, `plugin/local.salah/DueReminders.qml`, `plugin/local.salah/ResourceLogic.js`, `plugin/local.salah/i18n/en.json`, `plugin/local.salah/tests/resource_logic_test.js`, `docs/work/tracking-ui/c6-progress.md`)

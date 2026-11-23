@@ -6,6 +6,7 @@ import qs.Commons as Commons
 import qs.Ui
 import "CreationLogic.js" as CreationLogic
 import "DragLogic.js" as DragLogic
+import "ResourceLogic.js" as ResourceLogic
 import "SessionLogic.js" as SessionLogic
 
 BarWidget {
@@ -37,6 +38,9 @@ BarWidget {
   property string actionError: ""
   property string quickAddBlock: ""
   property var pendingOps: ({})
+  property var dueReminders: []
+  property var pendingReminders: ({})
+  property string reminderError: ""
   property var projects: []
   property var epics: []
   property var metricCatalogue: []
@@ -91,9 +95,12 @@ BarWidget {
     if (runningProject && runningProject.color) return String(runningProject.color)
     return Commons.Color.accent
   }
-  readonly property string barPrefix: localizedNextName !== ""
+  readonly property string reminderBadge: dueReminders.length
+    ? strings.t("bar.reminderBadge").arg(Commons.I18n.formatNumber(dueReminders.length)) : ""
+  readonly property string prayerStatus: localizedNextName !== ""
     ? strings.t("bar.nextStatus").arg(localizedNextName).arg(remainingShort).arg("")
     : (firstLoad ? strings.t("bar.loading") : strings.t("bar.unavailableShort"))
+  readonly property string barPrefix: reminderBadge ? prayerStatus + "  " + reminderBadge : prayerStatus
   // Three en spaces hold the running session's colour dot, painted over the
   // middle one, then the elapsed time.
   readonly property string runningGap: "\u2002\u2002\u2002"
@@ -131,6 +138,12 @@ BarWidget {
       .arg(minutes < 10 ? "0" + minutes : String(minutes))
   }
 
+  function resourceDateTime(value) {
+    var date = new Date(value)
+    if (!value || isNaN(date.getTime())) return ""
+    return date.toLocaleString(Qt.locale(Commons.I18n.formatLocale), Locale.ShortFormat)
+  }
+
   function countdownDeadline(status) {
     var next = status && status.next ? status.next : null
     if (!next) return 0
@@ -162,9 +175,25 @@ BarWidget {
     var pending = pendingOps[opId]
     if (!pending) return
     delete pendingOps[opId]
+    if (pending.reminderId) {
+      var remaining = Object.assign({}, pendingReminders)
+      delete remaining[pending.reminderId]
+      pendingReminders = remaining
+    }
     var content = panel.loadedContent
     if (content && pending.rowKey) content.setRowPending(pending.rowKey, false)
     if (content && pending.tempKey) content.removeItem(pending.tempKey)
+  }
+
+  function completeReminder(id) {
+    if (!id || pendingReminders[id]) return
+    reminderError = ""
+    var opId = beginOp("resource.edit", "")
+    pendingOps[opId].reminderId = id
+    var next = Object.assign({}, pendingReminders)
+    next[id] = true
+    pendingReminders = next
+    client.rpcMutation(opId, "resource.edit", { "id": id, "done": true })
   }
 
   function addItem(title) {
@@ -451,6 +480,8 @@ BarWidget {
       if (!status || !status.next || !(status.prayers instanceof Array))
         throw new Error("missing next/prayers fields")
       report = status
+      var reminders = ResourceLogic.orderedDueReminders(status.reminders)
+      if (JSON.stringify(reminders) !== JSON.stringify(dueReminders)) dueReminders = reminders
       var runningId = status.running ? status.running.id : ""
       if (sessionPanelMode === "pause" && pauseId !== runningId) closeSessionPanel()
       if (noteSource && noteSessionId !== runningId) closeNote()
@@ -481,6 +512,9 @@ BarWidget {
   }
 
   function handleMutationSuccess(opId, kind, result) {
+    var reminderId = pendingOps[opId] && pendingOps[opId].reminderId
+    if (reminderId)
+      dueReminders = dueReminders.filter(function(row) { return row.id !== reminderId })
     if (pendingOps[opId] && pendingOps[opId].pulse) bumpPulse.restart()
     if (opId === noteOp) closeNote()
     var after = pendingOps[opId] ? pendingOps[opId].after : null
@@ -519,7 +553,9 @@ BarWidget {
     var detail = String(message || "").trim().replace(/[\r\n]+/g, " ")
     detail = detail === "" ? strings.t("panel.commandFailed") : detail.slice(0, 240)
     var content = panel.loadedContent
-    if (opId === noteOp) {
+    if (pending.reminderId) {
+      reminderError = detail
+    } else if (opId === noteOp) {
       noteOp = ""
       noteError = detail
     } else if (opId === sessionPanelOp) {
@@ -558,9 +594,9 @@ BarWidget {
   }
 
   Timer {
-    // Only the CLI fallback needs polling; a connected socket pushes changes.
+    // A reminder can become due without a database write or prayer boundary.
     interval: 30000
-    running: !client.socketActive
+    running: true
     repeat: true
     triggeredOnStart: false
     onTriggered: root.refresh()
@@ -646,7 +682,7 @@ BarWidget {
 
   implicitWidth: root.vertical ? button.implicitWidth
     : (root.runningTimer ? Math.max(Style.space(250), button.implicitWidth + bumpButton.implicitWidth)
-      : Style.space(180))
+      : Math.max(Style.space(180), button.implicitWidth))
   implicitHeight: button.implicitHeight + (root.vertical && root.runningTimer ? bumpButton.implicitHeight : 0)
 
   WidgetButton {
@@ -655,13 +691,18 @@ BarWidget {
     width: !root.vertical && root.runningTimer ? implicitWidth : root.width
     height: root.vertical ? implicitHeight : root.height
     bar: root.bar
-    text: root.vertical ? strings.t("bar.symbol") : root.displayText
+    text: root.vertical
+      ? strings.t("bar.symbol") + (root.reminderBadge ? "\n" + root.reminderBadge : "")
+      : root.displayText
     labelVisible: true
     horizontalMargin: root.runningTimer ? 2 : 8.75
     verticalPadding: 8.75
     tooltipText: (root.localizedNextName !== ""
       ? strings.t("bar.tooltip").arg(root.localizedNextName).arg(root.nextTime).arg(root.remainingLong)
       : strings.t("bar.unavailable"))
+      + (root.dueReminders.length
+        ? "\n" + strings.tn("reminder.count", root.dueReminders.length)
+          .arg(Commons.I18n.formatNumber(root.dueReminders.length)) : "")
       + (root.runningTimer
         ? "\n" + strings.t("bar.runningTooltip").arg(root.runningTitle).arg(root.runningTotalMinutes) : "")
     pressFeedbackButtons: Qt.NoButton
@@ -1132,6 +1173,12 @@ BarWidget {
           id: dayColumn
           width: dayScroll.width
           spacing: Style.space(10)
+
+          DueReminders {
+            width: parent.width
+            host: root
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+          }
 
           Item {
             width: parent.width
