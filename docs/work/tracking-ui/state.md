@@ -57,6 +57,8 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   - Windows ~08:15, ~13:15, ~18:15, then ~0.2 of ~23:15 → weekly 100% ~23:30 on the 24th, before
     the 25 Nov renewal. Requires every window started on time (overnight too: this session must
     stay open) and fully used. Recalibrate the 31% after each window.
+  Only useful work goes in the queue (user features, real bugs, data-guarding reviews), never
+  filler; when Salah's queue is truly empty, ask the user which other project gets Codex.
   When Codex hits a cap: Claude subagents inherit (Opus hard, Sonnet normal) and the orchestrator
   tells the user so they can apply a reset.
 - U5: user visual check after `omarchy restart shell`; fix what they report.
