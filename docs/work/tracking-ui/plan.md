@@ -171,6 +171,18 @@ the required and optional metrics, and see results in charts. Both surfaces stay
   label's click area; a brief pulse shows it counted). The popup's running card and the app's
   running card show "Distractions N" with − and + buttons. The pause panel shows the current count
   (editable) with the other metrics.
+- **Per-task metrics** (user request): a task (one-time or routine) can choose which of its
+  project's metrics it asks. Item gains `metric_ids: [metric_id] | null`; `null` (default) = all of
+  the project's asked metrics; a list = only those (each must be an active metric the project asks,
+  or a built-in; an empty list = ask nothing). `item.add`/`item.edit` accept `metric_ids?` (`null`
+  resets to the project's). Day rows and backlog rows gain `metrics: [PromptMetric]`, the
+  effective list in project order, so the frontends never compute it; `status.get.prompt` for a
+  running item uses the same list. Panels (pause, done, log for an item) ask exactly that list.
+  Changing the project's metrics later changes tasks that inherit (`null`) and drops removed ids
+  from tasks with a list. The bar "+" (distractions) works whether or not the task asks it.
+  App item editor: under the project chips, "Asks" with the project's metrics as toggle chips (all
+  on by default; "Reset to project"). Widget: no editor needed (the app owns it); the creation
+  sheet (phase 3) may add it later. Fixtures `item_edit_metrics.json`.
 - New fixtures: `stats_table_week.json`, `stats_table_project.json`, `stats_item_filter.json`,
   `session_stop_done.json`.
 

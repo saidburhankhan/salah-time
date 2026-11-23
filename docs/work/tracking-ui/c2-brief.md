@@ -19,6 +19,7 @@ Tasks:
    range still appear as columns; without data they are omitted).
 2b. Built-in `distractions` metric (migration adds it to existing projects' asked metrics),
    `session.bump`, and the derived per-hour column in `stats.table`.
+2c. Per-task `metric_ids` with the effective `metrics` list on day rows and in status.prompt.
 3b. `sessions.list` (Notes page query) as specified, filtered in SQL, with tests for every filter
    and the cursor.
 4. CLI: `salah sessions list --q ... --min-focus ...` style flags, `salah stats table --group week ...` printing the RPC JSON; `salah session stop --done`.

@@ -18,6 +18,8 @@ Tasks, in order, one CHECKPOINT each:
    minutes editable plus −5/−15/−30 chips; send `minutes` only when changed.
 1b. Running card: "Distractions N" with − and + (`session.bump`), and the count shown/editable
    in the pause panel and session editor.
+1c. Item editor: "Asks" toggle chips of the project's metrics (all on by default, "Reset to
+   project"), sent as `metric_ids`; every panel asks the row's `metrics` list.
 2. Stats filters: separate Tags, Projects (narrowed by tag) and Tasks (narrowed by project)
    lists; range presets 7/28/90 plus Custom with from/to date pickers; every request carries
    the filter.
