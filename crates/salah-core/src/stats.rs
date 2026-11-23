@@ -18,6 +18,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub mod measures;
+pub mod series;
 pub mod table;
 
 /// The longest range one request covers.

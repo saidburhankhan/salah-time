@@ -5,7 +5,7 @@ use crate::dispatcher::{Call, Context, parse, to_value};
 use crate::error::RpcError;
 use crate::methods::{
     DayParams, ListParams, ParseParams, PreviewParams, ScopeParams, SessionsListParams,
-    StatsParams, StatsTableParams, SubscribeParams, SubscribeResult,
+    StatsParams, StatsSeriesParams, StatsTableParams, SubscribeParams, SubscribeResult,
 };
 use chrono::{Duration, NaiveDate};
 use salah_core::items::ItemView;
@@ -61,6 +61,20 @@ pub(crate) fn stats_table(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value
         range,
         filter,
         params.group,
+    )?)
+}
+
+pub(crate) fn stats_series(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let params: StatsSeriesParams = parse(call.params)?;
+    let today = day::current(&ctx.config.load()?, ctx.now())?;
+    let (range, filter) = scope(params.stats.scope, today, params.stats.measures)?;
+    to_value(statistics::series::series(
+        ctx.store,
+        range,
+        filter,
+        params.interval,
+        params.split,
+        &params.measures,
     )?)
 }
 

@@ -7,14 +7,14 @@ use crate::{WriteTx, items, tags};
 use salah_domain::tracking::Project;
 
 /// 2026-11-16 and 2026-11-23 are Mondays.
-fn range(from: u32, to: u32) -> Range {
+pub(crate) fn range(from: u32, to: u32) -> Range {
     Range {
         from: date(from),
         to: date(to),
     }
 }
 
-fn log(
+pub(crate) fn log(
     tx: &WriteTx<'_>,
     target: Target,
     day: u32,
@@ -41,21 +41,21 @@ fn log(
     .unwrap()
 }
 
-fn on_project(project: &Project) -> Target {
+pub(crate) fn on_project(project: &Project) -> Target {
     Target {
         item_id: None,
         project_id: Some(project.id.clone()),
     }
 }
 
-fn on_item(id: &str) -> Target {
+pub(crate) fn on_item(id: &str) -> Target {
     Target {
         item_id: Some(id.into()),
         project_id: None,
     }
 }
 
-fn item(store: &mut Store, title: &str, project_id: Option<&str>) -> String {
+pub(crate) fn item(store: &mut Store, title: &str, project_id: Option<&str>) -> String {
     store
         .write(|tx| {
             items::add(
@@ -76,7 +76,7 @@ fn item(store: &mut Store, title: &str, project_id: Option<&str>) -> String {
         .id
 }
 
-fn tag(store: &mut Store, name: &str, projects: &[&Project]) -> Tag {
+pub(crate) fn tag(store: &mut Store, name: &str, projects: &[&Project]) -> Tag {
     store
         .write(|tx| {
             let tag = tags::add(tx, at(16, 9, 0), ids(), name, "#445566")?;
@@ -100,17 +100,17 @@ fn tag(store: &mut Store, name: &str, projects: &[&Project]) -> Tag {
 }
 
 /// Quran (tags Deen, Study), Gym (Study), and a task without a project.
-struct World {
-    store: Store,
-    quran: Project,
-    gym: Project,
-    read: String,
-    loose: String,
-    deen: Tag,
-    study: Tag,
+pub(crate) struct World {
+    pub(crate) store: Store,
+    pub(crate) quran: Project,
+    pub(crate) gym: Project,
+    pub(crate) read: String,
+    pub(crate) loose: String,
+    pub(crate) deen: Tag,
+    pub(crate) study: Tag,
 }
 
-fn world() -> World {
+pub(crate) fn world() -> World {
     let mut store = Store::open_in_memory().unwrap();
     let quran = project(&mut store, "Quran");
     let gym = project(&mut store, "Gym");
@@ -152,15 +152,15 @@ fn world() -> World {
     }
 }
 
-fn build(w: &World, group: Group, filter: Filter) -> Table {
+pub(crate) fn build(w: &World, group: Group, filter: Filter) -> Table {
     table(&w.store, range(14, 25), filter, group).unwrap()
 }
 
-fn value(values: &BTreeMap<String, Option<f64>>, id: &str) -> Option<f64> {
+pub(crate) fn value(values: &BTreeMap<String, Option<f64>>, id: &str) -> Option<f64> {
     *values.get(id).unwrap_or_else(|| panic!("no {id} cell"))
 }
 
-fn row<'a>(table: &'a Table, key: &str) -> &'a Row {
+pub(crate) fn row<'a>(table: &'a Table, key: &str) -> &'a Row {
     table
         .rows
         .iter()
@@ -168,7 +168,7 @@ fn row<'a>(table: &'a Table, key: &str) -> &'a Row {
         .unwrap_or_else(|| panic!("no row {key}"))
 }
 
-fn close(actual: Option<f64>, expected: f64) {
+pub(crate) fn close(actual: Option<f64>, expected: f64) {
     let actual = actual.expect("a value");
     assert!((actual - expected).abs() < 1e-9, "{actual} != {expected}");
 }

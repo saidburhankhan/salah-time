@@ -8,6 +8,7 @@ use salah_core::metrics::{MetricChanges, NewMetric};
 use salah_core::projects::{NewProject, ProjectChanges, ProjectView};
 use salah_core::sessions::{NewLog, SessionChanges, SessionQuery, SessionView, Stop, Target};
 use salah_core::stats::measures::Measures;
+use salah_core::stats::series::{Interval, Split};
 use salah_core::stats::table::Group;
 use salah_domain::day::BoundaryId;
 use salah_domain::item::{PrayerMark, Repeat, Weekdays};
@@ -89,6 +90,20 @@ pub struct StatsTableParams {
     pub stats: StatsParams,
     #[serde(default)]
     pub group: Group,
+}
+
+/// `stats.table`'s range and filter plus the period (default `day`), an
+/// optional split and the measure ids, one series each per split key.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct StatsSeriesParams {
+    #[serde(flatten)]
+    pub stats: StatsParams,
+    #[serde(default)]
+    pub interval: Interval,
+    #[serde(default)]
+    pub split: Option<Split>,
+    #[serde(default)]
+    pub measures: Vec<String>,
 }
 
 /// `stats.get`'s range and filter plus the Notes page predicates and cursor.

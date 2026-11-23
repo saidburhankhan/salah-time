@@ -337,6 +337,56 @@ fn totals(result: &Value) -> (i64, i64) {
 }
 
 #[test]
+fn stats_series_draws_day_lines_and_splits_by_task() {
+    let h = Harness::new();
+    let s = seed(&h);
+    let mut rpc = Session::open(&h, NOW);
+    let mut fixtures = Fixtures::default();
+    let range = json!({"from":"2031-05-08","to":"2031-05-14"});
+    let mut params = range.clone();
+    params["measures"] = json!(["minutes", "focus", "distractions_per_hour"]);
+    let day = fixtures.check("stats_series_day", rpc.request("stats.series", params));
+    assert_eq!(day["interval"], "day");
+    assert_eq!(day["periods"].as_array().unwrap().len(), 7);
+    let series = day["series"].as_array().unwrap();
+    assert_eq!(series.len(), 3);
+    // 8 May holds Read 30 min focus 4; 9 May has no session: a gap, 0 minutes.
+    assert_eq!(series[0]["points"][0]["value"], 30.0);
+    assert_eq!(series[0]["points"][1]["value"], 0.0);
+    assert_eq!(series[1]["points"][0]["value"], 4.0);
+    assert_eq!(series[1]["points"][1]["value"], Value::Null);
+    assert_eq!(series[1]["scale_max"], 5);
+
+    let mut params = range.clone();
+    params["measures"] = json!(["minutes"]);
+    params["split"] = json!("item");
+    params["interval"] = json!("week");
+    let split = fixtures.check(
+        "stats_series_split_item",
+        rpc.request("stats.series", params),
+    );
+    let keys: Vec<&str> = split["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(keys, [s.read.as_str(), "none", s.walk.as_str()]);
+    assert_eq!(split["series"][0]["label"], "Read");
+    assert_eq!(split["periods"], json!(["2031-05-08", "2031-05-12"]));
+    bad(
+        &mut rpc,
+        "stats.series",
+        range.clone(),
+        "validation",
+        Some("measures"),
+    );
+    let mut params = range;
+    params["measures"] = json!(["nope"]);
+    bad(&mut rpc, "stats.series", params, "not_found", None);
+}
+
+#[test]
 fn stats_get_and_table_narrow_sessions_by_duration_and_metric_values() {
     let h = Harness::new();
     let s = seed(&h);

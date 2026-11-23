@@ -357,6 +357,11 @@ fn method_success_and_error(client: &mut Client) {
         "week"
     );
     assert_eq!(client.bad("stats.table", json!({"days":0})), -32001);
+    assert_eq!(
+        client.good("stats.series", json!({"days":7,"measures":["minutes"]}))["series"][0]["key"],
+        "all"
+    );
+    assert_eq!(client.bad("stats.series", json!({"days":7})), -32001);
     assert!(client.good("sessions.list", json!({"days":7}))["rows"].is_array());
     assert_eq!(client.bad("sessions.list", json!({"limit":0})), -32001);
 

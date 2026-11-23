@@ -53,6 +53,25 @@ pub struct MeasureArgs {
 pub enum StatsCommand {
     /// The general table: one row per week, day, project, tag or task
     Table(StatsTableArgs),
+    /// Trend lines: one point per day or week, one series per measure and split key
+    Series(StatsSeriesArgs),
+}
+
+#[derive(Args)]
+pub struct StatsSeriesArgs {
+    #[command(flatten)]
+    scope: ReportScope,
+    /// day (default) or week
+    #[arg(long)]
+    interval: Option<String>,
+    /// project, tag or item: one series per key (top 8 plus Other)
+    #[arg(long)]
+    split: Option<String>,
+    /// minutes, sessions, a metric id or distractions_per_hour, repeatable
+    #[arg(long = "measure", value_name = "ID", required = true)]
+    measure: Vec<String>,
+    #[command(flatten)]
+    measures: MeasureArgs,
 }
 
 #[derive(Args)]
@@ -166,7 +185,20 @@ fn print(result: &Value) -> Result<(), String> {
 }
 
 pub fn stats(local: &mut Local<'_>, command: StatsCommand) -> Result<(), String> {
-    let StatsCommand::Table(args) = command;
+    let args = match command {
+        StatsCommand::Table(args) => args,
+        StatsCommand::Series(args) => {
+            let mut params = scope(local, args.scope)?;
+            for (key, value) in [("interval", args.interval), ("split", args.split)] {
+                if let Some(value) = value {
+                    params.insert(key.into(), value.into());
+                }
+            }
+            params.insert("measures".into(), args.measure.into());
+            measures(&mut params, &args.measures)?;
+            return print(&local.call("stats.series", Value::Object(params))?);
+        }
+    };
     let mut params = scope(local, args.scope)?;
     if let Some(group) = args.group {
         params.insert("group".into(), group.into());

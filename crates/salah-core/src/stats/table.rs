@@ -101,14 +101,14 @@ pub fn table(store: &Store, range: Range, filter: Filter, group: Group) -> Resul
         ))
     })?;
     let metrics = metric_columns(metrics, &positions, &sessions);
+    let everything: Vec<&Session> = sessions.iter().map(|s| &s.session).collect();
     let buckets = match group {
-        Group::Week => dated(&sessions, weeks(&range)),
-        Group::Day => dated(&sessions, days(&range)),
+        Group::Week => dated(&everything, weeks(&range)),
+        Group::Day => dated(&everything, days(&range)),
         Group::Project => keyed(&sessions, |s| vec![project_key(s)]),
         Group::Tag => keyed(&sessions, |s| tag_keys(s, &tags)),
         Group::Item => keyed(&sessions, |s| vec![item_key(s)]),
     };
-    let everything: Vec<&Session> = sessions.iter().map(|s| &s.session).collect();
     let rows = buckets
         .into_iter()
         .map(|bucket| {
@@ -142,7 +142,7 @@ pub fn table(store: &Store, range: Range, filter: Filter, group: Group) -> Resul
 
 /// Active metrics, and archived ones only when a session in scope recorded
 /// them. A single-project filter orders them like the project's prompt.
-fn metric_columns(
+pub(super) fn metric_columns(
     metrics: Vec<Metric>,
     positions: &[ProjectMetric],
     sessions: &[ReportSession],
@@ -164,7 +164,7 @@ fn metric_columns(
     kept
 }
 
-fn columns(metrics: &[Metric]) -> Vec<Column> {
+pub(super) fn columns(metrics: &[Metric]) -> Vec<Column> {
     let fixed = |id: &str, name: &str, unit: &str| Column {
         id: id.into(),
         name: name.into(),
@@ -205,7 +205,10 @@ fn columns(metrics: &[Metric]) -> Vec<Column> {
 }
 
 /// Minutes, session count and one value per metric column.
-fn cells(metrics: &[Metric], sessions: &[&Session]) -> (i64, i64, BTreeMap<String, Option<f64>>) {
+pub(super) fn cells(
+    metrics: &[Metric],
+    sessions: &[&Session],
+) -> (i64, i64, BTreeMap<String, Option<f64>>) {
     let minutes = total_minutes(sessions.iter().copied());
     let mut values = BTreeMap::new();
     for metric in metrics {
@@ -222,20 +225,20 @@ fn cells(metrics: &[Metric], sessions: &[&Session]) -> (i64, i64, BTreeMap<Strin
 }
 
 /// One table row before its numbers.
-struct Bucket<'a> {
-    key: String,
-    label: String,
-    color: Option<String>,
-    from: Option<NaiveDate>,
-    to: Option<NaiveDate>,
-    sessions: Vec<&'a Session>,
+pub(super) struct Bucket<'a> {
+    pub(super) key: String,
+    pub(super) label: String,
+    pub(super) color: Option<String>,
+    pub(super) from: Option<NaiveDate>,
+    pub(super) to: Option<NaiveDate>,
+    pub(super) sessions: Vec<&'a Session>,
 }
 
 /// A row key of a project, tag or task table, with its label and colour.
-struct Key {
-    key: String,
-    label: String,
-    color: Option<String>,
+pub(super) struct Key {
+    pub(super) key: String,
+    pub(super) label: String,
+    pub(super) color: Option<String>,
 }
 
 impl Key {
@@ -249,16 +252,13 @@ impl Key {
 }
 
 /// Every week or day of the range, including those without sessions.
-fn dated<'a>(
-    sessions: &'a [ReportSession],
+pub(super) fn dated<'a>(
+    sessions: &[&'a Session],
     spans: Vec<(String, String, NaiveDate, NaiveDate)>,
 ) -> Vec<Bucket<'a>> {
     let mut by_day = BTreeMap::<NaiveDate, Vec<&Session>>::new();
     for s in sessions {
-        by_day
-            .entry(s.session.block.day)
-            .or_default()
-            .push(&s.session);
+        by_day.entry(s.block.day).or_default().push(*s);
     }
     spans
         .into_iter()
@@ -277,7 +277,7 @@ fn dated<'a>(
 }
 
 /// Monday-first weeks clipped to the range, keyed by ISO week.
-fn weeks(range: &Range) -> Vec<(String, String, NaiveDate, NaiveDate)> {
+pub(super) fn weeks(range: &Range) -> Vec<(String, String, NaiveDate, NaiveDate)> {
     let mut weeks = Vec::new();
     let mut from = range.from;
     while from <= range.to {
@@ -295,7 +295,7 @@ fn weeks(range: &Range) -> Vec<(String, String, NaiveDate, NaiveDate)> {
     weeks
 }
 
-fn days(range: &Range) -> Vec<(String, String, NaiveDate, NaiveDate)> {
+pub(super) fn days(range: &Range) -> Vec<(String, String, NaiveDate, NaiveDate)> {
     range
         .days()
         .into_iter()
@@ -324,7 +324,7 @@ fn span_label(from: NaiveDate, to: NaiveDate) -> String {
 }
 
 /// Rows of the keys that have sessions, most minutes first.
-fn keyed<'a>(
+pub(super) fn keyed<'a>(
     sessions: &'a [ReportSession],
     keys_of: impl Fn(&'a ReportSession) -> Vec<Key>,
 ) -> Vec<Bucket<'a>> {
@@ -357,7 +357,7 @@ fn keyed<'a>(
     rows
 }
 
-fn project_key(s: &ReportSession) -> Key {
+pub(super) fn project_key(s: &ReportSession) -> Key {
     match &s.project {
         Some(project) => Key {
             key: project.id.clone(),
@@ -369,7 +369,7 @@ fn project_key(s: &ReportSession) -> Key {
 }
 
 /// Each live tag of the session's project, or the "No tag" row.
-fn tag_keys(s: &ReportSession, tags: &BTreeMap<String, Vec<Tag>>) -> Vec<Key> {
+pub(super) fn tag_keys(s: &ReportSession, tags: &BTreeMap<String, Vec<Tag>>) -> Vec<Key> {
     let keys: Vec<Key> = s
         .session
         .project_id
@@ -392,7 +392,7 @@ fn tag_keys(s: &ReportSession, tags: &BTreeMap<String, Vec<Tag>>) -> Vec<Key> {
 
 /// The recorded task, coloured by the session's project; project-only work
 /// is "No task".
-fn item_key(s: &ReportSession) -> Key {
+pub(super) fn item_key(s: &ReportSession) -> Key {
     match &s.item {
         Some(item) => Key {
             key: item.id.clone(),
@@ -404,4 +404,4 @@ fn item_key(s: &ReportSession) -> Key {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

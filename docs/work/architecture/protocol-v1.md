@@ -100,6 +100,7 @@ store-wide counter, never a precondition.
 | `items.list` | — | `[ItemView]` | storage | — | — |
 | `stats.get` | `from,to` or `days?` (default 30, max 730), `tag_id?`, `project_id?`, `item_id?` (each also `"none"`), `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}` | `range`, `filter`, `days` (with `unplanned_minutes`, nullable `fulfilment_ratio`), `series` (minutes first), `projects`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
 | `stats.table` | `stats.get`'s range and filter (including the session bounds), `group?` (`week` default, `day`, `project`, `tag`, `item`) | `range`, `filter`, `group`, `columns`, `rows`, `totals` | validation, not_found, storage | — | — |
+| `stats.series` | `stats.get`'s range and filter (including the session bounds), `interval?` (`day` default, `week`), `split?` (`project`, `tag`, `item`), `measures: [id]` (required, non-empty: `minutes`, `sessions`, a metric id or `distractions_per_hour`) | `range`, `filter`, `interval`, `split`, `periods`, `series` | validation (empty `measures`, range over 730 days), not_found (unknown measure), storage | — | — |
 | `sessions.list` | `stats.get`'s range and project, tag and item filters, `with_note?` (default true), `q?`, `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}`, `limit?` (default 100, 1–500), `before?` (a previous `next`) | `rows: [SessionView + project + item]`, `next: cursor\|null` | validation, not_found, storage | — | — |
 | `item.parse` | `text` | draft `{title, block, repeat, weekdays, planned_minutes}` | validation | — | — |
 | `item.preview` | `block`, `repeat`, `weekdays?`, `planned_minutes?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
@@ -203,6 +204,19 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
     and `totals` count each session once. Task rows are coloured by the session's
     project. A row `key` is a valid filter value for its dimension.
   - `totals`: `{minutes, sessions, values}` over every session in scope.
+- `stats.series` feeds the Trends line chart and aggregates exactly like `stats.table`
+  (same filters, minute weighting, rollups, `distractions_per_hour`, `key: "none"`). One
+  series per (split key x measure), in split-key order then `measures` order (duplicate
+  ids are dropped). `periods` lists each day, or each Monday-first week's first day
+  (the first week clipped to `from`). A series is `{key, label, color, measure, unit,
+  scale_max, points: [{value, sessions}]}` with one point per period. `value` is `null`
+  for a period without data, except `minutes` and `sessions`, which are 0; `sessions`
+  counts the sessions behind the point. Without `split`, `key` is `"all"`, `label` the
+  measure's name and `color` `null`. With a split, `key` is the project, tag or item
+  id (`"none"` for unassigned work), `color` its colour, and `label` the key's label
+  (`key label · measure name` when several measures). At most 8 keys are kept, most
+  minutes first; further keys merge into one `key: "other"`, `label: "Other"` series
+  that counts each session once. A tag split counts a session in each tag of its project.
 - Session bounds (`stats.get`, `stats.table`, `sessions.list`): `minutes_min?`,
   `minutes_max?` and `values?` share one predicate. `minutes_*` are inclusive and never
   match a tick; each `values` entry needs the session to have that metric within the

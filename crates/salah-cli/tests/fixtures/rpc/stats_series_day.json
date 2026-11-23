@@ -1,0 +1,145 @@
+{
+  "id": 2,
+  "jsonrpc": "2.0",
+  "result": {
+    "filter": {
+      "item_id": null,
+      "minutes_max": null,
+      "minutes_min": null,
+      "project_id": null,
+      "tag_id": null,
+      "values": {}
+    },
+    "interval": "day",
+    "periods": [
+      "2031-05-08",
+      "2031-05-09",
+      "2031-05-10",
+      "2031-05-11",
+      "2031-05-12",
+      "2031-05-13",
+      "2031-05-14"
+    ],
+    "range": {
+      "from": "2031-05-08",
+      "to": "2031-05-14"
+    },
+    "series": [
+      {
+        "color": null,
+        "key": "all",
+        "label": "Minutes",
+        "measure": "minutes",
+        "points": [
+          {
+            "sessions": 1,
+            "value": 30.0
+          },
+          {
+            "sessions": 0,
+            "value": 0.0
+          },
+          {
+            "sessions": 0,
+            "value": 0.0
+          },
+          {
+            "sessions": 0,
+            "value": 0.0
+          },
+          {
+            "sessions": 1,
+            "value": 20.0
+          },
+          {
+            "sessions": 1,
+            "value": 15.0
+          },
+          {
+            "sessions": 2,
+            "value": 25.0
+          }
+        ],
+        "scale_max": null,
+        "unit": "min"
+      },
+      {
+        "color": null,
+        "key": "all",
+        "label": "Focus",
+        "measure": "focus",
+        "points": [
+          {
+            "sessions": 1,
+            "value": 4.0
+          },
+          {
+            "sessions": 0,
+            "value": null
+          },
+          {
+            "sessions": 0,
+            "value": null
+          },
+          {
+            "sessions": 0,
+            "value": null
+          },
+          {
+            "sessions": 1,
+            "value": 2.0
+          },
+          {
+            "sessions": 1,
+            "value": null
+          },
+          {
+            "sessions": 2,
+            "value": 3.0769230769230766
+          }
+        ],
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "color": null,
+        "key": "all",
+        "label": "Distractions per hour",
+        "measure": "distractions_per_hour",
+        "points": [
+          {
+            "sessions": 1,
+            "value": 4.0
+          },
+          {
+            "sessions": 0,
+            "value": null
+          },
+          {
+            "sessions": 0,
+            "value": null
+          },
+          {
+            "sessions": 0,
+            "value": null
+          },
+          {
+            "sessions": 1,
+            "value": 3.0
+          },
+          {
+            "sessions": 1,
+            "value": null
+          },
+          {
+            "sessions": 2,
+            "value": null
+          }
+        ],
+        "scale_max": null,
+        "unit": "per hour"
+      }
+    ],
+    "split": null
+  }
+}

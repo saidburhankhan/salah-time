@@ -394,6 +394,19 @@ fn stats_table_and_sessions_list_print_the_rpc_json() {
     assert_eq!(weeks["group"], "week");
     assert_eq!(weeks["filter"]["project_id"], "none");
     assert_eq!(weeks["totals"]["sessions"], 2, "the item has no project");
+    let lines = fixture.json(&[
+        "stats",
+        "series",
+        "--days",
+        "7",
+        "--measure",
+        "minutes",
+        "--split",
+        "item",
+    ]);
+    assert_eq!(lines["split"], "item");
+    assert_eq!(lines["series"][0]["key"], item);
+    assert_eq!(lines["series"][0]["points"].as_array().unwrap().len(), 7);
     let old_form = fixture.json(&["stats", "--days", "7", "--json"]);
     assert_eq!(old_form["totals"]["minutes"], 40);
 
