@@ -11,6 +11,7 @@ Popup {
     property string block: item.block || "fajr"
     property string repeat: item.repeat || "none"
     property var days: item.weekdays || []
+    property string projectId: ""
     property bool confirming: false
     readonly property bool weeklyValid: repeat !== "weekly" || days.length > 0
     readonly property var preview: backend.preview
@@ -28,6 +29,7 @@ Popup {
         block = item.block || "fajr"
         repeat = item.repeat || "none"
         days = item.weekdays || []
+        projectId = item.projectId || ""
         confirming = false
         backend.loadSettings()
         entryFields.initialize(item.title || "", item.plannedMinutes ? String(item.plannedMinutes) : "")
@@ -47,7 +49,7 @@ Popup {
     }
     Connections {
         target: entryFields
-        function onGoalTextChanged() { entryPopup.previewTimer.restart() }
+        function onGoalTextChanged() { previewTimer.restart() }
     }
     function draft() {
         var goal = Number(entryFields.goalText)
@@ -55,7 +57,7 @@ Popup {
             id: item.id || "",
             title: entryFields.titleText,
             block: block,
-            project_id: entryFields.projectIndex > 0 ? backend.projects[entryFields.projectIndex - 1].id : "",
+            project_id: projectId,
             planned_minutes: goal > 0 ? goal : 0,
             repeat: repeat,
             weekdays: repeat === "weekly" ? days : []
@@ -175,7 +177,7 @@ Popup {
                 Layout.fillHeight: true
                 Rectangle {
                     Layout.fillWidth: true
-                    height: 245
+                    height: 285
                     radius: theme.radius
                     color: entryPopup.win.panel
                     border.color: entryPopup.win.border
@@ -240,16 +242,37 @@ Popup {
                         RowLayout {
                             Layout.fillWidth: true
                             Label {
-                                text: entryPopup.kind === "task" ? qsTr("Time goal") : qsTr("Goal")
+                                text: qsTr("Planned")
                                 color: entryPopup.win.muted
                                 Layout.fillWidth: true
                             }
                             Label {
-                                text: entryFields.goalText
-                                    ? (entryFields.goalText + (entryPopup.kind === "task" ? qsTr(" min") : ""))
-                                    : qsTr("None")
+                                text: entryFields.goalText ? qsTr("%1 min").arg(entryFields.goalText) : qsTr("None")
                                 color: entryPopup.win.text
                                 font.family: entryPopup.win.mono
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                text: qsTr("Project")
+                                color: entryPopup.win.muted
+                                Layout.fillWidth: true
+                            }
+                            Rectangle {
+                                visible: !!entryPopup.win.projectById(entryPopup.projectId)
+                                width: 10
+                                height: 10
+                                radius: 5
+                                color: entryPopup.win.projectColor(entryPopup.projectId)
+                            }
+                            Label {
+                                text: entryPopup.win.projectName(entryPopup.projectId) || qsTr("None")
+                                textFormat: Text.PlainText
+                                color: entryPopup.win.text
+                                font.family: entryPopup.win.mono
+                                elide: Text.ElideRight
+                                Layout.maximumWidth: 180
                             }
                         }
                     }

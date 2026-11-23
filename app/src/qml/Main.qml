@@ -155,6 +155,75 @@ ApplicationWindow {
         if (b.first.getMonth() === b.last.getMonth()) return l.toString(b.first, "d") + "–" + l.toString(b.last, "d MMM yyyy")
         return l.toString(b.first, "d MMM") + " – " + l.toString(b.last, "d MMM yyyy")
     }
+    // Settings lists (projects, tags, metrics) as plain lookups. Reading
+    // backend.* inside these keeps bindings that call them live.
+    function projectById(id) {
+        if (!id)
+            return null
+        var list = backend.projects || []
+        for (var i = 0; i < list.length; i++) {
+            if (String(list[i].id) === String(id))
+                return list[i]
+        }
+        return null
+    }
+    function projectName(id) {
+        var project = projectById(id)
+        return project ? String(project.name || "") : ""
+    }
+    function projectColor(id) {
+        var project = projectById(id)
+        return project ? String(project.color || "#78909c") : "transparent"
+    }
+    function activeProjects() {
+        return (backend.projects || []).filter(function(p) { return !p.archived })
+    }
+    function tagById(id) {
+        var list = backend.tags || []
+        for (var i = 0; i < list.length; i++) {
+            if (String(list[i].id) === String(id))
+                return list[i]
+        }
+        return null
+    }
+    function metricById(id) {
+        var list = backend.metrics || []
+        for (var i = 0; i < list.length; i++) {
+            if (String(list[i].id) === String(id))
+                return list[i]
+        }
+        return null
+    }
+    function metricKindText(metric) {
+        if (!metric)
+            return ""
+        if (metric.kind === "scale")
+            return qsTr("Scale 1–%1").arg(metric.scale_max || 5)
+        if (metric.kind === "check")
+            return qsTr("Yes / no")
+        return metric.unit ? qsTr("Count · %1").arg(metric.unit) : qsTr("Count")
+    }
+    function projectSummary(project) {
+        var parts = []
+        var tagNames = (project.tag_ids || []).map(function(id) {
+            var tag = tagById(id)
+            return tag ? String(tag.name) : ""
+        }).filter(function(name) { return name !== "" })
+        if (tagNames.length > 0)
+            parts.push(tagNames.join(", "))
+        var metricNames = (project.metrics || []).map(function(link) {
+            var metric = link.metric || metricById(link.metric_id)
+            var name = metric ? String(metric.name) : String(link.metric_id)
+            return link.required ? name + "*" : name
+        })
+        parts.push(metricNames.length > 0 ? metricNames.join(", ") : qsTr("no metrics"))
+        return parts.join("  ·  ")
+    }
+    function openSettings(section) {
+        entryVisible = false
+        page = 3
+        settingsPage.section = section || "general"
+    }
     function formatMinutes(n) { n = Number(n || 0); return n >= 60 ? Math.floor(n / 60) + " h " + (n % 60) + " m" : n + " m" }
     function isTyping() { var f = win.activeFocusItem; return f && f.inputMethodHints !== undefined }
 
@@ -163,6 +232,7 @@ ApplicationWindow {
     }
 
     onActiveChanged: if (active) backend.reload()
+    Component.onCompleted: backend.loadSettings()
 
     Connections {
         target: backend.preview
@@ -219,6 +289,7 @@ ApplicationWindow {
                     tip: tip
                 }
                 SettingsPage {
+                    id: settingsPage
                     visible: win.page === 3
                     Layout.fillWidth: true
                     Layout.fillHeight: true

@@ -33,6 +33,11 @@
         <file alias="qml/controls/SidebarItem.qml">qml/controls/SidebarItem.qml</file>
         <file alias="qml/controls/LineIcon.qml">qml/controls/LineIcon.qml</file>
         <file alias="qml/controls/Card.qml">qml/controls/Card.qml</file>
+        <file alias="qml/controls/ColorSwatches.qml">qml/controls/ColorSwatches.qml</file>
+        <file alias="qml/settings/GeneralSettings.qml">qml/settings/GeneralSettings.qml</file>
+        <file alias="qml/settings/ProjectsSettings.qml">qml/settings/ProjectsSettings.qml</file>
+        <file alias="qml/settings/TagsSettings.qml">qml/settings/TagsSettings.qml</file>
+        <file alias="qml/settings/MetricsSettings.qml">qml/settings/MetricsSettings.qml</file>
         <file alias="qml/controls/Sidebar.qml">qml/controls/Sidebar.qml</file>
         <file alias="qml/controls/AppHeader.qml">qml/controls/AppHeader.qml</file>
         <file alias="qml/controls/GlobalShortcuts.qml">qml/controls/GlobalShortcuts.qml</file>

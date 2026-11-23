@@ -141,6 +141,12 @@ void ItemDraft::update(const QJsonObject &row) {
     m_measure = row.value(QStringLiteral("measure")).toString();
     if (m_measure.isEmpty()) m_measure = QStringLiteral("check");
     m_target = row.value(QStringLiteral("target")).toInt();
+    // A day row carries `project: {id, name, color}`; a pending create or an
+    // item view carries `project_id`.
+    m_projectId = row.value(QStringLiteral("project_id")).toString();
+    if (m_projectId.isEmpty())
+        m_projectId = row.value(QStringLiteral("project")).toObject().value(QStringLiteral("id")).toString();
+    m_plannedMinutes = row.value(QStringLiteral("planned_minutes")).toInt();
     emit changed();
 }
 
@@ -156,5 +162,7 @@ void ItemDraft::clear() {
     m_weekdays.clear();
     m_measure = QStringLiteral("check");
     m_target = 0;
+    m_projectId.clear();
+    m_plannedMinutes = 0;
     emit changed();
 }

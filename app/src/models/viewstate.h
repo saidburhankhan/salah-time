@@ -197,6 +197,8 @@ class ItemDraft : public QObject {
     Q_PROPERTY(QStringList weekdays READ weekdays NOTIFY changed)
     Q_PROPERTY(QString measure READ measure NOTIFY changed)
     Q_PROPERTY(int target READ target NOTIFY changed)
+    Q_PROPERTY(QString projectId READ projectId NOTIFY changed)
+    Q_PROPERTY(int plannedMinutes READ plannedMinutes NOTIFY changed)
 public:
     explicit ItemDraft(QObject *parent = nullptr);
 
@@ -207,6 +209,8 @@ public:
     QStringList weekdays() const { return m_weekdays; }
     QString measure() const { return m_measure; }
     int target() const { return m_target; }
+    QString projectId() const { return m_projectId; }
+    int plannedMinutes() const { return m_plannedMinutes; }
 
     void update(const QJsonObject &row);
     void update(const Dto::ParseDraft &draft);
@@ -220,4 +224,6 @@ private:
     QStringList m_weekdays;
     QString m_measure = QStringLiteral("check");
     int m_target = 0;
+    QString m_projectId;
+    int m_plannedMinutes = 0;
 };

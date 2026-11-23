@@ -17,7 +17,9 @@ Button {
     }
     background: Rectangle {
         radius: Math.max(6, theme.radius)
-        color: control.enabled && control.primary ? control.win.text : (control.down ? control.win.border : "transparent")
+        color: control.primary
+            ? (control.enabled ? control.win.text : "#2c2a25")
+            : (control.down ? control.win.border : "transparent")
         border.width: control.primary ? 0 : 1
         border.color: control.win.border
     }

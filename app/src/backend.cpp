@@ -180,6 +180,9 @@ void Backend::reloadFromNotification(qint64 revision) {
     if (revision <= m_lastNotificationRevision) return;
     m_lastNotificationRevision = revision;
     reload();
+    // Another surface (the bar widget, the CLI) may have changed projects,
+    // tags, or metrics; the lists are cheap.
+    loadSettings();
 }
 
 void Backend::applyDayPlan(const Dto::DayPlan &plan) {
@@ -636,6 +639,9 @@ void Backend::setSleepTime(const QString &time) {
 }
 
 void Backend::loadSettings() {
+    // The list methods are served by the daemon only; the CLI fallback has
+    // nothing to show, and an error banner for it would be noise.
+    if (m_client.offline()) return;
     auto load = [this](const QString &method, QVariantList *target) {
         m_client.listEntities(method, readResponse([this, target](const CoreClient::Result &result) {
             if (const auto *json = std::get_if<Dto::Json>(&result.value)) {
@@ -654,8 +660,34 @@ void Backend::saveEntity(const QString &kind, const QVariantMap &fields) {
     if (!allowed.contains(kind)) return;
     const bool editing = !fields.value(QStringLiteral("id")).toString().isEmpty();
     m_client.mutateEntity(kind + (editing ? QStringLiteral(".edit") : QStringLiteral(".add")),
-                          QJsonObject::fromVariantMap(fields),
-                          readResponse([this](const CoreClient::Result &) { loadSettings(); }));
+                          QJsonObject::fromVariantMap(fields), entityResponse(kind));
+}
+
+void Backend::removeTag(const QString &id) {
+    if (id.isEmpty()) return;
+    m_client.mutateEntity(QStringLiteral("tag.remove"), QJsonObject{{QStringLiteral("id"), id}},
+                          entityResponse(QStringLiteral("tag")));
+}
+
+CoreClient::Callback Backend::entityResponse(const QString &kind) {
+    return [this, kind](const CoreClient::Result &result) {
+        if (!result.ok) {
+            fail(result.error.message);
+            emit entitySaveFailed(kind, result.error.message);
+            return;
+        }
+        QString id;
+        if (const auto *mutation = std::get_if<Dto::MutationResult>(&result.value)) {
+            const QJsonObject changed = mutation->json.value(QStringLiteral("changed")).toObject();
+            const QJsonArray rows = changed.value(kind + QStringLiteral("s")).toArray();
+            if (!rows.isEmpty()) id = rows.first().toObject().value(QStringLiteral("id")).toString();
+        }
+        clearError();
+        loadSettings();
+        // Project names and colours show on the Today rows.
+        m_refreshPending = true;
+        emit entitySaved(kind, id);
+    };
 }
 
 void Backend::setSelectedStatsItem(const QString &id) {

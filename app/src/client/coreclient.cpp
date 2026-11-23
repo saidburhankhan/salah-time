@@ -422,7 +422,9 @@ void CoreClient::configSetSleepTime(const QString &time, Callback callback) {
             std::move(callback), false, true, Dto::decodeConfig, nullptr, opId);
 }
 void CoreClient::listEntities(const QString &method, Callback callback) {
-    enqueue({}, QJsonObject{{"archived", false}}, method, std::move(callback), true, false,
+    // Reads are coalesced by their argument list, so each list method needs
+    // its own key. No archive filter: Settings shows archived rows to restore.
+    enqueue({QStringLiteral("rpc"), method}, QJsonObject{}, method, std::move(callback), true, false,
             Dto::decodeJson, nullptr, {}, true);
 }
 void CoreClient::mutateEntity(const QString &method, QJsonObject params, Callback callback) {

@@ -113,6 +113,7 @@ public:
     Q_INVOKABLE void setSleepTime(const QString &time);
     Q_INVOKABLE void loadSettings();
     Q_INVOKABLE void saveEntity(const QString &kind, const QVariantMap &fields);
+    Q_INVOKABLE void removeTag(const QString &id);
     Q_INVOKABLE ItemDraft *itemForId(const QString &id);
     Q_INVOKABLE ItemDraft *itemFromParse(const QString &fallbackTitle = {});
     Q_INVOKABLE QString hijriHeader(const QString &isoDate) const;
@@ -131,6 +132,10 @@ signals:
     void fulfilmentChanged();
     void settingsChanged();
     void statsDataChanged();
+    // A project/tag/metric write finished. `id` is the saved row's id (empty
+    // for a removal); on failure `error` carries the server message.
+    void entitySaved(const QString &kind, const QString &id);
+    void entitySaveFailed(const QString &kind, const QString &error);
 
 private:
     struct PendingCreate {
@@ -149,6 +154,7 @@ private:
     CoreClient::Callback readResponse(std::function<void(const CoreClient::Result &)> success,
                                       bool reloadAfter = false);
     CoreClient::Callback mutationResponse(const QString &pendingId = {}, const QString &pendingOpId = {});
+    CoreClient::Callback entityResponse(const QString &kind);
     void applyDayPlan(const Dto::DayPlan &plan);
     void applyStats(const Dto::Stats &stats);
     void applyRoutines(const Dto::Stats &stats);

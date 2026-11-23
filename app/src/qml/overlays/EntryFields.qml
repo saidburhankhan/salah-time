@@ -9,7 +9,7 @@ ScrollView {
     property var form
     property alias titleText: titleField.text
     property alias goalText: plannedField.text
-    property alias projectIndex: projectPicker.currentIndex
+    property bool creatingProject: false
     Layout.fillWidth: true
     Layout.fillHeight: true
     Layout.minimumWidth: 450
@@ -20,6 +20,31 @@ ScrollView {
     }
     function clearTitle() {
         titleField.text = ""
+    }
+    // Creates a project from the inline field and selects it once saved.
+    function createProject() {
+        var name = newProjectField.text.trim()
+        if (name === "" || creatingProject)
+            return
+        var palette = ["#4c8bf5", "#2e7d32", "#e0663f", "#9b59b6", "#d4a72c", "#26a69a", "#e05d8c"]
+        var color = palette[(backend.projects || []).length % palette.length]
+        creatingProject = true
+        backend.saveEntity("project", { name: name, color: color })
+    }
+    Connections {
+        target: backend
+        function onEntitySaved(kind, id) {
+            if (kind !== "project" || !entryFields.creatingProject)
+                return
+            entryFields.creatingProject = false
+            newProjectField.text = ""
+            if (id !== "")
+                form.projectId = id
+        }
+        function onEntitySaveFailed(kind, error) {
+            if (kind === "project")
+                entryFields.creatingProject = false
+        }
     }
     Column {
         width: entryFields.availableWidth
@@ -96,27 +121,81 @@ ScrollView {
         }
         Rectangle {
             width: parent.width
-            height: 160
+            height: planColumn.implicitHeight + 44
             radius: theme.radius
             color: form.win.panel
             border.color: form.win.border
             ColumnLayout {
-                anchors.fill: parent
+                id: planColumn
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
                 anchors.margins: 22
                 spacing: 14
                 Label {
-                    text: qsTr("Project and plan")
+                    text: qsTr("Project")
                     color: form.win.text
                     font.pixelSize: 17
                     font.weight: Font.DemiBold
                 }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    ChoiceChip {
+                        objectName: "noProjectChip"
+                        win: form.win
+                        text: qsTr("No project")
+                        selected: form.projectId === ""
+                        onClicked: form.projectId = ""
+                    }
+                    Repeater {
+                        model: form.win.activeProjects()
+                        ChoiceChip {
+                            required property var modelData
+                            win: form.win
+                            text: String(modelData.name || "")
+                            dotColor: String(modelData.color || "transparent")
+                            selected: form.projectId === String(modelData.id)
+                            onClicked: form.projectId = String(modelData.id)
+                        }
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    TextField {
+                        id: newProjectField
+                        objectName: "newProjectField"
+                        Layout.preferredWidth: 240
+                        placeholderText: form.win.activeProjects().length === 0
+                            ? qsTr("Name your first project")
+                            : qsTr("New project name")
+                        onAccepted: entryFields.createProject()
+                    }
+                    AppButton {
+                        win: form.win
+                        text: qsTr("+  Create project")
+                        enabled: newProjectField.text.trim() !== "" && !entryFields.creatingProject
+                        onClicked: entryFields.createProject()
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Colours and metrics: Settings → Projects")
+                        color: form.win.muted
+                        font.pixelSize: 12
+                        elide: Text.ElideRight
+                    }
+                }
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: form.win.border
+                }
                 RowLayout {
                     spacing: 8
-                    ComboBox { id: projectPicker; model: [qsTr("Routine / no project")].concat((backend.projects || []).map(function(p){ return String(p.name || "") })) }
                     Label {
                         text: qsTr("Planned minutes")
                         color: form.win.muted
-                        Layout.leftMargin: 10
                     }
                     TextField {
                         id: plannedField
@@ -124,7 +203,18 @@ ScrollView {
                         placeholderText: qsTr("Optional")
                         font.family: form.win.mono
                         inputMethodHints: Qt.ImhDigitsOnly
-                        validator: IntValidator { bottom: 1; top: 99999 }
+                        validator: IntValidator { bottom: 1; top: 1440 }
+                    }
+                    Repeater {
+                        model: [15, 30, 60]
+                        ChoiceChip {
+                            required property int modelData
+                            win: form.win
+                            implicitHeight: 36
+                            text: qsTr("%1 min").arg(modelData)
+                            selected: plannedField.text === String(modelData)
+                            onClicked: plannedField.text = String(modelData)
+                        }
                     }
                 }
             }

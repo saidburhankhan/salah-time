@@ -1,5 +1,6 @@
 #include <QDir>
 #include <cstring>
+#include <memory>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QFile>
@@ -15,6 +16,7 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickItem>
+#include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSet>
 #include <QtTest>
@@ -27,6 +29,7 @@
 #include "models/statsseriesmodel.h"
 #include "theme.h"
 #include "translator.h"
+#include "tracking_fixture.h"
 
 namespace {
 class FakeDaemon : public QObject {
@@ -369,6 +372,77 @@ esac
         };
     }
 
+
+    // A daemon serving the rich tracking fixture. Mutations are recorded in
+    // FakeDaemon::requests and answered with an empty canonical result (or
+    // the saved row for entity adds), so the app refetches.
+    struct TrackingState {
+        QJsonObject day;
+        QJsonObject status;
+        qint64 revision = 100;
+    };
+    static QJsonObject emptyChanged() {
+        return QJsonObject{{"items", QJsonArray{}}, {"sessions", QJsonArray{}}, {"projects", QJsonArray{}},
+                           {"tags", QJsonArray{}}, {"metrics", QJsonArray{}}, {"marks", QJsonArray{}},
+                           {"deleted", QJsonArray{}}};
+    }
+    static FakeDaemon::Handler trackingHandler(std::shared_ptr<TrackingState> state) {
+        return [state](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            const QString method = request.value("method").toString();
+            const QJsonObject params = request.value("params").toObject();
+            if (method == "day.get") server->respond(socket, request, state->day);
+            else if (method == "status.get") server->respond(socket, request, state->status);
+            else if (method == "stats.get") {
+                const int days = params.value("days").toInt(28);
+                server->respond(socket, request, TrackingFixture::stats(params.value("tag_id").toString(),
+                                                                        params.value("project_id").toString(),
+                                                                        days > 0 ? days : 28));
+            }
+            else if (method == "config.get") server->respond(socket, request, QJsonObject{{"sleep_time", "23:00"}, {"location", "Tashkent"}, {"latitude", 41.2}, {"longitude", 69.2}, {"timezone_offset", 5}, {"method", "uzbekistan"}, {"method_name", "Muslim Board of Uzbekistan"}, {"asr", "hanafi"}, {"auto_location", true}, {"last_location_provider", QJsonValue::Null}, {"last_location_sync", QJsonValue::Null}});
+            else if (method == "projects.list") server->respond(socket, request, TrackingFixture::projects());
+            else if (method == "tags.list") server->respond(socket, request, TrackingFixture::tags());
+            else if (method == "metrics.list") server->respond(socket, request, TrackingFixture::metrics());
+            else if (method == "item.preview") server->respond(socket, request, fixture("item_preview"));
+            else if (params.contains("op_id")) {
+                QJsonObject changed = emptyChanged();
+                if (method == "project.add" || method == "project.edit")
+                    changed["projects"] = QJsonArray{QJsonObject{{"id", params.value("id").toString("new-project")},
+                                                                 {"name", params.value("name")}}};
+                else if (method == "tag.add" || method == "tag.edit")
+                    changed["tags"] = QJsonArray{QJsonObject{{"id", params.value("id").toString("new-tag")}}};
+                else if (method == "metric.add" || method == "metric.edit")
+                    changed["metrics"] = QJsonArray{QJsonObject{{"id", params.value("id").toString("new-metric")}}};
+                else if (method == "session.remove" || method == "tag.remove")
+                    changed["deleted"] = QJsonArray{params.value("id")};
+                server->respond(socket, request, QJsonObject{{"revision", ++state->revision},
+                                                             {"op_id", params.value("op_id")},
+                                                             {"changed", changed}});
+            }
+            else server->respond(socket, request, QJsonObject{});
+        };
+    }
+    static std::shared_ptr<TrackingState> trackingState(bool withRunning = true) {
+        auto state = std::make_shared<TrackingState>();
+        state->day = TrackingFixture::day(fixture("day"), withRunning);
+        state->status = TrackingFixture::status(fixture("status_running"), withRunning);
+        return state;
+    }
+    // Saves a PNG of the window when SALAH_UI_SHOT_DIR is set; always checks
+    // that the window renders.
+    static void shotWindow(QQuickWindow *window, const QString &name) {
+        QTest::qWait(250);
+        const QImage image = window->grabWindow();
+        QVERIFY2(!image.isNull(), qPrintable(name));
+        const QString dir = qEnvironmentVariable("SALAH_UI_SHOT_DIR");
+        if (dir.isEmpty()) return;
+        QDir().mkpath(dir);
+        QVERIFY2(image.save(dir + "/" + name), qPrintable(name));
+    }
+    static QObject *findByName(QObject *root, const QString &name) {
+        for (QObject *object : root->findChildren<QObject *>())
+            if (object->objectName() == name) return object;
+        return nullptr;
+    }
     static QString daemon_path(const QTemporaryDir &dir) { return dir.filePath("salah.sock"); }
     // Create a Unix socket inode with no listener: connecting to it is refused,
     // exactly like a daemon that exited without cleaning up its socket file.
@@ -391,6 +465,8 @@ esac
 
 private slots:
     void initTestCase() {
+        // The app runs with the Material style (main.cpp); render the same.
+        QQuickStyle::setStyle("Material");
         // The opt-in integration tests below intentionally use the caller's
         // desktop environment; everything else runs in the sandbox set up in
         // init().
@@ -739,11 +815,8 @@ private slots:
         QVERIFY(stats.value("projects").isArray());
         QVERIFY(stats.value("blocks").isArray());
 
-        QFile panel(QStringLiteral(TEST_SOURCE_DIR "/../../plugin/local.salah/SessionPanel.qml"));
-        QVERIFY(panel.open(QIODevice::ReadOnly));
-        const QByteArray panelSource = panel.readAll();
-        QVERIFY(panelSource.contains("function markMissing"));
-        QVERIFY(panelSource.contains("effectiveMetrics"));
+        // The bar widget's own sources are checked by plugin/local.salah/tests;
+        // the app suite does not pin the plugin's internals.
 
         QFile settings(QStringLiteral(TEST_SOURCE_DIR "/../src/backend.cpp"));
         QVERIFY(settings.open(QIODevice::ReadOnly));
@@ -1611,6 +1684,137 @@ const int original = model->indexOfItem("<id:4>");
             QCOMPARE(args.at(0).toModelIndex().row(), args.at(1).toModelIndex().row());
         }
         QCOMPARE(reset.size(), 0);
+    }
+
+    void settingsListsAreSeparateAndEntitySavesSendFullFields() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        daemon.setHandler(trackingHandler(trackingState()));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy settings(&backend, &Backend::settingsChanged);
+        backend.loadSettings();
+        // The three lists used to share one coalescing key and all received
+        // the projects list.
+        QTRY_COMPARE_WITH_TIMEOUT(settings.size(), 3, 3000);
+        QCOMPARE(backend.projects().size(), 4);
+        QCOMPARE(backend.tags().size(), 3);
+        QCOMPARE(backend.metrics().size(), 6);
+        QCOMPARE(backend.tags().first().toMap().value("name").toString(), QString("Faith"));
+        QCOMPARE(backend.metrics().first().toMap().value("id").toString(), QString("focus"));
+
+        QSignalSpy saved(&backend, &Backend::entitySaved);
+        backend.saveEntity("project", QVariantMap{
+            {"name", "Reading"}, {"color", "#26a69a"}, {"note", ""},
+            {"tag_ids", QVariantList{"learning"}},
+            {"metrics", QVariantList{QVariantMap{{"metric_id", "focus"}, {"required", true}},
+                                     QVariantMap{{"metric_id", "pages"}, {"required", false}}}}});
+        QTRY_COMPARE_WITH_TIMEOUT(saved.size(), 1, 3000);
+        QCOMPARE(saved.first().at(0).toString(), QString("project"));
+        QCOMPARE(saved.first().at(1).toString(), QString("new-project"));
+        const QJsonObject add = lastRequest(daemon, "project.add").value("params").toObject();
+        QCOMPARE(add.value("name").toString(), QString("Reading"));
+        QCOMPARE(add.value("tag_ids").toArray(), QJsonArray{"learning"});
+        const QJsonArray metrics = add.value("metrics").toArray();
+        QCOMPARE(metrics.size(), 2);
+        QCOMPARE(metrics.at(0).toObject().value("metric_id").toString(), QString("focus"));
+        QCOMPARE(metrics.at(0).toObject().value("required").toBool(), true);
+        QCOMPARE(metrics.at(1).toObject().value("required").toBool(), false);
+        QVERIFY(!add.value("op_id").toString().isEmpty());
+
+        backend.saveEntity("project", QVariantMap{{"id", "quran"}, {"archived", true}});
+        QTRY_COMPARE_WITH_TIMEOUT(saved.size(), 2, 3000);
+        const QJsonObject archive = lastRequest(daemon, "project.edit").value("params").toObject();
+        QCOMPARE(archive.value("id").toString(), QString("quran"));
+        QCOMPARE(archive.value("archived").toBool(), true);
+
+        backend.saveEntity("metric", QVariantMap{{"name", "Verses"}, {"unit", "verses"}, {"kind", "count"}, {"rollup", "sum"}});
+        QTRY_COMPARE_WITH_TIMEOUT(saved.size(), 3, 3000);
+        QCOMPARE(lastRequest(daemon, "metric.add").value("params").toObject().value("kind").toString(), QString("count"));
+
+        backend.removeTag("health");
+        QTRY_COMPARE_WITH_TIMEOUT(saved.size(), 4, 3000);
+        QCOMPARE(lastRequest(daemon, "tag.remove").value("params").toObject().value("id").toString(), QString("health"));
+        QCOMPARE(saved.last().at(1).toString(), QString());
+        QVERIFY(backend.error().isEmpty());
+    }
+    void itemEditorPicksAndCreatesProjects() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        daemon.setHandler(trackingHandler(trackingState()));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy spy(&backend, &Backend::requestFinished);
+        backend.reload(); QTRY_VERIFY_WITH_TIMEOUT(spy.size() >= 3, 3000);
+        ItemDraft *draft = backend.itemForId("quran");
+        QCOMPARE(draft->projectId(), QString("quran"));
+        QCOMPARE(draft->plannedMinutes(), 30);
+        Theme theme(dir.path());
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create()); QVERIFY2(root, qPrintable(component.errorString()));
+        root->setProperty("visible", false);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.projects().size(), 4, 3000);
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "openEntry", Q_ARG(QVariant, QVariant("quran"))));
+        QObject *entry = root->findChild<QObject *>("entryPopup"); QVERIFY(entry);
+        QTRY_COMPARE_WITH_TIMEOUT(entry->property("projectId").toString(), QString("quran"), 3000);
+        // Archived projects are not offered.
+        auto *entryContent = entry->property("contentItem").value<QQuickItem *>(); QVERIFY(entryContent);
+        auto entryHasText = [&](const QString &text) {
+            for (QQuickItem *item : quickDescendants(entryContent))
+                if (item->property("text").toString() == text) return true;
+            return false;
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(entryHasText("Study"), 3000);
+        QVERIFY(entryHasText("No project"));
+        QVERIFY(!entryHasText("Garden"));
+        QObject *field = findByName(root.data(), "newProjectField"); QVERIFY(field);
+        field->setProperty("text", "Reading");
+        QVERIFY(QMetaObject::invokeMethod(field, "accepted"));
+        QTRY_COMPARE_WITH_TIMEOUT(entry->property("projectId").toString(), QString("new-project"), 3000);
+        QCOMPARE(lastRequest(daemon, "project.add").value("params").toObject().value("name").toString(), QString("Reading"));
+        QVariant draftMap; QVERIFY(QMetaObject::invokeMethod(entry, "draft", Q_RETURN_ARG(QVariant, draftMap)));
+        QCOMPARE(draftMap.toMap().value("project_id").toString(), QString("new-project"));
+    }
+    void trackingUiScreens() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        daemon.setHandler(trackingHandler(trackingState()));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        Theme theme(dir.path());
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create()); QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data()); QVERIFY(window);
+        window->setWidth(1440); window->setHeight(900); window->show();
+        backend.reload();
+        waitForBackendIdle(backend);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.projects().size(), 4, 3000);
+        shotWindow(window, "today.png");
+
+        QObject *settings = findByName(root.data(), "settingsPage"); QVERIFY(settings);
+        root->setProperty("page", 3);
+        settings->setProperty("section", "general");
+        shotWindow(window, "settings-general.png");
+        QVERIFY(hasLabelText(settings, "Sleep time"));
+        QVERIFY(hasLabelText(settings, "Prayer calculation"));
+        settings->setProperty("section", "projects");
+        QObject *projectsPane = findByName(root.data(), "projectsSettings"); QVERIFY(projectsPane);
+        shotWindow(window, "settings-projects-new.png");
+        const QVariant quran = backend.projects().first();
+        QVERIFY(QMetaObject::invokeMethod(projectsPane, "startEdit", Q_ARG(QVariant, quran)));
+        shotWindow(window, "settings-projects-edit.png");
+        QCOMPARE(projectsPane->property("editId").toString(), QString("quran"));
+        settings->setProperty("section", "tags");
+        shotWindow(window, "settings-tags.png");
+        settings->setProperty("section", "metrics");
+        QObject *metricsPane = findByName(root.data(), "metricsSettings"); QVERIFY(metricsPane);
+        QVERIFY(QMetaObject::invokeMethod(metricsPane, "startEdit", Q_ARG(QVariant, backend.metrics().at(2))));
+        shotWindow(window, "settings-metrics.png");
+
+        root->setProperty("page", 0);
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "openEntry", Q_ARG(QVariant, QVariant("deep"))));
+        shotWindow(window, "item-editor.png");
+        root->setProperty("entryVisible", false);
+        QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
+        window->hide();
     }
 
     void themeFallbackAndAccent() {
