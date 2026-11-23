@@ -275,7 +275,7 @@
         "kind": "scale",
         "metric_id": "focus",
         "name": "Focus",
-        "required": true,
+        "required": false,
         "scale_max": 5,
         "unit": ""
       },
@@ -283,7 +283,7 @@
         "kind": "scale",
         "metric_id": "quality",
         "name": "Quality",
-        "required": true,
+        "required": false,
         "scale_max": 5,
         "unit": ""
       },

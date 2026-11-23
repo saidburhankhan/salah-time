@@ -36,7 +36,7 @@ pub enum ItemCommand {
 pub enum SessionCommand {
     /// Start a timer for an item or project
     Start(SessionStartArgs),
-    /// Stop the running timer and record its metrics
+    /// Stop the running timer, optionally recording metrics
     Stop(SessionStopArgs),
     /// Record finished work, or tick an item without minutes
     Log(SessionLogArgs),
@@ -262,7 +262,7 @@ pub struct ProjectAddArgs {
     note: Option<String>,
     #[arg(long = "tag", value_name = "ID")]
     tags: Vec<String>,
-    /// A metric to ask for, `ID` (required) or `ID:optional`; default focus and quality
+    /// A metric to ask for, `ID` or `ID:optional`; all answers are optional
     #[arg(long = "metric", value_name = "ID[:optional]")]
     metrics: Vec<String>,
     #[command(flatten)]

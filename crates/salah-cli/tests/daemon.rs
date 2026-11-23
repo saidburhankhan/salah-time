@@ -556,15 +556,12 @@ fn method_success_and_error(client: &mut Client) {
     assert_eq!(
         client.bad(
             "session.stop",
-            json!({"op_id":"s4-stop-bad","values":{"focus":4}})
+            json!({"op_id":"s4-stop-bad","values":{"focus":6}})
         ),
         -32001
     );
     assert_eq!(
-        client.good(
-            "session.stop",
-            json!({"op_id":"s4-stop","values":{"focus":4,"quality":5}})
-        )["changed"]["sessions"][0]["minutes"],
+        client.good("session.stop", json!({"op_id":"s4-stop"}))["changed"]["sessions"][0]["minutes"],
         1
     );
     let logged = client.good(

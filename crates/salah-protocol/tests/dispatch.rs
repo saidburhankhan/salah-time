@@ -1,5 +1,5 @@
 //! Dispatcher invariants: the handshake, framing faults, params validation,
-//! idempotent replay, version conflicts, and the missing-metrics error.
+//! idempotent replay, version conflicts, and tracking behaviour.
 //! Every method's happy path runs over the socket in `salah-cli/tests/daemon.rs`
 //! and against the golden fixtures in `salah-cli/tests/rpc.rs`.
 
@@ -256,7 +256,7 @@ fn a_stale_expected_version_is_a_conflict_that_writes_nothing() {
 }
 
 #[test]
-fn stopping_without_required_metrics_names_the_missing_ones() {
+fn stopping_without_values_succeeds() {
     let mut fixture = Fixture::new();
     fixture.handshake();
     let project = first_id(
@@ -267,20 +267,8 @@ fn stopping_without_required_metrics_names_the_missing_ones() {
         "session.start",
         json!({"op_id":"op-start","project_id":project}),
     );
-    let error = fixture.err(
-        "session.stop",
-        json!({"op_id":"op-stop","values":{"quality":3}}),
-    );
-    let data = error.data.unwrap();
-    assert_eq!(
-        (data.kind.as_str(), data.field.as_deref()),
-        ("validation", Some("values"))
-    );
-    assert_eq!(data.missing, Some(vec!["focus".to_owned()]));
-    let stopped = fixture.ok(
-        "session.stop",
-        json!({"op_id":"op-stop","values":{"focus":4,"quality":3}}),
-    );
+    let stopped = fixture.ok("session.stop", json!({"op_id":"op-stop"}));
+    assert_eq!(stopped["changed"]["sessions"][0]["values"], json!({}));
     assert_eq!(stopped["changed"]["sessions"][0]["running"], false);
 }
 
@@ -397,11 +385,6 @@ fn running_session_keeps_partial_ratings_and_notes_until_stop() {
         "session.edit",
         json!({"op_id":"e","id":session,"values":{"focus":4},"note":"chapter 1"}),
     );
-    let missing = f.err("session.stop", json!({"op_id":"stop"}));
-    assert_eq!(
-        missing.data.unwrap().missing,
-        Some(vec!["quality".to_owned()])
-    );
     let stopped = f.ok(
         "session.stop",
         json!({"op_id":"stop","values":{"quality":3}}),
@@ -515,4 +498,99 @@ fn project_filters_keep_plan_line_sessions_distinct_from_unplanned_minutes() {
         .unwrap();
     assert_eq!(block["actual_minutes"], 10);
     assert_eq!(block["unplanned_minutes"], 5);
+}
+
+#[test]
+fn a_tick_stops_only_its_item_timer_and_replays_both_rows_once() {
+    let mut f = Fixture::new();
+    f.handshake();
+    let project = first_id(
+        &f.ok("project.add", json!({"op_id":"p","name":"Study"})),
+        "projects",
+    );
+    let item = first_id(&f.ok("item.add", json!({"op_id":"i","title":"Read","project_id":project,"planned_minutes":30,"repeat":"daily"})), "items");
+    let other = first_id(
+        &f.ok(
+            "item.add",
+            json!({"op_id":"other","title":"Walk","project_id":project}),
+        ),
+        "items",
+    );
+    let timer = first_id(
+        &f.ok("session.start", json!({"op_id":"start","item_id":item})),
+        "sessions",
+    );
+
+    for body in [
+        json!({"op_id":"other-tick","item_id":other}),
+        json!({"op_id":"project-tick","project_id":project}),
+        json!({"op_id":"log-time","item_id":item,"minutes":5}),
+    ] {
+        assert_eq!(
+            f.ok("session.log", body)["changed"]["sessions"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+    let status = f.ok("status.get", json!({}));
+    assert_eq!(status["running"]["id"], timer);
+    let row = status["planner"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == item)
+        .unwrap();
+    assert_eq!(row["done"], false);
+
+    // 09:30 to 23:00 local time. The tick belongs to the following day.
+    f.clock = FixedClock::new(Utc.with_ymd_and_hms(2031, 5, 15, 4, 30, 0).unwrap());
+    let revision = f.store.revision().unwrap();
+    let seq = f.store.last_change_seq().unwrap();
+    f.err(
+        "session.log",
+        json!({"op_id":"done","item_id":item,"values":{"focus":6}}),
+    );
+    assert_eq!(f.store.revision().unwrap(), revision);
+    assert_eq!(f.ok("status.get", json!({}))["running"]["id"], timer);
+
+    let result = f.ok(
+        "session.log",
+        json!({"op_id":"done","item_id":item,"values":{"focus":4},"note":"finished"}),
+    );
+    let rows = result["changed"]["sessions"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    let (tick, stopped) = (&rows[0], &rows[1]);
+    assert_eq!(tick["day"], "2031-05-15");
+    assert!(tick["minutes"].is_null());
+    assert_eq!(tick["values"], json!({"focus":4.0}));
+    assert_eq!(tick["note"], "finished");
+    assert_eq!(stopped["id"], timer);
+    assert_eq!(stopped["ended_at"], "2031-05-14T18:00:00Z");
+    assert_eq!(stopped["minutes"], 810);
+    assert_eq!(stopped["values"], json!({}));
+    assert!(stopped["note"].is_null());
+    assert!(f.ok("status.get", json!({}))["running"].is_null());
+    assert_eq!(f.ok("session.log", json!({"op_id":"done"})), result);
+    assert_eq!(f.store.revision().unwrap(), revision + 1);
+    let changes = f.store.changes_since(seq, 10).unwrap();
+    assert_eq!(changes.len(), 2);
+    assert_eq!(changes[0].entity_id, timer);
+    assert_eq!(changes[1].entity_id, tick["id"].as_str().unwrap());
+    assert!(
+        changes
+            .iter()
+            .all(|c| c.revision == revision + 1 && c.op_id.as_deref() == Some("done"))
+    );
+
+    let today = f.ok("day.get", json!({}));
+    assert_eq!(today["fulfilment"]["done_items"], 1);
+    assert_eq!(today["fulfilment"]["actual_minutes"], 0);
+    let yesterday = f.ok("day.get", json!({"date":"2031-05-14"}));
+    assert_eq!(yesterday["fulfilment"]["done_items"], 1); // only Walk
+    assert_eq!(yesterday["fulfilment"]["actual_minutes"], 815);
+    f.ok("session.remove", json!({"op_id":"untick","id":tick["id"]}));
+    assert_eq!(f.ok("day.get", json!({}))["fulfilment"]["done_items"], 0);
+    assert_eq!(f.ok("day.get", json!({"date":"2031-05-14"})), yesterday);
 }

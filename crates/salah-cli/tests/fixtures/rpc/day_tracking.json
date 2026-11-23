@@ -21,7 +21,7 @@
             "actual_minutes": 25,
             "block": "fajr",
             "detail_text": "25 / 30 min · Daily",
-            "done": true,
+            "done": false,
             "id": "<id:4>",
             "next_occurrence": "2031-05-14",
             "planned_minutes": 30,
@@ -41,15 +41,11 @@
                 "id": "<id:6>",
                 "item_id": "<id:4>",
                 "minutes": 25,
-                "note": "Calm",
+                "note": null,
                 "project_id": "<id:3>",
                 "running": false,
                 "started_at": "2031-05-14T04:30:00Z",
-                "values": {
-                  "<id:1>": 6.0,
-                  "focus": 4.0,
-                  "quality": 5.0
-                },
+                "values": {},
                 "version": 2
               }
             ],
@@ -134,7 +130,7 @@
     "day": "2031-05-14",
     "fulfilment": {
       "actual_minutes": 25,
-      "done_items": 2,
+      "done_items": 1,
       "planned_items": 2,
       "planned_minutes": 45,
       "unplanned_minutes": 20
@@ -152,7 +148,7 @@
       },
       "sleeping": false
     },
-    "open": 0,
+    "open": 1,
     "prayers": [
       {
         "current": true,

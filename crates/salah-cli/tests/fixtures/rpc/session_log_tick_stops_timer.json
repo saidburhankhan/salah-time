@@ -1,0 +1,48 @@
+{
+  "id": 16,
+  "jsonrpc": "2.0",
+  "result": {
+    "changed": {
+      "deleted": [],
+      "items": [],
+      "marks": [],
+      "metrics": [],
+      "projects": [],
+      "sessions": [
+        {
+          "block": "fajr",
+          "day": "2031-05-14",
+          "ended_at": null,
+          "id": "<id:9>",
+          "item_id": "<id:4>",
+          "minutes": null,
+          "note": "Finished",
+          "project_id": "<id:3>",
+          "running": false,
+          "started_at": null,
+          "values": {
+            "quality": 5.0
+          },
+          "version": 1
+        },
+        {
+          "block": "fajr",
+          "day": "2031-05-14",
+          "ended_at": "2031-05-14T04:55:00Z",
+          "id": "<id:10>",
+          "item_id": "<id:4>",
+          "minutes": 1,
+          "note": null,
+          "project_id": "<id:3>",
+          "running": false,
+          "started_at": "2031-05-14T04:55:00Z",
+          "values": {},
+          "version": 2
+        }
+      ],
+      "tags": []
+    },
+    "op_id": "op-done",
+    "revision": 21
+  }
+}

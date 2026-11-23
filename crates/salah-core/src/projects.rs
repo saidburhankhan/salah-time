@@ -33,7 +33,7 @@ pub struct NewProject {
     pub note: Option<String>,
     #[serde(default)]
     pub tag_ids: Vec<String>,
-    /// Defaults to the built-in `focus` and `quality`, both required.
+    /// Defaults to the built-in `focus` and `quality`, with the legacy `required` flags set.
     #[serde(default)]
     pub metrics: Option<Vec<MetricChoice>>,
 }

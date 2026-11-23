@@ -16,7 +16,7 @@ pub struct Fulfilment {
 }
 
 impl Fulfilment {
-    /// A plan line is done once a session of its item finished that day.
+    /// A plan line is done once its item has a tick on that day.
     pub fn of(plan: &[DayPlanLine], sessions: &[Session]) -> Self {
         let planned: BTreeSet<&str> = plan.iter().map(|line| line.item_id.as_str()).collect();
         let (on_plan, off_plan): (Vec<&Session>, Vec<&Session>) = sessions
@@ -26,7 +26,7 @@ impl Fulfilment {
             planned_items: plan.len() as i64,
             done_items: plan
                 .iter()
-                .filter(|line| has_finished(sessions, &line.item_id))
+                .filter(|line| has_tick(sessions, &line.item_id))
                 .count() as i64,
             planned_minutes: plan.iter().filter_map(|line| line.planned_minutes).sum(),
             actual_minutes: total_minutes(on_plan),
@@ -46,8 +46,8 @@ pub fn total_minutes<'a>(sessions: impl IntoIterator<Item = &'a Session>) -> i64
     sessions.into_iter().filter_map(|s| s.minutes).sum()
 }
 
-pub(super) fn has_finished(sessions: &[Session], item_id: &str) -> bool {
+pub(super) fn has_tick(sessions: &[Session], item_id: &str) -> bool {
     sessions
         .iter()
-        .any(|s| !s.is_running() && s.item_id.as_deref() == Some(item_id))
+        .any(|s| s.is_tick() && s.item_id.as_deref() == Some(item_id))
 }

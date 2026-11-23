@@ -10,7 +10,7 @@
         "minutes": 0
       },
       {
-        "avg_focus": 3.5555555555555554,
+        "avg_focus": 3.0,
         "block": "fajr",
         "capacity_minutes": 3794,
         "minutes": 45
@@ -108,8 +108,8 @@
         "id": "<id:3>",
         "metrics": {
           "<id:1>": 6.0,
-          "focus": 3.5555555555555554,
-          "quality": 4.555555555555555
+          "focus": 3.0,
+          "quality": 4.0
         },
         "minutes": 45,
         "name": "Quran",
@@ -187,7 +187,7 @@
           },
           {
             "day": "2031-05-14",
-            "value": 3.5555555555555554
+            "value": 3.0
           }
         ],
         "rollup": "avg",
@@ -223,7 +223,7 @@
           },
           {
             "day": "2031-05-14",
-            "value": 4.555555555555555
+            "value": 4.0
           }
         ],
         "rollup": "avg",
@@ -276,8 +276,8 @@
     ],
     "totals": {
       "active_days": 1,
-      "avg_focus": 3.5555555555555554,
-      "avg_quality": 4.555555555555555,
+      "avg_focus": 3.0,
+      "avg_quality": 4.0,
       "minutes": 45,
       "sessions": 3
     }

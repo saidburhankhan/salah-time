@@ -56,7 +56,7 @@ mod test_support {
         &UuidV4
     }
 
-    /// A project asking for the built-in metrics, both required.
+    /// A project asking for the built-in metrics, with the legacy `required` flags set.
     pub fn project(store: &mut Store, name: &str) -> Project {
         store
             .write(|tx| {

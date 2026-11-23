@@ -1,6 +1,6 @@
 //! The day timeline and the widget's view of the day in progress.
 
-use super::fulfilment::has_finished;
+use super::fulfilment::has_tick;
 use super::{Fulfilment, Snapshot, block_minutes, freeze, snapshot, total_minutes};
 use crate::Store;
 use crate::config::Config;
@@ -50,7 +50,7 @@ pub struct DayRow {
     pub planned_minutes: Option<i64>,
     pub actual_minutes: i64,
     pub sessions: Vec<SessionView>,
-    /// True once a session of the item finished that day (a tick counts).
+    /// True when the item has a tick on this day.
     pub done: bool,
     pub schedule_text: String,
     pub next_occurrence: Option<NaiveDate>,
@@ -358,7 +358,7 @@ impl Ledger {
                 .map(ProjectRef::from),
             planned_minutes: line.planned_minutes,
             actual_minutes,
-            done: has_finished(&self.sessions, &item.id),
+            done: has_tick(&self.sessions, &item.id),
             sessions: sessions.into_iter().map(SessionView::from).collect(),
             next_occurrence: item.next_occurrence(self.day),
             schedule_text,
@@ -446,14 +446,15 @@ mod tests {
         assert_eq!((fajr.planned_minutes, fajr.actual_minutes), (30, 20));
         let row = &fajr.items[0];
         assert_eq!(row.project.as_ref().unwrap().name, "Quran");
-        assert!(row.done && row.sessions.len() == 1);
+        assert!(!row.done);
+        assert_eq!(row.sessions.len(), 1);
         assert_eq!(row.detail_text, "20 / 30 min · Daily");
-        assert_eq!(plan.open, 1);
+        assert_eq!(plan.open, 2);
         assert_eq!(
             plan.fulfilment,
             Fulfilment {
                 planned_items: 2,
-                done_items: 1,
+                done_items: 0,
                 planned_minutes: 30,
                 actual_minutes: 20,
                 unplanned_minutes: 0,

@@ -21,6 +21,7 @@
           "running": false,
           "started_at": null,
           "values": {
+            "<id:1>": 6.0,
             "focus": 3.0,
             "quality": 4.0
           },

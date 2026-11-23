@@ -24,9 +24,6 @@ pub struct ErrorData {
     pub field: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current: Option<Value>,
-    /// Required metric ids a session stop or log left out.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub missing: Option<Vec<String>>,
 }
 
 impl ErrorData {
@@ -36,7 +33,6 @@ impl ErrorData {
             retryable,
             field: None,
             current: None,
-            missing: None,
         }
     }
 }
@@ -114,13 +110,8 @@ impl From<Error> for RpcError {
     fn from(error: Error) -> Self {
         let kind = error.code();
         let mut data = ErrorData::new(kind, retryable_kind(kind));
-        match &error {
-            Error::Validation { field, .. } => data.field = Some((*field).to_string()),
-            Error::MissingMetrics(ids) => {
-                data.field = Some("values".into());
-                data.missing = Some(ids.clone());
-            }
-            _ => {}
+        if let Error::Validation { field, .. } = &error {
+            data.field = Some((*field).to_string());
         }
         Self::new(code_for_kind(kind), error.message(), Some(data))
     }

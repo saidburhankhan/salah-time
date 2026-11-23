@@ -803,9 +803,9 @@ private slots:
     }
     void trackingSurfacesFollowCanonicalFixtures() {
         const QString rpc = QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/rpc/");
-        const QJsonObject missing = readJson(rpc + "session_stop_missing_metrics.json").object()
+        const QJsonObject invalid = readJson(rpc + "session_stop_invalid_value.json").object()
                                         .value("error").toObject().value("data").toObject();
-        QCOMPARE(missing.value("missing").toArray().first().toString(), QString("quality"));
+        QCOMPARE(invalid.value("field").toString(), QString("values"));
 
         const QJsonArray projects = readJson(rpc + "projects_list.json").object().value("result").toArray();
         const QJsonObject binding = projects.first().toObject().value("metrics").toArray().first().toObject();

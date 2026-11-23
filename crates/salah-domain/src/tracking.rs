@@ -69,6 +69,7 @@ pub struct Metric {
 pub struct ProjectMetric {
     pub project_id: String,
     pub metric_id: String,
+    /// Stored for protocol compatibility. All metric values are optional.
     pub required: bool,
     pub position: i64,
 }
@@ -225,6 +226,11 @@ impl Session {
 
     pub fn is_running(&self) -> bool {
         self.is_live() && self.started_at.is_some() && self.ended_at.is_none()
+    }
+
+    /// A live completion tick has neither logged minutes nor a running timer.
+    pub fn is_tick(&self) -> bool {
+        self.is_live() && self.minutes.is_none() && !self.is_running()
     }
 
     /// Weight of this session in an `avg` rollup: its minutes, a tick weighs 1.

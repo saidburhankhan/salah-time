@@ -146,7 +146,7 @@ fn items_are_planned_edited_moved_and_removed() {
 }
 
 #[test]
-fn a_timed_session_asks_for_the_project_metrics() {
+fn pausing_records_time_and_ticking_marks_the_item_done() {
     let fixture = Fixture::new();
     let project = fixture.added(
         "projects",
@@ -172,35 +172,14 @@ fn a_timed_session_asks_for_the_project_metrics() {
     assert_eq!(status["running"]["item_id"], item.as_str());
     assert_eq!(status["prompt"].as_array().unwrap().len(), 2);
 
-    let missing = fixture.run_at(LATER, &["session", "stop", "--value", "focus=4"]);
-    assert!(!missing.status.success());
-    assert!(stderr(&missing).contains("missing required metrics: quality"));
-    let stopped = fixture.json_at(
-        LATER,
-        &[
-            "session",
-            "stop",
-            "--value",
-            "focus=4",
-            "--value",
-            "quality=5",
-            "--note",
-            "calm",
-            "--json",
-        ],
-    );
+    let stopped = fixture.json_at(LATER, &["session", "stop", "--json"]);
     assert_eq!(stopped["changed"]["sessions"][0]["minutes"], 25);
 
+    let paused = fixture.json_at(LATER, &["day", "--json"]);
+    assert_eq!(day_rows(&paused)[0]["done"], false);
+
     let tick = fixture.json(&[
-        "session",
-        "log",
-        "--project",
-        &project,
-        "--value",
-        "focus=3",
-        "--value",
-        "quality=3",
-        "--json",
+        "session", "log", "--item", &item, "--value", "focus=3", "--json",
     ]);
     assert!(tick["changed"]["sessions"][0]["minutes"].is_null());
 

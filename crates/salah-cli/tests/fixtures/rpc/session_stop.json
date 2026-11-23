@@ -16,15 +16,11 @@
           "id": "<id:6>",
           "item_id": "<id:4>",
           "minutes": 25,
-          "note": "Calm",
+          "note": null,
           "project_id": "<id:3>",
           "running": false,
           "started_at": "2031-05-14T04:30:00Z",
-          "values": {
-            "<id:1>": 6.0,
-            "focus": 4.0,
-            "quality": 5.0
-          },
+          "values": {},
           "version": 2
         }
       ],

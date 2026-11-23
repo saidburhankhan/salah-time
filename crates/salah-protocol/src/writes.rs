@@ -324,8 +324,12 @@ pub(crate) fn session_log(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value
     let config = ctx.config.load()?;
     let (now, ids) = (ctx.now(), ctx.ids);
     mutate(ctx.store, call.method, &p.op_id, |tx| {
-        let session = sessions::log(tx, &config, now, ids, p.log.clone())?;
-        Ok(session_view(&session))
+        let result = sessions::log_with_changes(tx, &config, now, ids, p.log.clone())?;
+        let mut changed = session_view(&result.logged);
+        changed
+            .sessions
+            .extend(result.stopped.as_ref().map(SessionView::from));
+        Ok(changed)
     })
 }
 

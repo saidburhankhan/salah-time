@@ -4,12 +4,9 @@
     "data": {
       "field": "values",
       "kind": "validation",
-      "missing": [
-        "quality"
-      ],
       "retryable": false
     },
-    "message": "missing required metrics: quality"
+    "message": "invalid value for metric \"focus\""
   },
   "id": 2,
   "jsonrpc": "2.0"

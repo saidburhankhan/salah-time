@@ -370,17 +370,15 @@ fn tracking_methods_match_fixtures() {
     let mut rpc = Session::open(&harness, LATER);
     check(
         &mut rpc,
-        "session_stop_missing_metrics",
+        "session_stop_invalid_value",
         "session.stop",
-        json!({"op_id":"op-session-stop-missing","values":{"focus":4}}),
+        json!({"op_id":"op-session-stop-invalid","values":{"focus":6}}),
     );
     check(
         &mut rpc,
         "session_stop",
         "session.stop",
-        json!({
-            "op_id":"op-session-stop","values":{"focus":4,"quality":5,(pages.as_str()):6},"note":"Calm"
-        }),
+        json!({"op_id":"op-session-stop"}),
     );
     let logged = id(
         &check(
@@ -388,7 +386,7 @@ fn tracking_methods_match_fixtures() {
             "session_log",
             "session.log",
             json!({
-                "op_id":"op-session-log","project_id":quran,"minutes":15,"values":{"focus":3,"quality":4}
+                "op_id":"op-session-log","project_id":quran,"minutes":15,"values":{"focus":3,"quality":4,(pages.as_str()):6}
             }),
         ),
         "sessions",
@@ -445,6 +443,17 @@ fn tracking_methods_match_fixtures() {
         replay["result"], removed,
         "a replayed op_id returns the stored result"
     );
+    rpc.request(
+        "session.start",
+        json!({"op_id":"op-start-again","item_id":read}),
+    );
+    let tick = check(
+        &mut rpc,
+        "session_log_tick_stops_timer",
+        "session.log",
+        json!({"op_id":"op-done","item_id":read,"values":{"quality":5},"note":"Finished"}),
+    );
+    assert_eq!(tick["changed"]["sessions"].as_array().unwrap().len(), 2);
 }
 
 #[test]

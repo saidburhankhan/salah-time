@@ -10,11 +10,11 @@ use salah_domain::{
     error::Error,
     item::validate_block,
     runtime::IdGenerator,
-    tracking::{Metric, MetricKind, Session, SessionValue},
+    tracking::{MetricKind, Session, SessionValue},
 };
 use salah_prayer::schedule;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 /// What a session is for: an item (its project is copied), a project, or both.
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -101,7 +101,7 @@ impl From<&Session> for SessionView {
     }
 }
 
-/// A metric to ask for when the running session stops.
+/// An optional metric available for the running session.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct PromptMetric {
     pub metric_id: String,
@@ -119,39 +119,29 @@ pub fn running(store: &Store) -> Result<Option<Session>, Error> {
 
 /// The metrics a session of `project_id` asks for, in the project's order.
 pub fn prompt(store: &Store, project_id: Option<&str>) -> Result<Vec<PromptMetric>, Error> {
-    let metrics = match project_id {
-        Some(_) => asked(store, project_id)?,
-        None => ["focus", "quality"]
+    let ids: Vec<String> = match project_id {
+        Some(id) => store
+            .project_metrics(id)?
             .into_iter()
-            .map(|id| Ok((metrics::find(store, id)?, false)))
-            .collect::<Result<_, Error>>()?,
+            .map(|link| link.metric_id)
+            .collect(),
+        None => vec!["focus".to_owned(), "quality".to_owned()],
     };
-    Ok(metrics
-        .into_iter()
-        .map(|(metric, required)| PromptMetric {
-            metric_id: metric.id,
-            name: metric.name,
-            unit: metric.unit,
-            kind: metric.kind,
-            scale_max: metric.scale_max,
-            required,
-        })
-        .collect())
-}
-
-/// The project's metrics that are not archived, with whether each is required.
-fn asked(store: &Store, project_id: Option<&str>) -> Result<Vec<(Metric, bool)>, Error> {
-    let Some(project_id) = project_id else {
-        return Ok(Vec::new());
-    };
-    let mut asked = Vec::new();
-    for link in store.project_metrics(project_id)? {
-        let metric = metrics::find(store, &link.metric_id)?;
+    let mut prompt = Vec::new();
+    for id in ids {
+        let metric = metrics::find(store, &id)?;
         if !metric.archived {
-            asked.push((metric, link.required));
+            prompt.push(PromptMetric {
+                metric_id: metric.id,
+                name: metric.name,
+                unit: metric.unit,
+                kind: metric.kind,
+                scale_max: metric.scale_max,
+                required: false,
+            });
         }
     }
-    Ok(asked)
+    Ok(prompt)
 }
 
 /// Starts a timer in the block in progress. Only one session may run.
@@ -174,7 +164,7 @@ pub fn start(
 }
 
 /// Stops the running session (`id`, or whichever runs) and records its
-/// minutes, values, and note. The project's required metrics must be given.
+/// minutes and any supplied values or note.
 /// A timer left running past its day ends at that day's sleep boundary.
 pub fn stop(
     tx: &WriteTx<'_>,
@@ -184,9 +174,20 @@ pub fn stop(
     values: Values,
     session_note: Option<String>,
 ) -> Result<Session, Error> {
-    let mut session = running(tx)?
+    let session = running(tx)?
         .filter(|s| id.is_none_or(|id| s.id == id))
         .ok_or_else(|| not_found("running session", id.unwrap_or("")))?;
+    finish(tx, config, now, session, values, session_note)
+}
+
+fn finish(
+    tx: &WriteTx<'_>,
+    config: &Config,
+    now: DateTime<Utc>,
+    mut session: Session,
+    values: Values,
+    session_note: Option<String>,
+) -> Result<Session, Error> {
     let started = session.started_at.unwrap_or(now);
     let day = session.block.day;
     let today = day::current(config, now)?;
@@ -199,7 +200,7 @@ pub fn stop(
         .map(|v| (v.metric_id.clone(), v.value))
         .collect();
     combined.extend(values);
-    session.values = checked_values(tx, session.project_id.as_deref(), combined, &session.values)?;
+    session.values = checked_values(tx, combined, &session.values)?;
     if session_note.is_some() {
         session.note = note(session_note)?;
     }
@@ -210,7 +211,7 @@ pub fn stop(
     Ok(session)
 }
 
-/// Records a finished session. The project's required metrics must be given.
+/// Records a finished session with optional metric values.
 pub fn log(
     tx: &WriteTx<'_>,
     config: &Config,
@@ -218,6 +219,22 @@ pub fn log(
     ids: &dyn IdGenerator,
     new: NewLog,
 ) -> Result<Session, Error> {
+    Ok(log_with_changes(tx, config, now, ids, new)?.logged)
+}
+
+/// The new log and any timer stopped in the same transaction.
+pub struct LogResult {
+    pub logged: Session,
+    pub stopped: Option<Session>,
+}
+
+pub fn log_with_changes(
+    tx: &WriteTx<'_>,
+    config: &Config,
+    now: DateTime<Utc>,
+    ids: &dyn IdGenerator,
+    new: NewLog,
+) -> Result<LogResult, Error> {
     let item_block = match &new.target.item_id {
         Some(id) => Some(items::find(tx, id)?.block),
         None => None,
@@ -236,11 +253,22 @@ pub fn log(
     };
     let mut session = new_session(ids.new_id(), now, item_id, project_id, block);
     session.minutes = new.minutes.map(|m| minutes("minutes", m)).transpose()?;
-    session.values = checked_values(tx, session.project_id.as_deref(), new.values, &[])?;
+    session.values = checked_values(tx, new.values, &[])?;
     session.note = note(new.note)?;
     day::freeze(tx, config, block.day, schedule.day())?;
+    let stopped = if session.is_tick() && session.item_id.is_some() {
+        running(tx)?
+            .filter(|timer| timer.item_id == session.item_id)
+            .map(|timer| finish(tx, config, now, timer, Values::new(), None))
+            .transpose()?
+    } else {
+        None
+    };
     session.version = tx.put_session(&session)?;
-    Ok(session)
+    Ok(LogResult {
+        logged: session,
+        stopped,
+    })
 }
 
 pub fn edit(
@@ -264,12 +292,7 @@ pub fn edit(
         session.minutes = Some(minutes("minutes", value)?);
     }
     if let Some(values) = changes.values {
-        let required_project = if session.is_running() {
-            None
-        } else {
-            session.project_id.as_deref()
-        };
-        session.values = checked_values(tx, required_project, values, &session.values)?;
+        session.values = checked_values(tx, values, &session.values)?;
     }
     if let Some(value) = changes.note {
         session.note = note(value)?;
@@ -357,12 +380,9 @@ fn resolve(store: &Store, target: Target) -> Result<(Option<String>, Option<Stri
     }
 }
 
-/// Validates each value against its metric and requires the project's
-/// required metrics that are not archived. A value in `kept` (the session's
-/// current values) stays valid even if its metric was archived since.
+/// Validates supplied samples and preserves previously recorded archived values.
 fn checked_values(
     store: &Store,
-    project_id: Option<&str>,
     mut values: Values,
     kept: &[SessionValue],
 ) -> Result<Vec<SessionValue>, Error> {
@@ -381,15 +401,6 @@ fn checked_values(
         if !values.contains_key(&old.metric_id) && metrics::find(store, &old.metric_id)?.archived {
             values.insert(old.metric_id.clone(), old.value);
         }
-    }
-    let given: BTreeSet<&str> = values.keys().map(String::as_str).collect();
-    let missing: Vec<String> = asked(store, project_id)?
-        .into_iter()
-        .filter(|(metric, required)| *required && !given.contains(metric.id.as_str()))
-        .map(|(metric, _)| metric.id)
-        .collect();
-    if !missing.is_empty() {
-        return Err(Error::MissingMetrics(missing));
     }
     Ok(values
         .into_iter()
@@ -414,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn a_timer_stops_with_rounded_minutes_and_required_values() {
+    fn a_timer_stops_with_rounded_minutes_and_optional_values() {
         let mut store = Store::open_in_memory().unwrap();
         let quran = project(&mut store, "Quran");
         let started = store
@@ -426,20 +437,6 @@ mod tests {
             store.write(|tx| start(tx, &config(), at(20, 13, 1), ids(), on_project(&quran.id)));
         assert_eq!(second.unwrap_err().code(), "conflict");
 
-        let missing = store.write(|tx| {
-            stop(
-                tx,
-                &config(),
-                at(20, 13, 25),
-                None,
-                Values::from([("focus".into(), 4.0)]),
-                None,
-            )
-        });
-        assert_eq!(
-            missing.unwrap_err(),
-            Error::MissingMetrics(vec!["quality".into()])
-        );
         let invalid =
             store.write(|tx| stop(tx, &config(), at(20, 13, 25), None, rated(6.0, 3.0), None));
         assert_eq!(invalid.unwrap_err().code(), "validation");
@@ -451,7 +448,7 @@ mod tests {
                     &config(),
                     at(20, 13, 25),
                     Some(&started.id),
-                    rated(4.0, 3.0),
+                    Values::from([("focus".into(), 4.0)]),
                     Some(" good ".into()),
                 )
             })
@@ -573,7 +570,7 @@ mod tests {
             .iter()
             .map(|m| (m.metric_id.as_str(), m.required))
             .collect();
-        assert_eq!(ids, [("focus", true), ("quality", true)]);
+        assert_eq!(ids, [("focus", false), ("quality", false)]);
         assert_eq!(prompt[0].scale_max, Some(5));
     }
 
@@ -636,7 +633,7 @@ mod tests {
     }
 
     #[test]
-    fn an_archived_metric_is_neither_required_nor_prompted_but_old_values_stay() {
+    fn archived_metrics_reject_new_samples_and_preserve_existing_samples() {
         let mut store = Store::open_in_memory().unwrap();
         let pages = store
             .write(|tx| {
@@ -699,9 +696,24 @@ mod tests {
         store
             .write(|tx| start(tx, &config(), at(20, 14, 0), ids(), on_project(&book.id)))
             .unwrap();
+        let archived_sample = Values::from([(pages.id.clone(), 1.0)]);
+        let invalid = store
+            .write(|tx| {
+                stop(
+                    tx,
+                    &config(),
+                    at(20, 14, 30),
+                    None,
+                    archived_sample.clone(),
+                    None,
+                )
+            })
+            .unwrap_err();
+        assert_eq!(invalid.code(), "validation");
+        assert!(running(&store).unwrap().is_some());
         store
             .write(|tx| stop(tx, &config(), at(20, 14, 30), None, Values::new(), None))
-            .expect("an archived required metric is no longer required");
+            .expect("a stop without values succeeds");
 
         let keep = SessionChanges {
             values: Some(Values::from([(pages.id.clone(), 12.0)])),

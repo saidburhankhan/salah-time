@@ -97,16 +97,9 @@ pub fn projects(result: &Value) -> String {
     rows(result)
         .iter()
         .map(|project| {
-            let metrics: Vec<String> = rows(&project["metrics"])
+            let metrics: Vec<&str> = rows(&project["metrics"])
                 .iter()
-                .map(|m| {
-                    let suffix = if m["required"].as_bool() == Some(true) {
-                        ""
-                    } else {
-                        "?"
-                    };
-                    format!("{}{suffix}", text(&m["metric_id"]))
-                })
+                .map(|metric| text(&metric["metric_id"]))
                 .collect();
             format!(
                 "{}  {}  {}  [{}]",

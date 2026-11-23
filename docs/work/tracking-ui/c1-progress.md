@@ -41,3 +41,30 @@ The existing tracking-v1 database receives additive history tables on open. Enti
 - `docs/work/tracking-ui/c1-progress.md`
 
 CHECKPOINT 1: Preserve tracking history and harden session validation, stats, replay and notifications
+
+## User decisions — optional metrics and explicit completion
+
+`session.stop`, `session.log` and `session.edit` accept empty or partial metric values. Supplied values retain kind, range and archive validation. Project bindings retain their stored `required` flag for compatibility. All entries in `status.get.prompt` return `required: false`.
+
+A live tick makes an item done on the tick's day. Timed work continues to count toward minutes and the fulfilment ratio. Ticking the item whose timer is running stops that timer first inside the same write transaction. The RPC result lists the new tick first for existing log callers, followed by the stopped timer. Each session keeps its own day and values. A retry returns both original rows at the original revision.
+
+Regression coverage includes an overnight 810-minute Sleep clamp, a tick with invalid values leaving the timer running, unrelated item and project ticks, manual minute logs during a timer, distinct tick and timer values, one revision and op ID for both changes, replay, and unticking while retaining the timed work.
+
+### Verification
+
+- Regenerated golden responses with `UPDATE_FIXTURES=1 cargo test --offline --test rpc` and verified them in the ordinary suite.
+- 130 non-socket Rust tests passed. All eight tests in `crates/salah-cli/tests/daemon.rs` failed in the full workspace run because this sandbox denies Unix socket creation.
+- Strict Clippy, `cargo fmt --check`, `git diff --check`, and the widget's 35 session-logic checks passed.
+- UI-A integration follow-up at `app/tests/salah_app_tests.cpp:806`: the test reads the deleted missing-metrics error fixture. The replacement success assertion can read `session_stop.json` and check the stopped session's empty values.
+- Original task 2 is obsolete because the missing-metrics error was removed. Tasks 3–5 remain queued for subsequent checkpoints.
+
+### Checkpoint files
+
+- `crates/salah-domain/src/{error,tracking}.rs`
+- `crates/salah-core/src/{lib,projects,sessions}.rs`, `crates/salah-core/src/day/{fulfilment,view}.rs`
+- `crates/salah-protocol/src/{error,writes}.rs`, `crates/salah-protocol/tests/dispatch.rs`
+- `crates/salah-cli/src/{render,tracking}.rs`, `crates/salah-cli/tests/{daemon,rpc,tracking_cli}.rs`
+- `crates/salah-cli/tests/fixtures/rpc/{day_tracking,session_edit,session_log,session_log_tick_stops_timer,session_stop,session_stop_invalid_value,stats,stats_by_tag,status_running}.json`; removed `session_stop_missing_metrics.json` from the same directory.
+- `docs/work/architecture/protocol-v1.md`, `docs/work/tracking-ui/c1-progress.md`
+
+CHECKPOINT A-D: Make session metrics optional and record explicit completion ticks atomically with timer stops
