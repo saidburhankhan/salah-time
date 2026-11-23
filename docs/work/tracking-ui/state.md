@@ -61,6 +61,10 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   - Windows ~08:15, ~13:15, ~18:15, then ~0.2 of ~23:15 → weekly 100% ~23:30 on the 24th, before
     the 25 Nov renewal. Requires every window started on time (overnight too: this session must
     stay open) and fully used. Recalibrate the 31% after each window.
+  22:12 window (weekly 16%): C5 --resume Astra = r2-findings fixes; C6 --resume Sol = bell/due,
+  resources in rows, then plugin r3 findings (CHECKPOINT R3w); C7 --resume Astra = all app/ r3
+  findings (CHECKPOINT R3a; task drawer after, on Sol). session.log ticks already stop the
+  matching timer server-side, so the R3 "Done = two writes" fix is frontend-only. C8 when C5 commits.
   Tags on tasks (user, ~18:00; plan.md addendum): C8 0 (item_tags in 005) + 0c rules, then C9 0
   (app) and C10 0 (widget) before their phase 4 tasks.
   Only useful work goes in the queue (user features, real bugs, data-guarding reviews), never
