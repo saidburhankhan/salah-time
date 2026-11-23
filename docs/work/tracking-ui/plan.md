@@ -183,6 +183,17 @@ the required and optional metrics, and see results in charts. Both surfaces stay
   App item editor: under the project chips, "Asks" with the project's metrics as toggle chips (all
   on by default; "Reset to project"). Widget: no editor needed (the app owns it); the creation
   sheet (phase 3) may add it later. Fixtures `item_edit_metrics.json`.
+- **Notes during a running session** (user request): `session.note {id?, text, op_id}` appends a
+  line `HH:MM text` (local time) to the session's note without stopping it or touching earlier
+  lines (default: the running session; text 1–500 chars, trimmed; replay-safe). Fixture
+  `session_note.json`. Earlier notes are never replaced by this method; `session.edit note` still
+  edits the whole note.
+- **Bar "+" mouse buttons:** left click = distractions +1 (as above). **Right click = distractions
+  +1 and opens a small note box** for the running session (a compact popover anchored to the bar,
+  not the full popup; one line field, Enter or Save sends `session.note`, Esc closes without saving;
+  the count stays even if the note is cancelled). Neither click toggles the main popup.
+- **"Add note" on the running card** (widget popup and app): the same one-line field without
+  counting a distraction.
 - New fixtures: `stats_table_week.json`, `stats_table_project.json`, `stats_item_filter.json`,
   `session_stop_done.json`.
 

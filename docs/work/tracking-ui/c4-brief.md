@@ -20,6 +20,7 @@ Tasks, in order, one CHECKPOINT each:
    in the pause panel and session editor.
 1c. Item editor: "Asks" toggle chips of the project's metrics (all on by default, "Reset to
    project"), sent as `metric_ids`; every panel asks the row's `metrics` list.
+1d. Running card "Add note": one-line field sending `session.note` (appends; no pause).
 2. Stats filters: separate Tags, Projects (narrowed by tag) and Tasks (narrowed by project)
    lists; range presets 7/28/90 plus Custom with from/to date pickers; every request carries
    the filter.
