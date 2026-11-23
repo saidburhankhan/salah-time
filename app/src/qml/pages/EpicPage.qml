@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
+import "../resources"
 import "../statistics"
 
 // One epic: its project, status and totals, minutes per day, the tasks and
@@ -168,6 +169,13 @@ ScrollView {
                         font.pixelSize: 13
                         wrapMode: Text.WordWrap
                     }
+                }
+                ResourceChip {
+                    objectName: "epicResources"
+                    win: epicPage.win
+                    selected: epicPage.win.resourceTargetId === epicPage.win.epicId
+                    onClicked: epicPage.win.openResources("epic", epicPage.win.epicId,
+                                                          epicPage.epic ? String(epicPage.epic.name || "") : "")
                 }
                 AppButton {
                     objectName: "epicLogButton"

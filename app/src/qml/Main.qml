@@ -9,6 +9,7 @@ import "overlays"
 import "controls"
 import "today"
 import "backlog"
+import "resources"
 
 ApplicationWindow {
     id: win
@@ -26,6 +27,8 @@ ApplicationWindow {
     // 0 Today, 1 Routines, 2 Statistics, 3 Settings, 4 an Epic, 5 Backlog.
     property int page: 0
     property string epicId: ""
+    // The task or epic whose resource drawer is open ("" for none).
+    property string resourceTargetId: ""
     property int epicBackPage: 2
     property bool quickVisible: false
     property bool entryVisible: false
@@ -91,6 +94,11 @@ ApplicationWindow {
     function openEntryFromParse(title) { editItem = backend.itemFromParse(title || ""); entryVisible = true }
     function openBacklogEntry() { openEntry({ backlog: true }) }
     function openSchedule(item) { scheduleDialog.show(item) }
+    // kind is "item" or "epic". Opening it again for the same target closes it.
+    function openResources(kind, id, title) {
+        if (resourceDrawer.opened && resourceDrawer.targetId === id) { resourceDrawer.close(); return }
+        resourceDrawer.show(kind, id, title)
+    }
     function locationName() { return backend.config.locationName || backend.config.location || qsTr("Location") }
     function methodName() { return backend.config.methodName || backend.config.method || "—" }
     function capitalized(s) { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1) }
@@ -447,6 +455,8 @@ ApplicationWindow {
             Layout.fillHeight: true
             ColumnLayout {
                 anchors.fill: parent
+                // The resource drawer sits beside the page, not over it.
+                anchors.rightMargin: resourceDrawer.visible ? resourceDrawer.width : 0
                 spacing: 0
                 AppHeader {
                     win: win
@@ -523,6 +533,10 @@ ApplicationWindow {
     }
     ScheduleDialog {
         id: scheduleDialog
+        win: win
+    }
+    ResourceDrawer {
+        id: resourceDrawer
         win: win
     }
 

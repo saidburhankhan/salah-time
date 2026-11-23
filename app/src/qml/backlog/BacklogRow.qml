@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
+import "../resources"
 
 Rectangle {
     id: row
@@ -94,6 +95,13 @@ Rectangle {
             color: row.win.muted
             font.pixelSize: 12
             horizontalAlignment: Text.AlignRight
+        }
+        ResourceChip {
+            objectName: "backlogResources_" + row.task.id
+            win: row.win
+            count: row.resourceCount
+            selected: row.win.resourceTargetId === row.task.id
+            onClicked: row.win.openResources("item", row.task.id, row.task.title)
         }
         AppButton {
             objectName: "backlogEdit_" + row.task.id

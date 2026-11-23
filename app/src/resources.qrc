@@ -7,6 +7,11 @@
         <file alias="qml/pages/SettingsPage.qml">qml/pages/SettingsPage.qml</file>
         <file alias="qml/pages/EpicPage.qml">qml/pages/EpicPage.qml</file>
         <file alias="qml/pages/BacklogPage.qml">qml/pages/BacklogPage.qml</file>
+        <file alias="qml/resources/ResourceDrawer.qml">qml/resources/ResourceDrawer.qml</file>
+        <file alias="qml/resources/ResourceTime.js">qml/resources/ResourceTime.js</file>
+        <file alias="qml/resources/ResourceChip.qml">qml/resources/ResourceChip.qml</file>
+        <file alias="qml/resources/ResourceRow.qml">qml/resources/ResourceRow.qml</file>
+        <file alias="qml/resources/ResourceForm.qml">qml/resources/ResourceForm.qml</file>
         <file alias="qml/backlog/BacklogRow.qml">qml/backlog/BacklogRow.qml</file>
         <file alias="qml/backlog/BacklogDrag.qml">qml/backlog/BacklogDrag.qml</file>
         <file alias="qml/backlog/ScheduleDialog.qml">qml/backlog/ScheduleDialog.qml</file>

@@ -67,6 +67,8 @@ class Backend : public QObject {
     Q_PROPERTY(bool sessionsLoading READ sessionsLoading NOTIFY sessionsLoadingChanged)
     Q_PROPERTY(QVariantMap epicSeries READ epicSeries NOTIFY epicPageChanged)
     Q_PROPERTY(QVariantList epicSessions READ epicSessions NOTIFY epicPageChanged)
+    Q_PROPERTY(QVariantList resources READ resources NOTIFY resourcesChanged)
+    Q_PROPERTY(bool resourcesLoading READ resourcesLoading NOTIFY resourcesChanged)
 public:
     explicit Backend(QObject *parent = nullptr, const QString &program = {}, int timeoutMs = 10000,
                      const QString &socketPath = {});
@@ -113,6 +115,8 @@ public:
     QVariantList tags() const { return m_tags; }
     QVariantMap epicSeries() const { return m_epicSeries; }
     QVariantList epicSessions() const { return m_epicSessions; }
+    QVariantList resources() const { return m_resources; }
+    bool resourcesLoading() const { return m_resourcesLoading; }
     QVariantList metrics() const { return m_metrics; }
     QVariantList trackingItems() const { return m_trackingItems; }
     QVariantList backlogItems() const { return m_backlogItems; }
@@ -196,6 +200,15 @@ public:
     // The Epic page: minutes per day (stats.series) and the epic's sessions
     // (sessions.list), kept apart from the Statistics results.
     Q_INVOKABLE void loadEpicPage(const QString &epicId);
+    // Resources (backend_resources.cpp). `kind` is "item" or "epic". The list
+    // follows the open target and refreshes on `changed` notifications.
+    Q_INVOKABLE void loadResources(const QString &kind, const QString &id);
+    Q_INVOKABLE void closeResources();
+    // `fields`: kind (add only), title, body, url, remind_at; an empty optional
+    // string clears it on edit. Edit also takes `done`.
+    Q_INVOKABLE void addResource(const QVariantMap &fields);
+    Q_INVOKABLE void editResource(const QString &id, const QVariantMap &fields);
+    Q_INVOKABLE void removeResource(const QString &id);
     Q_INVOKABLE ItemDraft *itemForId(const QString &id);
     Q_INVOKABLE ItemDraft *itemFromParse(const QString &fallbackTitle = {});
     Q_INVOKABLE QString hijriHeader(const QString &isoDate) const;
@@ -231,6 +244,9 @@ signals:
     void sessionsListChanged();
     void sessionsLoadingChanged();
     void epicPageChanged();
+    void resourcesChanged();
+    // A resource add/edit/remove finished; `message` is the server error on failure.
+    void resourceWriteFinished(bool ok, const QString &message);
 
 private:
     struct PendingCreate {
@@ -276,6 +292,9 @@ private:
     void reloadFromNotification(qint64 revision, const QStringList &scopes);
     bool dayContains(const QString &id) const;
     void refreshBacklog();
+    void refreshResources();
+    void applyResourceWrite(const CoreClient::Result &result);
+    qint64 resourceVersion(const QString &id) const;
     QVariantMap backlogItem(const QString &id) const;
     qint64 backlogVersionFor(const QString &id) const;
 
@@ -312,6 +331,11 @@ private:
     PreviewState m_preview;
     QVariantList m_projects, m_epics, m_tags, m_metrics;
     QVariantMap m_epicSeries;
+    QVariantList m_resources;
+    QString m_resourceKind, m_resourceTarget;
+    quint64 m_resourcesRequest = 0;
+    bool m_resourcesOpen = false;
+    bool m_resourcesLoading = false;
     QVariantList m_epicSessions;
     quint64 m_epicRequest = 0;
     QVariantList m_trackingItems;

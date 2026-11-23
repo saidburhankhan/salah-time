@@ -31,6 +31,8 @@ RowLayout {
     }
     ScrollView {
         id: todaySide
+        // The side cards make room while the resource drawer is open.
+        visible: todayPage.win.resourceTargetId === ""
         Layout.preferredWidth: 300
         Layout.minimumWidth: 270
         Layout.maximumWidth: 320

@@ -88,6 +88,9 @@ DayTimelineModel::Row itemRow(const Dto::DayItem &item, bool pending) {
     const QJsonArray sessions = item.json.value(QStringLiteral("sessions")).toArray();
     row.sessions = sessions.size();
     row.sessionList = sessions.toVariantList();
+    const QJsonObject resources = item.json.value(QStringLiteral("resources")).toObject();
+    row.resourceCount = resources.value(QStringLiteral("notes")).toInt()
+        + resources.value(QStringLiteral("links")).toInt() + resources.value(QStringLiteral("reminders")).toInt();
     const QJsonValue metrics = item.json.value(QStringLiteral("metrics"));
     if (metrics.isArray()) row.promptMetrics = metrics.toArray().toVariantList();
     for (const QJsonValue &value : sessions) {
@@ -241,6 +244,7 @@ void Backend::reloadFromNotification(qint64 revision, const QStringList &scopes)
     if (revision <= m_lastNotificationRevision) return;
     m_lastNotificationRevision = revision;
     reload();
+    if (scopes.isEmpty() || scopes.contains("resources")) refreshResources();
     // Another surface (the bar widget, the CLI) may have changed projects,
     // tags, or metrics; the lists are cheap.
     loadSettings();

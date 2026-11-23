@@ -257,6 +257,7 @@ Item {
             required property var promptMetrics
             required property bool ticked
             required property string runningSessionId
+            required property int resourceCount
             readonly property bool open: rowKind === "item" && sessions > 0 && !!timeline.expanded[itemId]
             width: todayList.width
             height: rowKind === "header" ? 60
@@ -302,6 +303,7 @@ Item {
                 promptMetrics: rowDelegate.promptMetrics
                 ticked: rowDelegate.ticked
                 runningSessionId: rowDelegate.runningSessionId
+                resourceCount: rowDelegate.resourceCount
                 expanded: rowDelegate.open
                 onToggleExpanded: timeline.toggleExpanded(rowDelegate.itemId)
                 rowIndex: rowDelegate.index

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
+import "../resources"
 
 // A plan line: drag handle, done box, title with project and progress, and
 // the session actions. Expanded, it lists today's sessions for editing.
@@ -32,6 +33,7 @@ Rectangle {
     property bool ticked: false
     property string runningSessionId: ""
     property bool expanded: false
+    property int resourceCount: 0
     property int rowIndex: 0
     property var list: null
     // Done is an explicit tick (day.get `done`); timed sessions never count.
@@ -204,6 +206,13 @@ Rectangle {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: itemCard.toggleExpanded()
             }
+        }
+        ResourceChip {
+            objectName: "resourcesButton"
+            win: itemCard.win
+            count: itemCard.resourceCount
+            selected: itemCard.win.resourceTargetId === itemCard.itemId
+            onClicked: itemCard.win.openResources("item", itemCard.itemId, itemCard.title)
         }
         AppButton {
             objectName: "toBacklogButton"

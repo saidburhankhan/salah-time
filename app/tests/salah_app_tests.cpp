@@ -408,12 +408,28 @@ esac
         QJsonObject day;
         QJsonObject status;
         QJsonArray backlog;
+        QJsonArray resources;
         qint64 revision = 100;
     };
+    static QJsonObject resourceRow(const QString &kind, const QString &id, const QJsonValue &item, const QJsonValue &epic,
+                                   const QJsonValue &title, const QJsonValue &body, const QJsonValue &url,
+                                   const QJsonValue &remind, bool done) {
+        return QJsonObject{{"id", id}, {"kind", kind}, {"item_id", item.isUndefined() ? QJsonValue(QJsonValue::Null) : item},
+                          {"epic_id", epic.isUndefined() ? QJsonValue(QJsonValue::Null) : epic},
+                          {"title", title.isUndefined() ? QJsonValue(QJsonValue::Null) : title},
+                          {"body", body.isUndefined() ? QJsonValue(QJsonValue::Null) : body},
+                          {"url", url.isUndefined() ? QJsonValue(QJsonValue::Null) : url},
+                          {"remind_at", remind.isUndefined() ? QJsonValue(QJsonValue::Null) : remind},
+                          {"done", done}, {"position", 0}, {"version", 1}, {"created_at", "2031-05-14T04:30:00Z"},
+                          {"updated_at", "2031-05-14T04:30:00Z"}, {"deleted_at", QJsonValue(QJsonValue::Null)}};
+    }
+    static QJsonObject rpcFixture(const QString &name) {
+        return readJson(QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/rpc/") + name + ".json").object();
+    }
     static QJsonObject emptyChanged() {
         return QJsonObject{{"items", QJsonArray{}}, {"sessions", QJsonArray{}}, {"projects", QJsonArray{}},
                            {"epics", QJsonArray{}}, {"tags", QJsonArray{}}, {"metrics", QJsonArray{}}, {"marks", QJsonArray{}},
-                           {"deleted", QJsonArray{}}};
+                           {"resources", QJsonArray{}}, {"deleted", QJsonArray{}}};
     }
     static FakeDaemon::Handler trackingHandler(std::shared_ptr<TrackingState> state) {
         return [state](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
@@ -491,6 +507,16 @@ esac
                 }
                 server->respond(socket, request, rows);
             }
+            else if (method == "resources.list") {
+                QJsonArray rows;
+                for (const QJsonValue &row : state->resources) {
+                    const QJsonObject r = row.toObject();
+                    if (params.contains("item_id") ? r.value("item_id") == params.value("item_id")
+                                                   : r.value("epic_id") == params.value("epic_id"))
+                        rows.append(row);
+                }
+                server->respond(socket, request, rows);
+            }
             else if (method == "tags.list") server->respond(socket, request, TrackingFixture::tags());
             else if (method == "metrics.list") server->respond(socket, request, TrackingFixture::metrics());
             else if (method == "item.preview") server->respond(socket, request, fixture("item_preview"));
@@ -502,6 +528,22 @@ esac
                 else if (method == "epic.add" || method == "epic.edit")
                     changed["epics"] = QJsonArray{QJsonObject{{"id", params.value("id").toString("new-epic")},
                                                               {"name", params.value("name")}}};
+                else if (method == "resource.add")
+                    changed["resources"] = QJsonArray{resourceRow(params.value("kind").toString(), "new-resource",
+                                                                  params.value("item_id"), params.value("epic_id"),
+                                                                  params.value("title"), params.value("body"),
+                                                                  params.value("url"), params.value("remind_at"), false)};
+                else if (method == "resource.edit") {
+                    for (const QJsonValue &row : state->resources)
+                        if (row.toObject().value("id") == params.value("id")) {
+                            QJsonObject edited = row.toObject();
+                            for (const QString &key : {"title", "body", "url", "remind_at", "done"})
+                                if (params.contains(key)) edited[key] = params.value(key);
+                            changed["resources"] = QJsonArray{edited};
+                        }
+                }
+                else if (method == "resource.remove")
+                    changed["deleted"] = QJsonArray{params.value("id")};
                 else if (method == "epic.remove")
                     changed["deleted"] = QJsonArray{params.value("id")};
                 else if (method == "tag.add" || method == "tag.edit")
@@ -3691,6 +3733,227 @@ fi
         shotWindow(window, "prompt-pause-stale.png");
         root->setProperty("sessionPromptVisible", false);
 
+        QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
+        window->hide();
+    }
+
+    static QJsonArray resourceRowsFor(const QString &item) {
+        QJsonArray rows = rpcFixture("resources_list").value("result").toArray();
+        for (int i = 0; i < rows.size(); ++i) {
+            QJsonObject row = rows.at(i).toObject();
+            row["item_id"] = item;
+            row["id"] = QString("r%1").arg(i + 1);
+            // The reminder is long overdue and open; the link keeps its title.
+            if (row.value("kind") == "reminder") row["remind_at"] = "2020-01-02T08:00:00Z";
+            rows[i] = row;
+        }
+        return rows;
+    }
+    static void setRowResources(QJsonObject &day, const QString &id, int notes, int links, int reminders) {
+        QJsonArray blocks = day.value("blocks").toArray();
+        for (int b = 0; b < blocks.size(); ++b) {
+            QJsonObject block = blocks.at(b).toObject();
+            QJsonArray items = block.value("items").toArray();
+            for (int i = 0; i < items.size(); ++i) {
+                QJsonObject item = items.at(i).toObject();
+                if (item.value("id").toString() == id)
+                    item["resources"] = QJsonObject{{"notes", notes}, {"links", links}, {"reminders", reminders}};
+                items[i] = item;
+            }
+            block["items"] = items;
+            blocks[b] = block;
+        }
+        day["blocks"] = blocks;
+    }
+    void resourceRequestsFollowCanonicalFixtures() {
+        for (const char *name : {"resource_add_link", "resource_add_reminder", "resource_edit_done"})
+            QVERIFY2(Dto::decode<Dto::MutationResult>(fixture(name)), name);
+        const QJsonArray listed = rpcFixture("resources_list").value("result").toArray();
+        QCOMPARE(listed.size(), 3);
+        for (const char *key : {"id", "item_id", "epic_id", "kind", "title", "body", "url", "remind_at", "done", "position", "version"})
+            QVERIFY2(listed.first().toObject().contains(key), key);
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        auto state = trackingState();
+        state->resources = resourceRowsFor("dhikr");
+        daemon.setHandler(trackingHandler(state));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        backend.reload();
+        waitForBackendIdle(backend);
+
+        backend.loadResources("item", "dhikr");
+        QTRY_COMPARE_WITH_TIMEOUT(backend.resources().size(), 3, 3000);
+        QJsonObject params = lastRequest(daemon, "resources.list").value("params").toObject();
+        QCOMPARE(params.value("item_id").toString(), QString("dhikr"));
+        QVERIFY(!params.contains("epic_id"));
+
+        backend.addResource({{"kind", "link"}, {"url", "https://example.org/books?q=first"}, {"title", "Reading"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "resource.add").isEmpty(), 3000);
+        params = lastRequest(daemon, "resource.add").value("params").toObject();
+        QCOMPARE(params.value("item_id").toString(), QString("dhikr"));
+        QCOMPARE(params.value("kind").toString(), QString("link"));
+        QCOMPARE(params.value("url").toString(), QString("https://example.org/books?q=first"));
+        QCOMPARE(params.value("title").toString(), QString("Reading"));
+        QVERIFY(params.contains("op_id") && !params.contains("body") && !params.contains("remind_at") && !params.contains("epic_id"));
+
+        backend.addResource({{"kind", "reminder"}, {"title", "Check opening times"}, {"remind_at", "2031-05-14T04:30:00Z"}});
+        QTRY_COMPARE_WITH_TIMEOUT(requestCount(daemon, "resource.add"), 2, 3000);
+        params = lastRequest(daemon, "resource.add").value("params").toObject();
+        QCOMPARE(params.value("kind").toString(), QString("reminder"));
+        QCOMPARE(params.value("remind_at").toString(), QString("2031-05-14T04:30:00Z"));
+
+        backend.addResource({{"kind", "note"}, {"body", "First line\nSecond line"}, {"title", "  "}});
+        QTRY_COMPARE_WITH_TIMEOUT(requestCount(daemon, "resource.add"), 3, 3000);
+        params = lastRequest(daemon, "resource.add").value("params").toObject();
+        QCOMPARE(params.value("body").toString(), QString("First line\nSecond line"));
+        QVERIFY(!params.contains("title") && !params.contains("url"));
+
+        backend.editResource("r2", {{"done", true}});
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "resource.edit").isEmpty(), 3000);
+        params = lastRequest(daemon, "resource.edit").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("r2"));
+        QVERIFY(params.value("done").toBool());
+        QCOMPARE(params.value("expected_version").toInt(), 1);
+        QVERIFY(params.contains("op_id") && !params.contains("title") && !params.contains("remind_at"));
+
+        backend.editResource("r1", {{"title", ""}, {"url", "https://example.org/other"}});
+        QTRY_COMPARE_WITH_TIMEOUT(requestCount(daemon, "resource.edit"), 2, 3000);
+        params = lastRequest(daemon, "resource.edit").value("params").toObject();
+        QVERIFY(params.value("title").isNull() && params.contains("title"));
+        QCOMPARE(params.value("url").toString(), QString("https://example.org/other"));
+
+        backend.removeResource("r3");
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "resource.remove").isEmpty(), 3000);
+        params = lastRequest(daemon, "resource.remove").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("r3"));
+        QCOMPARE(params.value("expected_version").toInt(), 1);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.resources().size() >= 3, 3000);
+
+        // Epic targets use epic_id and never item_id.
+        backend.loadResources("epic", "e-grammar");
+        QTRY_VERIFY_WITH_TIMEOUT(lastRequest(daemon, "resources.list").value("params").toObject().contains("epic_id"), 3000);
+        params = lastRequest(daemon, "resources.list").value("params").toObject();
+        QCOMPARE(params.value("epic_id").toString(), QString("e-grammar"));
+        QVERIFY(!params.contains("item_id"));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.resources().size(), 0, 3000);
+        backend.addResource({{"kind", "note"}, {"body", "Epic note"}});
+        QTRY_COMPARE_WITH_TIMEOUT(requestCount(daemon, "resource.add"), 4, 3000);
+        params = lastRequest(daemon, "resource.add").value("params").toObject();
+        QCOMPARE(params.value("epic_id").toString(), QString("e-grammar"));
+        QVERIFY(!params.contains("item_id"));
+
+        // A `changed` notification for resources refreshes the open list.
+        const int lists = requestCount(daemon, "resources.list");
+        daemon.notifyChanged(500, {"resources"});
+        QTRY_VERIFY_WITH_TIMEOUT(requestCount(daemon, "resources.list") > lists, 3000);
+        backend.closeResources();
+        QVERIFY(backend.resources().isEmpty());
+        QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
+    }
+    void resourceWritesUseStdioRpcOffline() {
+        QTemporaryDir dir; Backend b(nullptr, fake(dir)); QSignalSpy spy(&b, &Backend::requestFinished);
+        b.reload(); QTRY_COMPARE(spy.size(), 4);
+        b.loadResources("item", "<id:2>");
+        b.addResource({{"kind", "link"}, {"url", "https://example.org"}});
+        b.editResource("r1", {{"done", true}});
+        b.removeResource("r1");
+        QTRY_COMPARE_WITH_TIMEOUT(offlineRequests(dir).size(), 3, 3000);
+        const auto requests = offlineRequests(dir);
+        QCOMPARE(requests[0].value("method").toString(), QString("resource.add"));
+        QCOMPARE(requests[0].value("params").toObject().value("item_id").toString(), QString("<id:2>"));
+        QCOMPARE(requests[1].value("method").toString(), QString("resource.edit"));
+        QVERIFY(requests[1].value("params").toObject().value("done").toBool());
+        QCOMPARE(requests[2].value("method").toString(), QString("resource.remove"));
+    }
+    void resourceDrawerScreens() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        auto state = trackingState();
+        setRowResources(state->day, "dhikr", 1, 1, 1);
+        state->resources = resourceRowsFor("dhikr");
+        state->backlog = backlogRows();
+        daemon.setHandler(trackingHandler(state));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        Theme theme(dir.path());
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create()); QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data()); QVERIFY(window);
+        window->setWidth(1440); window->setHeight(900); window->show();
+        backend.reload();
+        waitForBackendIdle(backend);
+
+        // The Today row shows its count and opens the drawer.
+        const int row = timelineItem(backend.dayTimeline(), "dhikr");
+        QVERIFY(row >= 0);
+        QCOMPARE(backend.dayTimeline()->data(backend.dayTimeline()->index(row, 0), DayTimelineModel::ResourceCountRole).toInt(), 3);
+        QObject *chip = nullptr;
+        for (QObject *candidate : visualNamed(window, "resourcesButton"))
+            if (candidate->property("count").toInt() == 3) chip = candidate;
+        QVERIFY(chip);
+        QVERIFY(QMetaObject::invokeMethod(chip, "clicked"));
+        QObject *drawer = findByName(root.data(), "resourceDrawer"); QVERIFY(drawer);
+        QTRY_VERIFY_WITH_TIMEOUT(drawer->property("opened").toBool(), 2000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.resources().size(), 3, 3000);
+        QCOMPARE(lastRequest(daemon, "resources.list").value("params").toObject().value("item_id").toString(), QString("dhikr"));
+        QTRY_VERIFY_WITH_TIMEOUT(!visualNamed(window, "resourceOpen_r1").isEmpty(), 2000);
+        shotWindow(window, "resource-drawer.png");
+        QVERIFY(!visualNamed(window, "resourceEdit_r3").isEmpty());
+
+        // Add a note: the form takes any text; nothing is required.
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "resourceAdd").value(0), "clicked"));
+        QObject *form = findByName(root.data(), "resourceForm"); QVERIFY(form);
+        QTRY_VERIFY_WITH_TIMEOUT(form->property("visible").toBool(), 2000);
+        QVERIFY(visualNamed(window, "resourceSave").value(0)->property("enabled").toBool());
+        shotWindow(window, "resource-add-form.png");
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "resourceKind_link").value(0), "clicked"));
+        QObject *save = visualNamed(window, "resourceSave").value(0);
+        QVERIFY(!save->property("enabled").toBool());  // a link needs a valid URL
+        visualNamed(window, "resourceUrl").value(0)->setProperty("text", "https://example.org/read");
+        QTRY_VERIFY(save->property("enabled").toBool());
+        shotWindow(window, "resource-add-link.png");
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "resourceKind_reminder").value(0), "clicked"));
+        QVERIFY(save->property("enabled").toBool());  // the default is tomorrow 09:00
+        shotWindow(window, "resource-add-reminder.png");
+        visualNamed(window, "resourceDate").value(0)->setProperty("text", "2031-13-45");
+        QTRY_VERIFY(!save->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "resourceTomorrow").value(0), "clicked"));
+        QVERIFY(save->property("enabled").toBool());
+        visualNamed(window, "resourceTitle").value(0)->setProperty("text", "Ring the shop");
+        QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "resource.add").isEmpty(), 3000);
+        QJsonObject params = lastRequest(daemon, "resource.add").value("params").toObject();
+        QCOMPARE(params.value("kind").toString(), QString("reminder"));
+        QCOMPARE(params.value("title").toString(), QString("Ring the shop"));
+        QVERIFY(QDateTime::fromString(params.value("remind_at").toString(), Qt::ISODate).isValid());
+        QVERIFY(params.value("remind_at").toString().endsWith("Z"));
+        QTRY_VERIFY_WITH_TIMEOUT(!form->property("visible").toBool(), 3000);
+
+        // Tick the overdue reminder off.
+        QQuickItem *done = qobject_cast<QQuickItem *>(visualNamed(window, "resourceDone_r2").value(0)); QVERIFY(done);
+        QTest::mouseClick(window, Qt::LeftButton, {}, done->mapToScene({done->width() / 2, done->height() / 2}).toPoint());
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "resource.edit").isEmpty(), 3000);
+        QVERIFY(lastRequest(daemon, "resource.edit").value("params").toObject().value("done").toBool());
+        // Edit the link.
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "resourceEdit_r1").value(0), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(form->property("visible").toBool(), 2000);
+        QCOMPARE(visualNamed(window, "resourceUrl").value(0)->property("text").toString(), QString("https://example.org/books?q=first"));
+        shotWindow(window, "resource-edit-link.png");
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "resourceCancel").value(0), "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "resourceRemove_r3").value(0), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "resource.remove").isEmpty(), 3000);
+        QCOMPARE(lastRequest(daemon, "resource.remove").value("params").toObject().value("id").toString(), QString("r3"));
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "resourceClose").value(0), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(!drawer->property("opened").toBool(), 2000);
+
+        // The Backlog page opens the same drawer for an item.
+        root->setProperty("page", 5);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.backlogItems().size(), 5, 3000);
+        QObject *backlogChip = visualNamed(window, "backlogResources_b1").value(0); QVERIFY(backlogChip);
+        QVERIFY(QMetaObject::invokeMethod(backlogChip, "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(drawer->property("opened").toBool(), 2000);
+        QTRY_VERIFY_WITH_TIMEOUT(lastRequest(daemon, "resources.list").value("params").toObject().value("item_id").toString() == "b1", 3000);
+        shotWindow(window, "resource-drawer-backlog.png");
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "resourceClose").value(0), "clicked"));
         QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
         window->hide();
     }

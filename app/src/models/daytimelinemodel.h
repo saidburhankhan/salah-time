@@ -42,7 +42,8 @@ public:
         SessionListRole,
         TickedRole,
         RunningSessionIdRole,
-        PromptMetricsRole
+        PromptMetricsRole,
+        ResourceCountRole
     };
 
     enum class Kind { Header, Item, Add, Marker };
@@ -89,6 +90,8 @@ public:
         // The item has a tick today: it is done.
         bool ticked = false;
         QString runningSessionId;
+        // Live notes, links and open reminders on the item (day.get `resources`).
+        int resourceCount = 0;
     };
 
     explicit DayTimelineModel(QObject *parent = nullptr);
