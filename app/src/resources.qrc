@@ -19,6 +19,12 @@
         <file alias="qml/statistics/ChartModeToggle.qml">qml/statistics/ChartModeToggle.qml</file>
         <file alias="qml/statistics/ChartTable.qml">qml/statistics/ChartTable.qml</file>
         <file alias="qml/statistics/BreakdownCard.qml">qml/statistics/BreakdownCard.qml</file>
+        <file alias="qml/statistics/FilterBar.qml">qml/statistics/FilterBar.qml</file>
+        <file alias="qml/statistics/ChartsView.qml">qml/statistics/ChartsView.qml</file>
+        <file alias="qml/statistics/GeneralTable.qml">qml/statistics/GeneralTable.qml</file>
+        <file alias="qml/statistics/NotesList.qml">qml/statistics/NotesList.qml</file>
+        <file alias="qml/statistics/NoteRow.qml">qml/statistics/NoteRow.qml</file>
+        <file alias="qml/controls/FilterChip.qml">qml/controls/FilterChip.qml</file>
         <file alias="qml/overlays/QuickAdd.qml">qml/overlays/QuickAdd.qml</file>
         <file alias="qml/overlays/EntryForm.qml">qml/overlays/EntryForm.qml</file>
         <file alias="qml/overlays/EntryFields.qml">qml/overlays/EntryFields.qml</file>

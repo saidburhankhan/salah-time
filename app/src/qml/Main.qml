@@ -311,6 +311,25 @@ ApplicationWindow {
         }
         return parts.join("  ·  ")
     }
+    // Muted red → amber → green for a scale value (1..max) on the dark
+    // surface; transparent without a value.
+    function scaleTint(value, max) {
+        if (value === null || value === undefined || isNaN(Number(value)))
+            return "transparent"
+        var top = Math.max(2, Number(max || 5))
+        var t = Math.max(0, Math.min(1, (Number(value) - 1) / (top - 1)))
+        var low = t < 0.5 ? Qt.color("#b5574a") : Qt.color("#c49a45")
+        var high = t < 0.5 ? Qt.color("#c49a45") : Qt.color("#6c9a64")
+        var f = t < 0.5 ? t * 2 : (t - 0.5) * 2
+        return Qt.rgba(low.r + (high.r - low.r) * f, low.g + (high.g - low.g) * f,
+                       low.b + (high.b - low.b) * f, 0.26)
+    }
+    // One decimal at most, no trailing ".0"; "—" without a value.
+    function numberText(value) {
+        if (value === null || value === undefined || isNaN(Number(value)))
+            return "—"
+        return String(Math.round(Number(value) * 10) / 10)
+    }
     function openSessionPrompt(options) {
         sessionPrompt.show(options)
     }
@@ -320,6 +339,12 @@ ApplicationWindow {
             return
         var started = Date.parse(String(running.started_at || ""))
         var elapsed = isNaN(started) ? 0 : Math.round((Date.now() - started) / 60000)
+        // The server stops a timer at its day's Sleep and accepts at most
+        // max_minutes; never offer more than that.
+        var cap = Number(running.max_minutes)
+        var hasCap = running.max_minutes !== undefined && running.max_minutes !== null && !isNaN(cap)
+        if (hasCap)
+            elapsed = Math.min(elapsed, cap)
         openSessionPrompt({
             mode: "pause",
             sessionId: String(running.id),
@@ -328,6 +353,8 @@ ApplicationWindow {
             color: backend.runningColor,
             projectId: String(running.project_id || ""),
             minutes: Math.max(1, Math.min(1440, elapsed)),
+            maxMinutes: hasCap ? Math.max(1, cap) : 0,
+            stale: running.stale === true,
             metrics: backend.runningPrompt,
             values: running.values || {}
         })

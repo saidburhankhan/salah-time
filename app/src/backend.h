@@ -57,6 +57,10 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList runningPrompt READ runningPrompt NOTIFY runningChanged)
     Q_PROPERTY(QString runningTitle READ runningTitle NOTIFY runningChanged)
     Q_PROPERTY(QString runningColor READ runningColor NOTIFY runningChanged)
+    Q_PROPERTY(QVariantMap statsTable READ statsTable NOTIFY statsTableChanged)
+    Q_PROPERTY(QVariantList sessionsList READ sessionsList NOTIFY sessionsListChanged)
+    Q_PROPERTY(bool sessionsHasMore READ sessionsHasMore NOTIFY sessionsListChanged)
+    Q_PROPERTY(bool sessionsLoading READ sessionsLoading NOTIFY sessionsLoadingChanged)
 public:
     explicit Backend(QObject *parent = nullptr, const QString &program = {}, int timeoutMs = 10000,
                      const QString &socketPath = {});
@@ -107,6 +111,10 @@ public:
     QVariantList runningPrompt() const { return m_runningPrompt; }
     QString runningTitle() const { return m_runningTitle; }
     QString runningColor() const { return m_runningColor; }
+    QVariantMap statsTable() const { return m_statsTable; }
+    QVariantList sessionsList() const { return m_sessionsList; }
+    bool sessionsHasMore() const { return !m_sessionsNext.isEmpty(); }
+    bool sessionsLoading() const { return m_sessionsLoading; }
 
     Q_INVOKABLE void reload();
     Q_INVOKABLE void loadStats(int days);
@@ -114,6 +122,18 @@ public:
                                        const QString &itemId = {});
     Q_INVOKABLE void loadStatsRange(const QString &from, const QString &to, const QString &tagId = {},
                                     const QString &projectId = {}, const QString &itemId = {});
+    // Reports (backend_reports.cpp). `filter` is the shared Statistics/Notes
+    // filter: days or from/to, tag_id, project_id, item_id, minutes_min,
+    // minutes_max, values {metric_id: {min?, max?}}; unknown keys are dropped.
+    Q_INVOKABLE void loadStatsQuery(const QVariantMap &filter);
+    Q_INVOKABLE void loadStatsTable(const QVariantMap &filter, const QString &group = {});
+    // sessions.list: the filter plus with_note and q. loadMoreSessions pages
+    // with the last `next` cursor and the same filter.
+    Q_INVOKABLE void loadSessions(const QVariantMap &filter);
+    Q_INVOKABLE void loadMoreSessions();
+    // Small UI preferences (table columns) kept in QSettings.
+    Q_INVOKABLE QVariant uiSetting(const QString &key, const QVariant &fallback = {}) const;
+    Q_INVOKABLE void setUiSetting(const QString &key, const QVariant &value);
     Q_INVOKABLE void loadTrackingItems();
     Q_INVOKABLE void moveDay(int amount);
     Q_INVOKABLE void selectDay(const QString &day);
@@ -174,6 +194,9 @@ signals:
     void sessionWriteFinished(bool ok, const QString &message);
     void runningNoteFinished(const QString &sessionId, bool ok);
     void runningChanged();
+    void statsTableChanged();
+    void sessionsListChanged();
+    void sessionsLoadingChanged();
 
 private:
     struct PendingCreate {
@@ -197,6 +220,8 @@ private:
     CoreClient::Callback statsResponse();
     void applyRunningWrite(const CoreClient::Result &result);
     void applyStatus(const QJsonObject &status);
+    static QJsonObject filterParams(const QVariantMap &filter, bool allowAnyDays);
+    void requestSessions(const QJsonObject &params, bool append);
     void refreshRunning();
     QJsonArray sessionsOf(const QString &itemId) const;
     QDate writeDate() const;
@@ -256,4 +281,11 @@ private:
     QVariantMap m_running, m_lastRunning;
     QVariantList m_runningPrompt, m_lastRunningPrompt;
     QString m_runningTitle, m_runningColor;
+    QVariantMap m_statsTable;
+    quint64 m_statsTableRequest = 0;
+    QVariantList m_sessionsList;
+    QJsonObject m_sessionsParams;
+    QString m_sessionsNext;
+    quint64 m_sessionsRequest = 0;
+    bool m_sessionsLoading = false;
 };

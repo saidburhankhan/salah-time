@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QLocale>
 #include <QStringList>
 #include <QtMath>
 
@@ -298,6 +299,119 @@ inline QJsonObject stats(const QString &tagId = {}, const QString &projectId = {
         {"days", days}, {"series", series}, {"projects", projectRows}, {"tags", tagRows}, {"blocks", blockRows},
         {"totals", QJsonObject{{"minutes", totalMinutes}, {"sessions", sessions}, {"active_days", activeDays},
                                {"avg_focus", 3.6}, {"avg_quality", 4.1}}}};
+}
+
+inline QJsonObject tableColumn(const QString &id, const QString &name, const QString &unit, const QString &kind,
+                               const QString &rollup, int scaleMax = 0, const QString &derivedFrom = {}) {
+    return QJsonObject{{"id", id}, {"name", name}, {"unit", unit}, {"kind", kind}, {"rollup", rollup},
+                       {"scale_max", scaleMax > 0 ? QJsonValue(scaleMax) : QJsonValue(QJsonValue::Null)},
+                       {"archived", false},
+                       {"derived_from", derivedFrom.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(derivedFrom)}};
+}
+
+inline QJsonValue maybe(double value) { return value < 0 ? QJsonValue(QJsonValue::Null) : QJsonValue(value); }
+
+// One stats.table row; negative metric values are null (no sample).
+inline QJsonObject tableRow(const QString &key, const QString &label, const QString &color, const QString &from,
+                            const QString &to, int minutes, int sessions, double focus, double quality,
+                            double pages, double distractions) {
+    const double perHour = distractions < 0 || minutes <= 0 ? -1 : distractions * 60.0 / minutes;
+    return QJsonObject{{"key", key}, {"label", label},
+                       {"color", color.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(color)},
+                       {"from", from.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(from)},
+                       {"to", to.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(to)},
+                       {"minutes", minutes}, {"sessions", sessions},
+                       {"values", QJsonObject{{"focus", maybe(focus)}, {"quality", maybe(quality)},
+                                              {"pages", maybe(pages)}, {"distractions", maybe(distractions)},
+                                              {"distractions_per_hour", maybe(perHour)}}}};
+}
+
+// stats.table in the shape of stats_table_week.json / stats_table_project.json
+// for the 28 days ending on the fixture day.
+inline QJsonObject statsTable(const QString &group) {
+    QJsonArray rows;
+    if (group == "project") {
+        rows = {tableRow("quran", "Quran", "#4c8bf5", {}, {}, 812, 31, 3.9, 4.4, 96, 4),
+                tableRow("study", "Study", "#9b59b6", {}, {}, 640, 18, 3.2, -1, -1, 21),
+                tableRow("fitness", "Fitness", "#e0663f", {}, {}, 365, 12, 2.4, -1, -1, -1),
+                tableRow("none", "No project", {}, {}, {}, 95, 6, -1, -1, -1, -1)};
+    } else if (group == "tag") {
+        rows = {tableRow("faith", "Faith", "#2e7d32", {}, {}, 812, 31, 3.9, 4.4, 96, 4),
+                tableRow("learning", "Learning", "#9b59b6", {}, {}, 640, 18, 3.2, -1, -1, 21),
+                tableRow("health", "Health", "#e0663f", {}, {}, 365, 12, 2.4, -1, -1, -1),
+                tableRow("none", "No tag", {}, {}, {}, 95, 6, -1, -1, -1, -1)};
+    } else if (group == "item") {
+        rows = {tableRow("quran", "Read Quran", "#4c8bf5", {}, {}, 790, 30, 3.9, 4.4, 96, 4),
+                tableRow("deep", "Deep work: grammar", "#9b59b6", {}, {}, 600, 16, 3.1, -1, -1, 20),
+                tableRow("gym", "Gym session", "#e0663f", {}, {}, 365, 12, 2.4, -1, -1, -1),
+                tableRow("review", "Review notes", "#9b59b6", {}, {}, 40, 2, 4.5, -1, -1, 1),
+                tableRow("none", "No task", {}, {}, {}, 117, 7, 1.0, -1, -1, -1)};
+    } else if (group == "day") {
+        const QDate last = QDate::fromString(kDay, Qt::ISODate);
+        for (int i = 27; i >= 0; --i) {
+            const QDate day = last.addDays(-i);
+            const bool quiet = i % 7 == 2;
+            const int minutes = quiet ? 0 : 40 + (i * 37) % 90;
+            rows.append(tableRow(day.toString(Qt::ISODate), QLocale::c().toString(day, "ddd d MMM"), {},
+                                 day.toString(Qt::ISODate), day.toString(Qt::ISODate), minutes, quiet ? 0 : 1 + i % 3,
+                                 quiet ? -1 : 1.5 + (i % 5) * 0.8, quiet || i % 2 ? -1 : 3.0 + (i % 3) * 0.7,
+                                 -1, quiet ? -1 : i % 4));
+        }
+    } else {
+        rows = {tableRow("2031-W16", "17–20 Apr 2031", {}, "2031-04-17", "2031-04-20", 210, 7, 3.4, 4.0, 18, 3),
+                tableRow("2031-W17", "21–27 Apr 2031", {}, "2031-04-21", "2031-04-27", 455, 16, 2.1, 3.2, 22, 9),
+                tableRow("2031-W18", "28 Apr – 4 May 2031", {}, "2031-04-28", "2031-05-04", 520, 19, 3.8, 4.5, 30, 6),
+                tableRow("2031-W19", "5–11 May 2031", {}, "2031-05-05", "2031-05-11", 0, 0, -1, -1, -1, -1),
+                tableRow("2031-W20", "12–14 May 2031", {}, "2031-05-12", "2031-05-14", 182, 3, 4.6, 5.0, 12, 1)};
+    }
+    return QJsonObject{
+        {"range", QJsonObject{{"from", "2031-04-17"}, {"to", kDay}}},
+        {"filter", QJsonObject{{"tag_id", QJsonValue::Null}, {"project_id", QJsonValue::Null}, {"item_id", QJsonValue::Null}}},
+        {"group", group},
+        {"columns", QJsonArray{tableColumn("minutes", "Minutes", "min", "count", "sum"),
+                               tableColumn("sessions", "Sessions", "sessions", "count", "sum"),
+                               tableColumn("focus", "Focus", "", "scale", "avg", 5),
+                               tableColumn("quality", "Quality", "", "scale", "avg", 5),
+                               tableColumn("pages", "Pages read", "pages", "count", "sum"),
+                               tableColumn("distractions", "Distractions", "times", "count", "sum"),
+                               tableColumn("distractions_per_hour", "Distractions per hour", "per hour", "count", "avg", 0,
+                                           "distractions")}},
+        {"rows", rows},
+        {"totals", QJsonObject{{"minutes", 1912}, {"sessions", 67},
+                               {"values", QJsonObject{{"focus", 3.4}, {"quality", 4.3}, {"pages", 96.0},
+                                                      {"distractions", 25.0}, {"distractions_per_hour", 0.8}}}}}};
+}
+
+// sessions.list rows (SessionView + project + item), shaped like sessions_list.json.
+inline QJsonObject listRow(const QString &id, const QString &day, const QString &itemId, const QString &itemTitle,
+                           const QString &projectId, const QString &start, int minutes, const QJsonObject &values,
+                           const QString &note, const QJsonArray &notes = {}) {
+    QJsonObject row = session(id, itemId, projectId, "fajr", minutes, values, start, false, note, notes);
+    row["day"] = day;
+    row["stale"] = false;
+    row["project"] = projectId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(projectRef(projectId));
+    row["item"] = itemId.isEmpty() ? QJsonValue(QJsonValue::Null)
+                                   : QJsonValue(QJsonObject{{"id", itemId}, {"title", itemTitle}});
+    return row;
+}
+
+inline QJsonObject sessionsList(bool filtered = false, bool more = false) {
+    QJsonArray rows{
+        listRow("l-1", kDay, "deep", "Deep work: grammar", "study", "2031-05-14T07:30:00Z", 40,
+                QJsonObject{{"focus", 4.0}, {"distractions", 1.0}}, "Verb forms clicked today",
+                QJsonArray{QJsonObject{{"id", "e-1"}, {"at", "2031-05-14T07:41:00Z"}, {"text", "Phone buzzed, put it away"}}}),
+        listRow("l-2", kDay, "quran", "Read Quran", "quran", "2031-05-14T00:30:00Z", 25,
+                QJsonObject{{"focus", 5.0}, {"quality", 5.0}, {"pages", 6.0}}, "Calm morning, slow recitation",
+                QJsonArray{QJsonObject{{"id", "e-2"}, {"at", "2031-05-14T00:52:00Z"}, {"text", "Stopped at page 12"}}}),
+        listRow("l-3", "2031-05-13", "gym", "Gym session", "fitness", "2031-05-13T12:10:00Z", 45,
+                QJsonObject{{"focus", 2.0}, {"reps", 120.0}}, "Tired after work, short sets"),
+        listRow("l-4", "2031-05-12", "", "", "", {}, 15, QJsonObject{{"focus", 1.0}}, "Evening walk, mind elsewhere"),
+        listRow("l-5", "2031-05-11", "deep", "Deep work: grammar", "study", "2031-05-11T08:00:00Z", 60,
+                QJsonObject{{"focus", 4.0}, {"quality", 3.0}, {"distractions", 2.0}},
+                "Long session; the dative chapter needs a second pass")};
+    if (filtered) rows = QJsonArray{rows.at(0), rows.at(1), rows.at(4)};
+    return QJsonObject{{"rows", rows}, {"next", more ? QJsonValue("2031-05-11|2031-05-11T09:00:00Z|l-5")
+                                                     : QJsonValue(QJsonValue::Null)}};
 }
 
 } // namespace TrackingFixture

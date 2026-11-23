@@ -19,6 +19,7 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSet>
+#include <QSettings>
 #include <QtTest>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -404,6 +405,23 @@ esac
                 server->respond(socket, request, TrackingFixture::stats(params.value("tag_id").toString(), narrow,
                                                                         days > 0 ? days : 28));
             }
+            else if (method == "stats.table") {
+                QJsonObject table = TrackingFixture::statsTable(params.value("group").toString("week"));
+                table["filter"] = QJsonObject{{"tag_id", params.value("tag_id")}, {"project_id", params.value("project_id")},
+                                              {"item_id", params.value("item_id")}};
+                server->respond(socket, request, table);
+            }
+            else if (method == "sessions.list") {
+                const bool filtered = params.contains("values") || params.contains("q") || params.contains("minutes_min");
+                if (params.contains("before")) {
+                    const QJsonObject older = TrackingFixture::listRow(
+                        "l-6", "2031-05-09", "quran", "Read Quran", "quran", "2031-05-09T00:40:00Z", 20,
+                        QJsonObject{{"focus", 3.0}}, "Juz 12 started");
+                    server->respond(socket, request, QJsonObject{{"rows", QJsonArray{older}}, {"next", QJsonValue::Null}});
+                } else {
+                    server->respond(socket, request, TrackingFixture::sessionsList(filtered, !filtered));
+                }
+            }
             else if (method == "items.list") {
                 QJsonArray rows;
                 for (const QJsonValue &block : state->day.value("blocks").toArray())
@@ -484,6 +502,7 @@ esac
     }
 
     QTemporaryDir *m_runtime = nullptr;
+    QTemporaryDir m_settingsDir;
     bool m_integrationEnvironment = false;
 
 private slots:
@@ -493,11 +512,17 @@ private slots:
         // The opt-in integration tests below intentionally use the caller's
         // desktop environment; everything else runs in the sandbox set up in
         // init().
+        // UI preferences (Statistics tab, table columns) never touch the
+        // user's own settings file.
+        QVERIFY(m_settingsDir.isValid());
+        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, m_settingsDir.path());
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_settingsDir.path());
         m_integrationEnvironment = !qEnvironmentVariableIsEmpty("SALAH_PROTOCOL_SMOKE") ||
                                    !qEnvironmentVariableIsEmpty("SALAH_APP_SMOKE") ||
                                    !qEnvironmentVariableIsEmpty("A9_SCREENSHOT_DIR");
     }
     void init() {
+        QSettings(QStringLiteral("salah"), QStringLiteral("salah-app")).clear();
         if (m_integrationEnvironment) return;
         delete m_runtime;
         m_runtime = new QTemporaryDir;
@@ -2145,9 +2170,261 @@ const int original = model->indexOfItem("<id:4>");
         QCOMPARE(params.value("item_id").toString(), QString("deep"));
         QCOMPARE(backend.statsData().value("days").toList().size(), 44);
     }
-    void trackingUiScreens() {
+    void statsTableSessionsListAndMetricFiltersReachTheDaemon() {
         QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
         daemon.setHandler(trackingHandler(trackingState()));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy table(&backend, &Backend::statsTableChanged);
+        QSignalSpy list(&backend, &Backend::sessionsListChanged);
+        QSignalSpy stats(&backend, &Backend::statsDataChanged);
+        const QVariantMap focus{{"focus", QVariantMap{{"min", 4}}}, {"distractions", QVariantMap{{"max", 2}}}};
+        backend.loadStatsTable(QVariantMap{{"days", 28}, {"project_id", "quran"}, {"minutes_min", 10}, {"values", focus},
+                                           {"bogus", 1}}, "project");
+        QTRY_COMPARE_WITH_TIMEOUT(table.size(), 1, 3000);
+        QJsonObject params = lastRequest(daemon, "stats.table").value("params").toObject();
+        QCOMPARE(params.value("group").toString(), QString("project"));
+        QCOMPARE(params.value("days").toInt(), 28);
+        QCOMPARE(params.value("project_id").toString(), QString("quran"));
+        QCOMPARE(params.value("minutes_min").toInt(), 10);
+        QVERIFY(!params.contains("minutes_max"));
+        QVERIFY(!params.contains("bogus"));
+        QCOMPARE(params.value("values").toObject().value("focus").toObject(), (QJsonObject{{"min", 4}}));
+        QCOMPARE(params.value("values").toObject().value("distractions").toObject(), (QJsonObject{{"max", 2}}));
+        QCOMPARE(backend.statsTable().value("rows").toList().size(), 4);
+        QCOMPARE(backend.statsTable().value("rows").toList().last().toMap().value("key").toString(), QString("none"));
+        // An unknown group falls back to week; a custom range is sent as from/to.
+        backend.loadStatsTable(QVariantMap{{"from", "2031-04-01"}, {"to", "2031-05-14"}, {"days", 7}}, "nope");
+        QTRY_COMPARE_WITH_TIMEOUT(table.size(), 2, 3000);
+        params = lastRequest(daemon, "stats.table").value("params").toObject();
+        QCOMPARE(params.value("group").toString(), QString("week"));
+        QCOMPARE(params.value("from").toString(), QString("2031-04-01"));
+        QVERIFY(!params.contains("days"));
+
+        // stats.get carries the session filters too.
+        backend.loadStatsQuery(QVariantMap{{"days", 90}, {"minutes_max", 45}, {"values", focus}});
+        QTRY_COMPARE_WITH_TIMEOUT(stats.size(), 1, 3000);
+        params = lastRequest(daemon, "stats.get").value("params").toObject();
+        QCOMPARE(params.value("days").toInt(), 90);
+        QCOMPARE(params.value("minutes_max").toInt(), 45);
+        QCOMPARE(params.value("values").toObject().value("focus").toObject(), (QJsonObject{{"min", 4}}));
+        backend.loadStatsQuery(QVariantMap{{"days", 7}, {"tag_id", "faith"}});
+        QTRY_COMPARE_WITH_TIMEOUT(stats.size(), 2, 3000);
+        params = lastRequest(daemon, "stats.get").value("params").toObject();
+        QVERIFY(!params.contains("values"));
+        QCOMPARE(params.value("tag_id").toString(), QString("faith"));
+
+        // sessions.list: with_note, a trimmed q, a limit, then the cursor.
+        backend.loadSessions(QVariantMap{{"days", 90}, {"with_note", false}});
+        QTRY_COMPARE_WITH_TIMEOUT(list.size(), 1, 3000);
+        params = lastRequest(daemon, "sessions.list").value("params").toObject();
+        QCOMPARE(params.value("with_note"), QJsonValue(false));
+        QCOMPARE(params.value("limit").toInt(), 100);
+        QVERIFY(!params.contains("before"));
+        QCOMPARE(backend.sessionsList().size(), 5);
+        QVERIFY(backend.sessionsHasMore());
+        backend.loadMoreSessions();
+        QTRY_COMPARE_WITH_TIMEOUT(list.size(), 2, 3000);
+        params = lastRequest(daemon, "sessions.list").value("params").toObject();
+        QCOMPARE(params.value("before").toString(), QString("2031-05-11|2031-05-11T09:00:00Z|l-5"));
+        QCOMPARE(params.value("with_note"), QJsonValue(false));
+        QCOMPARE(backend.sessionsList().size(), 6);
+        QVERIFY(!backend.sessionsHasMore());
+        backend.loadSessions(QVariantMap{{"days", 28}, {"with_note", true}, {"q", "  dative "}, {"values", focus}});
+        QTRY_COMPARE_WITH_TIMEOUT(list.size(), 3, 3000);
+        params = lastRequest(daemon, "sessions.list").value("params").toObject();
+        QCOMPARE(params.value("q").toString(), QString("dative"));
+        QCOMPARE(params.value("with_note"), QJsonValue(true));
+        QCOMPARE(params.value("values").toObject().value("distractions").toObject(), (QJsonObject{{"max", 2}}));
+        QCOMPARE(backend.sessionsList().size(), 3);
+        QVERIFY(backend.error().isEmpty());
+    }
+    void canonicalTableAndListFixturesReachTheModels() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        daemon.setHandler([](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            const QString method = request.value("method").toString();
+            const QJsonObject params = request.value("params").toObject();
+            if (method == "stats.table" && params.contains("values"))
+                server->respond(socket, request, fixture("stats_table_metric_filter"));
+            else if (method == "stats.table")
+                server->respond(socket, request, fixture(params.value("group").toString() == "project" ? "stats_table_project" : "stats_table_week"));
+            else if (method == "stats.get")
+                server->respond(socket, request, fixture("stats_metric_filter"));
+            else if (method == "sessions.list")
+                server->respond(socket, request, fixture(params.contains("values") ? "sessions_list_filtered" : "sessions_list"));
+            else server->respond(socket, request, QJsonObject{});
+        });
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy table(&backend, &Backend::statsTableChanged);
+        QSignalSpy list(&backend, &Backend::sessionsListChanged);
+        backend.loadStatsTable(QVariantMap{{"days", 14}}, "week");
+        QTRY_COMPARE_WITH_TIMEOUT(table.size(), 1, 3000);
+        QVariantList rows = backend.statsTable().value("rows").toList();
+        QCOMPARE(rows.size(), 3);
+        QCOMPARE(rows.first().toMap().value("sessions").toInt(), 0);
+        QCOMPARE(backend.statsTable().value("columns").toList().last().toMap().value("derived_from").toString(), QString("distractions"));
+        backend.loadStatsTable(QVariantMap{{"days", 14}}, "project");
+        QTRY_COMPARE_WITH_TIMEOUT(table.size(), 2, 3000);
+        rows = backend.statsTable().value("rows").toList();
+        QCOMPARE(rows.last().toMap().value("key").toString(), QString("none"));
+        QCOMPARE(rows.last().toMap().value("label").toString(), QString("No project"));
+        QVERIFY(rows.last().toMap().value("color").isNull());
+        backend.loadSessions(QVariantMap{{"days", 14}});
+        QTRY_COMPARE_WITH_TIMEOUT(list.size(), 1, 3000);
+        QCOMPARE(backend.sessionsList().size(), 3);
+        QVERIFY(!backend.sessionsHasMore());
+        QCOMPARE(backend.sessionsList().first().toMap().value("notes").toList().size(), 1);
+        backend.loadSessions(QVariantMap{{"days", 14}, {"values", QVariantMap{{"focus", QVariantMap{{"min", 4}}}}}});
+        QTRY_COMPARE_WITH_TIMEOUT(list.size(), 2, 3000);
+        QCOMPARE(backend.sessionsList().size(), 1);
+        // The metric-filter fixtures decode, and echo the filter that was sent.
+        const QVariantMap focusRange{{"focus", QVariantMap{{"min", 3}, {"max", 4}}}};
+        backend.loadStatsTable(QVariantMap{{"days", 14}, {"tag_id", "t"}, {"minutes_min", 10}, {"values", focusRange}}, "project");
+        QTRY_COMPARE_WITH_TIMEOUT(table.size(), 3, 3000);
+        QCOMPARE(backend.statsTable().value("filter").toMap().value("minutes_min").toInt(), 10);
+        QCOMPARE(backend.statsTable().value("rows").toList().size(), 1);
+        QSignalSpy stats(&backend, &Backend::statsDataChanged);
+        backend.loadStatsQuery(QVariantMap{{"days", 14}, {"minutes_min", 10}, {"values", QVariantMap{{"focus", QVariantMap{{"min", 3}}}}}});
+        QTRY_COMPARE_WITH_TIMEOUT(stats.size(), 1, 3000);
+        QCOMPARE(backend.statsData().value("filter").toMap().value("values").toMap().value("focus").toMap().value("min").toDouble(), 3.0);
+        QCOMPARE(backend.statsData().value("totals").toMap().value("sessions").toInt(), 2);
+        QVERIFY(backend.error().isEmpty());
+    }
+    void pausePanelCapsWorkedAtMaxMinutes() {
+        QTemporaryDir dir;
+        Backend backend(nullptr, fake(dir), 3000, daemon_path(dir));
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        QObject *prompt = findByName(root.data(), "sessionPrompt");
+        QObject *worked = findByName(root.data(), "sessionMinutesField");
+        QVERIFY(prompt && worked);
+        QVariantMap options{{"mode", "pause"}, {"sessionId", "s-run"}, {"itemId", "deep"}, {"title", "Deep work"},
+                            {"minutes", 600}, {"maxMinutes", 120}, {"stale", true}};
+        QVERIFY(QMetaObject::invokeMethod(prompt, "show", Q_ARG(QVariant, QVariant(options))));
+        QTRY_VERIFY(prompt->property("visible").toBool());
+        QCOMPARE(worked->property("text").toString(), QString("120"));
+        auto *content = prompt->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content);
+        QQuickItem *staleNote = nullptr;
+        QQuickItem *chip30 = nullptr;
+        for (QQuickItem *item : quickDescendants(content)) {
+            if (item->objectName() == "sessionStaleNote") staleNote = item;
+            if (item->objectName() == "subtractWorked30") chip30 = item;
+        }
+        QVERIFY(staleNote && chip30);
+        QVERIFY(staleNote->isVisible());
+        QVERIFY(staleNote->property("text").toString().contains("120"));
+        // Above the cap is not acceptable input; a chip starts from the cap.
+        worked->setProperty("text", "121");
+        QVERIFY(!worked->property("acceptableInput").toBool());
+        QVERIFY(QMetaObject::invokeMethod(chip30, "clicked"));
+        QCOMPARE(worked->property("text").toString(), QString("90"));
+        worked->setProperty("text", "20");
+        QVERIFY(QMetaObject::invokeMethod(chip30, "clicked"));
+        QCOMPARE(worked->property("text").toString(), QString("1"));
+        // A fresh timer: no stale line, Worked is the elapsed time under the cap.
+        options["minutes"] = 47;
+        options["maxMinutes"] = 47;
+        options["stale"] = false;
+        QVERIFY(QMetaObject::invokeMethod(prompt, "show", Q_ARG(QVariant, QVariant(options))));
+        QCOMPARE(worked->property("text").toString(), QString("47"));
+        QVERIFY(!staleNote->isVisible());
+    }
+    void filterBarTableAndTabsFollowTheUser() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        daemon.setHandler(trackingHandler(trackingState()));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        Theme theme(dir.path());
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create()); QVERIFY2(root, qPrintable(component.errorString()));
+        backend.reload();
+        waitForBackendIdle(backend);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.metrics().size(), 7, 3000);
+        root->setProperty("page", 2);
+        QObject *stats = findByName(root.data(), "statsScroll"); QVERIFY(stats);
+        QObject *bar = stats->property("filterBar").value<QObject *>(); QVERIFY(bar);
+        QCOMPARE(stats->property("tab").toString(), QString("charts"));
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "loadStatistics"));
+        waitForBackendIdle(backend);
+        // Two metric ranges and a duration: chips, and the same filter on every tab.
+        QVERIFY(QMetaObject::invokeMethod(bar, "setMetricRange", Q_ARG(QVariant, QVariant("focus")), Q_ARG(QVariant, QVariant(4)), Q_ARG(QVariant, QVariant(""))));
+        QVERIFY(QMetaObject::invokeMethod(bar, "setMetricRange", Q_ARG(QVariant, QVariant("distractions")), Q_ARG(QVariant, QVariant("")), Q_ARG(QVariant, QVariant(2))));
+        QVERIFY(QMetaObject::invokeMethod(bar, "setMetricRange", Q_ARG(QVariant, QVariant("minutes")), Q_ARG(QVariant, QVariant(60)), Q_ARG(QVariant, QVariant(10))));
+        waitForBackendIdle(backend);
+        QVariantList chips = bar->property("activeChips").toList();
+        QCOMPARE(chips.size(), 3);
+        QCOMPARE(chips.at(0).toMap().value("text").toString(), QString("Duration 10–60 min"));
+        QCOMPARE(chips.at(1).toMap().value("text").toString(), QString::fromUtf8("Focus ≥ 4"));
+        QCOMPARE(chips.at(2).toMap().value("text").toString(), QString::fromUtf8("Distractions ≤ 2"));
+        QJsonObject params = lastRequest(daemon, "stats.get").value("params").toObject();
+        QCOMPARE(params.value("minutes_min").toInt(), 10);
+        QCOMPARE(params.value("minutes_max").toInt(), 60);
+        QCOMPARE(params.value("values").toObject().value("focus").toObject(), (QJsonObject{{"min", 4}}));
+        QVERIFY(QMetaObject::invokeMethod(bar, "removeChip", Q_ARG(QVariant, QVariant("minutes"))));
+        waitForBackendIdle(backend);
+        QVERIFY(!lastRequest(daemon, "stats.get").value("params").toObject().contains("minutes_min"));
+
+        QVERIFY(QMetaObject::invokeMethod(stats, "setTab", Q_ARG(QVariant, QVariant("table"))));
+        waitForBackendIdle(backend);
+        params = lastRequest(daemon, "stats.table").value("params").toObject();
+        QCOMPARE(params.value("group").toString(), QString("week"));
+        QCOMPARE(params.value("values").toObject().value("distractions").toObject(), (QJsonObject{{"max", 2}}));
+        QObject *table = findByName(root.data(), "generalTable"); QVERIFY(table);
+        QCOMPARE(table->property("rows").toList().size(), 5);
+        QVERIFY(QMetaObject::invokeMethod(table, "setGroup", Q_ARG(QVariant, QVariant("project"))));
+        waitForBackendIdle(backend);
+        QCOMPARE(lastRequest(daemon, "stats.table").value("params").toObject().value("group").toString(), QString("project"));
+        // Sort by focus: descending, ascending (nulls last both ways), then server order.
+        QVERIFY(QMetaObject::invokeMethod(table, "sortBy", Q_ARG(QVariant, QVariant("focus"))));
+        QVariantList rows = table->property("rows").toList();
+        QCOMPARE(rows.first().toMap().value("key").toString(), QString("quran"));
+        QCOMPARE(rows.last().toMap().value("key").toString(), QString("none"));
+        QVERIFY(QMetaObject::invokeMethod(table, "sortBy", Q_ARG(QVariant, QVariant("focus"))));
+        rows = table->property("rows").toList();
+        QCOMPARE(rows.first().toMap().value("key").toString(), QString("fitness"));
+        QCOMPARE(rows.last().toMap().value("key").toString(), QString("none"));
+        QVERIFY(QMetaObject::invokeMethod(table, "sortBy", Q_ARG(QVariant, QVariant("focus"))));
+        QCOMPARE(table->property("sortKey").toString(), QString());
+        // Hidden columns are remembered.
+        QVERIFY(QMetaObject::invokeMethod(table, "toggleColumn", Q_ARG(QVariant, QVariant("quality"))));
+        QCOMPARE(backend.uiSetting("statistics/tableHidden").toString(), QString("quality"));
+        QCOMPARE(table->property("shown").toList().size(), 6);
+
+        QVERIFY(QMetaObject::invokeMethod(stats, "setTab", Q_ARG(QVariant, QVariant("notes"))));
+        waitForBackendIdle(backend);
+        params = lastRequest(daemon, "sessions.list").value("params").toObject();
+        QCOMPARE(params.value("with_note"), QJsonValue(true));
+        QCOMPARE(params.value("values").toObject().value("focus").toObject(), (QJsonObject{{"min", 4}}));
+        QCOMPARE(backend.uiSetting("statistics/tab").toString(), QString("notes"));
+        QCOMPARE(backend.sessionsList().size(), 3);
+        // Clicking a note opens the session editor on that session.
+        QObject *notes = findByName(root.data(), "notesList"); QVERIFY(notes);
+        QVERIFY(QMetaObject::invokeMethod(notes, "openSession", Q_ARG(QVariant, backend.sessionsList().first())));
+        QObject *prompt = findByName(root.data(), "sessionPrompt"); QVERIFY(prompt);
+        QTRY_VERIFY(prompt->property("visible").toBool());
+        QCOMPARE(prompt->property("mode").toString(), QString("edit"));
+        QCOMPARE(prompt->property("sessionId").toString(), QString("l-1"));
+        root->setProperty("sessionPromptVisible", false);
+        QVERIFY(QMetaObject::invokeMethod(bar, "clearMetrics"));
+        waitForBackendIdle(backend);
+        QVERIFY(!lastRequest(daemon, "sessions.list").value("params").toObject().contains("values"));
+        QVERIFY(backend.uiSetting("statistics/tab").isValid());
+
+        // A new page instance comes back on the remembered tab.
+        QScopedPointer<QObject> again(component.create()); QVERIFY(again);
+        QCOMPARE(findByName(again.data(), "statsScroll")->property("tab").toString(), QString("notes"));
+        QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
+    }
+    void trackingUiScreens() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        auto state = trackingState();
+        daemon.setHandler(trackingHandler(state));
         Backend backend(nullptr, QString(), 3000, daemon_path(dir));
         Theme theme(dir.path());
         QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
@@ -2316,6 +2593,64 @@ const int original = model->indexOfItem("<id:4>");
         waitForBackendIdle(backend);
         QCOMPARE(lastRequest(daemon, "stats.get").value("params").toObject().value("days").toInt(), 90);
         shotWindow(window, "stats-90.png");
+
+        // The shared filter bar with two metric chips, on each tab.
+        QVERIFY(QMetaObject::invokeMethod(stats, "setRange", Q_ARG(QVariant, QVariant(28))));
+        QObject *bar = stats->property("filterBar").value<QObject *>(); QVERIFY(bar);
+        QVERIFY(QMetaObject::invokeMethod(bar, "setMetricRange", Q_ARG(QVariant, QVariant("focus")), Q_ARG(QVariant, QVariant(4)), Q_ARG(QVariant, QVariant(""))));
+        QVERIFY(QMetaObject::invokeMethod(bar, "setMetricRange", Q_ARG(QVariant, QVariant("distractions")), Q_ARG(QVariant, QVariant("")), Q_ARG(QVariant, QVariant(2))));
+        waitForBackendIdle(backend);
+        QCOMPARE(lastRequest(daemon, "stats.get").value("params").toObject().value("values").toObject().size(), 2);
+        shotWindow(window, "stats-charts-metrics.png");
+        QVERIFY(QMetaObject::invokeMethod(bar, "openEditor", Q_ARG(QVariant, QVariant("focus"))));
+        shotWindow(window, "stats-metric-editor.png");
+        bar->setProperty("editing", "");
+        QVERIFY(QMetaObject::invokeMethod(stats, "setTab", Q_ARG(QVariant, QVariant("table"))));
+        waitForBackendIdle(backend);
+        QCOMPARE(lastRequest(daemon, "stats.table").value("params").toObject().value("values").toObject().size(), 2);
+        shotWindow(window, "stats-table-week.png");
+        QObject *table = findByName(root.data(), "generalTable"); QVERIFY(table);
+        QVERIFY(QMetaObject::invokeMethod(table, "setGroup", Q_ARG(QVariant, QVariant("project"))));
+        waitForBackendIdle(backend);
+        QVERIFY(QMetaObject::invokeMethod(table, "toggleColumn", Q_ARG(QVariant, QVariant("quality"))));
+        QVERIFY(QMetaObject::invokeMethod(table, "sortBy", Q_ARG(QVariant, QVariant("minutes"))));
+        shotWindow(window, "stats-table-project.png");
+        QVERIFY(QMetaObject::invokeMethod(table, "toggleColumn", Q_ARG(QVariant, QVariant("sessions"))));
+        QVERIFY(QMetaObject::invokeMethod(table, "setGroup", Q_ARG(QVariant, QVariant("tag"))));
+        waitForBackendIdle(backend);
+        shotWindow(window, "stats-table-tag-no-sessions.png");
+        QVERIFY(QMetaObject::invokeMethod(table, "toggleColumn", Q_ARG(QVariant, QVariant("sessions"))));
+        QVERIFY(QMetaObject::invokeMethod(table, "toggleColumn", Q_ARG(QVariant, QVariant("quality"))));
+        QVERIFY(QMetaObject::invokeMethod(table, "setGroup", Q_ARG(QVariant, QVariant("week"))));
+        QVERIFY(QMetaObject::invokeMethod(stats, "setTab", Q_ARG(QVariant, QVariant("notes"))));
+        waitForBackendIdle(backend);
+        QCOMPARE(lastRequest(daemon, "sessions.list").value("params").toObject().value("values").toObject().size(), 2);
+        shotWindow(window, "stats-notes.png");
+        QVERIFY(QMetaObject::invokeMethod(bar, "clearMetrics"));
+        waitForBackendIdle(backend);
+        flick->setProperty("contentY", 300);
+        shotWindow(window, "stats-notes-unfiltered.png");
+        flick->setProperty("contentY", 0);
+        QVERIFY(QMetaObject::invokeMethod(stats, "setTab", Q_ARG(QVariant, QVariant("charts"))));
+        waitForBackendIdle(backend);
+
+        // A timer that ran past Sleep: Worked is capped and the panel says why.
+        {
+            QJsonObject stale = state->status.value("running").toObject();
+            stale["started_at"] = QDateTime::currentDateTimeUtc().addSecs(-10 * 3600).toString(Qt::ISODate);
+            stale["stale"] = true;
+            stale["max_minutes"] = 120;
+            state->status["running"] = stale;
+        }
+        root->setProperty("page", 0);
+        backend.reload();
+        waitForBackendIdle(backend);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.running().value("stale").toBool(), 3000);
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "pauseRunning"));
+        QTRY_VERIFY_WITH_TIMEOUT(prompt->property("visible").toBool(), 2000);
+        QCOMPARE(findByName(root.data(), "sessionMinutesField")->property("text").toString(), QString("120"));
+        shotWindow(window, "prompt-pause-stale.png");
+        root->setProperty("sessionPromptVisible", false);
 
         QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
         window->hide();

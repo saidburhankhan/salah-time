@@ -291,6 +291,26 @@ void CoreClient::statsFiltered(int days, const QString &tagId, const QString &pr
     enqueue(args, params, QStringLiteral("stats.get"), std::move(callback), true, false,
             Dto::decodeStats, Dto::decodeStats);
 }
+void CoreClient::statsQuery(const QJsonObject &params, Callback callback) {
+    const bool sessionFilters = params.contains(QStringLiteral("minutes_min"))
+        || params.contains(QStringLiteral("minutes_max")) || params.contains(QStringLiteral("values"));
+    if (sessionFilters) {
+        const QString key = QString::fromUtf8(QJsonDocument(params).toJson(QJsonDocument::Compact));
+        enqueue({QStringLiteral("rpc"), QStringLiteral("stats.get"), key}, params, QStringLiteral("stats.get"),
+                std::move(callback), true, false, Dto::decodeStats, nullptr, {}, true);
+        return;
+    }
+    const QDate from = QDate::fromString(params.value(QStringLiteral("from")).toString(), Qt::ISODate);
+    const QDate to = QDate::fromString(params.value(QStringLiteral("to")).toString(), Qt::ISODate);
+    statsFiltered(params.value(QStringLiteral("days")).toInt(28), params.value(QStringLiteral("tag_id")).toString(),
+                  params.value(QStringLiteral("project_id")).toString(), params.value(QStringLiteral("item_id")).toString(),
+                  std::move(callback), from, to);
+}
+void CoreClient::rpcRead(const QString &method, const QJsonObject &params, Callback callback) {
+    const QString key = QString::fromUtf8(QJsonDocument(params).toJson(QJsonDocument::Compact));
+    enqueue({QStringLiteral("rpc"), method, key}, params, method, std::move(callback), true, false,
+            Dto::decodeJson, nullptr, {}, true);
+}
 void CoreClient::itemsList(Callback callback) {
     enqueue({"item", "list", "--json"}, {}, QStringLiteral("items.list"), std::move(callback), true, false,
             Dto::decodeJson, Dto::decodeJson);

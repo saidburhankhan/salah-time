@@ -26,6 +26,11 @@ Popup {
     property var initialValues: ({})
     property var notes: []
     property int initialMinutes: 0
+    // pause: the most minutes the server accepts (0 = unknown), and whether
+    // the timer ran past its day's Sleep.
+    property int maxMinutes: 0
+    property bool stale: false
+    readonly property int workedCap: maxMinutes > 0 ? maxMinutes : Math.max(1, initialMinutes)
     property bool waiting: false
     property string serverError: ""
     readonly property bool pauseMode: mode === "pause"
@@ -70,7 +75,11 @@ Popup {
         notes = options.notes || []
         waiting = false
         serverError = ""
+        maxMinutes = options.maxMinutes || 0
+        stale = !!options.stale
         initialMinutes = options.minutes || 0
+        if (mode === "pause" && maxMinutes > 0)
+            initialMinutes = Math.max(1, Math.min(initialMinutes, maxMinutes))
         minutesField.text = initialMinutes ? String(initialMinutes) : ""
         noteField.text = options.note || ""
         win.sessionPromptVisible = true
@@ -94,7 +103,7 @@ Popup {
         if (!canSave)
             return
         if (pauseMode && minutesField.text !== "" && !minutesField.acceptableInput) {
-            serverError = qsTr("Enter 1 to %1 minutes, or leave Worked empty.").arg(initialMinutes)
+            serverError = qsTr("Enter 1 to %1 minutes, or leave Worked empty.").arg(workedCap)
             minutesField.forceActiveFocus()
             return
         }
@@ -202,7 +211,7 @@ Popup {
                         inputMethodHints: Qt.ImhDigitsOnly
                         validator: IntValidator {
                             bottom: 1
-                            top: prompt.pauseMode ? Math.max(1, prompt.initialMinutes) : 1440
+                            top: prompt.pauseMode ? prompt.workedCap : 1440
                         }
                         onAccepted: prompt.save(false)
                     }
@@ -216,10 +225,21 @@ Popup {
                             selected: !prompt.pauseMode && prompt.minutes === modelData
                             onClicked: {
                                 var current = minutesField.acceptableInput ? prompt.minutes : prompt.initialMinutes
-                                minutesField.text = String(prompt.pauseMode ? Math.max(1, current - modelData) : modelData)
+                                minutesField.text = String(prompt.pauseMode
+                                    ? Math.max(1, Math.min(prompt.workedCap, current - modelData)) : modelData)
                             }
                         }
                     }
+                }
+                Label {
+                    objectName: "sessionStaleNote"
+                    visible: prompt.pauseMode && prompt.stale
+                    Layout.fillWidth: true
+                    text: qsTr("This timer ran past Sleep, so it stops there: at most %1 min.").arg(prompt.workedCap)
+                    textFormat: Text.PlainText
+                    color: prompt.win.muted
+                    font.pixelSize: 13
+                    wrapMode: Text.WordWrap
                 }
             }
 

@@ -58,6 +58,13 @@ public:
     void statsDays(int days, Callback callback);
     void statsFiltered(int days, const QString &tagId, const QString &projectId, const QString &itemId,
                        Callback callback, const QDate &from = {}, const QDate &to = {});
+    // stats.get with a ready parameter object (range, tag/project/item and the
+    // session filters minutes_min/minutes_max/values). Without session
+    // filters it also works through the CLI fallback.
+    void statsQuery(const QJsonObject &params, Callback callback);
+    // A daemon-only read (stats.table, sessions.list). Reads are coalesced by
+    // method plus parameters.
+    void rpcRead(const QString &method, const QJsonObject &params, Callback callback);
     void itemsList(Callback callback);
     void itemAdd(const ItemFields &fields, Callback callback = {});
     void itemEdit(const QString &id, const ItemFields &fields, Callback callback = {}, qint64 expectedVersion = -1);
