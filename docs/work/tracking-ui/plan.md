@@ -406,3 +406,28 @@ The user wants Statistics filtered by focus and other metrics too, not only by t
 - Layout (user, ~13:05): Statistics has three tabs, Charts | Table | Notes, under one shared
   filter bar (range, tags/projects/tasks, Metrics row). Filters persist across tabs; the Notes page
   is the Notes tab, not a separate sidebar entry.
+
+### Addendum: Trends line chart (user request 2026-11-23 ~13:15)
+Bars side by side or stacked do not show several tasks' or several metrics' growth clearly. The user
+wants lines: dots connected by a line, one line per series, to see rises and falls.
+- **App, Charts tab, new "Trends" chart:**
+  - x = day or week (follows the range: ≤ 31 days → day, else week; a Day/Week switch);
+  - series picker:
+    - measures (Minutes, Sessions, Focus, Quality, Distractions, Distractions per hour, each project metric);
+    - optional "Split by" Task / Project / Tag / Epic (phase 3), e.g. Focus split by task = one line per task;
+  - at most 8 lines; distinct muted palette colours; legend chips toggle a line;
+  - hover shows the period, and the real value and sessions of every line.
+  - Periods without data are gaps in the line, never fake zeros, except Minutes and Sessions, which are 0.
+  - **Different units:** if all lines share a unit (e.g. Focus and Quality on 1–5) they share one axis.
+    Otherwise the default is "Split" view: small charts stacked with a shared x axis, one per unit.
+    A "Relative" view instead scales each line to its own min–max on one chart; the tooltips still
+    show real values.
+  - The chart has the Chart/Table toggle like the others; the table is periods × lines.
+- **Protocol:** `stats.series {range…, filter… (same as stats.table incl. minutes/values ranges),
+  interval: "day"|"week", split?: "project"|"tag"|"item" (later "epic"), measures: [id…]}` →
+  `{interval, periods:[day…], series:[{key, label, color|null, measure, unit, scale_max|null,
+  points:[{value|null, sessions}]}]}`.
+  - One series per (split key × measure). Without `split` it is one series per measure over all filtered sessions.
+  - Weighting and rollups are the same as `stats.table`; `key:"none"` for unassigned work.
+  - Max 8 split keys, the top ones by minutes, plus a combined "Other" series when more exist.
+  - Fixtures: `stats_series_day.json`, `stats_series_split_item.json`.
