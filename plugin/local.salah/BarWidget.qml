@@ -67,6 +67,10 @@ BarWidget {
     ? SessionLogic.clockText(SessionLogic.elapsedSeconds(runningTimer.started_at, countdownNowMs)) : ""
 
   readonly property var runningItem: runningTimer ? plannerItem(runningTimer.item_id) : null
+  // Everything worked on the running task today: its finished sessions plus
+  // the running one, in whole minutes (the hover tooltip shows this).
+  readonly property int runningTotalMinutes: (runningItem ? Number(runningItem.actual_minutes || 0) : 0)
+    + Math.floor(SessionLogic.elapsedSeconds(runningTimer ? runningTimer.started_at : "", countdownNowMs) / 60)
   readonly property var runningProject: runningTimer
     ? SessionLogic.findProject(projects, runningTimer.project_id) : null
   readonly property string runningTitle: runningItem ? String(runningItem.title || "")
@@ -582,7 +586,7 @@ BarWidget {
       ? strings.t("bar.tooltip").arg(root.localizedNextName).arg(root.nextTime).arg(root.remainingLong)
       : strings.t("bar.unavailable"))
       + (root.runningTimer
-        ? "\n" + strings.t("bar.runningTooltip").arg(root.runningTitle).arg(root.runningElapsedText) : "")
+        ? "\n" + strings.t("bar.runningTooltip").arg(root.runningTitle).arg(root.runningTotalMinutes) : "")
     pressFeedbackButtons: Qt.NoButton
     onPressed: function(mouseButton) {
       if (mouseButton === Qt.MiddleButton) root.syncLocation(true)

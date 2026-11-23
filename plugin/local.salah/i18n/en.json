@@ -67,7 +67,7 @@
   "weekday.fri": "Fri",
   "weekday.sat": "Sat",
   "weekday.sun": "Sun",
-  "bar.runningTooltip": "%1 · %2 running",
+  "bar.runningTooltip": "%1 · %2 min today",
   "panel.log": "+︎ Log time",
   "session.addTime": "+︎ Time",
   "session.cancel": "Cancel",
