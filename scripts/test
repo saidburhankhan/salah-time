@@ -9,6 +9,7 @@ cargo test --locked --offline --workspace --manifest-path "$project_dir/Cargo.to
 bash -n "$project_dir/scripts/install" "$project_dir/scripts/uninstall"
 jq empty "$plugin_source/manifest.json" "$plugin_source/i18n/en.json"
 omarchy plugin validate "$plugin_source"
+for check in "$plugin_source"/tests/*_test.js; do node "$check" >/dev/null; done
 
 test_home=$(mktemp -d)
 # The scripts must never change the user's live bar while testing.
