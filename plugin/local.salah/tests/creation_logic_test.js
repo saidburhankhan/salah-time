@@ -36,29 +36,49 @@ test("explicit choices override prefill and a block-row preset overrides the par
     { block: "isha", minutes: null })
 })
 
-test("project tags filter the catalogue and never become item fields", () => {
+test("project defaults are selected before the tag catalogue loads", () => {
   const [quran] = fixture("projects_list")
-  const projects = [quran, { ...quran, id: "second" }, { id: "untagged", tags: [], tag_ids: [] }]
-  same(logic.tagsForProjects(projects), quran.tags)
-  same(logic.projectsForTag(projects, quran.tag_ids[0]).map(p => p.id), [quran.id, "second"])
-  same(logic.projectsForTag(projects, "").map(p => p.id), [quran.id, "second", "untagged"])
+  const projects = [quran, { id: "untagged", tag_ids: [] }]
+  const defaults = logic.defaultTagIds(projects, quran.id)
+  same(logic.taskTagIds(defaults, null, []), quran.tag_ids)
+  same(logic.defaultTagIds(projects, "untagged"), [])
+  same(logic.defaultTagIds(projects, ""), [])
+  same(logic.defaultTagIds(projects, "archived"), [])
+})
+
+test("task tags can clear all defaults or include tags from outside the chosen project", () => {
+  const [quran] = fixture("projects_list")
+  const catalogue = [...quran.tags, { id: "standalone", name: "Arabic" }]
+  const defaults = logic.defaultTagIds([quran], quran.id)
+  const empty = logic.toggleTag(defaults, defaults[0])
+  const selected = logic.toggleTag(empty, "standalone")
+
+  same(logic.taskTagIds(defaults, empty, catalogue), [])
+  same(logic.taskTagIds(defaults, selected, catalogue), ["standalone"])
+  same(logic.taskTagIds(defaults, selected, quran.tags), [])
+  same(quran.tag_ids, [quran.tags[0].id])
+  same(logic.addParams(once, {}, quran.id, false, "", "", empty),
+    { title: once.title, project_id: quran.id, tag_ids: [] })
+  same(logic.addParams(once, {}, quran.id, false, "", "", selected),
+    { title: once.title, project_id: quran.id, tag_ids: ["standalone"] })
 })
 
 test("the sheet sends the parsed title, recurrence and selected schedule", () => {
   const weekly = { ...daily, repeat: "weekly", weekdays: ["mon", "fri"] }
-  same(logic.addParams(weekly, { minutes: 30, block: "asr" }, "project", false, "2031-05-15"),
+  same(logic.addParams(weekly, { minutes: 30, block: "asr" }, "project", false, "2031-05-15", "", []),
     { title: daily.title, planned_minutes: 30, project_id: "project", date: "2031-05-15",
-      block: "asr", repeat: "weekly", weekdays: ["mon", "fri"] })
-  same(logic.addParams(once, { minutes: null, block: "isha" }, "", false, "2031-05-14"),
-    { title: once.title, date: "2031-05-14", block: "isha" })
+      block: "asr", repeat: "weekly", weekdays: ["mon", "fri"], tag_ids: [] })
+  same(logic.addParams(once, { minutes: null, block: "isha" }, "", false, "2031-05-14", "", []),
+    { title: once.title, date: "2031-05-14", block: "isha", tag_ids: [] })
 })
 
 test("backlog has no day or block and only accepts a parsed one-time task", () => {
   const fields = { minutes: 20, block: "isha" }
-  same(logic.addParams(once, fields, "", true, "2031-05-15"),
-    { title: once.title, planned_minutes: 20, backlog: true })
-  assert.equal(logic.addParams(daily, fields, "", true, ""), null)
-  assert.equal(logic.addParams(null, fields, "", true, ""), null)
+  const [item] = fixture("item_add_tags").changed.items
+  same(logic.addParams(once, fields, "", true, "2031-05-15", "", item.tag_ids),
+    { title: once.title, planned_minutes: 20, backlog: true, tag_ids: item.tag_ids })
+  assert.equal(logic.addParams(daily, fields, "", true, "", "", []), null)
+  assert.equal(logic.addParams(null, fields, "", true, "", "", []), null)
 })
 
 test("Tomorrow follows the tracking day across month, leap-day and year boundaries", () => {
@@ -76,7 +96,7 @@ test("a parsed day prefills the When chip and the date submitted by Add", () => 
   same(logic.schedule({ day: "2028-03-01" }, "", today), { when: "tomorrow", date: "2028-03-01" })
   same(logic.schedule({ day: today }, "", today), { when: "today", date: today })
   same(logic.schedule(once, "", today), { when: "today", date: today })
-  assert.equal(logic.addParams(draft, { minutes: 20, block: "isha" }, "", false, schedule.date).date,
+  assert.equal(logic.addParams(draft, { minutes: 20, block: "isha" }, "", false, schedule.date, "", []).date,
     draft.start_day)
 })
 
@@ -114,11 +134,11 @@ test("a stale or foreign epic choice falls back to No epic", () => {
 
 test("epic_id is sent with item.add only alongside its project", () => {
   const draft = { title: "Read", repeat: "none" }
-  const withEpic = logic.addParams(draft, { minutes: 15, block: "fajr" }, "p", false, "2031-05-14", "e")
+  const withEpic = logic.addParams(draft, { minutes: 15, block: "fajr" }, "p", false, "2031-05-14", "e", [])
   assert.equal(withEpic.epic_id, "e")
-  assert.equal(logic.addParams(draft, {}, "p", false, "", "").epic_id, undefined)
-  assert.equal(logic.addParams(draft, {}, "", false, "", "e").epic_id, undefined)
-  assert.equal(logic.addParams(draft, {}, "p", true, "", "e").epic_id, "e")
+  assert.equal(logic.addParams(draft, {}, "p", false, "", "", []).epic_id, undefined)
+  assert.equal(logic.addParams(draft, {}, "", false, "", "e", []).epic_id, undefined)
+  assert.equal(logic.addParams(draft, {}, "p", true, "", "e", []).epic_id, "e")
 })
 
 test("day rows name their epic, finished ones included", () => {

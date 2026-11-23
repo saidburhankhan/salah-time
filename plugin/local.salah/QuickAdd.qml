@@ -24,7 +24,7 @@ Column {
   property var minutesChoice: null
   property string blockChoice: ""
   property string whenChoice: ""
-  property string tagId: ""
+  property var tagChoice: null
   property string projectId: ""
   property string epicId: ""
   property string submitting: ""
@@ -33,8 +33,9 @@ Column {
   readonly property var schedule: CreationLogic.schedule(parsed, whenChoice, today)
   readonly property var fields: CreationLogic.prefill(parsed, minutesChoice, blockChoice,
     host.quickAddBlock, schedule.when === "tomorrow" ? "fajr" : (planning ? planning.start : ""))
-  readonly property var tags: CreationLogic.tagsForProjects(host.projects)
-  readonly property var filteredProjects: CreationLogic.projectsForTag(host.projects, tagId)
+  readonly property var projects: host.projects
+  readonly property var tagIds: CreationLogic.taskTagIds(
+    CreationLogic.defaultTagIds(projects, projectId), tagChoice, host.tags)
   readonly property var projectEpics: CreationLogic.epicsForProject(host.epics, projectId)
   readonly property bool backlogAllowed: !!parsed && parsed.repeat === "none"
 
@@ -42,7 +43,7 @@ Column {
     minutesChoice = null
     blockChoice = ""
     whenChoice = ""
-    tagId = ""
+    tagChoice = null
     projectId = ""
     epicId = ""
   }
@@ -56,20 +57,23 @@ Column {
 
   function submit(backlog) {
     if (submitting || !parsed || (schedule.when === "tomorrow" && !schedule.date && !backlog)) return
-    var params = CreationLogic.addParams(parsed, fields, projectId, backlog, schedule.date, epicId)
+    var params = CreationLogic.addParams(parsed, fields, projectId, backlog, schedule.date, epicId, tagIds)
     if (!params) return
     submitting = host.beginOp("add", "")
     transport.rpcMutation(submitting, "item.add", params, "add")
   }
 
-  onTagsChanged: if (tagId && !tags.some(tag => tag.id === tagId)) tagId = ""
-  onFilteredProjectsChanged: {
-    if (projectId && !filteredProjects.some(project => project.id === projectId)) projectId = ""
+  onProjectsChanged: {
+    if (projectId && !projects.some(project => project.id === projectId)) projectId = ""
   }
-  onProjectIdChanged: epicId = ""
+  onProjectIdChanged: {
+    epicId = ""
+    tagChoice = null
+  }
   onProjectEpicsChanged: epicId = CreationLogic.validEpicId(host.epics, projectId, epicId)
   onExpandedChanged: if (expanded) {
     transport.loadProjects()
+    transport.loadTags()
     transport.loadEpics()
   }
 
@@ -88,7 +92,10 @@ Column {
       if (draft && !root.backlogAllowed && root.whenChoice === "backlog") root.whenChoice = ""
     }
     function onTransportChanged(active) {
-      if (root.expanded) parseTimer.restart()
+      if (root.expanded) {
+        if (!active) root.transport.loadTags()
+        parseTimer.restart()
+      }
     }
     function onMutationSucceeded(opId, kind, result) {
       if (opId === root.submitting) root.dismiss()
@@ -145,17 +152,9 @@ Column {
     spacing: Style.space(3)
 
     ChipRow {
-      visible: root.tags.length > 0
-      caption: root.strings.t("creation.tags")
-      options: [{ id: "", name: root.strings.t("creation.all") }].concat(root.tags)
-      selection: root.tagId
-      onPicked: value => root.tagId = value
-    }
-
-    ChipRow {
-      visible: root.host.projects.length > 0
+      visible: root.projects.length > 0
       caption: root.strings.t("creation.project")
-      options: [{ id: "", name: root.strings.t("creation.noProject") }].concat(root.filteredProjects)
+      options: [{ id: "", name: root.strings.t("creation.noProject") }].concat(root.projects)
       selection: root.projectId
       onPicked: value => root.projectId = value
     }
@@ -166,6 +165,15 @@ Column {
       options: [{ id: "", name: root.strings.t("creation.noEpic") }].concat(root.projectEpics)
       selection: root.epicId
       onPicked: value => root.epicId = value
+    }
+
+    ChipRow {
+      visible: root.host.tags.length > 0
+      caption: root.strings.t("creation.tags")
+      options: root.host.tags
+      selection: root.tagIds
+      multiple: true
+      onPicked: value => root.tagChoice = CreationLogic.toggleTag(root.tagIds, value)
     }
 
     ChipRow {

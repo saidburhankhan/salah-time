@@ -10,6 +10,7 @@ Row {
   required property string caption
   required property var options
   required property var selection
+  property bool multiple: false
   required property color foreground
   required property color mutedForeground
   required property string fontFamily
@@ -54,7 +55,7 @@ Row {
           iconSize: Style.font.caption
           leftAlign: true
           width: Math.min(implicitWidth, strip.width)
-          selected: root.selection === modelData.id
+          selected: root.multiple ? root.selection.includes(modelData.id) : root.selection === modelData.id
           enabled: modelData.enabled !== false
           bordered: true
           foreground: root.foreground

@@ -28,6 +28,7 @@ Item {
   signal statusFailed(string message)
   signal itemParsed(string text, var draft, string error)
   signal projectsLoaded(var projects)
+  signal tagsLoaded(var tags)
   signal metricsLoaded(var metrics)
   signal epicsLoaded(var epics)
   signal resourcesLoaded(string requestId, var resources, string error)
@@ -237,7 +238,7 @@ Item {
       if (meta.type === "status") client.handleStatusFailure(meta, detail)
       else if (meta.type === "parse") client.itemParsed(meta.text, null, detail)
       else if (meta.type === "resources") client.resourcesLoaded(meta.requestId, null, detail)
-      else if (meta.type === "projects" || meta.type === "metrics" || meta.type === "epics") {
+      else if (meta.type === "projects" || meta.type === "metrics" || meta.type === "epics" || meta.type === "tags") {
         // The planner still works without these lists; the panels say so.
       }
       else if (meta.type === "mutation") {
@@ -260,6 +261,8 @@ Item {
       client.itemParsed(meta.text, result, "")
     } else if (meta.type === "projects") {
       client.projectsLoaded(result || [])
+    } else if (meta.type === "tags") {
+      client.tagsLoaded(result || [])
     } else if (meta.type === "epics") {
       client.epicsLoaded(result || [])
     } else if (meta.type === "metrics") {
@@ -564,6 +567,10 @@ Item {
     client.read("projects.list", { "archived": false }, { "type": "projects" })
   }
 
+  function loadTags() {
+    client.read("tags.list", {}, { "type": "tags" })
+  }
+
   function loadEpics() {
     client.read("epics.list", {}, { "type": "epics" })
   }
@@ -697,6 +704,8 @@ Item {
             client.itemParsed(meta.text, exitCode === 0 ? result : null, exitCode === 0 ? "" : failure)
           else if (meta.type === "projects" && exitCode === 0 && !client.socketActive)
             client.projectsLoaded(result)
+          else if (meta.type === "tags" && exitCode === 0 && !client.socketActive)
+            client.tagsLoaded(result)
           else if (meta.type === "epics" && exitCode === 0 && !client.socketActive)
             client.epicsLoaded(result)
           else if (meta.type === "resources")

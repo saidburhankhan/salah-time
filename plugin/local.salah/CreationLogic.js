@@ -17,24 +17,21 @@ function minuteChoices(parsed) {
   return choices
 }
 
-function tagsForProjects(projects) {
-  var tags = []
-  var seen = new Set()
-  projects.forEach(function(project) {
-    var projectTags = project.tags || []
-    projectTags.forEach(function(tag) {
-      if (seen.has(tag.id)) return
-      seen.add(tag.id)
-      tags.push(tag)
-    })
-  })
-  return tags
+function defaultTagIds(projects, projectId) {
+  var project = projects.find(function(row) { return row.id === projectId })
+  return project ? (project.tag_ids || []) : []
 }
 
-function projectsForTag(projects, tagId) {
-  return projects.filter(function(project) {
-    return !tagId || (project.tag_ids || []).indexOf(tagId) >= 0
+function taskTagIds(defaults, choice, tags) {
+  if (choice === null) return defaults
+  return choice.filter(function(id) {
+    return tags.some(function(tag) { return tag.id === id })
   })
+}
+
+function toggleTag(tagIds, id) {
+  return tagIds.includes(id) ? tagIds.filter(function(tagId) { return tagId !== id })
+    : tagIds.concat(id)
 }
 
 // Shift the planner's calendar date even when the machine is in another zone.
@@ -77,9 +74,9 @@ function epicName(epics, epicId) {
   return ""
 }
 
-function addParams(parsed, fields, projectId, backlog, date, epicId) {
+function addParams(parsed, fields, projectId, backlog, date, epicId, tagIds) {
   if (!parsed || !parsed.title || (backlog && parsed.repeat !== "none")) return null
-  var params = { title: parsed.title }
+  var params = { title: parsed.title, tag_ids: tagIds }
   if (fields.minutes != null) params.planned_minutes = fields.minutes
   if (projectId) {
     params.project_id = projectId

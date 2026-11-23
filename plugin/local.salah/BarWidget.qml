@@ -43,6 +43,7 @@ BarWidget {
   property var pendingReminders: ({})
   property string reminderError: ""
   property var projects: []
+  property var tags: []
   property var epics: []
   property var metricCatalogue: []
   property string sessionPanelMode: ""
@@ -594,18 +595,21 @@ BarWidget {
     onMutationSucceeded: function(opId, kind, result) { root.handleMutationSuccess(opId, kind, result) }
     onMutationFailed: function(opId, kind, message, data) { root.handleMutationFailure(opId, kind, message, data) }
     onProjectsLoaded: function(rows) { root.projects = rows || [] }
+    onTagsLoaded: function(rows) { root.tags = rows || [] }
     onEpicsLoaded: function(rows) { root.epics = rows || [] }
     onMetricsLoaded: function(rows) { root.metricCatalogue = rows || [] }
     onEntitiesChanged: function(scopes) {
       if (scopes.indexOf("projects") >= 0 || scopes.indexOf("tags") >= 0
           || scopes.indexOf("metrics") >= 0) client.loadProjects()
       if (scopes.indexOf("metrics") >= 0) client.loadMetrics()
+      if (scopes.indexOf("tags") >= 0) client.loadTags()
       if (scopes.indexOf("epics") >= 0 || scopes.indexOf("projects") >= 0) client.loadEpics()
     }
     onTransportChanged: function(active) {
       if (!active) root.refresh()
       else {
         client.loadProjects()
+        client.loadTags()
         client.loadEpics()
         client.loadMetrics()
       }
