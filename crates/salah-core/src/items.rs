@@ -33,6 +33,7 @@ pub struct NewItem {
     pub project_id: Option<String>,
     pub epic_id: Option<String>,
     pub metric_ids: Option<Vec<String>>,
+    pub tag_ids: Option<Vec<String>>,
     pub planned_minutes: Option<i64>,
     /// The day of a one-time item or the first day of a repeating one.
     /// Defaults to the day in progress.
@@ -45,6 +46,7 @@ pub struct NewItem {
 pub struct ItemChanges {
     #[serde(default)]
     pub title: Option<String>,
+    pub tag_ids: Option<Vec<String>>,
     #[serde(default)]
     pub block: Option<BoundaryId>,
     #[serde(default)]
@@ -77,6 +79,7 @@ pub enum MovePosition {
 pub struct ItemView {
     #[serde(flatten)]
     pub item: Item,
+    pub tag_ids: Vec<String>,
     /// No day and no block: the item waits in the backlog.
     pub backlog: bool,
     pub metrics: Vec<PromptMetric>,
@@ -88,6 +91,7 @@ pub struct ItemView {
 impl ItemView {
     pub fn new(store: &Store, item: Item, from: NaiveDate) -> Result<Self, Error> {
         Ok(Self {
+            tag_ids: store.item_tag_ids(&item.id)?,
             metrics: effective_metrics(store, &item)?,
             schedule_text: item.schedule_text(),
             next_occurrence: item.next_occurrence(from),
@@ -177,6 +181,14 @@ pub fn add(
     let (project_id, epic_id) = epic_owner(tx, new.project_id, new.epic_id)?;
     let project_id = checked_project(tx, project_id)?;
     let metric_ids = checked_metric_ids(tx, project_id.as_deref(), new.metric_ids)?;
+    let tags = match new.tag_ids {
+        Some(ids) => projects::checked_tags(tx, ids)?,
+        None => project_id
+            .as_deref()
+            .map(|id| tx.project_default_tags(id))
+            .transpose()?
+            .unwrap_or_default(),
+    };
     let mut item = Item {
         id: ids.new_id(),
         title: validate_title(&new.title)?,
@@ -198,6 +210,7 @@ pub fn add(
         version: 1,
     };
     item.version = tx.put_item(&item)?;
+    tx.set_item_tags(&item.id, &tags)?;
     Ok(item)
 }
 
@@ -265,6 +278,9 @@ pub fn edit(
         Some(ids) => item.metric_ids = checked_metric_ids(tx, item.project_id.as_deref(), ids)?,
         None if item.project_id != previous_project => item.metric_ids = None,
         None => {}
+    }
+    if let Some(tags) = changes.tag_ids {
+        tx.set_item_tags(id, &projects::checked_tags(tx, tags)?)?;
     }
     if let Some(planned) = changes.planned_minutes {
         item.planned_minutes = planned.map(|m| minutes("planned_minutes", m)).transpose()?;

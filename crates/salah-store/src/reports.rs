@@ -9,7 +9,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{Connection, functions::FunctionFlags, params_from_iter, types::Value};
 use salah_domain::{
     error::Error,
-    tracking::{ItemRef, ProjectRef, Session, SessionNote, SessionValue, Tag},
+    tracking::{ItemRef, ProjectRef, Session, SessionNote, SessionValue},
 };
 use std::collections::BTreeMap;
 
@@ -102,9 +102,10 @@ const SORT_AT: &str = "strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(s.ended_at, s.cre
 /// session logged later for an earlier day sorts under that day.
 const PAGE_ORDER: &str = "s.day DESC, strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(s.ended_at, s.created_at)) DESC, s.id DESC";
 
-/// Live sessions with a project tag that is itself live.
-const HAS_LIVE_TAG: &str = "EXISTS (SELECT 1 FROM project_tags pt JOIN tags t ON t.id = pt.tag_id
-    AND t.deleted_at IS NULL WHERE pt.project_id = s.project_id)";
+/// A task's labels take precedence even when its set is empty. Without a task,
+/// the project's current defaults label the session.
+const SESSION_TAGS: &str = "SELECT it.tag_id FROM item_tags it WHERE it.item_id = s.item_id
+    UNION ALL SELECT pt.tag_id FROM project_tags pt WHERE s.item_id IS NULL AND pt.project_id = s.project_id";
 
 const HAS_ENTRY: &str = "EXISTS (SELECT 1 FROM session_notes n WHERE n.session_id = s.id
     AND n.deleted_at IS NULL";
@@ -128,14 +129,14 @@ impl Query {
             Some(Choice::Is(id)) => query.push("s.project_id = ?", [text(id)]),
             None => {}
         }
-        match scope.tag {
-            Some(Choice::Unassigned) => query.push(&format!("NOT {HAS_LIVE_TAG}"), []),
-            Some(Choice::Is(id)) => query.push(
-                "EXISTS (SELECT 1 FROM project_tags pt WHERE pt.project_id = s.project_id
-                 AND pt.tag_id = ?)",
-                [text(id)],
-            ),
-            None => {}
+        if let Some(tag) = scope.tag {
+            let tags = format!(
+                "SELECT t.id FROM ({SESSION_TAGS}) labels JOIN tags t ON t.id = labels.tag_id WHERE t.deleted_at IS NULL"
+            );
+            match tag {
+                Choice::Unassigned => query.push(&format!("NOT EXISTS ({tags})"), []),
+                Choice::Is(id) => query.push(&format!("EXISTS ({tags} AND t.id = ?)"), [text(id)]),
+            }
         }
         match scope.epic {
             Some(Choice::Unassigned) => query.push("s.epic_id IS NULL", []),
@@ -279,21 +280,6 @@ impl Store {
             by_session.entry(session_id).or_default().push(note);
         }
         Ok(by_session)
-    }
-
-    /// Each project's live tags by name.
-    pub fn project_tags(&self) -> Result<BTreeMap<String, Vec<Tag>>, Error> {
-        let links = self.all(
-            "SELECT pt.project_id, t.* FROM project_tags pt JOIN tags t ON t.id = pt.tag_id
-             WHERE t.deleted_at IS NULL ORDER BY pt.project_id, t.name, t.id",
-            [],
-            |row| Ok((row.get::<_, String>("project_id")?, codec::tag(row)?)),
-        )?;
-        let mut tags = BTreeMap::<String, Vec<Tag>>::new();
-        for (project, tag) in links {
-            tags.entry(project).or_default().push(tag);
-        }
-        Ok(tags)
     }
 }
 

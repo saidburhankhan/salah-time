@@ -109,8 +109,8 @@ store-wide counter, never a precondition.
 | `sessions.list` | `stats.get`'s range and project, epic, tag and item filters, `with_note?` (default true), `q?`, `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}`, `limit?` (default 100, 1–500), `before?` (a previous `next`) | `rows: [SessionView + project + epic + item]`, `next: cursor\|null` | validation, not_found, storage | — | — |
 | `item.parse` | `text` | draft `{title, block, repeat, weekdays, planned_minutes, start_day}` | validation (and, only when the text names a day, config/source) | — | — |
 | `item.preview` | `block`, `repeat`, `weekdays?`, `planned_minutes?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
-| `item.add` | `op_id`, `title` or `quick_text`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `epic_id?`, `planned_minutes?`, `date?`, `metric_ids?`, `backlog?` (one-time, then no `block`/`date`) | mutation result (`changed.items`) | validation, not_found, source, storage | yes | no |
-| `item.edit` | `op_id`, `id`, `expected_version?`, `title?`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `epic_id?`, `planned_minutes?`, `metric_ids?` (`null` clears the project, epic, planned minutes or metric selection) | mutation result | validation, not_found, conflict, storage | yes | yes |
+| `item.add` | `op_id`, `title` or `quick_text`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `epic_id?`, `planned_minutes?`, `date?`, `metric_ids?`, `tag_ids?`, `backlog?` (one-time, then no `block`/`date`) | mutation result (`changed.items`) | validation, not_found, source, storage | yes | no |
+| `item.edit` | `op_id`, `id`, `expected_version?`, `title?`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `epic_id?`, `planned_minutes?`, `tag_ids?`, `metric_ids?` (`null` clears the project, epic, planned minutes or metric selection) | mutation result | validation, not_found, conflict, storage | yes | yes |
 | `item.move` | `op_id`, `id`, `block` (required; `null` reorders the backlog), `after_id?` / `before_id?` / `index?`, `expected_version?` | mutation result (every renumbered item) | validation, not_found, conflict, storage | yes | yes |
 | `item.schedule` | `op_id`, `id`, `day`, `block`, `expected_version?` (one-time items only) | mutation result (`changed.items`) | validation, not_found, conflict, source, storage | yes | yes |
 | `item.backlog` | `op_id`, `id`, `expected_version?` (one-time items only) | mutation result (`changed.items`) | validation, not_found, conflict, source, storage | yes | yes |
@@ -198,7 +198,7 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   of a backlog item's `block`, or a repeat on it is a `validation` error.
   `backlog.list` reads its rows and filters from one snapshot. A `project_id` of
   `"none"` selects items with a null stored project ID. `tag_id` filters by the
-  project's live tags.
+  task's current live tags.
 - A `Resource` carries `id`, `item_id`, `epic_id`, `kind`, `title`, `body`,
   `url`, `remind_at`, `done`, `position`, and sync fields (`created_at`, `updated_at`,
   `deleted_at`, `version`). One parent ID is null. The other names a live item or
@@ -245,9 +245,18 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   `unplanned_minutes` (every other session: unplanned items, bare projects).
   Each day block carries `capacity_minutes`, `planned_minutes`,
   `actual_minutes` and `unplanned_minutes` the same way.
+- Item views and day rows expose `tag_ids`. On `item.add`, omitting the field
+  copies the project's live defaults, or an empty set for an item without a
+  project. An explicit list replaces those defaults, including `[]`. An
+  `item.edit` with `tag_ids` replaces the set. Project changes preserve existing
+  task tags. Both methods validate each id against live tags. Removing a tag
+  detaches it from tasks and projects and bumps the affected versions.
+- All session reports resolve tags at read time using the task's current tags,
+  or the recorded project's current defaults for sessions without a task.
+  Re-tagging a task therefore updates its historical reports.
 - `stats.table` is the general statistics table. It reads finished live sessions only
   (ticks included) and never writes. Filters intersect; `"none"` selects unassigned
-  work: no project, no live project tag, or no task. A named id must exist (a removed
+  work: no project, no live session tag, or no task. A named id must exist (a removed
   item still matches its sessions). `columns` lists `minutes`, `sessions`, then every
   active metric and each archived metric with a value in scope. The order follows the
   catalog, or the project's prompt order under a single `project_id`. Each column is
@@ -264,7 +273,7 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   - `project`, `epic`, `tag`, `item`: only keys with sessions, most minutes first; `from`/`to`
     are `null`. Unassigned work is the row `key: "none"` ("No project", "No epic", "No tag",
     "No task", `color: null`), so the rows cover every session in scope. A tag row
-    counts each session of a project carrying that tag; a session counts once per tag,
+    counts each session carrying that tag; a session counts once per tag,
     and `totals` count each session once. Task and epic rows are coloured by the session's
     project. A row `key` is a valid filter value for its dimension.
   - `block`: rows with work or ticks, in prayer order. A timed session's recorded
@@ -297,7 +306,7 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   id (`"none"` for unassigned work), `color` its colour, and `label` the key's label
   (`key label · measure name` when several measures). At most 8 keys are kept, most
   minutes first; further keys merge into one `key: "other"`, `label: "Other"` series
-  that counts each session once. A tag split counts a session in each tag of its project.
+  that counts each session once. A tag split counts a session in each of its tags.
 - Session bounds (`stats.get`, `stats.table`, `sessions.list`): `minutes_min?`,
   `minutes_max?` and `values?` share one predicate. `minutes_*` are inclusive and never
   match a tick; each `values` entry needs the session to have that metric within the
@@ -335,8 +344,7 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
 - `stats.get.projects` lists each project with work in scope, in project order, then
   one `{id: "none", name: "No project", color: null}` row when sessions without a
   project are in scope, so the rows add up to `totals`.
-- `stats.get.tags` counts a session’s minutes in each live tag of its recorded
-  project. A session without a project or without a live project tag contributes
+- `stats.get.tags` counts a session’s minutes in each of its current tags. A session with an empty tag set contributes
   to the final `{id: "none", name: "No tag", color: null, minutes}` row. An
   untagged tick contributes zero minutes. See `stats_with_untagged_tick.json`.
 - `stats.get.epics` contains `{id, name, project_id, minutes, sessions, metrics}`

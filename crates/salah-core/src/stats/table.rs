@@ -13,7 +13,7 @@ use crate::Store;
 use chrono::{Datelike, Days, NaiveDate};
 use salah_domain::{
     error::Error,
-    tracking::{Metric, MetricKind, ProjectMetric, Rollup, Session, Tag},
+    tracking::{Metric, MetricKind, ProjectMetric, Rollup, Session},
 };
 use salah_store::reports::{Choice, ReportSession};
 use serde::{Deserialize, Serialize};
@@ -150,7 +150,7 @@ pub fn table(
 pub(super) struct ReportData {
     pub sessions: Vec<ReportSession>,
     pub metrics: Vec<Metric>,
-    pub tags: BTreeMap<String, Vec<Tag>>,
+    pub tags: salah_store::ReportTags,
     pub windows: blocks::Windows,
 }
 
@@ -171,9 +171,9 @@ impl ReportData {
             Ok(Self {
                 metrics: metric_columns(store.metrics()?, &positions, &sessions),
                 tags: if by_tag {
-                    store.project_tags()?
+                    store.report_tags()?
                 } else {
-                    BTreeMap::new()
+                    Default::default()
                 },
                 windows: if by_block {
                     calendar.windows(store, &sessions)?
@@ -456,14 +456,13 @@ pub(super) fn epic_key(s: &ReportSession) -> Key {
 }
 
 /// Each live tag of the session's project, or the "No tag" row.
-pub(super) fn tag_keys(s: &ReportSession, tags: &BTreeMap<String, Vec<Tag>>) -> Vec<Key> {
-    let keys: Vec<Key> = s
-        .session
-        .project_id
-        .as_ref()
-        .and_then(|id| tags.get(id))
-        .into_iter()
-        .flatten()
+pub(super) fn tag_keys(s: &ReportSession, tags: &salah_store::ReportTags) -> Vec<Key> {
+    let keys: Vec<Key> = tags
+        .for_owner(
+            s.session.item_id.as_deref(),
+            s.session.project_id.as_deref(),
+        )
+        .iter()
         .map(|tag| Key {
             key: tag.id.clone(),
             label: tag.name.clone(),

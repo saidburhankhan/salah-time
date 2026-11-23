@@ -232,24 +232,19 @@ pub fn stats(
 
 fn tag_breakdown(
     tags: Vec<Tag>,
-    project_tags: &BTreeMap<String, Vec<String>>,
+    labels: &salah_store::ReportTags,
     sessions: &[ReportSession],
 ) -> Vec<TagStat> {
     let mut minutes = BTreeMap::<&str, i64>::new();
     for row in sessions {
         let session = &row.session;
         let worked = session.minutes.unwrap_or(0);
-        match session
-            .project_id
-            .as_ref()
-            .and_then(|id| project_tags.get(id))
-        {
-            Some(ids) => {
-                for id in ids {
-                    *minutes.entry(id).or_default() += worked;
-                }
-            }
-            None => *minutes.entry(NONE).or_default() += worked,
+        let tags = labels.for_owner(session.item_id.as_deref(), session.project_id.as_deref());
+        if tags.is_empty() {
+            *minutes.entry(NONE).or_default() += worked;
+        }
+        for tag in tags {
+            *minutes.entry(&tag.id).or_default() += worked;
         }
     }
     let mut rows: Vec<_> = tags
@@ -544,7 +539,7 @@ struct Scope {
     tag: Option<Pick>,
     item: Option<Pick>,
     /// Each project's live tag ids.
-    tags: BTreeMap<String, Vec<String>>,
+    tags: salah_store::ReportTags,
 }
 
 impl Scope {
@@ -554,11 +549,7 @@ impl Scope {
             epic: Pick::of(scope.epic),
             tag: Pick::of(scope.tag),
             item: Pick::of(scope.item),
-            tags: store
-                .project_tags()?
-                .into_iter()
-                .map(|(project, tags)| (project, tags.into_iter().map(|t| t.id).collect()))
-                .collect(),
+            tags: store.report_tags()?,
         })
     }
 
@@ -568,7 +559,7 @@ impl Scope {
 
     /// Plan lines always name a task, so `none` for tasks keeps no line.
     fn keeps(&self, project_id: Option<&str>, epic_id: Option<&str>, item_id: &str) -> bool {
-        let tags = project_id.and_then(|id| self.tags.get(id));
+        let tags = self.tags.for_owner(Some(item_id), project_id);
         self.project.as_ref().is_none_or(|pick| match pick {
             Pick::Unassigned => project_id.is_none(),
             Pick::Is(id) => project_id == Some(id.as_str()),
@@ -576,8 +567,8 @@ impl Scope {
             Pick::Unassigned => epic_id.is_none(),
             Pick::Is(id) => epic_id == Some(id.as_str()),
         }) && self.tag.as_ref().is_none_or(|pick| match pick {
-            Pick::Unassigned => tags.is_none_or(Vec::is_empty),
-            Pick::Is(id) => tags.is_some_and(|tags| tags.contains(id)),
+            Pick::Unassigned => tags.is_empty(),
+            Pick::Is(id) => tags.iter().any(|t| t.id == *id),
         }) && self.item.as_ref().is_none_or(|pick| match pick {
             Pick::Unassigned => false,
             Pick::Is(id) => id == item_id,

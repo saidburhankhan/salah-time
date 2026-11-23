@@ -1,0 +1,124 @@
+{
+  "id": 11,
+  "jsonrpc": "2.0",
+  "result": {
+    "columns": [
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "minutes",
+        "kind": "count",
+        "name": "Minutes",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "min"
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "sessions",
+        "kind": "count",
+        "name": "Sessions",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "sessions"
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "focus",
+        "kind": "scale",
+        "name": "Focus",
+        "rollup": "avg",
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "quality",
+        "kind": "scale",
+        "name": "Quality",
+        "rollup": "avg",
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "archived": false,
+        "derived_from": null,
+        "id": "distractions",
+        "kind": "count",
+        "name": "Distractions",
+        "rollup": "sum",
+        "scale_max": null,
+        "unit": "times"
+      },
+      {
+        "archived": false,
+        "derived_from": "distractions",
+        "id": "distractions_per_hour",
+        "kind": "count",
+        "name": "Distractions per hour",
+        "rollup": "avg",
+        "scale_max": null,
+        "unit": "per hour"
+      }
+    ],
+    "filter": {
+      "epic_id": null,
+      "item_id": null,
+      "minutes_max": null,
+      "minutes_min": null,
+      "project_id": null,
+      "tag_id": null,
+      "values": {}
+    },
+    "group": "tag",
+    "range": {
+      "from": "2031-05-14",
+      "to": "2031-05-14"
+    },
+    "rows": [
+      {
+        "color": "#223344",
+        "from": null,
+        "key": "<id:1>",
+        "label": "Study",
+        "minutes": 80,
+        "sessions": 3,
+        "to": null,
+        "values": {
+          "distractions": null,
+          "distractions_per_hour": null,
+          "focus": null,
+          "quality": null
+        }
+      },
+      {
+        "color": null,
+        "from": null,
+        "key": "none",
+        "label": "No tag",
+        "minutes": 20,
+        "sessions": 1,
+        "to": null,
+        "values": {
+          "distractions": null,
+          "distractions_per_hour": null,
+          "focus": null,
+          "quality": null
+        }
+      }
+    ],
+    "totals": {
+      "minutes": 100,
+      "sessions": 4,
+      "values": {
+        "distractions": null,
+        "distractions_per_hour": null,
+        "focus": null,
+        "quality": null
+      }
+    }
+  }
+}

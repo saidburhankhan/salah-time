@@ -33,6 +33,7 @@ pub struct DayRow {
     pub version: i64,
     pub project: Option<ProjectRef>,
     pub epic_id: Option<String>,
+    pub tag_ids: Vec<String>,
     pub metric_ids: Option<Vec<String>>,
     pub metrics: Vec<PromptMetric>,
     /// The project and minutes as planned that day (the snapshot of a past day).
@@ -381,6 +382,7 @@ impl Ledger {
                 .as_ref()
                 .and_then(|id| self.projects.iter().find(|p| p.id == *id))
                 .map(ProjectRef::from),
+            tag_ids: store.item_tag_ids(&item.id)?,
             metric_ids: metric_item.metric_ids.clone(),
             metrics: crate::items::effective_metrics(store, metric_item)?,
             planned_minutes: line.planned_minutes,

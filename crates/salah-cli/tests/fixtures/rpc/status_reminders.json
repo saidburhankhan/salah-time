@@ -147,6 +147,7 @@
           },
           "schedule_text": "Once",
           "sessions": [],
+          "tag_ids": [],
           "title": "Read",
           "version": 1,
           "weekdays": null
@@ -207,6 +208,7 @@
           },
           "schedule_text": "Once",
           "sessions": [],
+          "tag_ids": [],
           "title": "Read",
           "version": 1,
           "weekdays": null

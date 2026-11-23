@@ -105,6 +105,9 @@ pub struct ArchivedArgs {
 
 #[derive(Args)]
 pub struct ItemAddArgs {
+    /// Task tag id, repeatable. Pass --tag alone for an empty set.
+    #[arg(long = "tag", value_name = "ID", num_args = 0..=1)]
+    tags: Option<Vec<String>>,
     /// Title, or with --quick a line such as "read 20m after isha daily"
     #[arg(required = true, num_args = 1..)]
     title: Vec<String>,
@@ -159,6 +162,9 @@ pub struct ItemPreviewArgs {
 
 #[derive(Args)]
 pub struct ItemEditArgs {
+    /// Task tag id, repeatable. Pass --tag alone for an empty set.
+    #[arg(long = "tag", value_name = "ID", num_args = 0..=1)]
+    tags: Option<Vec<String>>,
     id: String,
     #[arg(long)]
     title: Option<String>,
@@ -490,6 +496,7 @@ pub fn item(local: &mut Local<'_>, command: ItemCommand) -> Result<(), String> {
         ItemCommand::Add(a) => {
             let text = a.title.join(" ");
             let params = Params::default()
+                .opt("tag_ids", a.tags)
                 .set(if a.quick { "quick_text" } else { "title" }, text)
                 .opt("block", a.block)
                 .opt("project_id", a.project)
@@ -521,6 +528,7 @@ pub fn item(local: &mut Local<'_>, command: ItemCommand) -> Result<(), String> {
         ItemCommand::Edit(a) => {
             let mut params = Params::default()
                 .set("id", local.item_id(&a.id)?)
+                .opt("tag_ids", a.tags)
                 .opt("title", a.title)
                 .opt("block", a.block)
                 .opt("project_id", a.project)

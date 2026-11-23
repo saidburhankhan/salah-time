@@ -143,6 +143,7 @@ pub(crate) fn item_add(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, R
         new.planned_minutes = p.planned_minutes.or(new.planned_minutes);
         new.project_id = p.project_id.clone();
         new.epic_id = p.epic_id.clone();
+        new.tag_ids = p.tag_ids.clone();
         new.metric_ids = p.metric_ids.clone();
         new.date = p.date.or(new.date);
         new.backlog = p.backlog;
@@ -343,7 +344,7 @@ pub(crate) fn tag_remove(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value,
         let tagged: Vec<String> = tx
             .projects()?
             .into_iter()
-            .filter(|project| project.tag_ids.contains(&p.id))
+            .filter(|project| project.deleted_at.is_none() && project.tag_ids.contains(&p.id))
             .map(|project| project.id)
             .collect();
         let tag = tags::remove(tx, now, &p.id, p.expected_version)?;

@@ -87,6 +87,12 @@ fn world() -> World {
                 date: Some(date(16)),
                 ..Default::default()
             };
+            let tag = tags::add(tx, at(16, 6, 0), ids(), "Deen", "#556677")?;
+            let changes = ProjectChanges {
+                tag_ids: Some(vec![tag.id.clone()]),
+                ..Default::default()
+            };
+            projects::edit(tx, at(16, 6, 0), &quran.id, changes, None)?;
             let read = items::add(
                 tx,
                 &config(),
@@ -95,12 +101,6 @@ fn world() -> World {
                 new("Read", Some(quran.id.clone())),
             )?;
             let walk = items::add(tx, &config(), at(16, 6, 0), ids(), new("Walk", None))?;
-            let tag = tags::add(tx, at(16, 6, 0), ids(), "Deen", "#556677")?;
-            let changes = ProjectChanges {
-                tag_ids: Some(vec![tag.id.clone()]),
-                ..Default::default()
-            };
-            projects::edit(tx, at(16, 6, 0), &quran.id, changes, None)?;
             Ok((read.id, walk.id, tag.id))
         })
         .unwrap();

@@ -163,6 +163,7 @@ pub struct ItemAddParams {
     pub epic_id: Option<String>,
     #[serde(default)]
     pub metric_ids: Option<Vec<String>>,
+    pub tag_ids: Option<Vec<String>>,
     #[serde(default)]
     pub planned_minutes: Option<i64>,
     #[serde(default)]

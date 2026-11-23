@@ -47,6 +47,7 @@
           "project_id": null,
           "repeat": "none",
           "schedule_text": "Once",
+          "tag_ids": [],
           "title": "Call mum",
           "updated_at": "2031-05-14T04:30:00Z",
           "version": 1,

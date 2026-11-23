@@ -695,3 +695,32 @@ fn main_stats_item_none_counts_epic_only_work() {
     assert_eq!(stats["totals"]["minutes"], 20);
     assert_eq!(stats["filter"]["item_id"], "none");
 }
+
+#[test]
+fn repeatable_task_tags_replace_and_clear_the_set() {
+    let f = Fixture::new();
+    let a = f.added(
+        "tags",
+        &["tag", "add", "Study", "--color", "#223344", "--json"],
+    );
+    let b = f.added(
+        "tags",
+        &["tag", "add", "Reading", "--color", "#334455", "--json"],
+    );
+    let item = f.json(&["item", "add", "Book", "--tag", &a, "--tag", &b, "--json"]);
+    let row = &item["changed"]["items"][0];
+    let tags = row["tag_ids"].as_array().unwrap();
+    assert_eq!(tags.len(), 2);
+    assert!(tags.contains(&Value::from(a.as_str())) && tags.contains(&Value::from(b.as_str())));
+    let id = row["id"].as_str().unwrap();
+    let edited = f.json(&["item", "edit", id, "--tag", &b, "--json"]);
+    assert_eq!(
+        edited["changed"]["items"][0]["tag_ids"],
+        serde_json::json!([b])
+    );
+    let cleared = f.json(&["item", "edit", id, "--tag", "--json"]);
+    assert_eq!(
+        cleared["changed"]["items"][0]["tag_ids"],
+        serde_json::json!([])
+    );
+}

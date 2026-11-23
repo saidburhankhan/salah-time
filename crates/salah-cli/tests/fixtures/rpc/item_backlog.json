@@ -47,6 +47,7 @@
           "project_id": null,
           "repeat": "none",
           "schedule_text": "Once",
+          "tag_ids": [],
           "title": "Pay rent",
           "updated_at": "2031-05-15T05:00:00Z",
           "version": 2,

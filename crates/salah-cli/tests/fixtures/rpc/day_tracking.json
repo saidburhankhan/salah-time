@@ -85,6 +85,9 @@
                 "version": 2
               }
             ],
+            "tag_ids": [
+              "<id:2>"
+            ],
             "title": "Read Quran",
             "version": 2,
             "weekdays": null
@@ -153,6 +156,7 @@
                 "version": 1
               }
             ],
+            "tag_ids": [],
             "title": "Walk",
             "version": 2,
             "weekdays": null

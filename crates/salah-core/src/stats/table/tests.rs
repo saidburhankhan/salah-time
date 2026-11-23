@@ -4,7 +4,7 @@ use crate::projects::{self, ProjectChanges};
 use crate::sessions::{self, NewLog, Target, Values};
 use crate::test_support::{at, config, date, ids, project};
 use crate::{WriteTx, items, tags};
-use salah_domain::tracking::Project;
+use salah_domain::tracking::{Project, Tag};
 
 /// 2026-11-16 and 2026-11-23 are Mondays.
 pub(crate) fn range(from: u32, to: u32) -> Range {
@@ -126,10 +126,10 @@ pub(crate) fn world() -> World {
     let mut store = Store::open_in_memory().unwrap();
     let quran = project(&mut store, "Quran");
     let gym = project(&mut store, "Gym");
-    let read = item(&mut store, "Read", Some(&quran.id));
-    let loose = item(&mut store, "Walk", None);
     let deen = tag(&mut store, "Deen", &[&quran]);
     let study = tag(&mut store, "Study", &[&quran, &gym]);
+    let read = item(&mut store, "Read", Some(&quran.id));
+    let loose = item(&mut store, "Walk", None);
     store
         .write(|tx| {
             // Week 16–22: Quran 30 min focus 5, a Read tick focus 2, Gym 10 min focus 1.

@@ -51,6 +51,7 @@
           "project_id": "<id:3>",
           "repeat": "none",
           "schedule_text": "Once",
+          "tag_ids": [],
           "title": "Read",
           "updated_at": "2031-05-14T04:30:00Z",
           "version": 2,

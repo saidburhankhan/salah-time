@@ -233,7 +233,7 @@ fn drop_removed_choices(
     Ok(changed)
 }
 
-fn checked_tags(store: &Store, tag_ids: Vec<String>) -> Result<Vec<String>, Error> {
+pub(crate) fn checked_tags(store: &Store, tag_ids: Vec<String>) -> Result<Vec<String>, Error> {
     let mut seen = BTreeSet::new();
     for id in &tag_ids {
         tags::find(store, id)?;

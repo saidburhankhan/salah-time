@@ -114,6 +114,7 @@ pub fn remove(
             tx.put_project(&project)?;
         }
     }
+    tx.detach_item_tag(&tag.id, now)?;
     tag.deleted_at = Some(now);
     tag.updated_at = now;
     tag.version = tx.put_tag(&tag)?;

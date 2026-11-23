@@ -56,6 +56,9 @@
         "reminders": 0
       },
       "schedule_text": "Once",
+      "tag_ids": [
+        "<id:3>"
+      ],
       "title": "Read chapter",
       "updated_at": "2031-05-14T04:30:00Z",
       "version": 2,

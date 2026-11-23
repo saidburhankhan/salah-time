@@ -17,7 +17,7 @@ use salah_domain::{
 };
 use serde::Serialize;
 
-/// The project of a backlog row, with the tags the page filters by.
+/// The project of a backlog row, with its default tags.
 #[derive(Clone, Debug, Serialize)]
 pub struct BacklogProject {
     pub id: String,
@@ -69,18 +69,22 @@ pub fn list(
                 Some(NONE) => item.project_id.is_none(),
                 Some(id) => item.project_id.as_deref() == Some(id),
             };
+            if !keeps_project {
+                continue;
+            }
+            let view = ItemView::new(store, item, today)?;
             let keeps_tag = match tag_id {
                 None => true,
-                Some(NONE) => tag_ids.is_empty(),
-                Some(id) => tag_ids.iter().any(|t| t == id),
+                Some(NONE) => view.tag_ids.is_empty(),
+                Some(id) => view.tag_ids.iter().any(|t| t == id),
             };
-            if !(keeps_project && keeps_tag) {
+            if !keeps_tag {
                 continue;
             }
             rows.push(BacklogRow {
-                resources: counts.remove(&item.id).unwrap_or_default(),
+                resources: counts.remove(&view.item.id).unwrap_or_default(),
                 project: project.map(|p| backlog_project(p, tag_ids)),
-                view: ItemView::new(store, item, today)?,
+                view,
             });
         }
         Ok(rows)
