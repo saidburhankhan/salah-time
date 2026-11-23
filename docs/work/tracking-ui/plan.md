@@ -48,6 +48,24 @@ the required and optional metrics, and see results in charts. Both surfaces stay
 - **Code quality:** normal readable QML (one property per line in new code), no minified files.
   `Text.PlainText` for dynamic strings. No prayer maths in QML.
 
+## User decisions, 2026-11-23 (supersede the bullets above where they conflict)
+
+- **Timer = play/pause.** Stopping (pausing) a timer asks nothing: no metrics, no note. It sends
+  `session.stop` with no values. An item can have many timed sessions a day.
+- **Done = an explicit tick.** Tapping done opens the done panel: the item's metrics (its
+  project's metrics, or focus and quality when it has no project) and an optional note. **Every
+  field is optional**; the panel has "Done" (saves what is filled) and "Skip" (ticks with no
+  values). It sends `session.log` without minutes (a tick) carrying the values. If the item's
+  timer is running, it is stopped first (no values), then ticked.
+- **Untick** removes the tick session (and its values). Timed sessions stay; they never make an
+  item done by themselves.
+- **No required metrics.** The backend no longer rejects `session.stop`/`session.log` for missing
+  metrics. The project's metric list only decides what the done panel asks. The `required` field
+  stays in the protocol for compatibility but is not enforced and the UI does not show a
+  Required toggle (Settings shows "asked" metrics only).
+- "+ Log time" still logs minutes to an item or project; its metrics are optional too.
+- Backend `done` (day rows, `fulfilment.done_items`) = the item has a tick session that day.
+
 ## Workers
 
 - **UI-A (Claude):** `app/**`. Settings, item editor, Today (running timer, sessions, time
