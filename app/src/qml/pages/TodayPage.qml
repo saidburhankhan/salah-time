@@ -33,6 +33,11 @@ RowLayout {
         Layout.maximumWidth: 320
         Layout.fillHeight: true
         spacing: 18
+        RunningCard {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 156
+            win: todayPage.win
+        }
         NowCard {
             Layout.fillWidth: true
             height: 210

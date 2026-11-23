@@ -126,13 +126,14 @@ inline QJsonObject runningSession() {
 inline QJsonObject item(const QString &id, const QString &title, const QString &block, int position,
                         const QString &projectId, int planned, const QJsonArray &sessions,
                         const QString &repeat = "daily") {
+    // Done means the item has a tick; timed sessions only add minutes.
     int actual = 0;
     bool done = false;
     for (const QJsonValue &value : sessions) {
         const QJsonObject s = value.toObject();
         if (s.value("running").toBool()) continue;
-        actual += s.value("minutes").toInt();
-        done = true;
+        if (s.value("minutes").isNull()) done = true;
+        else actual += s.value("minutes").toInt();
     }
     const QString schedule = repeat == "daily" ? "Daily" : "Once";
     const QString detail = planned > 0 ? QString("%1 / %2 min · %3").arg(actual).arg(planned).arg(schedule)
@@ -150,11 +151,12 @@ inline QJsonArray dayItems(const QString &block, bool withRunning = true) {
     if (block == "fajr")
         return QJsonArray{
             item("quran", "Read Quran", "fajr", 0, "quran", 30,
-                 QJsonArray{session("s-q1", "quran", "quran", "fajr", 25,
+                 QJsonArray{session("s-q1", "quran", "quran", "fajr", 25, {},
+                                    "2031-05-14T00:30:00Z"),
+                            session("s-q2", "quran", "quran", "fajr", 10, {}),
+                            session("s-q3", "quran", "quran", "fajr", 0,
                                     QJsonObject{{"focus", 4.0}, {"quality", 5.0}, {"pages", 6.0}},
-                                    "2031-05-14T00:30:00Z", false, "Calm morning"),
-                            session("s-q2", "quran", "quran", "fajr", 10,
-                                    QJsonObject{{"focus", 3.0}, {"quality", 4.0}})}),
+                                    {}, false, "Finished the juz")}),
             item("walk", "Morning walk", "fajr", 1, "", 0,
                  QJsonArray{session("s-w1", "walk", "", "fajr", 0, {})})};
     if (block == "dhuhr") {
@@ -199,8 +201,13 @@ inline QJsonObject day(const QJsonObject &base, bool withRunning = true) {
                                        {"planned_minutes", plannedTotal}, {"actual_minutes", actualTotal},
                                        {"unplanned_minutes", 15}};
     result["open"] = plannedItems - doneItems;
+    // Next prayer 2h 49m from the real clock, so the countdown reads sensibly.
     QJsonObject now = result.value("now").toObject();
     now["block"] = "dhuhr";
+    QJsonObject next = now.value("next").toObject();
+    next["at"] = QDateTime::currentDateTimeUtc().addSecs(10140).toString(Qt::ISODate);
+    next["remaining_seconds"] = 10140;
+    now["next"] = next;
     result["now"] = now;
     return result;
 }

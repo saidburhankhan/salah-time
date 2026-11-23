@@ -2,6 +2,7 @@
 
 #include <QDate>
 #include <QHash>
+#include <QJsonArray>
 #include <QObject>
 #include <QSet>
 #include <QSortFilterProxyModel>
@@ -51,6 +52,10 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList tags READ tags NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList metrics READ metrics NOTIFY settingsChanged)
     Q_PROPERTY(QVariantMap statsData READ statsData NOTIFY statsDataChanged)
+    Q_PROPERTY(QVariantMap running READ running NOTIFY runningChanged)
+    Q_PROPERTY(QVariantList runningPrompt READ runningPrompt NOTIFY runningChanged)
+    Q_PROPERTY(QString runningTitle READ runningTitle NOTIFY runningChanged)
+    Q_PROPERTY(QString runningColor READ runningColor NOTIFY runningChanged)
 public:
     explicit Backend(QObject *parent = nullptr, const QString &program = {}, int timeoutMs = 10000,
                      const QString &socketPath = {});
@@ -82,14 +87,24 @@ public:
     int plannedMinutes() const { return m_dayPlan.json.value(QStringLiteral("fulfilment")).toObject().value(QStringLiteral("planned_minutes")).toInt(); }
     int actualMinutes() const { return m_dayPlan.json.value(QStringLiteral("fulfilment")).toObject().value(QStringLiteral("actual_minutes")).toInt(); }
     int unplannedMinutes() const { return m_dayPlan.json.value(QStringLiteral("fulfilment")).toObject().value(QStringLiteral("unplanned_minutes")).toInt(); }
+    // Plan-line minutes over planned minutes, capped at 1; null when nothing
+    // was planned (the day.get fulfilment carries the two sums only).
     QVariant fulfilmentRatio() const {
-        const QJsonValue value = m_dayPlan.json.value(QStringLiteral("fulfilment")).toObject().value(QStringLiteral("fulfilment_ratio"));
-        return value.isDouble() ? QVariant(value.toDouble()) : QVariant();
+        const QJsonObject fulfilment = m_dayPlan.json.value(QStringLiteral("fulfilment")).toObject();
+        const QJsonValue ratio = fulfilment.value(QStringLiteral("fulfilment_ratio"));
+        if (ratio.isDouble()) return ratio.toDouble();
+        const double planned = fulfilment.value(QStringLiteral("planned_minutes")).toDouble();
+        if (planned <= 0) return QVariant();
+        return qMin(1.0, fulfilment.value(QStringLiteral("actual_minutes")).toDouble() / planned);
     }
     QVariantList projects() const { return m_projects; }
     QVariantList tags() const { return m_tags; }
     QVariantList metrics() const { return m_metrics; }
     QVariantMap statsData() const { return m_stats.json.toVariantMap(); }
+    QVariantMap running() const { return m_running; }
+    QVariantList runningPrompt() const { return m_runningPrompt; }
+    QString runningTitle() const { return m_runningTitle; }
+    QString runningColor() const { return m_runningColor; }
 
     Q_INVOKABLE void reload();
     Q_INVOKABLE void loadStats(int days);
@@ -105,9 +120,18 @@ public:
     Q_INVOKABLE void removeItem(const QString &id);
     Q_INVOKABLE void moveItem(const QString &id, const QString &block,
                               const QString &afterId = {}, const QString &beforeId = {});
-    Q_INVOKABLE void toggleDone(const QString &id, const QString &state);
-    Q_INVOKABLE void adjustMinutes(const QString &id, int amount);
-    Q_INVOKABLE void adjustCount(const QString &id, int amount);
+    // Done is an explicit tick: an item with a tick today is unticked (its
+    // tick sessions removed), otherwise ticked. Timed sessions never count.
+    Q_INVOKABLE bool toggleDone(const QString &id, const QString &state = {});
+    Q_INVOKABLE void tickItem(const QString &id, const QVariantMap &values = {}, const QString &note = {});
+    Q_INVOKABLE void untickItem(const QString &id);
+    Q_INVOKABLE void logSession(const QString &itemId, const QString &projectId, int minutes,
+                                const QVariantMap &values = {}, const QString &note = {});
+    Q_INVOKABLE void startSession(const QString &itemId, const QString &projectId = {});
+    Q_INVOKABLE void stopSession(const QString &sessionId);
+    Q_INVOKABLE void editSession(const QString &sessionId, int minutes, const QVariantMap &values,
+                                 const QString &note);
+    Q_INVOKABLE void removeSession(const QString &sessionId);
     Q_INVOKABLE void toggleTimer(const QString &id, bool running);
     Q_INVOKABLE void togglePrayer(const QString &prayer, bool marked);
     Q_INVOKABLE void setSleepTime(const QString &time);
@@ -136,6 +160,9 @@ signals:
     // for a removal); on failure `error` carries the server message.
     void entitySaved(const QString &kind, const QString &id);
     void entitySaveFailed(const QString &kind, const QString &error);
+    // A session write (tick, log, stop, edit, remove) finished.
+    void sessionWriteFinished(bool ok, const QString &message);
+    void runningChanged();
 
 private:
     struct PendingCreate {
@@ -155,6 +182,11 @@ private:
                                       bool reloadAfter = false);
     CoreClient::Callback mutationResponse(const QString &pendingId = {}, const QString &pendingOpId = {});
     CoreClient::Callback entityResponse(const QString &kind);
+    CoreClient::Callback sessionResponse(const QString &pendingItemId, bool announce = true);
+    void applyStatus(const QJsonObject &status);
+    void refreshRunning();
+    QJsonArray sessionsOf(const QString &itemId) const;
+    QDate writeDate() const;
     void applyDayPlan(const Dto::DayPlan &plan);
     void applyStats(const Dto::Stats &stats);
     void applyRoutines(const Dto::Stats &stats);
@@ -206,4 +238,7 @@ private:
     ParseDraftState m_parseDraft;
     PreviewState m_preview;
     QVariantList m_projects, m_tags, m_metrics;
+    QVariantMap m_running, m_lastRunning;
+    QVariantList m_runningPrompt, m_lastRunningPrompt;
+    QString m_runningTitle, m_runningColor;
 };

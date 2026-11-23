@@ -26,6 +26,7 @@ ApplicationWindow {
     property bool quickVisible: false
     property bool entryVisible: false
     property bool helpVisible: false
+    property bool sessionPromptVisible: false
     property double timerNow: Date.now()
     property string quickBlock: ""
     property var editItem: ({})
@@ -104,6 +105,7 @@ ApplicationWindow {
         backend.previewItem(item || ({}))
     }
     function closeTopOverlay() {
+        if (sessionPromptVisible) { sessionPromptVisible = false; return true }
         if (entryVisible && entryPopup.confirming) { entryPopup.confirming = false; return true }
         if (helpVisible) { helpVisible = false; return true }
         if (entryVisible) { entryVisible = false; return true }
@@ -214,10 +216,78 @@ ApplicationWindow {
         var metricNames = (project.metrics || []).map(function(link) {
             var metric = link.metric || metricById(link.metric_id)
             var name = metric ? String(metric.name) : String(link.metric_id)
-            return link.required ? name + "*" : name
+            return name
         })
         parts.push(metricNames.length > 0 ? metricNames.join(", ") : qsTr("no metrics"))
         return parts.join("  ·  ")
+    }
+    // The metrics the done panel and "+ time" ask for, all optional: the
+    // project's asked metrics in order, or the built-in Focus and Quality
+    // without a project. Metrics that already have a value are kept (edit).
+    function promptMetrics(projectId, values) {
+        var list = []
+        var project = projectById(projectId)
+        var seen = {}
+        function add(metric) {
+            if (!metric || seen[metric.id])
+                return
+            seen[metric.id] = true
+            list.push({ metric_id: String(metric.id), name: String(metric.name || metric.id),
+                        unit: String(metric.unit || ""), kind: String(metric.kind || "scale"),
+                        scale_max: metric.scale_max || 5 })
+        }
+        if (project) {
+            var links = project.metrics || []
+            for (var i = 0; i < links.length; i++) {
+                var metric = links[i].metric || metricById(links[i].metric_id)
+                if (metric && !metric.archived)
+                    add(metric)
+            }
+        } else {
+            add(metricById("focus") || { id: "focus", name: qsTr("Focus"), kind: "scale", scale_max: 5 })
+            add(metricById("quality") || { id: "quality", name: qsTr("Quality"), kind: "scale", scale_max: 5 })
+        }
+        for (var key in (values || {}))
+            add(metricById(key))
+        return list
+    }
+    function elapsedMinutes(startedAt) {
+        var ms = Date.parse(String(startedAt || ""))
+        if (isNaN(ms))
+            return 0
+        return Math.max(0, Math.floor((timerNow - ms) / 60000))
+    }
+    function durationText(minutes) {
+        minutes = Math.max(0, Math.round(Number(minutes || 0)))
+        if (minutes < 60)
+            return minutes + "m"
+        return Math.floor(minutes / 60) + "h " + String(minutes % 60).padStart(2, "0") + "m"
+    }
+    function clockTime(iso) {
+        var ms = Date.parse(String(iso || ""))
+        return isNaN(ms) ? "" : Qt.formatTime(new Date(ms), "HH:mm")
+    }
+    function valuesText(values) {
+        var parts = []
+        for (var key in (values || {})) {
+            var metric = metricById(key)
+            var value = Number(values[key])
+            if (metric && metric.kind === "check")
+                parts.push(String(metric.name) + (value ? " ✓" : " ✗"))
+            else
+                parts.push((metric ? String(metric.name) : key) + " " + (Math.round(value * 10) / 10)
+                    + (metric && metric.unit ? " " + metric.unit : ""))
+        }
+        return parts.join("  ·  ")
+    }
+    function openSessionPrompt(options) {
+        sessionPrompt.show(options)
+    }
+    // Stopping is a pause: no prompt, no values.
+    function stopRunning() {
+        var running = backend.running
+        if (running && running.id)
+            backend.stopSession(String(running.id))
     }
     function openSettings(section) {
         entryVisible = false
@@ -331,6 +401,10 @@ ApplicationWindow {
         id: entryPopup
         win: win
         item: win.editItem
+    }
+    SessionPrompt {
+        id: sessionPrompt
+        win: win
     }
     ShortcutHelp {
         win: win

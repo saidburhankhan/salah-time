@@ -11,24 +11,30 @@ Button {
     implicitHeight: 40
     leftPadding: 15
     rightPadding: 15
-    contentItem: Row {
-        spacing: 8
-        Rectangle {
-            visible: control.hasDot
-            width: 10
-            height: 10
-            radius: 5
-            anchors.verticalCenter: parent.verticalCenter
-            color: control.dotColor
-            border.width: control.selected ? 1 : 0
-            border.color: "#171612"
-        }
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: control.text
-            textFormat: Text.PlainText
-            color: !control.enabled ? "#6f6b63" : (control.selected ? "#171612" : "#d6d2ca")
-            font.pixelSize: 14
+    contentItem: Item {
+        implicitWidth: chipRow.implicitWidth
+        implicitHeight: chipRow.implicitHeight
+        Row {
+            id: chipRow
+            anchors.centerIn: parent
+            spacing: 8
+            Rectangle {
+                visible: control.hasDot
+                width: 10
+                height: 10
+                radius: 5
+                anchors.verticalCenter: parent.verticalCenter
+                color: control.dotColor
+                border.width: control.selected ? 1 : 0
+                border.color: "#171612"
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: control.text
+                textFormat: Text.PlainText
+                color: !control.enabled ? "#6f6b63" : (control.selected ? "#171612" : "#d6d2ca")
+                font.pixelSize: 14
+            }
         }
     }
     background: Rectangle {

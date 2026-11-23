@@ -79,10 +79,25 @@ DayTimelineModel::Row itemRow(const Dto::DayItem &item, bool pending) {
     row.weekdays = weekdaysOf(item.json);
     row.version = item.json.value(QStringLiteral("version")).toVariant().toLongLong();
     row.position = item.json.value(QStringLiteral("position")).toInt();
-    row.projectColor = item.json.value(QStringLiteral("project")).toObject().value(QStringLiteral("color")).toString();
+    const QJsonObject project = item.json.value(QStringLiteral("project")).toObject();
+    row.projectColor = project.value(QStringLiteral("color")).toString();
+    row.projectId = project.value(QStringLiteral("id")).toString();
+    row.projectName = project.value(QStringLiteral("name")).toString();
     row.plannedMinutes = item.json.value(QStringLiteral("planned_minutes")).toInt();
     row.actualMinutes = item.json.value(QStringLiteral("actual_minutes")).toInt();
-    row.sessions = item.json.value(QStringLiteral("sessions")).toArray().size();
+    const QJsonArray sessions = item.json.value(QStringLiteral("sessions")).toArray();
+    row.sessions = sessions.size();
+    row.sessionList = sessions.toVariantList();
+    for (const QJsonValue &value : sessions) {
+        const QJsonObject session = value.toObject();
+        if (session.value(QStringLiteral("running")).toBool()) {
+            row.runningSessionId = session.value(QStringLiteral("id")).toString();
+            row.timerRunning = true;
+            row.timerStartedAt = session.value(QStringLiteral("started_at")).toString();
+        } else if (session.value(QStringLiteral("minutes")).isNull()) {
+            row.ticked = true;
+        }
+    }
     return row;
 }
 } // namespace
@@ -174,6 +189,49 @@ void Backend::reload() {
     m_client.configShow(readResponse([this](const CoreClient::Result &result) {
         if (const auto *config = std::get_if<Dto::Config>(&result.value)) applyConfig(*config);
     }));
+    // The running session (possibly one with only a project) and the metrics
+    // its stop asks for.
+    m_client.status(readResponse([this](const CoreClient::Result &result) {
+        if (const auto *json = std::get_if<Dto::Json>(&result.value)) applyStatus(json->json);
+    }));
+}
+
+void Backend::applyStatus(const QJsonObject &status) {
+    const QJsonValue running = status.value(QStringLiteral("running"));
+    m_running = running.isObject() ? running.toObject().toVariantMap() : QVariantMap();
+    m_runningPrompt = running.isObject() ? status.value(QStringLiteral("prompt")).toArray().toVariantList()
+                                         : QVariantList();
+    refreshRunning();
+}
+
+void Backend::refreshRunning() {
+    QString title;
+    QString color;
+    const QString itemId = m_running.value(QStringLiteral("item_id")).toString();
+    const QString projectId = m_running.value(QStringLiteral("project_id")).toString();
+    if (!itemId.isEmpty()) {
+        for (const Dto::DayBlock &block : m_dayPlan.blocks)
+            for (const Dto::DayItem &item : block.items)
+                if (item.id == itemId) {
+                    title = item.title;
+                    color = item.json.value(QStringLiteral("project")).toObject().value(QStringLiteral("color")).toString();
+                }
+    }
+    for (const QVariant &value : std::as_const(m_projects)) {
+        const QVariantMap project = value.toMap();
+        if (projectId.isEmpty() || project.value(QStringLiteral("id")).toString() != projectId) continue;
+        if (title.isEmpty()) title = project.value(QStringLiteral("name")).toString();
+        if (color.isEmpty()) color = project.value(QStringLiteral("color")).toString();
+    }
+    if (title.isEmpty() && !m_running.isEmpty()) title = tr("Session");
+    if (title == m_runningTitle && color == m_runningColor && m_running == m_lastRunning
+        && m_runningPrompt == m_lastRunningPrompt)
+        return;
+    m_runningTitle = title;
+    m_runningColor = color;
+    m_lastRunning = m_running;
+    m_lastRunningPrompt = m_runningPrompt;
+    emit runningChanged();
 }
 
 void Backend::reloadFromNotification(qint64 revision) {
@@ -205,6 +263,7 @@ void Backend::applyDayPlan(const Dto::DayPlan &plan) {
     rebuildTimeline();
     rebuildPrayers();
     m_now.update(m_dayPlan, m_dayPlanFetchedAt);
+    refreshRunning();
     if (previousSelected != selectedDay()) emit selectedDayChanged();
     if (previousToday != todayDay()) emit todayDayChanged();
 }
@@ -600,27 +659,110 @@ void Backend::moveItem(const QString &id, const QString &block, const QString &a
     m_client.itemMove(id, block, index, mutationResponse(id), versionFor(id), afterId, beforeId);
 }
 
-void Backend::toggleDone(const QString &id, const QString &state) {
-    setItemPending(id, true);
+QJsonArray Backend::sessionsOf(const QString &itemId) const {
+    for (const Dto::DayBlock &block : m_dayPlan.blocks)
+        for (const Dto::DayItem &item : block.items)
+            if (item.id == itemId) return item.json.value(QStringLiteral("sessions")).toArray();
+    return {};
+}
+
+QDate Backend::writeDate() const {
+    return m_selected.isValid() && m_selected != m_today ? m_selected : QDate();
+}
+
+namespace {
+bool isTick(const QJsonObject &session) {
+    return !session.value(QStringLiteral("running")).toBool() && session.value(QStringLiteral("minutes")).isNull();
+}
+} // namespace
+
+bool Backend::toggleDone(const QString &id, const QString &state) {
     Q_UNUSED(state)
-    m_client.sessionLog(id, {}, -1, {}, {}, m_selected, mutationResponse(id));
+    for (const QJsonValue &value : sessionsOf(id)) {
+        if (isTick(value.toObject())) {
+            untickItem(id);
+            return true;
+        }
+    }
+    tickItem(id);
+    return true;
 }
 
-void Backend::adjustMinutes(const QString &id, int amount) {
+void Backend::tickItem(const QString &id, const QVariantMap &values, const QString &note) {
+    // Done is one explicit tick; never a second one.
+    const QJsonArray sessions = sessionsOf(id);
+    QString runningId;
+    for (const QJsonValue &value : sessions) {
+        const QJsonObject session = value.toObject();
+        if (isTick(session)) return;
+        if (session.value(QStringLiteral("running")).toBool()) runningId = session.value(QStringLiteral("id")).toString();
+    }
     setItemPending(id, true);
-    m_client.sessionLog(id, {}, amount, {}, {}, m_selected != m_today ? m_selected : QDate(), mutationResponse(id));
+    // A running timer on the item is paused first (no values); the queue
+    // keeps the order.
+    if (!runningId.isEmpty()) m_client.sessionStop(runningId, {}, {}, sessionResponse({}, false));
+    m_client.sessionLog(id, {}, -1, QJsonObject::fromVariantMap(values), note, writeDate(), sessionResponse(id));
 }
 
-void Backend::adjustCount(const QString &id, int amount) {
+void Backend::untickItem(const QString &id) {
+    QStringList ticks;
+    for (const QJsonValue &value : sessionsOf(id)) {
+        const QJsonObject session = value.toObject();
+        if (isTick(session)) ticks.append(session.value(QStringLiteral("id")).toString());
+    }
+    if (ticks.isEmpty()) return;
     setItemPending(id, true);
-    Q_UNUSED(amount)
-    m_client.sessionLog(id, {}, -1, {}, {}, m_selected != m_today ? m_selected : QDate(), mutationResponse(id));
+    for (const QString &sessionId : ticks) m_client.sessionRemove(sessionId, sessionResponse(id));
+}
+
+void Backend::logSession(const QString &itemId, const QString &projectId, int minutes,
+                         const QVariantMap &values, const QString &note) {
+    if (itemId.isEmpty() && projectId.isEmpty()) return;
+    if (!itemId.isEmpty()) setItemPending(itemId, true);
+    m_client.sessionLog(itemId, itemId.isEmpty() ? projectId : QString(), minutes > 0 ? minutes : -1,
+                        QJsonObject::fromVariantMap(values), note, writeDate(), sessionResponse(itemId));
+}
+
+void Backend::stopSession(const QString &sessionId) {
+    // Stopping is a pause: no metrics, no note.
+    const QString itemId = m_running.value(QStringLiteral("id")).toString() == sessionId || sessionId.isEmpty()
+        ? m_running.value(QStringLiteral("item_id")).toString() : QString();
+    if (!itemId.isEmpty()) setItemPending(itemId, true);
+    m_client.sessionStop(sessionId, {}, {}, sessionResponse(itemId));
+}
+
+void Backend::editSession(const QString &sessionId, int minutes, const QVariantMap &values, const QString &note) {
+    m_client.sessionEdit(sessionId, minutes > 0 ? minutes : -1, true, QJsonObject::fromVariantMap(values),
+                         true, note, sessionResponse({}));
+}
+
+void Backend::removeSession(const QString &sessionId) {
+    m_client.sessionRemove(sessionId, sessionResponse({}));
+}
+
+CoreClient::Callback Backend::sessionResponse(const QString &pendingItemId, bool announce) {
+    return [this, pendingItemId, announce](const CoreClient::Result &result) {
+        if (!pendingItemId.isEmpty()) setItemPending(pendingItemId, false);
+        if (result.ok) {
+            m_refreshPending = true;
+            if (announce) emit sessionWriteFinished(true, {});
+            return;
+        }
+        fail(result.error.message);
+        if (announce) emit sessionWriteFinished(false, result.error.message);
+        if (result.error.kind == CoreClient::ErrorKind::Conflict || !m_client.offline()) reload();
+    };
 }
 
 void Backend::toggleTimer(const QString &id, bool running) {
     setItemPending(id, true);
     if (running) m_client.sessionStop({}, {}, {}, mutationResponse(id));
     else m_client.sessionStart(id, {}, mutationResponse(id));
+}
+
+void Backend::startSession(const QString &itemId, const QString &projectId) {
+    if (!itemId.isEmpty()) setItemPending(itemId, true);
+    m_client.sessionStart(itemId, itemId.isEmpty() ? projectId : QString(), sessionResponse(itemId));
 }
 
 void Backend::togglePrayer(const QString &prayer, bool marked) {
@@ -647,6 +789,7 @@ void Backend::loadSettings() {
             if (const auto *json = std::get_if<Dto::Json>(&result.value)) {
                 *target = json->value.toArray().toVariantList();
                 emit settingsChanged();
+                refreshRunning();
             }
         }));
     };

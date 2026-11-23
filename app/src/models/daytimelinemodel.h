@@ -36,7 +36,12 @@ public:
         VersionRole,
         PositionRole
         , ProjectColorRole, PlannedMinutesRole, ActualMinutesRole, SessionsRole,
-        CapacityMinutesRole, BlockPlannedMinutesRole, BlockActualMinutesRole
+        CapacityMinutesRole, BlockPlannedMinutesRole, BlockActualMinutesRole,
+        ProjectIdRole,
+        ProjectNameRole,
+        SessionListRole,
+        TickedRole,
+        RunningSessionIdRole
     };
 
     enum class Kind { Header, Item, Add, Marker };
@@ -75,6 +80,13 @@ public:
         int capacityMinutes = 0;
         int blockPlannedMinutes = 0;
         int blockActualMinutes = 0;
+        QString projectId;
+        QString projectName;
+        // Today's sessions of the item, as day.get returns them.
+        QVariantList sessionList;
+        // The item has a tick today: it is done.
+        bool ticked = false;
+        QString runningSessionId;
     };
 
     explicit DayTimelineModel(QObject *parent = nullptr);

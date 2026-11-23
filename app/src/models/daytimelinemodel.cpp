@@ -15,7 +15,10 @@ DayTimelineModel::DayTimelineModel(QObject *parent) : TypedListModel(parent) {
         {PositionRole, "position"}, {ProjectColorRole, "projectColor"},
         {PlannedMinutesRole, "plannedMinutes"}, {ActualMinutesRole, "actualMinutes"},
         {SessionsRole, "sessions"}, {CapacityMinutesRole, "capacityMinutes"},
-        {BlockPlannedMinutesRole, "blockPlannedMinutes"}, {BlockActualMinutesRole, "blockActualMinutes"}
+        {BlockPlannedMinutesRole, "blockPlannedMinutes"}, {BlockActualMinutesRole, "blockActualMinutes"},
+        {ProjectIdRole, "projectId"}, {ProjectNameRole, "projectName"},
+        {SessionListRole, "sessionList"}, {TickedRole, "ticked"},
+        {RunningSessionIdRole, "runningSessionId"}
     });
 }
 
@@ -37,7 +40,8 @@ QVariantList DayTimelineModel::values(const Row &row) {
             row.timerStartedAt, row.timerMinutes, row.timerProjected, row.count,
             row.target, row.weekdays, row.version, row.position, row.projectColor,
             row.plannedMinutes, row.actualMinutes, row.sessions, row.capacityMinutes,
-            row.blockPlannedMinutes, row.blockActualMinutes};
+            row.blockPlannedMinutes, row.blockActualMinutes, row.projectId, row.projectName,
+            row.sessionList, row.ticked, row.runningSessionId};
 }
 
 void DayTimelineModel::setRows(const QVector<Row> &rows) {

@@ -23,6 +23,13 @@ RowLayout {
     readonly property var metricChoices: (backend.metrics || []).filter(function(m) {
         return !m.archived
     })
+    // Asked metrics in the order they were added; the rest can be added.
+    readonly property var askedMetrics: editMetrics.map(function(link) {
+        return projects.win.metricById(link.metric_id)
+    }).filter(function(m) { return !!m && !m.archived })
+    readonly property var otherMetrics: metricChoices.filter(function(m) {
+        return projects.metricIndex(String(m.id)) < 0
+    })
     spacing: 20
 
     function startNew() {
@@ -37,13 +44,13 @@ RowLayout {
         nameField.forceActiveFocus()
     }
 
-    // A new project asks for the built-in ratings, both required, like the
-    // backend default.
+    // A new project asks for the built-in ratings. Nothing is required: the
+    // done panel's fields are all optional.
     function defaultMetrics() {
         var defaults = []
         for (var i = 0; i < metricChoices.length; i++) {
             if (metricChoices[i].builtin)
-                defaults.push({ metric_id: String(metricChoices[i].id), required: true })
+                defaults.push({ metric_id: String(metricChoices[i].id), required: false })
         }
         return defaults
     }
@@ -60,7 +67,7 @@ RowLayout {
         editColor = String(project.color || "#4c8bf5")
         editTags = (project.tag_ids || []).map(function(t) { return String(t) })
         editMetrics = (project.metrics || []).map(function(link) {
-            return { metric_id: String(link.metric_id), required: !!link.required }
+            return { metric_id: String(link.metric_id), required: false }
         })
         editArchived = !!project.archived
         metricsTouched = true
@@ -85,19 +92,6 @@ RowLayout {
         editMetrics = list
     }
 
-    function toggleRequired(id) {
-        metricsTouched = true
-        var list = editMetrics.map(function(m) {
-            return { metric_id: m.metric_id, required: m.required }
-        })
-        var at = metricIndex(id)
-        if (at < 0)
-            list.push({ metric_id: id, required: true })
-        else
-            list[at].required = !list[at].required
-        editMetrics = list
-    }
-
     function toggleTag(id) {
         var list = editTags.slice()
         var at = list.indexOf(id)
@@ -112,13 +106,8 @@ RowLayout {
         var name = nameField.text.trim()
         if (name === "")
             return
-        // Send metrics in the order the Metrics page lists them.
-        var ordered = []
-        for (var i = 0; i < metricChoices.length; i++) {
-            var at = metricIndex(String(metricChoices[i].id))
-            if (at >= 0)
-                ordered.push(editMetrics[at])
-        }
+        // Metrics in the order they were added; `required` is not used.
+        var ordered = editMetrics.map(function(m) { return { metric_id: m.metric_id, required: false } })
         var fields = {
             name: name,
             color: editColor,
@@ -410,7 +399,7 @@ RowLayout {
                         Layout.fillWidth: true
                         Label {
                             Layout.fillWidth: true
-                            text: qsTr("After a session, ask for")
+                            text: qsTr("The done panel asks for")
                             color: projects.win.muted
                             font.pixelSize: 13
                         }
@@ -420,17 +409,19 @@ RowLayout {
                             onClicked: projects.win.openSettings("metrics")
                         }
                     }
+                    Label {
+                        visible: projects.askedMetrics.length === 0
+                        Layout.fillWidth: true
+                        text: qsTr("Nothing: marking an item done only takes a note.")
+                        color: projects.win.muted
+                    }
                     Repeater {
-                        model: projects.metricChoices
+                        model: projects.askedMetrics
                         Rectangle {
                             id: metricRow
                             required property var modelData
-                            readonly property string metricId: String(modelData.id)
-                            readonly property int at: projects.metricIndex(metricId)
-                            readonly property bool asked: at >= 0
-                            readonly property bool required: asked && projects.editMetrics[at].required
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 54
+                            Layout.preferredHeight: 52
                             radius: theme.radius
                             color: projects.win.card
                             border.color: projects.win.border
@@ -446,7 +437,7 @@ RowLayout {
                                         Layout.fillWidth: true
                                         text: String(metricRow.modelData.name || "")
                                         textFormat: Text.PlainText
-                                        color: metricRow.asked ? projects.win.text : projects.win.muted
+                                        color: projects.win.text
                                         font.pixelSize: 14
                                     }
                                     Label {
@@ -458,24 +449,32 @@ RowLayout {
                                         font.pixelSize: 11
                                     }
                                 }
-                                ChoiceChip {
+                                AppButton {
                                     win: projects.win
-                                    text: qsTr("Ask")
-                                    selected: metricRow.asked
-                                    onClicked: projects.toggleAsk(metricRow.metricId)
+                                    text: qsTr("Remove")
+                                    onClicked: projects.toggleAsk(String(metricRow.modelData.id))
                                 }
-                                ChoiceChip {
-                                    win: projects.win
-                                    text: qsTr("Required")
-                                    selected: metricRow.required
-                                    onClicked: projects.toggleRequired(metricRow.metricId)
-                                }
+                            }
+                        }
+                    }
+                    Flow {
+                        visible: projects.otherMetrics.length > 0
+                        Layout.fillWidth: true
+                        Layout.topMargin: 4
+                        spacing: 8
+                        Repeater {
+                            model: projects.otherMetrics
+                            ChoiceChip {
+                                required property var modelData
+                                win: projects.win
+                                text: "+ " + String(modelData.name || "")
+                                onClicked: projects.toggleAsk(String(modelData.id))
                             }
                         }
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: qsTr("Required metrics must be filled when a session is stopped or logged; the others may be left empty.")
+                        text: qsTr("Every metric is optional when you mark an item done or add time.")
                         color: projects.win.muted
                         font.pixelSize: 12
                         wrapMode: Text.WordWrap

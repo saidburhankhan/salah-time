@@ -1,7 +1,10 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "../controls"
 
+// A plan line: drag handle, done box, title with project and progress, and
+// the session actions. Expanded, it lists today's sessions for editing.
 Rectangle {
     id: itemCard
     property var win
@@ -18,23 +21,61 @@ Rectangle {
     property bool timerProjected: false
     property int count: 0
     property int target: 0
-    property string projectColor: "transparent"
+    property string projectColor: ""
+    property string projectId: ""
+    property string projectName: ""
     property int plannedMinutes: 0
     property int actualMinutes: 0
     property int sessions: 0
+    property var sessionList: []
+    property bool ticked: false
+    property string runningSessionId: ""
+    property bool expanded: false
     property int rowIndex: 0
     property var list: null
+    // Done is an explicit tick (day.get `done`); timed sessions never count.
+    readonly property bool done: state === "done" || ticked
+    readonly property bool otherRunning: !!(backend.running && backend.running.id) && runningSessionId === ""
+    readonly property real headerHeight: 82
+    signal toggleExpanded()
     radius: theme.radius
     color: win.dragging && win.dragId === itemId ? "transparent" : "#1c1b18"
-    border.color: win.dragging && win.dragId === itemId ? "#4a463e" : win.border
+    border.color: win.dragging && win.dragId === itemId ? "#4a463e"
+        : (timerRunning ? theme.accent : win.border)
     opacity: pending ? 0.55 : 1
 
-    RowLayout {
+    // Done opens the done panel (metrics and a note, all optional); done
+    // again removes the tick.
+    function tapDone() {
+        if (done)
+            backend.untickItem(itemId)
+        else
+            win.openSessionPrompt({ mode: "done", itemId: itemId, projectId: projectId,
+                                    title: title, color: projectColor })
+    }
+
+    function addTime() {
+        win.openSessionPrompt({ mode: "log", itemId: itemId, projectId: projectId,
+                                title: title, color: projectColor })
+    }
+
+    MouseArea {
         anchors.fill: parent
+        acceptedButtons: Qt.LeftButton
+        onDoubleClicked: itemCard.win.openEntry(itemCard.itemId)
+    }
+
+    RowLayout {
+        id: header
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: itemCard.headerHeight
         anchors.leftMargin: 12
-        anchors.rightMargin: 14
+        anchors.rightMargin: 12
         spacing: 12
         opacity: itemCard.win.dragging && itemCard.win.dragId === itemCard.itemId ? 0 : 1
+
         Label {
             id: handle
             text: "⠿"
@@ -62,57 +103,146 @@ Rectangle {
                 onCanceled: itemCard.win.finishDrag(true)
             }
         }
-        Rectangle { width: 8; height: 8; radius: 4; color: itemCard.projectColor; visible: itemCard.projectColor !== "" }
         Rectangle {
-            width: 24
-            height: 24
-            radius: Math.min(5, theme.radius)
-            color: itemCard.state === "done" ? theme.accent : "transparent"
-            border.color: itemCard.state === "done" ? theme.accent : "#625e55"
+            Layout.preferredWidth: 4
+            Layout.preferredHeight: 34
+            radius: 2
+            color: itemCard.projectColor !== "" ? itemCard.projectColor : "#3a3730"
+        }
+        Rectangle {
+            objectName: "doneBox"
+            width: 26
+            height: 26
+            radius: Math.min(6, theme.radius)
+            color: itemCard.done ? theme.accent : "transparent"
+            border.color: itemCard.done ? theme.accent : "#625e55"
+            border.width: 2
             Label {
                 anchors.centerIn: parent
                 text: "✓"
-                visible: itemCard.state === "done"
+                visible: itemCard.done
                 color: theme.accentForeground
+                font.weight: Font.Bold
             }
             MouseArea {
                 anchors.fill: parent
-                onClicked: backend.toggleDone(itemCard.itemId, itemCard.state)
+                anchors.margins: -6
+                cursorShape: Qt.PointingHandCursor
+                enabled: !itemCard.pending
+                onClicked: itemCard.tapDone()
             }
         }
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 4
+            spacing: 5
             Label {
+                Layout.fillWidth: true
                 text: itemCard.title
-                color: itemCard.state === "done" ? itemCard.win.muted : itemCard.win.text
+                textFormat: Text.PlainText
+                color: itemCard.done ? itemCard.win.muted : itemCard.win.text
                 font.pixelSize: 15
                 font.weight: Font.Medium
-                Layout.fillWidth: true
                 elide: Text.ElideRight
-                textFormat: Text.PlainText
             }
-            Label {
-                text: itemCard.detailText
-                color: itemCard.win.muted
-                font.family: itemCard.win.mono
-                font.pixelSize: 12
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                Label {
+                    visible: itemCard.projectName !== ""
+                    text: itemCard.projectName
+                    textFormat: Text.PlainText
+                    color: itemCard.projectColor
+                    font.pixelSize: 12
+                    font.weight: Font.Medium
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: itemCard.detailText
+                    textFormat: Text.PlainText
+                    color: itemCard.win.muted
+                    font.family: itemCard.win.mono
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                }
             }
         }
-        Label { textFormat: Text.PlainText; text: (itemCard.sessions === 1 ? qsTr("%1m · %2 session") : qsTr("%1m · %2 sessions")).arg(itemCard.plannedMinutes).arg(itemCard.sessions); color: itemCard.win.muted; font.family: itemCard.win.mono }
-        Button {
-            flat: true
-            property int minutes: itemCard.win.timerMinutes(itemCard.timerMinutes,
-                itemCard.timerStartedAt, itemCard.timerProjected, itemCard.timerRunning)
-            text: itemCard.timerRunning ? qsTr("❚❚ %1m").arg(minutes) : qsTr("▶︎ %1m").arg(minutes)
+        // Session count; opens today's sessions.
+        Rectangle {
+            visible: itemCard.sessions > 0
+            Layout.preferredHeight: 30
+            Layout.preferredWidth: sessionsLabel.implicitWidth + 30
+            radius: 15
+            color: sessionsArea.containsMouse || itemCard.expanded ? "#2c2a25" : "transparent"
+            border.color: itemCard.win.border
+            Row {
+                anchors.centerIn: parent
+                spacing: 6
+                Label {
+                    id: sessionsLabel
+                    text: itemCard.sessions === 1 ? qsTr("1 session") : qsTr("%1 sessions").arg(itemCard.sessions)
+                    color: itemCard.win.text
+                    font.pixelSize: 12
+                }
+                Label {
+                    text: itemCard.expanded ? "▴" : "▾"
+                    color: itemCard.win.muted
+                    font.pixelSize: 11
+                }
+            }
+            MouseArea {
+                id: sessionsArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: itemCard.toggleExpanded()
+            }
+        }
+        AppButton {
+            objectName: "addTimeButton"
+            win: itemCard.win
+            text: qsTr("+ time")
+            enabled: !itemCard.pending
+            onClicked: itemCard.addTime()
+        }
+        AppButton {
+            objectName: "timerButton"
+            win: itemCard.win
+            Layout.preferredWidth: 104
+            primary: itemCard.timerRunning
+            enabled: !itemCard.pending && (itemCard.timerRunning || !itemCard.otherRunning)
+            text: itemCard.timerRunning
+                ? "❚❚ " + itemCard.win.durationText(itemCard.win.elapsedMinutes(itemCard.timerStartedAt))
+                : (itemCard.actualMinutes > 0 ? qsTr("▶  Resume") : qsTr("▶  Start"))
             font.family: itemCard.win.mono
-            onClicked: backend.toggleTimer(itemCard.itemId, itemCard.timerRunning)
+            ToolTip.visible: hovered && itemCard.otherRunning
+            ToolTip.text: qsTr("Pause the running session first")
+            onClicked: {
+                if (itemCard.timerRunning)
+                    itemCard.win.stopRunning()
+                else
+                    backend.startSession(itemCard.itemId)
+            }
         }
     }
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.LeftButton
-        onDoubleClicked: itemCard.win.openEntry(itemCard.itemId)
-        z: -1
+
+    Column {
+        visible: itemCard.expanded
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: header.bottom
+        anchors.leftMargin: 48
+        anchors.rightMargin: 12
+        spacing: 6
+        Repeater {
+            model: itemCard.expanded ? itemCard.sessionList : []
+            SessionRow {
+                required property var modelData
+                width: parent.width
+                win: itemCard.win
+                session: modelData
+                itemTitle: itemCard.title
+                projectColor: itemCard.projectColor
+            }
+        }
     }
 }

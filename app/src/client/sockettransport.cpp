@@ -315,6 +315,8 @@ void SocketTransport::onReadyRead() {
             }
             reply.message = error.value(QStringLiteral("message")).toString();
             reply.conflict = reply.kind == QStringLiteral("conflict");
+            // Error details (for example `missing` metric ids) for the caller.
+            reply.value = data;
         } else {
             reply.ok = true;
             reply.value = object.value(QStringLiteral("result"));

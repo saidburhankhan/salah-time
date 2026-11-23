@@ -17,7 +17,12 @@ class CoreClient : public QObject {
     Q_OBJECT
 public:
     enum class ErrorKind { Process, Exit, Decode, Timeout, Conflict, Rpc };
-    struct Error { ErrorKind kind; QString message; };
+    struct Error {
+        ErrorKind kind;
+        QString message;
+        // `error.data` of a JSON-RPC error, e.g. {"kind":"validation","missing":[...]}.
+        QJsonObject data = {};
+    };
     struct Result {
         Dto::Value value;
         Error error{ErrorKind::Process, {}};
@@ -49,6 +54,8 @@ public:
     void day(const QDate &date, Callback callback);
     void stats(const QDate &from, const QDate &to, Callback callback);
     void statsDays(int days, Callback callback);
+    // stats.get for the last `days` days, optionally filtered by one tag or project.
+    void statsFiltered(int days, const QString &tagId, const QString &projectId, Callback callback);
     void itemAdd(const ItemFields &fields, Callback callback = {});
     void itemEdit(const QString &id, const ItemFields &fields, Callback callback = {}, qint64 expectedVersion = -1);
     void itemRemove(const QString &id, Callback callback = {}, qint64 expectedVersion = -1);
@@ -60,6 +67,12 @@ public:
     void sessionStart(const QString &itemId, const QString &projectId = {}, Callback callback = {});
     void sessionStop(const QString &sessionId = {}, const QJsonObject &values = {},
                      const QString &note = {}, Callback callback = {});
+    // session.edit: minutes < 0 keeps them; values/note are sent only when
+    // the matching has* flag is set (an empty note clears it).
+    void sessionEdit(const QString &sessionId, int minutes, bool hasValues, const QJsonObject &values,
+                     bool hasNote, const QString &note, Callback callback = {});
+    void sessionRemove(const QString &sessionId, Callback callback = {});
+    void status(Callback callback);
     void prayerMark(const QString &prayer, const QDate &date, Callback callback = {}, qint64 expectedVersion = -1);
     void prayerUnmark(const QString &prayer, const QDate &date, Callback callback = {}, qint64 expectedVersion = -1);
     void parse(const QString &text, Callback callback);

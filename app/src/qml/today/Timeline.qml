@@ -14,6 +14,18 @@ Item {
     property string dragTitle: ""
     property string dragDetail: ""
     property bool dragDone: false
+    // Items whose session list is open, by id.
+    property var expanded: ({})
+    function toggleExpanded(id) {
+        var copy = {}
+        for (var key in expanded)
+            copy[key] = expanded[key]
+        if (copy[id])
+            delete copy[id]
+        else
+            copy[id] = true
+        expanded = copy
+    }
     // Compatibility for callers that used the old payload map; the ghost
     // itself binds the three typed properties above.
     readonly property var dragPayload: ({ title: dragTitle, detail_text: dragDetail,
@@ -123,17 +135,51 @@ Item {
         clip: true
         spacing: 8
         model: timeline.timelineModel
-        header: Rectangle {
-            width: todayList.width; height: 64; radius: theme.radius
-            color: timeline.win.card; border.color: timeline.win.border
-            RowLayout {
-                anchors.fill: parent; anchors.margins: 14
-                Label { text: qsTr("Today fulfilment"); color: timeline.win.text; font.weight: Font.DemiBold }
-                Item { Layout.fillWidth: true }
-                Label { text: qsTr("%1 / %2 items").arg(backend.doneItems).arg(backend.plannedItems); color: timeline.win.muted }
-                Label { text: qsTr("%1 / %2 min").arg(backend.actualMinutes).arg(backend.plannedMinutes); color: timeline.win.text; font.family: timeline.win.mono }
-                Label { text: qsTr("+%1 unplanned").arg(backend.unplannedMinutes); visible: backend.unplannedMinutes > 0; color: timeline.win.muted; font.family: timeline.win.mono }
-                Label { text: backend.fulfilmentRatio == null ? qsTr("—") : qsTr("%1%").arg(Math.round(Number(backend.fulfilmentRatio) * 100)); color: timeline.win.text; font.family: timeline.win.mono }
+        header: Item {
+            width: todayList.width
+            height: 72
+            Rectangle {
+                width: parent.width
+                height: 64
+                radius: theme.radius
+                color: timeline.win.card
+                border.color: timeline.win.border
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 18
+                    anchors.rightMargin: 18
+                    spacing: 18
+                    Label {
+                        text: qsTr("Today fulfilment")
+                        color: timeline.win.text
+                        font.weight: Font.DemiBold
+                    }
+                    Item {
+                        Layout.fillWidth: true
+                    }
+                    Label {
+                        text: qsTr("%1 / %2 items").arg(backend.doneItems).arg(backend.plannedItems)
+                        color: timeline.win.muted
+                    }
+                    Label {
+                        text: qsTr("%1 / %2 min").arg(backend.actualMinutes).arg(backend.plannedMinutes)
+                        color: timeline.win.text
+                        font.family: timeline.win.mono
+                    }
+                    Label {
+                        text: qsTr("+%1 unplanned").arg(backend.unplannedMinutes)
+                        visible: backend.unplannedMinutes > 0
+                        color: timeline.win.muted
+                        font.family: timeline.win.mono
+                    }
+                    Label {
+                        text: backend.fulfilmentRatio == null ? qsTr("—")
+                            : qsTr("%1%").arg(Math.round(Number(backend.fulfilmentRatio) * 100))
+                        color: theme.accent
+                        font.family: timeline.win.mono
+                        font.pixelSize: 16
+                    }
+                }
             }
         }
         move: Transition {
@@ -171,8 +217,16 @@ Item {
             required property int capacityMinutes
             required property int blockPlannedMinutes
             required property int blockActualMinutes
+            required property string projectId
+            required property string projectName
+            required property var sessionList
+            required property bool ticked
+            required property string runningSessionId
+            readonly property bool open: rowKind === "item" && sessions > 0 && !!timeline.expanded[itemId]
             width: todayList.width
-            height: rowKind === "header" ? 60 : rowKind === "item" ? 82 : rowKind === "add" ? 32 : 26
+            height: rowKind === "header" ? 60
+                : rowKind === "item" ? 82 + (open ? sessions * 52 + 8 : 0)
+                : rowKind === "add" ? 32 : 26
             PrayerHeader {
                 anchors.fill: parent
                 visible: rowDelegate.rowKind === "header"
@@ -207,6 +261,13 @@ Item {
                 plannedMinutes: rowDelegate.plannedMinutes
                 actualMinutes: rowDelegate.actualMinutes
                 sessions: rowDelegate.sessions
+                projectId: rowDelegate.projectId
+                projectName: rowDelegate.projectName
+                sessionList: rowDelegate.sessionList
+                ticked: rowDelegate.ticked
+                runningSessionId: rowDelegate.runningSessionId
+                expanded: rowDelegate.open
+                onToggleExpanded: timeline.toggleExpanded(rowDelegate.itemId)
                 rowIndex: rowDelegate.index
                 list: todayList
             }
