@@ -20,6 +20,8 @@ ColumnLayout {
     property string rangeTo: ""
     property string tagId: ""
     property string projectId: ""
+    // An epic id, "none" (work outside any epic), or "" for all.
+    property string epicId: ""
     property string itemId: ""
     // Duration bounds in minutes, -1 when unset.
     property int minutesMin: -1
@@ -32,12 +34,27 @@ ColumnLayout {
     readonly property var projectChoices: (backend.projects || []).filter(function(p) {
         return !p.archived && (tagId === "" || (p.tag_ids || []).indexOf(tagId) >= 0)
     })
+    // The epics of the shown projects, narrowed by the chosen project.
+    readonly property var epicChoices: {
+        var allowed = {}
+        for (var i = 0; i < projectChoices.length; i++)
+            allowed[String(projectChoices[i].id)] = true
+        return (backend.epics || []).filter(function(epic) {
+            var project = String(epic.project_id)
+            return allowed[project] === true && (projectId === "" || project === projectId)
+        })
+    }
     readonly property var taskChoices: {
         var allowed = {}
         for (var i = 0; i < projectChoices.length; i++)
             allowed[String(projectChoices[i].id)] = true
         return (backend.trackingItems || []).filter(function(item) {
             var project = String(item.project_id || "")
+            var epic = String(item.epic_id || "")
+            if (epicId === "none" && epic !== "")
+                return false
+            if (epicId !== "" && epicId !== "none" && epic !== epicId)
+                return false
             if (projectId !== "")
                 return project === projectId
             return tagId === "" || allowed[project] === true
@@ -111,6 +128,8 @@ ColumnLayout {
             q.tag_id = tagId
         if (projectId !== "")
             q.project_id = projectId
+        if (epicId !== "")
+            q.epic_id = epicId
         if (itemId !== "")
             q.item_id = itemId
         if (minutesMin >= 0)
@@ -132,26 +151,43 @@ ColumnLayout {
             q.values = values
         return q
     }
-    // kind: "" (clear everything), "tag", "project" or "item". Choosing a
-    // wider filter drops a narrower one that no longer fits.
+    function epicFits(id) {
+        return id === "" || id === "none" || epicChoices.some(function(e) { return String(e.id) === id })
+    }
+    function epicLabel(epic) {
+        var name = String(epic.name || "")
+        return projectId === "" ? win.projectName(epic.project_id) + " · " + name : name
+    }
+    // kind: "" (clear everything), "tag", "project", "epic" or "item".
+    // Choosing a wider filter drops a narrower one that no longer fits.
     function setFilter(kind, id) {
         if (kind === "tag") {
             tagId = id
             var fits = projectChoices.some(function(p) { return String(p.id) === projectId })
             if (projectId !== "" && !fits) {
                 projectId = ""
+                epicId = ""
                 itemId = ""
-            } else if (itemId !== "" && !taskChoices.some(function(t) { return String(t.id) === itemId })) {
-                itemId = ""
+            } else {
+                if (!epicFits(epicId))
+                    epicId = ""
+                if (itemId !== "" && !taskChoices.some(function(t) { return String(t.id) === itemId }))
+                    itemId = ""
             }
         } else if (kind === "project") {
             projectId = id
+            epicId = ""
             itemId = ""
+        } else if (kind === "epic") {
+            epicId = id
+            if (itemId !== "" && !taskChoices.some(function(t) { return String(t.id) === itemId }))
+                itemId = ""
         } else if (kind === "item") {
             itemId = id
         } else {
             tagId = ""
             projectId = ""
+            epicId = ""
             itemId = ""
         }
         edited()
@@ -241,6 +277,10 @@ ColumnLayout {
         }
         if (projectId !== "")
             parts.push(win.projectName(projectId))
+        if (epicId === "none")
+            parts.push(qsTr("No epic"))
+        else if (epicId !== "")
+            parts.push(win.epicName(epicId))
         if (itemId !== "") {
             var task = (backend.trackingItems || []).filter(function(t) { return String(t.id) === itemId })[0]
             if (task)
@@ -363,6 +403,44 @@ ColumnLayout {
                     selected: bar.projectId === String(modelData.id)
                     onClicked: bar.setFilter("project", String(modelData.id))
                 }
+            }
+        }
+    }
+
+    RowLayout {
+        visible: bar.epicChoices.length > 0
+        Layout.fillWidth: true
+        spacing: 8
+        RowTitle {
+            text: qsTr("EPICS")
+        }
+        Flow {
+            objectName: "statsEpicList"
+            Layout.fillWidth: true
+            spacing: 8
+            ChoiceChip {
+                win: bar.win
+                text: qsTr("All")
+                selected: bar.epicId === ""
+                onClicked: bar.setFilter("epic", "")
+            }
+            Repeater {
+                model: bar.epicChoices
+                ChoiceChip {
+                    required property var modelData
+                    objectName: "statsEpic_" + String(modelData.id)
+                    win: bar.win
+                    text: bar.epicLabel(modelData)
+                    selected: bar.epicId === String(modelData.id)
+                    onClicked: bar.setFilter("epic", String(modelData.id))
+                }
+            }
+            ChoiceChip {
+                objectName: "statsEpic_none"
+                win: bar.win
+                text: qsTr("No epic")
+                selected: bar.epicId === "none"
+                onClicked: bar.setFilter("epic", "none")
             }
         }
     }

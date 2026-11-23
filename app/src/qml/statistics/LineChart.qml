@@ -30,6 +30,8 @@ Rectangle {
         return series.rollup === "avg" ? sum / present.length : sum
     }
     property bool tableMode: false
+    // Draw a sum as a line over the days instead of a column per day.
+    property bool asLine: false
     readonly property var tableRows: points.slice().reverse().map(function(p) {
         var d = Date.fromLocaleString(Qt.locale(), String(p.day), "yyyy-MM-dd")
         return [Qt.locale("en_US").toString(d, "ddd d MMM"),
@@ -48,6 +50,7 @@ Rectangle {
     onPointsChanged: canvas.requestPaint()
     onWidthChanged: canvas.requestPaint()
     onYTopChanged: canvas.requestPaint()
+    onAsLineChanged: canvas.requestPaint()
 
     Row {
         x: 18
@@ -138,7 +141,7 @@ Rectangle {
             }
             function xAt(i) { return n === 1 ? width / 2 : i * width / (n - 1) }
             function yAt(v) { return height - 3 - (height - 6) * Math.min(1, Number(v) / chart.yTop) }
-            if (chart.series.rollup !== "avg") {
+            if (chart.series.rollup !== "avg" && !chart.asLine) {
                 var slot = width / n
                 var barWidth = Math.max(2, Math.min(24, slot - 3))
                 ctx.fillStyle = String(theme.accent)

@@ -11,6 +11,7 @@ Rectangle {
     property var session: ({})
     readonly property var project: session.project || null
     readonly property var item: session.item || null
+    readonly property string epicLabel: win.epicName(session.epic_id)
     readonly property bool tick: session.minutes === null || session.minutes === undefined
     readonly property var entries: session.notes || []
     readonly property var valueList: {
@@ -98,6 +99,14 @@ Rectangle {
             Label {
                 visible: !!row.project
                 text: row.project ? String(row.project.name || "") : ""
+                textFormat: Text.PlainText
+                color: row.win.muted
+                font.pixelSize: 14
+            }
+            Label {
+                objectName: "noteEpic"
+                visible: row.epicLabel !== ""
+                text: "· " + row.epicLabel
                 textFormat: Text.PlainText
                 color: row.win.muted
                 font.pixelSize: 14

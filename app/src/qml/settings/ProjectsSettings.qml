@@ -353,6 +353,13 @@ RowLayout {
                     }
                 }
 
+                ProjectEpics {
+                    visible: projects.editId !== ""
+                    Layout.fillWidth: true
+                    win: projects.win
+                    projectId: projects.editId
+                }
+
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 8

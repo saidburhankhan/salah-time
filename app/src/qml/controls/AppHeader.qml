@@ -38,7 +38,8 @@ Rectangle {
             visible: header.win.page !== 0
             Layout.fillWidth: true
             text: header.win.page === 1 ? qsTr("Routines")
-                : header.win.page === 2 ? qsTr("Statistics") : qsTr("Settings")
+                : header.win.page === 2 ? qsTr("Statistics")
+                : header.win.page === 4 ? qsTr("Epic") : qsTr("Settings")
             color: header.win.text
             font.pixelSize: 22
             font.weight: Font.DemiBold

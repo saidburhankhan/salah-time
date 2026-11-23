@@ -187,6 +187,41 @@ ScrollView {
                     }
                 }
                 ColumnLayout {
+                    objectName: "epicChoices"
+                    visible: form.epicChoices.length > 0
+                    Layout.fillWidth: true
+                    Layout.topMargin: 6
+                    spacing: 8
+                    Label {
+                        text: qsTr("Epic")
+                        color: form.win.text
+                        font.pixelSize: 15
+                        font.weight: Font.Medium
+                    }
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        ChoiceChip {
+                            objectName: "noEpicChip"
+                            win: form.win
+                            text: qsTr("No epic")
+                            selected: form.epicId === ""
+                            onClicked: form.epicId = ""
+                        }
+                        Repeater {
+                            model: form.epicChoices
+                            ChoiceChip {
+                                required property var modelData
+                                objectName: "epicChip_" + String(modelData.id)
+                                win: form.win
+                                text: String(modelData.name || "")
+                                selected: form.epicId === String(modelData.id)
+                                onClicked: form.epicId = String(modelData.id)
+                            }
+                        }
+                    }
+                }
+                ColumnLayout {
                     visible: !backend.offlineMode
                     Layout.fillWidth: true
                     Layout.topMargin: 10

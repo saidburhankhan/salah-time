@@ -16,6 +16,7 @@ Rectangle {
     readonly property bool running: !!session.running
     readonly property bool tick: !running && (session.minutes === null || session.minutes === undefined)
     readonly property string valuesText: win.valuesText(session.values)
+    readonly property string epicName: win.epicName(session.epic_id)
     readonly property var notes: session.notes || []
     readonly property int noteLineHeight: 18
     height: 46 + (notes.length > 0 ? notes.length * noteLineHeight + 6 : 0)
@@ -54,7 +55,7 @@ Rectangle {
         }
         Label {
             Layout.fillWidth: true
-            text: [sessionRow.valuesText, sessionRow.session.note || ""]
+            text: [sessionRow.epicName, sessionRow.valuesText, sessionRow.session.note || ""]
                 .filter(Boolean).join("  ·  ")
             textFormat: Text.PlainText
             color: sessionRow.win.muted

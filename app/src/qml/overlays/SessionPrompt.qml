@@ -17,6 +17,9 @@ Popup {
     property string sessionId: ""
     property string itemId: ""
     property string projectId: ""
+    // Optional: a time log with no task can name one of the project's epics.
+    property string epicId: ""
+    readonly property var epicChoices: mode === "log" && itemId === "" ? win.projectEpics(projectId, false) : []
     property string title: ""
     property string color: ""
     // edit of a tick session: no minutes
@@ -62,6 +65,7 @@ Popup {
         sessionId = options.sessionId || ""
         itemId = options.itemId || ""
         projectId = options.projectId || ""
+        epicId = options.epicId || ""
         title = options.title || ""
         color = options.color || ""
         tick = !!options.tick
@@ -125,7 +129,8 @@ Popup {
         else if (mode === "edit")
             backend.editSession(sessionId, tick ? 0 : minutes, chosen, note)
         else
-            backend.logSession(itemId, itemId === "" ? projectId : "", minutes, chosen, note)
+            backend.logSession(itemId, itemId === "" ? projectId : "", minutes, chosen, note,
+                               itemId === "" ? epicId : "")
     }
 
     Connections {
@@ -187,6 +192,39 @@ Popup {
                         font.pixelSize: 20
                         font.weight: Font.DemiBold
                         elide: Text.ElideRight
+                    }
+                }
+            }
+
+            ColumnLayout {
+                objectName: "promptEpicChoices"
+                visible: prompt.epicChoices.length > 0
+                Layout.fillWidth: true
+                spacing: 8
+                Label {
+                    text: qsTr("Epic")
+                    color: prompt.win.muted
+                    font.pixelSize: 13
+                }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    ChoiceChip {
+                        objectName: "promptNoEpicChip"
+                        win: prompt.win
+                        text: qsTr("No epic")
+                        selected: prompt.epicId === ""
+                        onClicked: prompt.epicId = ""
+                    }
+                    Repeater {
+                        model: prompt.epicChoices
+                        ChoiceChip {
+                            required property var modelData
+                            win: prompt.win
+                            text: String(modelData.name || "")
+                            selected: prompt.epicId === String(modelData.id)
+                            onClicked: prompt.epicId = String(modelData.id)
+                        }
                     }
                 }
             }

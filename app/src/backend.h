@@ -49,6 +49,7 @@ class Backend : public QObject {
     Q_PROPERTY(int unplannedMinutes READ unplannedMinutes NOTIFY fulfilmentChanged)
     Q_PROPERTY(QVariant fulfilmentRatio READ fulfilmentRatio NOTIFY fulfilmentChanged)
     Q_PROPERTY(QVariantList projects READ projects NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantList epics READ epics NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList tags READ tags NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList metrics READ metrics NOTIFY settingsChanged)
     Q_PROPERTY(QVariantMap statsData READ statsData NOTIFY statsDataChanged)
@@ -62,6 +63,8 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList sessionsList READ sessionsList NOTIFY sessionsListChanged)
     Q_PROPERTY(bool sessionsHasMore READ sessionsHasMore NOTIFY sessionsListChanged)
     Q_PROPERTY(bool sessionsLoading READ sessionsLoading NOTIFY sessionsLoadingChanged)
+    Q_PROPERTY(QVariantMap epicSeries READ epicSeries NOTIFY epicPageChanged)
+    Q_PROPERTY(QVariantList epicSessions READ epicSessions NOTIFY epicPageChanged)
 public:
     explicit Backend(QObject *parent = nullptr, const QString &program = {}, int timeoutMs = 10000,
                      const QString &socketPath = {});
@@ -104,7 +107,10 @@ public:
         return qMin(1.0, fulfilment.value(QStringLiteral("actual_minutes")).toDouble() / planned);
     }
     QVariantList projects() const { return m_projects; }
+    QVariantList epics() const { return m_epics; }
     QVariantList tags() const { return m_tags; }
+    QVariantMap epicSeries() const { return m_epicSeries; }
+    QVariantList epicSessions() const { return m_epicSessions; }
     QVariantList metrics() const { return m_metrics; }
     QVariantList trackingItems() const { return m_trackingItems; }
     QVariantMap statsData() const { return m_stats.json.toVariantMap(); }
@@ -155,8 +161,11 @@ public:
     Q_INVOKABLE bool toggleDone(const QString &id, const QString &state = {});
     Q_INVOKABLE void tickItem(const QString &id, const QVariantMap &values = {}, const QString &note = {});
     Q_INVOKABLE void untickItem(const QString &id);
+    // With an epic and no item the session is logged against the epic (the
+    // server takes its project from it).
     Q_INVOKABLE void logSession(const QString &itemId, const QString &projectId, int minutes,
-                                const QVariantMap &values = {}, const QString &note = {});
+                                const QVariantMap &values = {}, const QString &note = {},
+                                const QString &epicId = {});
     Q_INVOKABLE void startSession(const QString &itemId, const QString &projectId = {});
     Q_INVOKABLE void stopSession(const QString &sessionId, const QVariantMap &values = {},
                                  const QString &note = {}, bool done = false, int minutes = -1);
@@ -171,6 +180,11 @@ public:
     Q_INVOKABLE void loadSettings();
     Q_INVOKABLE void saveEntity(const QString &kind, const QVariantMap &fields);
     Q_INVOKABLE void removeTag(const QString &id);
+    // Epics (backend_epics.cpp). Remove only works for an epic without sessions.
+    Q_INVOKABLE void removeEpic(const QString &id);
+    // The Epic page: minutes per day (stats.series) and the epic's sessions
+    // (sessions.list), kept apart from the Statistics results.
+    Q_INVOKABLE void loadEpicPage(const QString &epicId);
     Q_INVOKABLE ItemDraft *itemForId(const QString &id);
     Q_INVOKABLE ItemDraft *itemFromParse(const QString &fallbackTitle = {});
     Q_INVOKABLE QString hijriHeader(const QString &isoDate) const;
@@ -202,6 +216,7 @@ signals:
     void statsTableChanged();
     void sessionsListChanged();
     void sessionsLoadingChanged();
+    void epicPageChanged();
 
 private:
     struct PendingCreate {
@@ -280,7 +295,10 @@ private:
     Config m_configState;
     ParseDraftState m_parseDraft;
     PreviewState m_preview;
-    QVariantList m_projects, m_tags, m_metrics;
+    QVariantList m_projects, m_epics, m_tags, m_metrics;
+    QVariantMap m_epicSeries;
+    QVariantList m_epicSessions;
+    quint64 m_epicRequest = 0;
     QVariantList m_trackingItems;
     quint64 m_statsRequest = 0;
     QVariantMap m_running, m_lastRunning;

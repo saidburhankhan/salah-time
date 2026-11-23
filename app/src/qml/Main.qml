@@ -22,7 +22,10 @@ ApplicationWindow {
     Material.accent: theme.accent
     Material.roundedScale: theme.radius
 
+    // 0 Today, 1 Routines, 2 Statistics, 3 Settings, 4 an Epic (not in the sidebar).
     property int page: 0
+    property string epicId: ""
+    property int epicBackPage: 2
     property bool quickVisible: false
     property bool entryVisible: false
     property bool helpVisible: false
@@ -185,6 +188,41 @@ ApplicationWindow {
     function projectColor(id) {
         var project = projectById(id)
         return project ? String(project.color || "#78909c") : "transparent"
+    }
+    function epicById(id) {
+        if (!id)
+            return null
+        var list = backend.epics || []
+        for (var i = 0; i < list.length; i++) {
+            if (String(list[i].id) === String(id))
+                return list[i]
+        }
+        return null
+    }
+    function epicName(id) {
+        var epic = epicById(id)
+        return epic ? String(epic.name || "") : ""
+    }
+    // A project's epics, active first; finished ones only when asked for.
+    function projectEpics(projectId, includeFinished) {
+        if (!projectId)
+            return []
+        var list = (backend.epics || []).filter(function(e) {
+            return String(e.project_id) === String(projectId) && (includeFinished || e.status !== "finished")
+        })
+        return list.sort(function(a, b) {
+            return (a.status === "finished" ? 1 : 0) - (b.status === "finished" ? 1 : 0)
+        })
+    }
+    function openEpic(id) {
+        if (!id)
+            return
+        if (page !== 4)
+            epicBackPage = page
+        entryVisible = false
+        epicId = String(id)
+        page = 4
+        epicPage.open()
     }
     function activeProjects() {
         return (backend.projects || []).filter(function(p) { return !p.archived })
@@ -431,6 +469,14 @@ ApplicationWindow {
                     Layout.margins: 26
                     win: win
                     tip: tip
+                }
+                EpicPage {
+                    id: epicPage
+                    visible: win.page === 4
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.margins: 26
+                    win: win
                 }
                 SettingsPage {
                     id: settingsPage

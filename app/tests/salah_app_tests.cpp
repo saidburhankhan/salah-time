@@ -388,7 +388,7 @@ esac
     };
     static QJsonObject emptyChanged() {
         return QJsonObject{{"items", QJsonArray{}}, {"sessions", QJsonArray{}}, {"projects", QJsonArray{}},
-                           {"tags", QJsonArray{}}, {"metrics", QJsonArray{}}, {"marks", QJsonArray{}},
+                           {"epics", QJsonArray{}}, {"tags", QJsonArray{}}, {"metrics", QJsonArray{}}, {"marks", QJsonArray{}},
                            {"deleted", QJsonArray{}}};
     }
     static FakeDaemon::Handler trackingHandler(std::shared_ptr<TrackingState> state) {
@@ -412,12 +412,12 @@ esac
                     server->respond(socket, request, fixture("stats_series_split_item"));
                 else
                     server->respond(socket, request, TrackingFixture::trendMonth(params.value("measures").toArray(),
-                                                                                  params.value("split") == "item"));
+                                                                                  params.value("split").toString()));
             }
             else if (method == "stats.table") {
                 QJsonObject table = TrackingFixture::statsTable(params.value("group").toString("week"));
                 table["filter"] = QJsonObject{{"tag_id", params.value("tag_id")}, {"project_id", params.value("project_id")},
-                                              {"item_id", params.value("item_id")}};
+                                              {"epic_id", params.value("epic_id")}, {"item_id", params.value("item_id")}};
                 server->respond(socket, request, table);
             }
             else if (method == "sessions.list") {
@@ -428,7 +428,14 @@ esac
                         QJsonObject{{"focus", 3.0}}, "Juz 12 started");
                     server->respond(socket, request, QJsonObject{{"rows", QJsonArray{older}}, {"next", QJsonValue::Null}});
                 } else {
-                    server->respond(socket, request, TrackingFixture::sessionsList(filtered, !filtered));
+                    QJsonObject list = TrackingFixture::sessionsList(filtered, !filtered);
+                    if (params.contains("epic_id")) {
+                        QJsonArray rows;
+                        for (const QJsonValue &row : list.value("rows").toArray())
+                            if (row.toObject().value("epic_id").toString() == params.value("epic_id").toString()) rows.append(row);
+                        list = QJsonObject{{"rows", rows}, {"next", QJsonValue::Null}};
+                    }
+                    server->respond(socket, request, list);
                 }
             }
             else if (method == "items.list") {
@@ -437,12 +444,19 @@ esac
                     for (const QJsonValue &value : block.toObject().value("items").toArray()) {
                         const QJsonObject row = value.toObject();
                         rows.append(QJsonObject{{"id", row.value("id")}, {"title", row.value("title")},
-                                                {"project_id", row.value("project").toObject().value("id")}});
+                                                {"project_id", row.value("project").toObject().value("id")},
+                                                {"epic_id", row.value("epic_id")}});
                     }
                 server->respond(socket, request, rows);
             }
             else if (method == "config.get") server->respond(socket, request, QJsonObject{{"sleep_time", "23:00"}, {"location", "Tashkent"}, {"latitude", 41.2}, {"longitude", 69.2}, {"timezone_offset", 5}, {"method", "uzbekistan"}, {"method_name", "Muslim Board of Uzbekistan"}, {"asr", "hanafi"}, {"auto_location", true}, {"last_location_provider", QJsonValue::Null}, {"last_location_sync", QJsonValue::Null}});
             else if (method == "projects.list") server->respond(socket, request, TrackingFixture::projects());
+            else if (method == "epics.list") {
+                QJsonArray rows;
+                for (const QJsonValue &row : TrackingFixture::epics())
+                    if (!params.contains("project_id") || row.toObject().value("project_id") == params.value("project_id")) rows.append(row);
+                server->respond(socket, request, rows);
+            }
             else if (method == "tags.list") server->respond(socket, request, TrackingFixture::tags());
             else if (method == "metrics.list") server->respond(socket, request, TrackingFixture::metrics());
             else if (method == "item.preview") server->respond(socket, request, fixture("item_preview"));
@@ -451,6 +465,11 @@ esac
                 if (method == "project.add" || method == "project.edit")
                     changed["projects"] = QJsonArray{QJsonObject{{"id", params.value("id").toString("new-project")},
                                                                  {"name", params.value("name")}}};
+                else if (method == "epic.add" || method == "epic.edit")
+                    changed["epics"] = QJsonArray{QJsonObject{{"id", params.value("id").toString("new-epic")},
+                                                              {"name", params.value("name")}}};
+                else if (method == "epic.remove")
+                    changed["deleted"] = QJsonArray{params.value("id")};
                 else if (method == "tag.add" || method == "tag.edit")
                     changed["tags"] = QJsonArray{QJsonObject{{"id", params.value("id").toString("new-tag")}}};
                 else if (method == "metric.add" || method == "metric.edit")
@@ -541,6 +560,19 @@ esac
         for (QQuickItem *child : quickDescendants(item))
             if (child->objectName() == name) return child;
         return nullptr;
+    }
+    // Visual search: delegates of a Repeater are not QObject children of the
+    // items above them, so findChildren cannot see them.
+    static QList<QObject *> visualNamed(QQuickWindow *window, const QString &name) {
+        QList<QObject *> found;
+        for (QQuickItem *item : quickDescendants(window->contentItem()))
+            if (item->objectName() == name) found.append(item);
+        return found;
+    }
+    static bool hasVisualText(QQuickWindow *window, const QString &text) {
+        for (QQuickItem *item : quickDescendants(window->contentItem()))
+            if (item->isVisible() && item->property("text").toString() == text) return true;
+        return false;
     }
     static QObject *findByName(QObject *root, const QString &name) {
         for (QObject *object : root->findChildren<QObject *>())
@@ -1812,8 +1844,9 @@ const int original = model->indexOfItem("<id:4>");
         backend.loadSettings();
         // The three lists used to share one coalescing key and all received
         // the projects list.
-        QTRY_COMPARE_WITH_TIMEOUT(settings.size(), 3, 3000);
+        QTRY_COMPARE_WITH_TIMEOUT(settings.size(), 4, 3000);
         QCOMPARE(backend.projects().size(), 4);
+        QCOMPARE(backend.epics().size(), 5);
         QCOMPARE(backend.tags().size(), 3);
         QCOMPARE(backend.metrics().size(), 7);
         QCOMPARE(backend.tags().first().toMap().value("name").toString(), QString("Faith"));
@@ -2352,6 +2385,128 @@ const int original = model->indexOfItem("<id:4>");
         QCOMPARE(backend.statsData().value("totals").toMap().value("sessions").toInt(), 2);
         QVERIFY(backend.error().isEmpty());
     }
+    void epicsFollowCanonicalFixtures() {
+        const QString rpc = QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/rpc/");
+        for (const char *name : {"epic_add", "epic_edit_finish", "session_log_epic", "item_add_quick_tomorrow"})
+            QVERIFY2(Dto::decode<Dto::MutationResult>(fixture(name)), name);
+        QVERIFY(Dto::decode<Dto::ParseDraft>(fixture("item_parse_tomorrow")));
+        QCOMPARE(fixture("item_parse_tomorrow").value("start_day").toString(), QString("2031-05-15"));
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        const QJsonValue epicsList = readJson(rpc + "epics_list.json").object().value("result");
+        const auto base = trackingHandler(trackingState());
+        daemon.setHandler([epicsList, base](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            const QString method = request.value("method").toString();
+            if (method == "epics.list") server->respond(socket, request, epicsList);
+            else if (method == "epic.add") server->respond(socket, request, fixture("epic_add"));
+            else if (method == "epic.edit") server->respond(socket, request, fixture("epic_edit_finish"));
+            else if (method == "epic.remove") server->respond(socket, request, fixture("epic_edit_finish"));
+            else if (method == "session.log") server->respond(socket, request, fixture("session_log_epic"));
+            else if (method == "stats.table") server->respond(socket, request, fixture("stats_table_epic"));
+            else base(request, socket, server);
+        });
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy settings(&backend, &Backend::settingsChanged);
+        backend.loadSettings();
+        QTRY_VERIFY_WITH_TIMEOUT(!backend.epics().isEmpty(), 3000);
+        const QVariantMap read = backend.epics().first().toMap();
+        QCOMPARE(read.value("name").toString(), QString("Read"));
+        QCOMPARE(read.value("total_minutes").toInt(), 30);
+        QCOMPARE(read.value("status").toString(), QString("active"));
+
+        QSignalSpy saved(&backend, &Backend::entitySaved);
+        backend.saveEntity("epic", QVariantMap{{"project_id", "p"}, {"name", "Read"}, {"note", "Spring"}});
+        QTRY_COMPARE_WITH_TIMEOUT(saved.size(), 1, 3000);
+        QCOMPARE(saved.first().at(0).toString(), QString("epic"));
+        QCOMPARE(saved.first().at(1).toString(), QString("<id:1>"));
+        QJsonObject params = lastRequest(daemon, "epic.add").value("params").toObject();
+        QCOMPARE(params.value("project_id").toString(), QString("p"));
+        QCOMPARE(params.value("note").toString(), QString("Spring"));
+        QVERIFY(!params.value("op_id").toString().isEmpty());
+        backend.saveEntity("epic", QVariantMap{{"id", "<id:1>"}, {"status", "finished"}});
+        QTRY_COMPARE_WITH_TIMEOUT(saved.size(), 2, 3000);
+        params = lastRequest(daemon, "epic.edit").value("params").toObject();
+        QCOMPARE(params.value("status").toString(), QString("finished"));
+        QVERIFY(!params.contains("name"));
+        backend.removeEpic("<id:1>");
+        QTRY_COMPARE_WITH_TIMEOUT(saved.size(), 3, 3000);
+        QCOMPARE(lastRequest(daemon, "epic.remove").value("params").toObject().value("id").toString(), QString("<id:1>"));
+        QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
+
+        // Work logged against the epic alone: epic_id, no project_id, no item_id.
+        QSignalSpy writes(&backend, &Backend::sessionWriteFinished);
+        backend.logSession({}, "p", 30, QVariantMap{{"focus", 4}}, {}, "<id:1>");
+        QTRY_COMPARE_WITH_TIMEOUT(writes.size(), 1, 3000);
+        params = lastRequest(daemon, "session.log").value("params").toObject();
+        QCOMPARE(params.value("epic_id").toString(), QString("<id:1>"));
+        QVERIFY(!params.contains("project_id"));
+        QVERIFY(!params.contains("item_id"));
+        QCOMPARE(params.value("minutes").toInt(), 30);
+
+        // The epic table keeps its unassigned row, drawn without a colour.
+        QSignalSpy table(&backend, &Backend::statsTableChanged);
+        backend.loadStatsTable(QVariantMap{{"days", 14}, {"epic_id", "none"}}, "epic");
+        QTRY_COMPARE_WITH_TIMEOUT(table.size(), 1, 3000);
+        params = lastRequest(daemon, "stats.table").value("params").toObject();
+        QCOMPARE(params.value("group").toString(), QString("epic"));
+        QCOMPARE(params.value("epic_id").toString(), QString("none"));
+        const QVariantList rows = backend.statsTable().value("rows").toList();
+        QCOMPARE(rows.last().toMap().value("label").toString(), QString("No epic"));
+        QVERIFY(rows.last().toMap().value("color").isNull());
+    }
+    void epicFiltersAndEditorFieldsReachTheDaemon() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        daemon.setHandler(trackingHandler(trackingState()));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        QSignalSpy stats(&backend, &Backend::statsDataChanged);
+        backend.loadStatsQuery(QVariantMap{{"days", 28}, {"epic_id", "e-juz"}});
+        QTRY_COMPARE_WITH_TIMEOUT(stats.size(), 1, 3000);
+        QCOMPARE(lastRequest(daemon, "stats.get").value("params").toObject().value("epic_id").toString(), QString("e-juz"));
+        QCOMPARE(backend.statsData().value("epics").toList().size(), 6);
+        QSignalSpy table(&backend, &Backend::statsTableChanged);
+        backend.loadStatsTable(QVariantMap{{"days", 28}, {"epic_id", "none"}}, "epic");
+        QTRY_COMPARE_WITH_TIMEOUT(table.size(), 1, 3000);
+        QCOMPARE(lastRequest(daemon, "stats.table").value("params").toObject().value("group").toString(), QString("epic"));
+        QSignalSpy list(&backend, &Backend::sessionsListChanged);
+        backend.loadSessions(QVariantMap{{"days", 28}, {"epic_id", "e-juz"}});
+        QTRY_COMPARE_WITH_TIMEOUT(list.size(), 1, 3000);
+        QCOMPARE(lastRequest(daemon, "sessions.list").value("params").toObject().value("epic_id").toString(), QString("e-juz"));
+        QSignalSpy trends(&backend, &Backend::trendsChanged);
+        backend.loadTrends(QVariantMap{{"days", 28}, {"epic_id", "e-juz"}}, {"minutes"}, "day", "epic");
+        QTRY_COMPARE_WITH_TIMEOUT(trends.size(), 1, 3000);
+        QJsonObject params = lastRequest(daemon, "stats.series").value("params").toObject();
+        QCOMPARE(params.value("split").toString(), QString("epic"));
+        QCOMPARE(params.value("epic_id").toString(), QString("e-juz"));
+        QCOMPARE(backend.trends().value("split").toString(), QString("epic"));
+
+        // The item editor sends epic_id only when it sets or clears one.
+        backend.saveItem(QVariantMap{{"id", "quran"}, {"title", "Read Quran"}, {"block", "fajr"}, {"project_id", "quran"},
+                                     {"epic_id", "e-tajweed"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "item.edit").isEmpty(), 3000);
+        QCOMPARE(lastRequest(daemon, "item.edit").value("params").toObject().value("epic_id").toString(), QString("e-tajweed"));
+        backend.saveItem(QVariantMap{{"id", "quran"}, {"title", "Read Quran"}, {"block", "fajr"}, {"project_id", "quran"},
+                                     {"epic_id", ""}});
+        QTRY_VERIFY_WITH_TIMEOUT(lastRequest(daemon, "item.edit").value("params").toObject().value("epic_id").isNull()
+                                 && lastRequest(daemon, "item.edit").value("params").toObject().contains("epic_id"), 3000);
+        const int edits = requestCount(daemon, "item.edit");
+        backend.saveItem(QVariantMap{{"id", "quran"}, {"title", "Read Quran II"}, {"block", "fajr"}, {"project_id", "quran"}});
+        QTRY_COMPARE_WITH_TIMEOUT(requestCount(daemon, "item.edit"), edits + 1, 3000);
+        QVERIFY(!lastRequest(daemon, "item.edit").value("params").toObject().contains("epic_id"));
+        backend.saveItem(QVariantMap{{"title", "Hifz"}, {"block", "fajr"}, {"project_id", "quran"}, {"epic_id", "e-juz"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "item.add").isEmpty(), 3000);
+        QCOMPARE(lastRequest(daemon, "item.add").value("params").toObject().value("epic_id").toString(), QString("e-juz"));
+
+        // The Epic page reads minutes per day and the epic's own sessions.
+        QSignalSpy page(&backend, &Backend::epicPageChanged);
+        backend.loadEpicPage("e-juz");
+        QTRY_VERIFY_WITH_TIMEOUT(!backend.epicSessions().isEmpty() && !backend.epicSeries().isEmpty(), 3000);
+        params = lastRequest(daemon, "stats.series").value("params").toObject();
+        QCOMPARE(params.value("epic_id").toString(), QString("e-juz"));
+        QCOMPARE(params.value("measures").toArray(), QJsonArray{"minutes"});
+        QCOMPARE(lastRequest(daemon, "sessions.list").value("params").toObject().value("epic_id").toString(), QString("e-juz"));
+        QCOMPARE(backend.epicSessions().size(), 1);
+        QCOMPARE(backend.epicSessions().first().toMap().value("epic_id").toString(), QString("e-juz"));
+        QVERIFY(backend.error().isEmpty());
+    }
     void pausePanelCapsWorkedAtMaxMinutes() {
         QTemporaryDir dir;
         Backend backend(nullptr, fake(dir), 3000, daemon_path(dir));
@@ -2636,6 +2791,7 @@ fi
         backend.reload();
         waitForBackendIdle(backend);
         QTRY_COMPARE_WITH_TIMEOUT(backend.projects().size(), 4, 3000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.epics().size(), 5, 3000);
         shotWindow(window, "today.png");
 
         QObject *settings = findByName(root.data(), "settingsPage"); QVERIFY(settings);
@@ -2651,6 +2807,28 @@ fi
         QVERIFY(QMetaObject::invokeMethod(projectsPane, "startEdit", Q_ARG(QVariant, quran)));
         shotWindow(window, "settings-projects-edit.png");
         QCOMPARE(projectsPane->property("editId").toString(), QString("quran"));
+        // Settings -> Projects lists the project's epics; only an epic without
+        // sessions can be removed, the rest are finished.
+        QObject *epicList = findByName(root.data(), "projectEpics"); QVERIFY(epicList);
+        QCOMPARE(epicList->property("rows").toList().size(), 2);
+        shotWindow(window, "settings-epics-quran.png");
+        QVERIFY(QMetaObject::invokeMethod(projectsPane, "startEdit", Q_ARG(QVariant, backend.projects().at(1))));
+        QCOMPARE(epicList->property("rows").toList().size(), 3);
+        int removable = 0;
+        for (QObject *object : visualNamed(window, "epicRemoveButton"))
+            if (object->property("visible").toBool()) ++removable;
+        QCOMPARE(removable, 1);
+        shotWindow(window, "settings-epics-study.png");
+        QObject *emptyRow = visualNamed(window, "epicRow_e-empty").value(0); QVERIFY(emptyRow);
+        QObject *finish = findItemByName(emptyRow, "epicStatusButton"); QVERIFY(finish);
+        QCOMPARE(finish->property("text").toString(), QString("Finish"));
+        QVERIFY(QMetaObject::invokeMethod(finish, "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "epic.edit").isEmpty(), 3000);
+        QCOMPARE(lastRequest(daemon, "epic.edit").value("params").toObject().value("status").toString(), QString("finished"));
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(emptyRow, "epicRemoveButton"), "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(emptyRow, "epicRemoveConfirm"), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "epic.remove").isEmpty(), 3000);
+        QCOMPARE(lastRequest(daemon, "epic.remove").value("params").toObject().value("id").toString(), QString("e-empty"));
         settings->setProperty("section", "tags");
         shotWindow(window, "settings-tags.png");
         settings->setProperty("section", "metrics");
@@ -2661,6 +2839,36 @@ fi
         root->setProperty("page", 0);
         QVERIFY(QMetaObject::invokeMethod(root.data(), "openEntry", Q_ARG(QVariant, QVariant("deep"))));
         shotWindow(window, "item-editor.png");
+        {
+            // Epic chips: only the project's active epics, "No epic" by default
+            // for a task without one; the saved draft carries or clears epic_id.
+            QObject *entry = findByName(root.data(), "entryPopup"); QVERIFY(entry);
+            QCOMPARE(entry->property("epicId").toString(), QString("e-grammar"));
+            QCOMPARE(entry->property("epicChoices").toList().size(), 2);
+            auto *content = entry->property("contentItem").value<QQuickItem *>(); QVERIFY(content);
+            auto chip = [&](const QString &name) -> QObject * {
+                for (QQuickItem *child : quickDescendants(content)) if (child->objectName() == name) return child;
+                return nullptr;
+            };
+            QVERIFY(chip("noEpicChip") && chip("epicChip_e-grammar") && chip("epicChip_e-empty"));
+            QVERIFY(!chip("epicChip_e-old"));
+            shotWindow(window, "item-editor-epics.png");
+            QVERIFY(QMetaObject::invokeMethod(chip("epicChip_e-empty"), "clicked"));
+            QVariant draft;
+            QVERIFY(QMetaObject::invokeMethod(entry, "draft", Q_RETURN_ARG(QVariant, draft)));
+            QCOMPARE(draft.toMap().value("epic_id").toString(), QString("e-empty"));
+            QVERIFY(QMetaObject::invokeMethod(chip("noEpicChip"), "clicked"));
+            QVERIFY(QMetaObject::invokeMethod(entry, "draft", Q_RETURN_ARG(QVariant, draft)));
+            QVERIFY(draft.toMap().contains("epic_id"));
+            QCOMPARE(draft.toMap().value("epic_id").toString(), QString());
+            // Another project: its own epics, and none chosen.
+            QVERIFY(QMetaObject::invokeMethod(entry, "selectProject", Q_ARG(QVariant, QVariant("quran"))));
+            QCOMPARE(entry->property("epicChoices").toList().size(), 2);
+            QCOMPARE(entry->property("epicId").toString(), QString());
+            QVERIFY(QMetaObject::invokeMethod(entry, "selectProject", Q_ARG(QVariant, QVariant("study"))));
+            QVERIFY(QMetaObject::invokeMethod(chip("epicChip_e-grammar"), "clicked"));
+            QCOMPARE(entry->property("epicId").toString(), QString("e-grammar"));
+        }
         {
             QObject *entry = findByName(root.data(), "entryPopup");
             QObject *form = entry ? entry : nullptr;
@@ -2677,6 +2885,8 @@ fi
         for (const char *id : {"quran", "walk", "deep"})
             QVERIFY(QMetaObject::invokeMethod(timeline, "toggleExpanded", Q_ARG(QVariant, QVariant(id))));
         shotWindow(window, "today-sessions.png");
+        // A session row names its epic.
+        QVERIFY(hasVisualText(window, "Memorise Juz 30"));
         shotWindow(window, "session-notes.png");
         QQuickItem *list = timelineView(root.data()); QVERIFY(list);
         list->setProperty("contentY", 420);
@@ -2745,6 +2955,22 @@ fi
         shotWindow(window, "prompt-edit.png");
         root->setProperty("sessionPromptVisible", false);
 
+        // A time log without a task can name one of the project's epics.
+        QVERIFY(showPrompt(QVariantMap{
+            {"mode", "log"}, {"projectId", "study"}, {"title", "Study"}, {"color", "#9b59b6"}}));
+        QTRY_VERIFY_WITH_TIMEOUT(prompt->property("visible").toBool(), 2000);
+        QCOMPARE(prompt->property("epicChoices").toList().size(), 2);
+        QCOMPARE(prompt->property("epicId").toString(), QString());
+        findByName(root.data(), "sessionMinutesField")->setProperty("text", "20");
+        shotWindow(window, "prompt-log-epic.png");
+        prompt->setProperty("epicId", "e-grammar");
+        QVERIFY(QMetaObject::invokeMethod(prompt, "save", Q_ARG(QVariant, QVariant(false)), Q_ARG(QVariant, QVariant(false))));
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "session.log").isEmpty(), 3000);
+        QCOMPARE(lastRequest(daemon, "session.log").value("params").toObject().value("epic_id").toString(), QString("e-grammar"));
+        QVERIFY(!lastRequest(daemon, "session.log").value("params").toObject().contains("item_id"));
+        QTRY_VERIFY_WITH_TIMEOUT(!prompt->property("visible").toBool(), 3000);
+        root->setProperty("sessionPromptVisible", false);
+
         QVERIFY(showPrompt(QVariantMap{
             {"mode", "log"}, {"itemId", "walk"}, {"title", "Morning walk"}}));
         QTRY_VERIFY_WITH_TIMEOUT(prompt->property("visible").toBool(), 2000);
@@ -2761,6 +2987,20 @@ fi
         QObject *flick = stats->property("contentItem").value<QObject *>(); QVERIFY(flick);
         trendsScreens(window, stats);
         waitForBackendIdle(backend);
+        {
+            // Trends can split by epic; the unassigned work is its own line.
+            auto *trends = qobject_cast<QQuickItem *>(findByName(stats, "trendsChart")); QVERIFY(trends);
+            QVERIFY(QMetaObject::invokeMethod(findItemByName(trends, "trendsSplit_epic"), "clicked"));
+            waitForBackendIdle(backend);
+            QCOMPARE(lastRequest(daemon, "stats.series").value("params").toObject().value("split").toString(), QString("epic"));
+            QTRY_COMPARE_WITH_TIMEOUT(backend.trends().value("split").toString(), QString("epic"), 3000);
+            flick->setProperty("contentY", flick->property("contentY").toReal()
+                               + trends->mapToItem(qobject_cast<QQuickItem *>(flick), QPointF()).y() - 10);
+            shotWindow(window, "trends-epic-split.png");
+            QVERIFY(QMetaObject::invokeMethod(findItemByName(trends, "trendsSplit_"), "clicked"));
+            waitForBackendIdle(backend);
+            flick->setProperty("contentY", 0);
+        }
         flick->setProperty("contentY", flick->property("contentHeight").toReal() - flick->property("height").toReal());
         shotWindow(window, "stats-all-bottom.png");
         flick->setProperty("contentY", 0);
@@ -2801,6 +3041,26 @@ fi
         QCOMPARE(lastRequest(daemon, "stats.get").value("params").toObject().value("days").toInt(), 90);
         shotWindow(window, "stats-90.png");
 
+        // Epics row: narrowed by the project, with "No epic" for the rest.
+        QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("project")), Q_ARG(QVariant, QVariant("study"))));
+        waitForBackendIdle(backend);
+        QVERIFY(findByName(root.data(), "statsEpicList"));
+        QCOMPARE(stats->property("filterBar").value<QObject *>()->property("epicChoices").toList().size(), 3);
+        QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("epic")), Q_ARG(QVariant, QVariant("e-grammar"))));
+        waitForBackendIdle(backend);
+        QCOMPARE(lastRequest(daemon, "stats.get").value("params").toObject().value("epic_id").toString(), QString("e-grammar"));
+        QCOMPARE(stats->property("taskChoices").toList().size(), 1);
+        shotWindow(window, "stats-epics-filter.png");
+        QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("epic")), Q_ARG(QVariant, QVariant("none"))));
+        waitForBackendIdle(backend);
+        QCOMPARE(lastRequest(daemon, "stats.get").value("params").toObject().value("epic_id").toString(), QString("none"));
+        QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("")), Q_ARG(QVariant, QVariant(""))));
+        waitForBackendIdle(backend);
+        QVERIFY(!lastRequest(daemon, "stats.get").value("params").toObject().contains("epic_id"));
+        flick->setProperty("contentY", flick->property("contentHeight").toReal() - flick->property("height").toReal());
+        shotWindow(window, "stats-epic-breakdown.png");
+        flick->setProperty("contentY", 0);
+
         // The shared filter bar with two metric chips, on each tab.
         QVERIFY(QMetaObject::invokeMethod(stats, "setRange", Q_ARG(QVariant, QVariant(28))));
         QObject *bar = stats->property("filterBar").value<QObject *>(); QVERIFY(bar);
@@ -2826,6 +3086,10 @@ fi
         QVERIFY(QMetaObject::invokeMethod(table, "setGroup", Q_ARG(QVariant, QVariant("tag"))));
         waitForBackendIdle(backend);
         shotWindow(window, "stats-table-tag-no-sessions.png");
+        QVERIFY(QMetaObject::invokeMethod(table, "setGroup", Q_ARG(QVariant, QVariant("epic"))));
+        waitForBackendIdle(backend);
+        QCOMPARE(lastRequest(daemon, "stats.table").value("params").toObject().value("group").toString(), QString("epic"));
+        shotWindow(window, "stats-table-epic.png");
         QVERIFY(QMetaObject::invokeMethod(table, "toggleColumn", Q_ARG(QVariant, QVariant("sessions"))));
         QVERIFY(QMetaObject::invokeMethod(table, "toggleColumn", Q_ARG(QVariant, QVariant("quality"))));
         QVERIFY(QMetaObject::invokeMethod(table, "setGroup", Q_ARG(QVariant, QVariant("week"))));
@@ -2833,6 +3097,7 @@ fi
         waitForBackendIdle(backend);
         QCOMPARE(lastRequest(daemon, "sessions.list").value("params").toObject().value("values").toObject().size(), 2);
         shotWindow(window, "stats-notes.png");
+        QVERIFY(hasVisualText(window, "· Arabic grammar course"));
         QVERIFY(QMetaObject::invokeMethod(bar, "clearMetrics"));
         waitForBackendIdle(backend);
         flick->setProperty("contentY", 300);
@@ -2840,6 +3105,40 @@ fi
         flick->setProperty("contentY", 0);
         QVERIFY(QMetaObject::invokeMethod(stats, "setTab", Q_ARG(QVariant, QVariant("charts"))));
         waitForBackendIdle(backend);
+
+        // A table row for an epic opens its page; the page has totals, minutes
+        // per day, its tasks and its notes, and goes back to Statistics.
+        QVERIFY(QMetaObject::invokeMethod(stats, "setTab", Q_ARG(QVariant, QVariant("table"))));
+        QVERIFY(QMetaObject::invokeMethod(table, "setGroup", Q_ARG(QVariant, QVariant("epic"))));
+        waitForBackendIdle(backend);
+        QObject *openRow = nullptr;
+        for (QObject *object : visualNamed(window, "epicRowOpen"))
+            if (object->property("enabled").toBool()) { openRow = object; break; }
+        QVERIFY(openRow);
+        auto *openItem = qobject_cast<QQuickItem *>(openRow); QVERIFY(openItem);
+        QTest::mouseClick(window, Qt::LeftButton, {}, openItem->mapToScene(QPointF(openItem->width() / 2, openItem->height() / 2)).toPoint());
+        QCOMPARE(root->property("page").toInt(), 4);
+        QCOMPARE(root->property("epicBackPage").toInt(), 2);
+        QCOMPARE(root->property("epicId").toString(), QString("e-juz"));
+        QTRY_VERIFY_WITH_TIMEOUT(!backend.epicSessions().isEmpty() && !backend.epicSeries().isEmpty(), 3000);
+        QObject *epicPage = findByName(root.data(), "epicPage"); QVERIFY(epicPage);
+        QCOMPARE(findByName(epicPage, "epicTitle")->property("text").toString(), QString("Memorise Juz 30"));
+        QCOMPARE(findByName(epicPage, "epicSubtitle")->property("text").toString(), QString("Quran  ·  Active"));
+        shotWindow(window, "epic-page.png");
+        QObject *epicFlick = epicPage->property("contentItem").value<QObject *>(); QVERIFY(epicFlick);
+        epicFlick->setProperty("contentY", epicFlick->property("contentHeight").toReal() - epicFlick->property("height").toReal());
+        shotWindow(window, "epic-page-notes.png");
+        epicFlick->setProperty("contentY", 0);
+        QVERIFY(QMetaObject::invokeMethod(findByName(epicPage, "epicLogButton"), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(prompt->property("visible").toBool(), 2000);
+        QCOMPARE(prompt->property("epicId").toString(), QString("e-juz"));
+        root->setProperty("sessionPromptVisible", false);
+        QVERIFY(QMetaObject::invokeMethod(findByName(epicPage, "epicFinishButton"), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "epic.edit").isEmpty(), 3000);
+        QVERIFY(QMetaObject::invokeMethod(findByName(epicPage, "epicBackButton"), "clicked"));
+        QCOMPARE(root->property("page").toInt(), 2);
+        QVERIFY(QMetaObject::invokeMethod(table, "setGroup", Q_ARG(QVariant, QVariant("week"))));
+        QVERIFY(QMetaObject::invokeMethod(stats, "setTab", Q_ARG(QVariant, QVariant("charts"))));
 
         // A timer that ran past Sleep: Worked is capped and the panel says why.
         state->status["running"] = TrackingFixture::staleRunningSession();

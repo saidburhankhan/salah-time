@@ -597,6 +597,10 @@ void Backend::saveItem(const QVariantMap &item) {
     fields.repeat = item.value(QStringLiteral("repeat"), QStringLiteral("none")).toString();
     fields.weekdays = item.value(QStringLiteral("weekdays")).toStringList();
     fields.projectId = item.value(QStringLiteral("project_id")).toString();
+    // epic_id is present only when it is set or being cleared; `null` clears.
+    const auto epic = item.constFind(QStringLiteral("epic_id"));
+    if (epic != item.cend()) fields.epicId = epic->toString().isEmpty() ? QJsonValue(QJsonValue::Null)
+                                                                        : QJsonValue(epic->toString());
     const auto metricIds = item.constFind(QStringLiteral("metric_ids"));
     if (metricIds != item.cend()) fields.metricIds = QJsonValue::fromVariant(*metricIds);
     fields.plannedMinutes = item.value(QStringLiteral("planned_minutes")).toInt();
@@ -741,11 +745,12 @@ void Backend::untickItem(const QString &id) {
 }
 
 void Backend::logSession(const QString &itemId, const QString &projectId, int minutes,
-                         const QVariantMap &values, const QString &note) {
-    if (itemId.isEmpty() && projectId.isEmpty()) return;
+                         const QVariantMap &values, const QString &note, const QString &epicId) {
+    if (itemId.isEmpty() && projectId.isEmpty() && epicId.isEmpty()) return;
     if (!itemId.isEmpty()) setItemPending(itemId, true);
-    m_client.sessionLog(itemId, itemId.isEmpty() ? projectId : QString(), minutes > 0 ? minutes : -1,
-                        QJsonObject::fromVariantMap(values), note, writeDate(), sessionResponse(itemId));
+    const bool epicOnly = itemId.isEmpty() && !epicId.isEmpty();
+    m_client.sessionLog(itemId, itemId.isEmpty() && !epicOnly ? projectId : QString(), minutes > 0 ? minutes : -1,
+                        QJsonObject::fromVariantMap(values), note, writeDate(), sessionResponse(itemId), epicOnly ? epicId : QString());
 }
 
 void Backend::stopSession(const QString &sessionId, const QVariantMap &values,
@@ -850,12 +855,14 @@ void Backend::loadSettings() {
         }));
     };
     load(QStringLiteral("projects.list"), &m_projects);
+    load(QStringLiteral("epics.list"), &m_epics);
     load(QStringLiteral("tags.list"), &m_tags);
     load(QStringLiteral("metrics.list"), &m_metrics);
 }
 
 void Backend::saveEntity(const QString &kind, const QVariantMap &fields) {
-    static const QSet<QString> allowed{QStringLiteral("project"), QStringLiteral("tag"), QStringLiteral("metric")};
+    static const QSet<QString> allowed{QStringLiteral("project"), QStringLiteral("epic"), QStringLiteral("tag"),
+                                       QStringLiteral("metric")};
     if (!allowed.contains(kind)) return;
     const bool editing = !fields.value(QStringLiteral("id")).toString().isEmpty();
     m_client.mutateEntity(kind + (editing ? QStringLiteral(".edit") : QStringLiteral(".add")),

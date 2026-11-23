@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
 
-// The Table tab: stats.table grouped by week (default), day, project, tag or
+// The Table tab: stats.table grouped by week (default), day, project, epic, tag or
 // task. Column chips hide columns (remembered); scale metrics are tinted by
 // value, minutes carry an in-cell bar scaled to the column's largest row; a
 // header click sorts (descending, ascending, back to the server order).
@@ -38,6 +38,7 @@ Rectangle {
         { id: "week", name: qsTr("Week") },
         { id: "day", name: qsTr("Day") },
         { id: "project", name: qsTr("Project") },
+        { id: "epic", name: qsTr("Epic") },
         { id: "tag", name: qsTr("Tag") },
         { id: "item", name: qsTr("Task") }
     ]
@@ -325,13 +326,15 @@ Rectangle {
                                 height: parent.height
                                 Rectangle {
                                     id: dot
-                                    visible: !!line.modelData.color
+                                    // Unassigned rows ("No project", "No epic") have no colour:
+                                    // a muted neutral, never white or black.
+                                    visible: !!line.modelData.color || line.modelData.key === "none"
                                     x: 6
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: 10
                                     height: 10
                                     radius: 5
-                                    color: line.modelData.color || "transparent"
+                                    color: line.modelData.color || "#5f5b53"
                                 }
                                 Label {
                                     anchors.left: parent.left
@@ -357,6 +360,14 @@ Rectangle {
                                     color: table.win.muted
                                     font.family: table.win.mono
                                     font.pixelSize: 11
+                                }
+                                // An epic row opens its page.
+                                MouseArea {
+                                    objectName: "epicRowOpen"
+                                    anchors.fill: parent
+                                    enabled: table.group === "epic" && line.modelData.key !== "none"
+                                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    onClicked: table.win.openEpic(String(line.modelData.key))
                                 }
                             }
                             Repeater {

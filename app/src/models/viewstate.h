@@ -198,6 +198,7 @@ class ItemDraft : public QObject {
     Q_PROPERTY(QString measure READ measure NOTIFY changed)
     Q_PROPERTY(int target READ target NOTIFY changed)
     Q_PROPERTY(QString projectId READ projectId NOTIFY changed)
+    Q_PROPERTY(QString epicId READ epicId NOTIFY changed)
     Q_PROPERTY(QVariant metricIds READ metricIds NOTIFY changed)
     Q_PROPERTY(int plannedMinutes READ plannedMinutes NOTIFY changed)
 public:
@@ -211,6 +212,7 @@ public:
     QString measure() const { return m_measure; }
     int target() const { return m_target; }
     QString projectId() const { return m_projectId; }
+    QString epicId() const { return m_epicId; }
     QVariant metricIds() const { return m_metricIds; }
     int plannedMinutes() const { return m_plannedMinutes; }
 
@@ -226,7 +228,7 @@ private:
     QStringList m_weekdays;
     QString m_measure = QStringLiteral("check");
     int m_target = 0;
-    QString m_projectId;
+    QString m_projectId, m_epicId;
     QVariant m_metricIds;
     int m_plannedMinutes = 0;
 };

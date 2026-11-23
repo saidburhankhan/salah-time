@@ -9,7 +9,7 @@
 
 namespace {
 const QSet<QString> kTableGroups{QStringLiteral("week"), QStringLiteral("day"), QStringLiteral("project"),
-                                 QStringLiteral("tag"), QStringLiteral("item")};
+                                 QStringLiteral("epic"), QStringLiteral("tag"), QStringLiteral("item")};
 
 // A number from QML (int, double or numeric string); false when unset or not a
 // finite number.
@@ -37,7 +37,7 @@ QJsonObject Backend::filterParams(const QVariantMap &filter, bool allowAnyDays) 
         if (!preset && !(allowAnyDays && days >= 1 && days <= 730)) days = 28;
         params.insert(QStringLiteral("days"), days);
     }
-    for (const char *key : {"tag_id", "project_id", "item_id"}) {
+    for (const char *key : {"tag_id", "project_id", "epic_id", "item_id"}) {
         const QString id = filter.value(QLatin1String(key)).toString();
         if (!id.isEmpty()) params.insert(QLatin1String(key), id);
     }

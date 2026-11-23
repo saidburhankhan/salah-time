@@ -12,6 +12,15 @@ Popup {
     property string repeat: item.repeat || "none"
     property var days: item.weekdays || []
     property string projectId: ""
+    // Optional, and always one of the chosen project's epics.
+    property string epicId: ""
+    readonly property var epicChoices: {
+        var list = win.projectEpics(projectId, false)
+        var current = win.epicById(epicId)
+        if (current && String(current.project_id) === projectId && current.status === "finished")
+            list.push(current)
+        return list
+    }
     property var metricIds: null
     property bool metricIdsEdited: false
     readonly property bool projectChanged: !!item.id && projectId !== (item.projectId || "")
@@ -45,6 +54,7 @@ Popup {
         repeat = item.repeat || "none"
         days = item.weekdays || []
         projectId = item.projectId || ""
+        epicId = item.epicId || ""
         metricIds = item.metricIds || null
         metricIdsEdited = false
         confirming = false
@@ -81,12 +91,16 @@ Popup {
         }
         if (metricIdsEdited && !projectChanged)
             result.metric_ids = metricIds
+        // Sent when an epic is chosen, or to clear the one the task had.
+        if (epicId !== "" || !!item.epicId)
+            result.epic_id = epicId
         return result
     }
     function selectProject(id) {
         if (projectId === id)
             return
         projectId = id
+        epicId = id === (item.projectId || "") ? (item.epicId || "") : ""
         metricIds = projectChanged ? null : (item.metricIds || null)
         metricIdsEdited = false
     }

@@ -35,6 +35,8 @@ public:
         QString repeat = "none";
         QStringList weekdays;
         QString projectId;
+        // Undefined leaves the epic alone, null clears it, a string sets it.
+        QJsonValue epicId = QJsonValue::Undefined;
         // Undefined preserves the current selection, null follows the project.
         QJsonValue metricIds = QJsonValue::Undefined;
         int plannedMinutes = 0;
@@ -74,7 +76,7 @@ public:
                   const QString &afterId = {}, const QString &beforeId = {});
     void sessionLog(const QString &itemId, const QString &projectId = {}, int minutes = -1,
                     const QJsonObject &values = {}, const QString &note = {},
-                    const QDate &date = {}, Callback callback = {});
+                    const QDate &date = {}, Callback callback = {}, const QString &epicId = {});
     void sessionStart(const QString &itemId, const QString &projectId = {}, Callback callback = {});
     void sessionStop(const QString &sessionId = {}, const QJsonObject &values = {},
                      const QString &note = {}, Callback callback = {}, bool done = false, int minutes = -1);

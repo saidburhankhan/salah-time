@@ -223,7 +223,8 @@ Card {
                 spacing: 5
                 Repeater {
                     model: [{ id: "", name: qsTr("None") }, { id: "item", name: qsTr("Task") },
-                            { id: "project", name: qsTr("Project") }, { id: "tag", name: qsTr("Tag") }]
+                            { id: "project", name: qsTr("Project") }, { id: "epic", name: qsTr("Epic") },
+                            { id: "tag", name: qsTr("Tag") }]
                     Chip {
                         required property var modelData
                         objectName: "trendsSplit_" + modelData.id

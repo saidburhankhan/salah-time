@@ -98,16 +98,43 @@ inline QJsonObject projectRef(const QString &id) {
     return {};
 }
 
+// An epics.list row (shape of epics_list.json) with its work totals.
+inline QJsonObject epic(const QString &id, const QString &projectId, const QString &name, const QString &status,
+                        int minutes, int sessions, int days, const QString &last, int open, int done,
+                        const QString &note = {}, int position = 0) {
+    return QJsonObject{
+        {"id", id}, {"project_id", projectId}, {"name", name},
+        {"note", note.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(note)},
+        {"position", position}, {"status", status},
+        {"finished_at", status == "finished" ? QJsonValue("2031-04-02T04:30:00Z") : QJsonValue(QJsonValue::Null)},
+        {"total_minutes", minutes}, {"sessions", sessions}, {"days_worked", days},
+        {"last_worked", last.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(last)},
+        {"open_tasks", open}, {"done_tasks", done},
+        {"created_at", "2031-04-01T04:30:00Z"}, {"updated_at", "2031-05-14T04:30:00Z"},
+        {"deleted_at", QJsonValue::Null}, {"version", 1}};
+}
+
+inline QJsonArray epics() {
+    return QJsonArray{
+        epic("e-juz", "quran", "Memorise Juz 30", "active", 180, 9, 6, "2031-05-14", 1, 1, "Spring term", 0),
+        epic("e-tajweed", "quran", "Tajweed rules", "active", 45, 3, 2, "2031-05-09", 0, 0, {}, 1),
+        epic("e-grammar", "study", "Arabic grammar course", "active", 320, 11, 8, "2031-05-14", 1, 1, {}, 0),
+        epic("e-old", "study", "Alphabet", "finished", 60, 4, 3, "2031-03-30", 0, 1, {}, 1),
+        epic("e-empty", "study", "Reading list", "active", 0, 0, 0, {}, 0, 0, {}, 2)};
+}
+
 inline QJsonObject session(const QString &id, const QString &itemId, const QString &projectId,
                            const QString &block, int minutes, const QJsonObject &values,
                            const QString &startedAt = {}, bool running = false,
-                           const QString &note = {}, const QJsonArray &notes = {}) {
+                           const QString &note = {}, const QJsonArray &notes = {},
+                           const QString &epicId = {}) {
     QJsonValue ended = QJsonValue::Null;
     if (!startedAt.isEmpty() && !running && minutes > 0)
         ended = QDateTime::fromString(startedAt, Qt::ISODate).addSecs(minutes * 60).toString(Qt::ISODate);
     return QJsonObject{
         {"id", id}, {"item_id", itemId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(itemId)},
         {"project_id", projectId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(projectId)},
+        {"epic_id", epicId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(epicId)},
         {"block", block}, {"day", kDay},
         {"started_at", startedAt.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(startedAt)},
         {"ended_at", ended},
@@ -124,7 +151,8 @@ inline QString runningStart() {
 inline QJsonObject runningSession() {
     return session("s-run", "deep", "study", "dhuhr", 0, QJsonObject{{"distractions", 3.0}}, runningStart(), true, {},
                    QJsonArray{QJsonObject{{"id", "n-1"}, {"at", "2031-05-14T07:41:00Z"}, {"text", "Phone buzzed, put it away"}},
-                              QJsonObject{{"id", "n-2"}, {"at", "2031-05-14T07:58:00Z"}, {"text", "Verb forms done, starting exercises"}}});
+                              QJsonObject{{"id", "n-2"}, {"at", "2031-05-14T07:58:00Z"}, {"text", "Verb forms done, starting exercises"}}},
+                   "e-grammar");
 }
 
 inline QJsonObject staleRunningSession() {
@@ -137,7 +165,7 @@ inline QJsonObject staleRunningSession() {
 
 inline QJsonObject item(const QString &id, const QString &title, const QString &block, int position,
                         const QString &projectId, int planned, const QJsonArray &sessions,
-                        const QString &repeat = "daily") {
+                        const QString &repeat = "daily", const QString &epicId = {}) {
     // Done means the item has a tick; timed sessions only add minutes.
     int actual = 0;
     bool done = false;
@@ -153,6 +181,7 @@ inline QJsonObject item(const QString &id, const QString &title, const QString &
     return QJsonObject{
         {"id", id}, {"title", title}, {"block", block}, {"position", position},
         {"project", projectId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(projectRef(projectId))},
+        {"epic_id", epicId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(epicId)},
         {"planned_minutes", planned > 0 ? QJsonValue(planned) : QJsonValue(QJsonValue::Null)},
         {"actual_minutes", actual}, {"done", done}, {"sessions", sessions}, {"repeat", repeat},
         {"schedule_text", schedule}, {"detail_text", detail}, {"next_occurrence", kDay},
@@ -166,18 +195,20 @@ inline QJsonArray dayItems(const QString &block, bool withRunning = true) {
                  QJsonArray{session("s-q1", "quran", "quran", "fajr", 25, {},
                                     "2031-05-14T00:30:00Z", false, {},
                                     QJsonArray{QJsonObject{{"id", "n-a"}, {"at", "2031-05-14T00:41:00Z"}, {"text", "Calm morning, slow recitation"}},
-                                               QJsonObject{{"id", "n-b"}, {"at", "2031-05-14T00:52:00Z"}, {"text", "Stopped at page 12"}}}),
-                            session("s-q2", "quran", "quran", "fajr", 10, {}),
+                                               QJsonObject{{"id", "n-b"}, {"at", "2031-05-14T00:52:00Z"}, {"text", "Stopped at page 12"}}},
+                                    "e-juz"),
+                            session("s-q2", "quran", "quran", "fajr", 10, {}, {}, false, {}, {}, "e-juz"),
                             session("s-q3", "quran", "quran", "fajr", 0,
                                     QJsonObject{{"focus", 4.0}, {"quality", 5.0}, {"pages", 6.0}},
-                                    {}, false, "Finished the juz")}),
+                                    {}, false, "Finished the juz", {}, "e-juz")},
+                 "daily", "e-juz"),
             item("walk", "Morning walk", "fajr", 1, "", 0,
                  QJsonArray{session("s-w1", "walk", "", "fajr", 0, {})})};
     if (block == "dhuhr") {
         QJsonArray deep{session("s-d1", "deep", "study", "dhuhr", 40,
-                                QJsonObject{{"focus", 4.0}}, "2031-05-14T07:30:00Z")};
+                                QJsonObject{{"focus", 4.0}}, "2031-05-14T07:30:00Z", false, {}, {}, "e-grammar")};
         if (withRunning) deep.append(runningSession());
-        return QJsonArray{item("deep", "Deep work: grammar", "dhuhr", 0, "study", 90, deep),
+        return QJsonArray{item("deep", "Deep work: grammar", "dhuhr", 0, "study", 90, deep, "daily", "e-grammar"),
                           item("dhikr", "Dhikr after Dhuhr", "dhuhr", 1, "quran", 10, {})};
     }
     if (block == "asr")
@@ -289,6 +320,20 @@ inline QJsonObject stats(const QString &tagId = {}, const QString &projectId = {
                     {"sessions", sessions / 3}, {"metrics", QJsonObject{{"focus", 3.4}}}},
         QJsonObject{{"id", "fitness"}, {"name", "Fitness"}, {"color", "#e0663f"}, {"minutes", int(totalMinutes * 0.2)},
                     {"sessions", sessions / 6}, {"metrics", QJsonObject{{"reps", 420.0}}}}};
+    auto share = [&](double part) { return int(totalMinutes * part); };
+    QJsonArray epicRows{
+        QJsonObject{{"id", "e-juz"}, {"name", "Memorise Juz 30"}, {"project_id", "quran"}, {"minutes", share(0.27)},
+                    {"sessions", sessions / 3}, {"metrics", QJsonObject{{"focus", 4.1}, {"pages", 64.0}}}},
+        QJsonObject{{"id", "e-tajweed"}, {"name", "Tajweed rules"}, {"project_id", "quran"}, {"minutes", share(0.08)},
+                    {"sessions", sessions / 9}, {"metrics", QJsonObject{{"focus", 3.6}}}},
+        QJsonObject{{"id", "none"}, {"name", "No epic"}, {"project_id", "quran"}, {"minutes", share(0.10)},
+                    {"sessions", sessions / 8}, {"metrics", QJsonObject{}}},
+        QJsonObject{{"id", "e-grammar"}, {"name", "Arabic grammar course"}, {"project_id", "study"}, {"minutes", share(0.24)},
+                    {"sessions", sessions / 4}, {"metrics", QJsonObject{{"focus", 3.5}}}},
+        QJsonObject{{"id", "none"}, {"name", "No epic"}, {"project_id", "study"}, {"minutes", share(0.11)},
+                    {"sessions", sessions / 9}, {"metrics", QJsonObject{}}},
+        QJsonObject{{"id", "none"}, {"name", "No epic"}, {"project_id", "fitness"}, {"minutes", share(0.2)},
+                    {"sessions", sessions / 6}, {"metrics", QJsonObject{{"reps", 420.0}}}}};
     QJsonArray tagRows{
         QJsonObject{{"id", "faith"}, {"name", "Faith"}, {"color", "#2e7d32"}, {"minutes", int(totalMinutes * 0.45)}},
         QJsonObject{{"id", "learning"}, {"name", "Learning"}, {"color", "#9b59b6"}, {"minutes", int(totalMinutes * 0.35)}},
@@ -304,18 +349,20 @@ inline QJsonObject stats(const QString &tagId = {}, const QString &projectId = {
         {"range", QJsonObject{{"from", first.toString(Qt::ISODate)}, {"to", last.toString(Qt::ISODate)}}},
         {"filter", QJsonObject{{"tag_id", tagId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(tagId)},
                                {"project_id", projectId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(projectId)}}},
-        {"days", days}, {"series", series}, {"projects", projectRows}, {"tags", tagRows}, {"blocks", blockRows},
+        {"days", days}, {"series", series}, {"projects", projectRows}, {"epics", epicRows}, {"tags", tagRows}, {"blocks", blockRows},
         {"totals", QJsonObject{{"minutes", totalMinutes}, {"sessions", sessions}, {"active_days", activeDays},
                                {"avg_focus", 3.6}, {"avg_quality", 4.1}}}};
 }
 
 // A 28-day stats.series response for the Trends screenshots. Each task has a
 // different sampling pattern, including sessions without a Focus rating.
-inline QJsonObject trendMonth(const QJsonArray &measures, bool tasks) {
+inline QJsonObject trendMonth(const QJsonArray &measures, const QString &split) {
+    const bool tasks = !split.isEmpty();
     const QDate first = QDate::fromString(kDay, Qt::ISODate).addDays(-27);
     QJsonArray periods, lines;
     for (int d = 0; d < 28; ++d) periods.append(first.addDays(d).toString(Qt::ISODate));
-    const QStringList titles{"Read Quran", "Deep work", "Morning walk"};
+    const QStringList titles = split == "epic" ? QStringList{"Memorise Juz 30", "Arabic grammar course", "No epic"}
+                                               : QStringList{"Read Quran", "Deep work", "Morning walk"};
     for (int task = 0; task < (tasks ? titles.size() : 1); ++task) {
         for (const auto &measure : measures) {
             const bool minutes = measure.toString() == "minutes";
@@ -330,7 +377,8 @@ inline QJsonObject trendMonth(const QJsonArray &measures, bool tasks) {
                     value = qRound(10 * (2.9 + 0.4 * task + 0.9 * qSin(0.38 * d + 2 * task))) / 10.0;
                 points.append(QJsonObject{{"value", value}, {"sessions", sessions}});
             }
-            lines.append(QJsonObject{{"key", tasks ? QString::number(task) : QStringLiteral("all")},
+            const QString key = split == "epic" && task == 2 ? QStringLiteral("none") : QString::number(task);
+            lines.append(QJsonObject{{"key", tasks ? key : QStringLiteral("all")},
                                      {"label", tasks ? titles[task] : name}, {"color", QJsonValue::Null},
                                      {"measure", measure}, {"unit", minutes ? "min" : ""},
                                      {"scale_max", minutes ? QJsonValue(QJsonValue::Null) : QJsonValue(5)},
@@ -338,7 +386,10 @@ inline QJsonObject trendMonth(const QJsonArray &measures, bool tasks) {
         }
     }
     return QJsonObject{{"periods", periods}, {"series", lines}, {"interval", "day"},
-                       {"split", tasks ? QJsonValue("item") : QJsonValue(QJsonValue::Null)}};
+                       {"split", tasks ? QJsonValue(split) : QJsonValue(QJsonValue::Null)}};
+}
+inline QJsonObject trendMonth(const QJsonArray &measures, bool tasks) {
+    return trendMonth(measures, tasks ? QStringLiteral("item") : QString());
 }
 
 inline QJsonObject tableColumn(const QString &id, const QString &name, const QString &unit, const QString &kind,
@@ -375,6 +426,12 @@ inline QJsonObject statsTable(const QString &group) {
                 tableRow("study", "Study", "#9b59b6", {}, {}, 640, 18, 3.2, -1, -1, 21),
                 tableRow("fitness", "Fitness", "#e0663f", {}, {}, 365, 12, 2.4, -1, -1, -1),
                 tableRow("none", "No project", {}, {}, {}, 95, 6, -1, -1, -1, -1)};
+    } else if (group == "epic") {
+        rows = {tableRow("e-juz", "Memorise Juz 30", "#4c8bf5", {}, {}, 520, 19, 4.1, 4.5, 64, 2),
+                tableRow("e-grammar", "Arabic grammar course", "#9b59b6", {}, {}, 455, 13, 3.5, -1, -1, 14),
+                tableRow("e-tajweed", "Tajweed rules", "#4c8bf5", {}, {}, 140, 5, 3.6, 4.0, -1, -1),
+                tableRow("e-old", "Alphabet", "#9b59b6", {}, {}, 60, 4, 3.0, -1, -1, 3),
+                tableRow("none", "No epic", {}, {}, {}, 737, 36, 3.1, 4.2, 32, 6)};
     } else if (group == "tag") {
         rows = {tableRow("faith", "Faith", "#2e7d32", {}, {}, 812, 31, 3.9, 4.4, 96, 4),
                 tableRow("learning", "Learning", "#9b59b6", {}, {}, 640, 18, 3.2, -1, -1, 21),
@@ -425,8 +482,8 @@ inline QJsonObject statsTable(const QString &group) {
 // sessions.list rows (SessionView + project + item), shaped like sessions_list.json.
 inline QJsonObject listRow(const QString &id, const QString &day, const QString &itemId, const QString &itemTitle,
                            const QString &projectId, const QString &start, int minutes, const QJsonObject &values,
-                           const QString &note, const QJsonArray &notes = {}) {
-    QJsonObject row = session(id, itemId, projectId, "fajr", minutes, values, start, false, note, notes);
+                           const QString &note, const QJsonArray &notes = {}, const QString &epicId = {}) {
+    QJsonObject row = session(id, itemId, projectId, "fajr", minutes, values, start, false, note, notes, epicId);
     row["day"] = day;
     row["stale"] = false;
     row["project"] = projectId.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(projectRef(projectId));
@@ -439,10 +496,12 @@ inline QJsonObject sessionsList(bool filtered = false, bool more = false) {
     QJsonArray rows{
         listRow("l-1", kDay, "deep", "Deep work: grammar", "study", "2031-05-14T07:30:00Z", 40,
                 QJsonObject{{"focus", 4.0}, {"distractions", 1.0}}, "Verb forms clicked today",
-                QJsonArray{QJsonObject{{"id", "e-1"}, {"at", "2031-05-14T07:41:00Z"}, {"text", "Phone buzzed, put it away"}}}),
+                QJsonArray{QJsonObject{{"id", "e-1"}, {"at", "2031-05-14T07:41:00Z"}, {"text", "Phone buzzed, put it away"}}},
+                "e-grammar"),
         listRow("l-2", kDay, "quran", "Read Quran", "quran", "2031-05-14T00:30:00Z", 25,
                 QJsonObject{{"focus", 5.0}, {"quality", 5.0}, {"pages", 6.0}}, "Calm morning, slow recitation",
-                QJsonArray{QJsonObject{{"id", "e-2"}, {"at", "2031-05-14T00:52:00Z"}, {"text", "Stopped at page 12"}}}),
+                QJsonArray{QJsonObject{{"id", "e-2"}, {"at", "2031-05-14T00:52:00Z"}, {"text", "Stopped at page 12"}}},
+                "e-juz"),
         listRow("l-3", "2031-05-13", "gym", "Gym session", "fitness", "2031-05-13T12:10:00Z", 45,
                 QJsonObject{{"focus", 2.0}, {"reps", 120.0}}, "Tired after work, short sets"),
         listRow("l-4", "2031-05-12", "", "", "", {}, 15, QJsonObject{{"focus", 1.0}}, "Evening walk, mind elsewhere"),

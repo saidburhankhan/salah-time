@@ -35,6 +35,7 @@ ColumnLayout {
         return sum / days.length
     }
     spacing: 16
+    readonly property color neutral: "#5f5b53"
 
     function sessionsText(count) {
         return count === 1 ? qsTr("1 session") : qsTr("%1 sessions").arg(count || 0)
@@ -52,9 +53,23 @@ ColumnLayout {
         var rows = stats.projects || []
         var total = Math.max(1, Number(totals.minutes || 0))
         return rows.map(function(p) {
-            return { name: p.name, color: p.color, value: p.minutes, total: total,
+            // "No project" has no colour: a muted neutral.
+            return { name: p.name, color: p.color || charts.neutral, value: p.minutes, total: total,
                      detail: win.formatMinutes(p.minutes) + "  ·  " + charts.sessionsText(p.sessions),
                      extra: charts.metricText(p.metrics) }
+        })
+    }
+    // Epics follow their project; a project's unassigned work is its "No epic" row.
+    function epicRows() {
+        var rows = stats.epics || []
+        var total = Math.max(1, Number(totals.minutes || 0))
+        return rows.map(function(e) {
+            var owner = e.project_id ? win.projectName(e.project_id) : qsTr("No project")
+            return { name: owner + "  ·  " + e.name,
+                     color: e.project_id ? win.projectColor(e.project_id) : charts.neutral,
+                     value: e.minutes, total: total,
+                     detail: win.formatMinutes(e.minutes) + "  ·  " + charts.sessionsText(e.sessions),
+                     extra: charts.metricText(e.metrics) }
         })
     }
     function tagRows() {
@@ -165,6 +180,14 @@ ColumnLayout {
             empty: qsTr("No tagged time")
             rows: charts.tagRows()
         }
+    }
+
+    BreakdownCard {
+        objectName: "epicBreakdown"
+        visible: charts.epicRows().length > 0
+        win: charts.win
+        title: qsTr("Epics")
+        rows: charts.epicRows()
     }
 
     BreakdownCard {
