@@ -83,6 +83,10 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   100% (expected ~09:00 on the 24th: windows from 17:09, ~22:09, ~03:09, ~08:09), then windows ~09:10,
   ~14:10, ~19:10 and ~00:10 on the 25th until the subscription stops. Every window must start on time
   and be fully used (2-3 parallel workers on disjoint dirs).
+- User 17:35: keep the rule, use the last reset only at a 100% weekly cap (option A). Billing period
+  25 Oct – 25 Nov 2026 (Plus, paid 26 Oct). Measured: one 5h window ≈ 16% weekly (Sol-heavy), used in
+  ~15 min by 3 workers. Expected weekly cap late on the 24th (windows 22:10, 03:10, 08:10, 13:10,
+  18:10, 23:10), then reset and keep going on the 25th until the subscription ends.
 - U5: user visual check after `omarchy restart shell`; fix what they report.
 - Optional: app/widget could show `stale` on an overnight timer (backend reports it since 47fb1d1).
 - Codex 5h limit hit at 06:59 (resets 11:26); weekly was 45% at 06:20.
