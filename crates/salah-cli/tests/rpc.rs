@@ -471,3 +471,69 @@ fn malformed_and_unhandshaken_requests_get_jsonrpc_errors() {
     // handshake fault, not method-not-found.
     assert_eq!(responses[2]["error"]["code"], -32600);
 }
+
+#[test]
+fn a_timer_becomes_stale_only_after_its_own_sleep_boundary() {
+    let harness = Harness::new();
+    let mut rpc = Session::open(&harness, NOW);
+    let config = rpc.request(
+        "config.set",
+        json!({"op_id":"late-sleep","sleep_time":"00:30"}),
+    );
+    assert_eq!(config["result"]["sleep_time"], "00:30");
+    let added = rpc.request(
+        "item.add",
+        json!({"op_id":"item","title":"Read","block":"fajr"}),
+    );
+    let item = id(&added["result"], "items");
+    let start = rpc.request("session.start", json!({"op_id":"timer","item_id":item}));
+    let started = &start["result"]["changed"]["sessions"][0];
+    assert_eq!(started["stale"], false);
+
+    // Civil midnight precedes this planning day's Sleep. The strict cutoff
+    // also leaves the timer fresh at the exact instant to which stop clamps.
+    for (time, stale) in [
+        ("2031-05-15T00:29:59+05:00", false),
+        ("2031-05-15T00:30:00+05:00", false),
+        ("2031-05-15T00:30:01+05:00", true),
+    ] {
+        let mut read = Session::open(&harness, time);
+        let status = read.request("status.get", json!({}));
+        let running = &status["result"]["running"];
+        assert_eq!(running["id"], started["id"]);
+        assert_eq!(running["running"], true);
+        assert_eq!(running["stale"], stale);
+        assert_eq!(running["version"], started["version"]);
+        assert!(running["minutes"].is_null());
+        let day = read.request("day.get", json!({"date":DATE}));
+        assert_eq!(
+            day["result"]["blocks"][1]["items"][0]["sessions"][0],
+            *running
+        );
+        if stale {
+            Fixtures::default().check("status_stale", status);
+        }
+    }
+
+    let mut later = Session::open(&harness, "2031-05-15T13:00:00+05:00");
+    let updated = later.request(
+        "config.set",
+        json!({"op_id":"new-sleep","sleep_time":"22:00"}),
+    );
+    assert_eq!(updated["result"]["sleep_time"], "22:00");
+    let edit = later.request(
+        "session.edit",
+        json!({"op_id":"edit","id":started["id"],"note":"late"}),
+    );
+    assert_eq!(edit["result"]["changed"]["sessions"][0]["stale"], true);
+    let retry = later.request("session.start", json!({"op_id":"timer"}));
+    assert_eq!(retry["result"], start["result"]);
+    let stop = later.request("session.stop", json!({"op_id":"stop"}));
+    let stopped = &stop["result"]["changed"]["sessions"][0];
+    assert_eq!(stopped["ended_at"], "2031-05-14T19:30:00Z");
+    assert_eq!(stopped["minutes"], 900);
+    assert_eq!(stopped["running"], false);
+    assert_eq!(stopped["stale"], false);
+    let status = later.request("status.get", json!({}));
+    assert!(status["result"]["running"].is_null());
+}

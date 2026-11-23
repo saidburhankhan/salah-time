@@ -1,0 +1,204 @@
+{
+  "id": 2,
+  "jsonrpc": "2.0",
+  "result": {
+    "boundaries": [
+      {
+        "id": "fajr",
+        "is_next": true,
+        "kind": "prayer",
+        "name": "Fajr",
+        "passed": false,
+        "time": "03:11"
+      },
+      {
+        "id": "sunrise",
+        "is_next": false,
+        "kind": "sunrise",
+        "name": "Sunrise",
+        "passed": false,
+        "time": "05:05"
+      },
+      {
+        "id": "dhuhr",
+        "is_next": false,
+        "kind": "prayer",
+        "name": "Dhuhr",
+        "passed": false,
+        "time": "12:19"
+      },
+      {
+        "id": "asr",
+        "is_next": false,
+        "kind": "prayer",
+        "name": "Asr",
+        "passed": false,
+        "time": "17:24"
+      },
+      {
+        "id": "maghrib",
+        "is_next": false,
+        "kind": "prayer",
+        "name": "Maghrib",
+        "passed": false,
+        "time": "19:34"
+      },
+      {
+        "id": "isha",
+        "is_next": false,
+        "kind": "prayer",
+        "name": "Isha",
+        "passed": false,
+        "time": "21:21"
+      },
+      {
+        "id": "sleep",
+        "is_next": false,
+        "kind": "sleep",
+        "name": "Sleep",
+        "passed": false,
+        "time": "00:30"
+      }
+    ],
+    "current_block": {
+      "block": {
+        "day": "2031-05-15",
+        "start": "night"
+      },
+      "end": {
+        "date": "2031-05-15",
+        "id": "fajr",
+        "kind": "prayer",
+        "name": "Fajr",
+        "time": "03:11"
+      },
+      "sleeping": true,
+      "start": {
+        "date": "2031-05-15",
+        "id": "sleep",
+        "kind": "sleep",
+        "name": "Sleep",
+        "time": "00:30"
+      }
+    },
+    "date": "2031-05-15",
+    "day": "2031-05-15",
+    "label": "☾ Fajr 2h 40m",
+    "location": "Tashkent",
+    "method": "mwl",
+    "method_name": "Muslim World League",
+    "next": {
+      "at": "2031-05-14T22:11:00Z",
+      "date": "2031-05-15",
+      "id": "fajr",
+      "kind": "prayer",
+      "name": "Fajr",
+      "remaining": "02:40:59",
+      "remaining_seconds": 9659,
+      "remaining_short": "2h 40m",
+      "time": "03:11"
+    },
+    "planner": {
+      "block": "night",
+      "current": [],
+      "day": "2031-05-15",
+      "fulfilment": {
+        "actual_minutes": 0,
+        "done_items": 0,
+        "planned_items": 0,
+        "planned_minutes": 0,
+        "unplanned_minutes": 0
+      },
+      "items": [],
+      "open": 0,
+      "planning_block": {
+        "day": "2031-05-15",
+        "start": "night"
+      },
+      "prayer_marks": []
+    },
+    "planner_error": null,
+    "prayers": [
+      {
+        "id": "fajr",
+        "is_next": true,
+        "name": "Fajr",
+        "passed": false,
+        "time": "03:11"
+      },
+      {
+        "id": "sunrise",
+        "is_next": false,
+        "name": "Sunrise",
+        "passed": false,
+        "time": "05:05"
+      },
+      {
+        "id": "dhuhr",
+        "is_next": false,
+        "name": "Dhuhr",
+        "passed": false,
+        "time": "12:19"
+      },
+      {
+        "id": "asr",
+        "is_next": false,
+        "name": "Asr",
+        "passed": false,
+        "time": "17:24"
+      },
+      {
+        "id": "maghrib",
+        "is_next": false,
+        "name": "Maghrib",
+        "passed": false,
+        "time": "19:34"
+      },
+      {
+        "id": "isha",
+        "is_next": false,
+        "name": "Isha",
+        "passed": false,
+        "time": "21:21"
+      }
+    ],
+    "prompt": [
+      {
+        "kind": "scale",
+        "metric_id": "focus",
+        "name": "Focus",
+        "required": false,
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "kind": "scale",
+        "metric_id": "quality",
+        "name": "Quality",
+        "required": false,
+        "scale_max": 5,
+        "unit": ""
+      }
+    ],
+    "running": {
+      "block": "fajr",
+      "day": "2031-05-14",
+      "ended_at": null,
+      "id": "<id:1>",
+      "item_id": "<id:2>",
+      "minutes": null,
+      "note": null,
+      "project_id": null,
+      "running": true,
+      "stale": true,
+      "started_at": "2031-05-14T04:30:00Z",
+      "values": {},
+      "version": 1
+    },
+    "schema_version": 1,
+    "sleep_time": "00:30",
+    "source": "calculated",
+    "source_name": "Muslim World League",
+    "source_updated": null
+  }
+}

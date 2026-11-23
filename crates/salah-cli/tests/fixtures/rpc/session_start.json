@@ -19,6 +19,7 @@
           "note": null,
           "project_id": "<id:3>",
           "running": true,
+          "stale": false,
           "started_at": "2031-05-14T04:30:00Z",
           "values": {},
           "version": 1

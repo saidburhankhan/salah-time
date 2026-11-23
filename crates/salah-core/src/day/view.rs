@@ -151,7 +151,7 @@ pub fn day_plan(
     let day = date.unwrap_or(today);
     let is_today = day == today;
     let current = is_today.then(|| schedule.current_block().start);
-    let ledger = Ledger::load(store, config, day, today)?;
+    let ledger = Ledger::load(store, config, day, today, now)?;
 
     let sunrise = ledger.clock.sunrise_minutes.map(format_minutes);
     let marks = live_marks(store, day)?;
@@ -219,7 +219,7 @@ pub fn today(store: &mut Store, config: &Config, now: DateTime<Utc>) -> Result<T
     let schedule = schedule::resolve(config, now)?;
     let planning_block = schedule.planning_block();
     let current = schedule.current_block();
-    let ledger = Ledger::load(store, config, current.day, schedule.day())?;
+    let ledger = Ledger::load(store, config, current.day, schedule.day(), now)?;
     let items: Vec<DayRow> = BoundaryId::AWAKE
         .into_iter()
         .flat_map(|block| ledger.rows(block))
@@ -243,6 +243,7 @@ pub fn today(store: &mut Store, config: &Config, now: DateTime<Utc>) -> Result<T
 
 /// The snapshots, items, projects, and sessions of one day.
 struct Ledger {
+    past_sleep: bool,
     clock: DayClock,
     day: NaiveDate,
     blocks: Vec<DayBlock>,
@@ -258,6 +259,7 @@ impl Ledger {
         config: &Config,
         day: NaiveDate,
         today: NaiveDate,
+        now: DateTime<Utc>,
     ) -> Result<Self, Error> {
         if day < today {
             store.write(|tx| freeze(tx, config, day, today))?;
@@ -268,6 +270,7 @@ impl Ledger {
             plan,
         } = snapshot(store, config, day, today)?;
         Ok(Self {
+            past_sleep: now > clock.sleep_at,
             day,
             clock,
             blocks,
@@ -359,7 +362,10 @@ impl Ledger {
             planned_minutes: line.planned_minutes,
             actual_minutes,
             done: has_tick(&self.sessions, &item.id),
-            sessions: sessions.into_iter().map(SessionView::from).collect(),
+            sessions: sessions
+                .into_iter()
+                .map(|session| SessionView::for_day(session, Some(self.past_sleep)))
+                .collect(),
             next_occurrence: item.next_occurrence(self.day),
             schedule_text,
             detail_text,

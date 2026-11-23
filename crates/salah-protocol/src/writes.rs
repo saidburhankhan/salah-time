@@ -5,7 +5,8 @@
 use crate::dispatcher::{Call, Context, parse, to_value};
 use crate::error::RpcError;
 use crate::methods::*;
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
+use salah_core::config::Config;
 use salah_core::items::{ItemView, MovePosition, NewItem};
 use salah_core::projects::ProjectView;
 use salah_core::sessions::SessionView;
@@ -90,11 +91,19 @@ fn project_view(store: &Store, project: Project) -> Result<Changed, Error> {
     })
 }
 
-fn session_view(session: &Session) -> Changed {
-    Changed {
-        sessions: vec![SessionView::from(session)],
+fn session_views<'a>(
+    store: &Store,
+    config: &Config,
+    now: DateTime<Utc>,
+    sessions: impl IntoIterator<Item = &'a Session>,
+) -> Result<Changed, Error> {
+    Ok(Changed {
+        sessions: sessions
+            .into_iter()
+            .map(|session| SessionView::at(store, config, now, session))
+            .collect::<Result<_, _>>()?,
         ..Changed::default()
-    }
+    })
 }
 
 fn removed(id: String) -> Changed {
@@ -298,7 +307,7 @@ pub(crate) fn session_start(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Val
     let (now, ids) = (ctx.now(), ctx.ids);
     mutate(ctx.store, call.method, &p.op_id, |tx| {
         let session = sessions::start(tx, &config, now, ids, p.target.clone())?;
-        Ok(session_view(&session))
+        session_views(tx, &config, now, [&session])
     })
 }
 
@@ -315,7 +324,7 @@ pub(crate) fn session_stop(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Valu
             p.values.clone(),
             p.note.clone(),
         )?;
-        Ok(session_view(&session))
+        session_views(tx, &config, now, [&session])
     })
 }
 
@@ -325,11 +334,12 @@ pub(crate) fn session_log(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value
     let (now, ids) = (ctx.now(), ctx.ids);
     mutate(ctx.store, call.method, &p.op_id, |tx| {
         let result = sessions::log_with_changes(tx, &config, now, ids, p.log.clone())?;
-        let mut changed = session_view(&result.logged);
-        changed
-            .sessions
-            .extend(result.stopped.as_ref().map(SessionView::from));
-        Ok(changed)
+        session_views(
+            tx,
+            &config,
+            now,
+            std::iter::once(&result.logged).chain(&result.stopped),
+        )
     })
 }
 
@@ -346,7 +356,7 @@ pub(crate) fn session_edit(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Valu
             p.changes.clone(),
             p.expected_version,
         )?;
-        Ok(session_view(&session))
+        session_views(tx, &config, now, [&session])
     })
 }
 

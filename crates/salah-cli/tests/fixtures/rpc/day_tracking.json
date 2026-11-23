@@ -44,6 +44,7 @@
                 "note": null,
                 "project_id": "<id:3>",
                 "running": false,
+                "stale": false,
                 "started_at": "2031-05-14T04:30:00Z",
                 "values": {},
                 "version": 2
@@ -76,6 +77,7 @@
                 "note": null,
                 "project_id": null,
                 "running": false,
+                "stale": false,
                 "started_at": null,
                 "values": {},
                 "version": 1

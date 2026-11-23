@@ -73,13 +73,30 @@ pub struct SessionView {
     /// `null` while running and for a tick.
     pub minutes: Option<i64>,
     pub running: bool,
+    /// An open timer observed strictly after its planning day's Sleep boundary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stale: Option<bool>,
     pub note: Option<String>,
     pub values: Values,
     pub version: i64,
 }
 
-impl From<&Session> for SessionView {
-    fn from(session: &Session) -> Self {
+impl SessionView {
+    pub fn at(
+        store: &Store,
+        config: &Config,
+        now: DateTime<Utc>,
+        session: &Session,
+    ) -> Result<Self, Error> {
+        if !session.is_running() {
+            return Ok(Self::for_day(session, Some(false)));
+        }
+        let today = day::current(config, now)?;
+        let clock = day::clock_for_day(store, config, session.block.day, today)?;
+        Ok(Self::for_day(session, Some(now > clock.sleep_at)))
+    }
+
+    pub(crate) fn for_day(session: &Session, past_sleep: Option<bool>) -> Self {
         Self {
             id: session.id.clone(),
             item_id: session.item_id.clone(),
@@ -90,6 +107,7 @@ impl From<&Session> for SessionView {
             ended_at: session.ended_at,
             minutes: session.minutes,
             running: session.is_running(),
+            stale: past_sleep.map(|past| session.is_running() && past),
             note: session.note.clone(),
             values: session
                 .values
@@ -192,7 +210,7 @@ fn finish(
     let day = session.block.day;
     let today = day::current(config, now)?;
     day::freeze(tx, config, day, today)?;
-    let day_end = day::snapshot(tx, config, day, today)?.clock.sleep_at;
+    let day_end = day::clock_for_day(tx, config, day, today)?.sleep_at;
     let ended = now.min(day_end).max(started);
     let mut combined: Values = session
         .values

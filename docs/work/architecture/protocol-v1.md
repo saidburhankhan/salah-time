@@ -139,7 +139,7 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
 ## Shapes
 
 - `SessionView`: `id`, `item_id`, `project_id`, `day`, `block`, `started_at`,
-  `ended_at`, `minutes` (`null` while running and for a tick), `running`,
+  `ended_at`, `minutes` (`null` while running and for a tick), `running`, `stale`,
   `note`, `values` (`{metric_id: number}`), `version`. A session of an item
   copies the item's project.
 - `status.get.prompt` lists the running session's active project metrics in the project's
@@ -186,8 +186,13 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
 - `fulfilment.done_items` counts planned items with at least one live tick. Removing
   the last tick for an item with `session.remove` clears its done state for that day.
   Its timed sessions still count toward `actual_minutes` and `fulfilment_ratio`.
-- A timer's minutes end at the sleep boundary of the session's day (at most
-  1440), however late it is stopped.
+- An open timer has `running: true` until it is stopped. Its `stale` flag becomes
+  true when the request time is strictly past its planning day's Sleep instant.
+  Stopping a stale timer sets `ended_at` to that Sleep instant and records the
+  clamped minutes (at most 1440). Finished sessions and ticks have `stale: false`.
+  If status can read the timer but cannot resolve its Sleep instant, it keeps the
+  running session, omits `stale`, and reports the failure in `planner_error`.
+  Earlier v1 responses, including stored mutation replays, can also omit `stale`.
 
 `now.next.at` in `day.get` and `next.at` in `status.get` are UTC instants. A
 client computes a countdown as `next.at - Date.now()`; it does not add local

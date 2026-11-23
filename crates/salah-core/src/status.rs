@@ -93,11 +93,15 @@ impl Status {
             Err(error) => errors.push(error.to_string()),
         }
         let running = sessions::running(store).and_then(|running| {
-            let prompt = match &running {
-                Some(session) => sessions::prompt(store, session.project_id.as_deref())?,
-                None => Vec::new(),
+            let Some(session) = running else {
+                return Ok((None, Vec::new()));
             };
-            Ok((running.as_ref().map(SessionView::from), prompt))
+            let view = SessionView::at(store, config, now, &session).unwrap_or_else(|error| {
+                errors.push(error.to_string());
+                SessionView::for_day(&session, None)
+            });
+            let prompt = sessions::prompt(store, session.project_id.as_deref())?;
+            Ok((Some(view), prompt))
         });
         match running {
             Ok((running, prompt)) => {
@@ -391,7 +395,9 @@ mod tests {
         };
         report.attach_planner(&mut store, &broken, now);
         assert!(report.planner.is_none() && report.planner_error.is_some());
-        assert!(report.running.is_some());
+        let running = serde_json::to_value(report.running.as_ref().unwrap()).unwrap();
+        assert_eq!(running["running"], true);
+        assert!(running.get("stale").is_none());
         assert_eq!(report.prompt.len(), 2);
     }
 }

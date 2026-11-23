@@ -29,22 +29,9 @@ pub fn snapshot(
     today: NaiveDate,
 ) -> Result<Snapshot, Error> {
     if day < today && store.day_written(day)? {
-        let blocks = store.day_blocks(day)?;
-        let clock = match store.day_clock(day)? {
-            Some(clock) => clock,
-            None => {
-                // Older snapshots stored only UTC block windows. Both nights
-                // were built with the same fixed offset and sleep time.
-                let mut clock = blocks_for_day(store, config, day, today)?.1;
-                if let Some(night) = blocks.iter().find(|b| b.block == BoundaryId::Night) {
-                    clock.sleep_at = night.starts_at + Duration::days(1);
-                }
-                clock
-            }
-        };
         return Ok(Snapshot {
-            blocks,
-            clock,
+            blocks: store.day_blocks(day)?,
+            clock: clock_for_day(store, config, day, today)?,
             plan: store.day_plan(day)?,
         });
     }
@@ -60,6 +47,33 @@ pub fn snapshot(
         clock,
         plan,
     })
+}
+
+/// Resolves the same Sleep instant for day rows, running timers, and stops
+/// without loading the day's items or plan.
+pub(crate) fn clock_for_day(
+    store: &Store,
+    config: &Config,
+    day: NaiveDate,
+    today: NaiveDate,
+) -> Result<DayClock, Error> {
+    if day < today
+        && let Some(clock) = store.day_clock(day)?
+    {
+        return Ok(clock);
+    }
+    let (_, mut clock) = blocks_for_day(store, config, day, today)?;
+    if day < today
+        && let Some(night) = store
+            .day_blocks(day)?
+            .iter()
+            .find(|b| b.block == BoundaryId::Night)
+    {
+        // Legacy snapshots only contain UTC block windows. Both nights
+        // used the same fixed offset and sleep time.
+        clock.sleep_at = night.starts_at + Duration::days(1);
+    }
+    Ok(clock)
 }
 
 /// Writes the snapshot of a past day that was never written; days from

@@ -68,3 +68,22 @@ Regression coverage includes an overnight 810-minute Sleep clamp, a tick with in
 - `docs/work/architecture/protocol-v1.md`, `docs/work/tracking-ui/c1-progress.md`
 
 CHECKPOINT A-D: Make session metrics optional and record explicit completion ticks atomically with timer stops
+
+## Task 3 — stale running timers
+
+`SessionView.stale` becomes true strictly after an open timer's planning-day Sleep instant. Status, day rows, and session mutation results use the same boundary as `session.stop`. The timer stays available to stop, and a late stop records clamped minutes. Finished sessions and ticks return false. If status can read the timer but cannot resolve its clock, it preserves the timer and prompt, omits `stale`, and reports the clock error in `planner_error`. Stored operation replays retain their original result.
+
+The stdio RPC regression starts a timer at 09:30 with Sleep at 00:30 the next civil day. It checks one second before, exactly at, and one second after Sleep in both status and the historical day row. After changing Sleep to 22:00, it checks that editing the timer reports stale, replaying its start returns the original fresh result, and stopping records 900 minutes at the original Sleep instant.
+
+### Verification
+
+- Regenerated RPC fixtures. All four RPC tests passed. A JSON comparison against the committed fixtures verified that the only addition in eight existing files is `stale`. The new `status_stale.json` exercises the true case.
+- 131 non-socket Rust tests passed. All eight tests in `crates/salah-cli/tests/daemon.rs` failed during Unix socket setup in the sandbox. Strict Clippy, formatting, and diff checks passed.
+
+### Checkpoint files
+
+- `crates/salah-core/src/day/{mod,snapshot,view}.rs`, `crates/salah-core/src/{sessions,status}.rs`, `crates/salah-protocol/src/writes.rs`
+- `crates/salah-cli/tests/rpc.rs`, `crates/salah-cli/tests/fixtures/rpc/{day_tracking,session_edit,session_log,session_log_tick,session_log_tick_stops_timer,session_start,session_stop,status_running,status_stale}.json`
+- `docs/work/architecture/protocol-v1.md`, `docs/work/tracking-ui/c1-progress.md`
+
+CHECKPOINT 3: Report stale running timers at their planning-day Sleep cutoff

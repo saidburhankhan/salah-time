@@ -19,6 +19,7 @@
           "note": null,
           "project_id": "<id:3>",
           "running": false,
+          "stale": false,
           "started_at": null,
           "values": {
             "<id:1>": 6.0,

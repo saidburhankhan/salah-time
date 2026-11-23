@@ -19,6 +19,7 @@
           "note": null,
           "project_id": null,
           "running": false,
+          "stale": false,
           "started_at": null,
           "values": {},
           "version": 1

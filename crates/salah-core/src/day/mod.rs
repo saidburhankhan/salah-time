@@ -6,6 +6,7 @@ mod snapshot;
 mod view;
 
 pub use fulfilment::{Fulfilment, total_minutes};
+pub(crate) use snapshot::clock_for_day;
 pub use snapshot::{Snapshot, block_minutes, day_capacity, freeze, freeze_past, snapshot};
 pub use view::{
     BlockPlan, DayPlan, DayRow, NextBoundary, Now, PrayerRow, ProjectRef, SleepRow, Today,
