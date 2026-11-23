@@ -2,7 +2,8 @@
 
 use crate::config::Config;
 use crate::guard::{ensure_version, minutes, not_found, nullable};
-use crate::{Store, WriteTx, day, projects};
+use crate::sessions::{self, PromptMetric};
+use crate::{Store, WriteTx, day, metrics, projects};
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use salah_domain::{
     day::BoundaryId,
@@ -16,6 +17,7 @@ use salah_domain::{
 };
 use salah_prayer::schedule;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 /// The shortest id prefix the human CLI resolves.
 const MIN_ID_PREFIX: usize = 4;
@@ -28,6 +30,7 @@ pub struct NewItem {
     pub repeat: Option<Repeat>,
     pub weekdays: Option<Weekdays>,
     pub project_id: Option<String>,
+    pub metric_ids: Option<Vec<String>>,
     pub planned_minutes: Option<i64>,
     /// The day of a one-time item or the first day of a repeating one.
     /// Defaults to the day in progress.
@@ -47,6 +50,9 @@ pub struct ItemChanges {
     /// `null` detaches the project; an absent field keeps it.
     #[serde(default, deserialize_with = "nullable")]
     pub project_id: Option<Option<String>>,
+    /// `null` inherits, an empty list asks for nothing, an absent field keeps the selection.
+    #[serde(default, deserialize_with = "nullable")]
+    pub metric_ids: Option<Option<Vec<String>>>,
     /// `null` clears the plan; an absent field keeps it.
     #[serde(default, deserialize_with = "nullable")]
     pub planned_minutes: Option<Option<i64>>,
@@ -65,18 +71,20 @@ pub enum MovePosition {
 pub struct ItemView {
     #[serde(flatten)]
     pub item: Item,
+    pub metrics: Vec<PromptMetric>,
     pub schedule_text: String,
     /// The first day on or after `from` on which the item applies.
     pub next_occurrence: Option<NaiveDate>,
 }
 
 impl ItemView {
-    pub fn new(item: Item, from: NaiveDate) -> Self {
-        Self {
+    pub fn new(store: &Store, item: Item, from: NaiveDate) -> Result<Self, Error> {
+        Ok(Self {
+            metrics: effective_metrics(store, &item)?,
             schedule_text: item.schedule_text(),
             next_occurrence: item.next_occurrence(from),
             item,
-        }
+        })
     }
 }
 
@@ -145,10 +153,13 @@ pub fn add(
     let block = validate_block(new.block.unwrap_or(default_block))?;
     let repeat = new.repeat.unwrap_or(Repeat::None);
     validate_repeat(repeat, new.weekdays)?;
+    let project_id = checked_project(tx, new.project_id)?;
+    let metric_ids = checked_metric_ids(tx, project_id.as_deref(), new.metric_ids)?;
     let mut item = Item {
         id: ids.new_id(),
         title: validate_title(&new.title)?,
-        project_id: checked_project(tx, new.project_id)?,
+        project_id,
+        metric_ids,
         block,
         repeat,
         weekdays: new.weekdays,
@@ -199,8 +210,14 @@ pub fn edit(
         item.weekdays = changes.weekdays;
     }
     validate_repeat(item.repeat, item.weekdays)?;
+    let previous_project = item.project_id.clone();
     if let Some(project_id) = changes.project_id {
         item.project_id = checked_project(tx, project_id)?;
+    }
+    if item.project_id != previous_project {
+        item.metric_ids = None;
+    } else if let Some(ids) = changes.metric_ids {
+        item.metric_ids = checked_metric_ids(tx, item.project_id.as_deref(), ids)?;
     }
     if let Some(planned) = changes.planned_minutes {
         item.planned_minutes = planned.map(|m| minutes("planned_minutes", m)).transpose()?;
@@ -302,6 +319,51 @@ pub fn preview(
         occurrences_this_month,
         schedule_text: schedule_text(repeat, weekdays),
     })
+}
+
+/// Effective prompt for an item, shared by item views and the running timer.
+pub(crate) fn effective_metrics(store: &Store, item: &Item) -> Result<Vec<PromptMetric>, Error> {
+    sessions::selected_prompt(
+        store,
+        item.project_id.as_deref(),
+        item.metric_ids.as_deref(),
+    )
+}
+
+fn checked_metric_ids(
+    store: &Store,
+    project_id: Option<&str>,
+    selection: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, Error> {
+    let Some(ids) = selection else {
+        return Ok(None);
+    };
+    let asked = project_id
+        .map(|id| store.project_metrics(id))
+        .transpose()?
+        .unwrap_or_default();
+    let mut seen = BTreeSet::new();
+    for id in &ids {
+        let metric = metrics::find(store, id).map_err(|error| match error {
+            Error::NotFound { .. } => {
+                Error::validation("metric_ids", format!("unknown metric {id:?}"))
+            }
+            error => error,
+        })?;
+        if metric.archived || (!metric.builtin && !asked.iter().any(|link| link.metric_id == *id)) {
+            return Err(Error::validation(
+                "metric_ids",
+                format!("metric {id:?} is not available for this item"),
+            ));
+        }
+        if !seen.insert(id) {
+            return Err(Error::validation(
+                "metric_ids",
+                format!("metric {id:?} is listed twice"),
+            ));
+        }
+    }
+    Ok(Some(ids))
 }
 
 fn sibling_index(siblings: &[Item], anchor: &str) -> Result<usize, Error> {

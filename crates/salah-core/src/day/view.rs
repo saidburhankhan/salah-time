@@ -5,7 +5,7 @@ use super::{Fulfilment, Snapshot, block_minutes, freeze, snapshot, total_minutes
 use crate::Store;
 use crate::config::Config;
 use crate::marks::live_marks;
-use crate::sessions::SessionView;
+use crate::sessions::{PromptMetric, SessionView};
 use crate::status::format_minutes;
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use salah_domain::{
@@ -46,6 +46,8 @@ pub struct DayRow {
     pub position: i64,
     pub version: i64,
     pub project: Option<ProjectRef>,
+    pub metric_ids: Option<Vec<String>>,
+    pub metrics: Vec<PromptMetric>,
     /// The project and minutes as planned that day (the snapshot of a past day).
     pub planned_minutes: Option<i64>,
     pub actual_minutes: i64,
@@ -175,8 +177,8 @@ pub fn day_plan(
     let sleep_at = ledger.clock.sleep_at;
     let blocks: Vec<BlockPlan> = BoundaryId::AWAKE
         .into_iter()
-        .map(|start| ledger.block_plan(start))
-        .collect();
+        .map(|start| ledger.block_plan(store, start))
+        .collect::<Result<_, _>>()?;
     let open = blocks
         .iter()
         .flat_map(|block| &block.items)
@@ -220,10 +222,10 @@ pub fn today(store: &mut Store, config: &Config, now: DateTime<Utc>) -> Result<T
     let planning_block = schedule.planning_block();
     let current = schedule.current_block();
     let ledger = Ledger::load(store, config, current.day, schedule.day(), now)?;
-    let items: Vec<DayRow> = BoundaryId::AWAKE
-        .into_iter()
-        .flat_map(|block| ledger.rows(block))
-        .collect();
+    let mut items = Vec::new();
+    for block in BoundaryId::AWAKE {
+        items.extend(ledger.rows(store, block)?);
+    }
     let current_rows: Vec<DayRow> = items
         .iter()
         .filter(|row| row.block == current.start)
@@ -293,8 +295,8 @@ impl Ledger {
         Fulfilment::of(&self.plan, &self.sessions)
     }
 
-    fn block_plan(&self, start: BoundaryId) -> BlockPlan {
-        let items = self.rows(start);
+    fn block_plan(&self, store: &Store, start: BoundaryId) -> Result<BlockPlan, Error> {
+        let items = self.rows(store, start)?;
         let inside: Vec<Session> = self
             .sessions
             .iter()
@@ -302,7 +304,7 @@ impl Ledger {
             .cloned()
             .collect();
         let fulfilment = Fulfilment::of(&self.plan, &inside);
-        BlockPlan {
+        Ok(BlockPlan {
             start,
             end: start.next().unwrap_or(BoundaryId::Sleep),
             capacity_minutes: self
@@ -315,25 +317,25 @@ impl Ledger {
             actual_minutes: fulfilment.actual_minutes,
             unplanned_minutes: fulfilment.unplanned_minutes,
             items,
-        }
+        })
     }
 
     /// The rows planned in `block`, in item position order.
-    fn rows(&self, block: BoundaryId) -> Vec<DayRow> {
+    fn rows(&self, store: &Store, block: BoundaryId) -> Result<Vec<DayRow>, Error> {
         let mut rows: Vec<DayRow> = self
             .plan
             .iter()
             .filter(|line| line.block == block)
             .filter_map(|line| {
                 let item = self.items.iter().find(|item| item.id == line.item_id)?;
-                Some(self.row(item, line))
+                Some(self.row(store, item, line))
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         rows.sort_by_key(|row| row.position);
-        rows
+        Ok(rows)
     }
 
-    fn row(&self, item: &Item, line: &DayPlanLine) -> DayRow {
+    fn row(&self, store: &Store, item: &Item, line: &DayPlanLine) -> Result<DayRow, Error> {
         let sessions: Vec<&Session> = self
             .sessions
             .iter()
@@ -346,7 +348,10 @@ impl Ledger {
             (0, None) => schedule_text.clone(),
             (actual, None) => format!("{actual} min · {schedule_text}"),
         };
-        DayRow {
+        // A historical row keeps its plan but asks the current task's metrics.
+        let current = store.item(&item.id)?;
+        let metric_item = current.as_ref().unwrap_or(item);
+        Ok(DayRow {
             id: item.id.clone(),
             title: item.title.clone(),
             block: line.block,
@@ -359,17 +364,19 @@ impl Ledger {
                 .as_ref()
                 .and_then(|id| self.projects.iter().find(|p| p.id == *id))
                 .map(ProjectRef::from),
+            metric_ids: metric_item.metric_ids.clone(),
+            metrics: crate::items::effective_metrics(store, metric_item)?,
             planned_minutes: line.planned_minutes,
             actual_minutes,
             done: has_tick(&self.sessions, &item.id),
             sessions: sessions
                 .into_iter()
-                .map(|session| SessionView::for_day(session, Some(self.past_sleep)))
-                .collect(),
+                .map(|session| SessionView::for_day(store, session, Some(self.past_sleep)))
+                .collect::<Result<_, _>>()?,
             next_occurrence: item.next_occurrence(self.day),
             schedule_text,
             detail_text,
-        }
+        })
     }
 }
 

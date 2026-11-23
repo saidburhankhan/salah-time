@@ -98,11 +98,11 @@ store-wide counter, never a precondition.
 | `status.get` | — | `Status`: prayer projection, `planner` (today's rows), `running: SessionView\|null`, `prompt: [PromptMetric]` | config, source, storage | — | — |
 | `day.get` | `date?` | `DayPlan`: prayers, blocks with `capacity_minutes`/`planned_minutes`/`actual_minutes`/`unplanned_minutes` and rows, `open`, `fulfilment` | validation, source, storage | — | — |
 | `items.list` | — | `[ItemView]` | storage | — | — |
-| `stats.get` | `from,to` or `days?` (default 30), `tag_id?`, `project_id?` | `range`, `filter`, `days` (with `unplanned_minutes`, nullable `fulfilment_ratio`), `series` (minutes first), `projects`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
+| `stats.get` | `from,to` or `days?` (default 30, max 730), `tag_id?`, `project_id?`, `item_id?` | `range`, `filter`, `days` (with `unplanned_minutes`, nullable `fulfilment_ratio`), `series` (minutes first), `projects`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
 | `item.parse` | `text` | draft `{title, block, repeat, weekdays, planned_minutes}` | validation | — | — |
 | `item.preview` | `block`, `repeat`, `weekdays?`, `planned_minutes?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
-| `item.add` | `op_id`, `title` or `quick_text`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `planned_minutes?`, `date?` | mutation result (`changed.items`) | validation, not_found, source, storage | yes | no |
-| `item.edit` | `op_id`, `id`, `expected_version?`, `title?`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `planned_minutes?` (`null` clears either) | mutation result | validation, not_found, conflict, storage | yes | yes |
+| `item.add` | `op_id`, `title` or `quick_text`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `planned_minutes?`, `date?`, `metric_ids?` | mutation result (`changed.items`) | validation, not_found, source, storage | yes | no |
+| `item.edit` | `op_id`, `id`, `expected_version?`, `title?`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `planned_minutes?`, `metric_ids?` (`null` clears the project, planned minutes or metric selection) | mutation result | validation, not_found, conflict, storage | yes | yes |
 | `item.move` | `op_id`, `id`, `block`, `after_id?` / `before_id?` / `index?`, `expected_version?` | mutation result (every renumbered item) | validation, not_found, conflict, storage | yes | yes |
 | `item.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`) | not_found, conflict, storage | yes | yes |
 | `projects.list` | `archived?` | `[Project + tags:[Tag] + metrics:[ProjectMetric + metric:Metric]]` | storage | — | — |
@@ -116,9 +116,11 @@ store-wide counter, never a precondition.
 | `metric.add` | `op_id`, `name`, `unit?`, `kind` (`count`/`scale`/`check`), `scale_max?` (scale: 2–10), `rollup?` (default `avg` for a scale, else `sum`) | mutation result (`changed.metrics`) | validation, storage | yes | no |
 | `metric.edit` | `op_id`, `id`, `expected_version?`, `name?`, `unit?`, `archived?` (a built-in cannot be archived; `kind` never changes) | mutation result | validation, not_found, conflict, storage | yes | yes |
 | `session.start` | `op_id`, `item_id?` / `project_id?` | mutation result (`changed.sessions`) | validation, not_found, conflict (one already runs), storage | yes | no |
-| `session.stop` | `op_id`, `id?` (default: the running one), `values?:{metric_id: number}`, `note?` | mutation result | validation, not_found, storage | yes | no |
+| `session.stop` | `op_id`, `id?` (defaults to the running timer), `values?:{metric_id: number}`, `note?`, `minutes?`, `done?: bool` | mutation result (`changed.sessions`) | validation, not_found, storage | yes | no |
+| `session.bump` | `op_id`, `id?` (defaults to the running timer), `metric_id`, `delta` (1 or −1) | mutation result (`changed.sessions`) | validation, not_found, storage | yes | no |
+| `session.note` | `op_id`, `id?` (defaults to the running timer), `text` | mutation result (`changed.sessions`) | validation, not_found, storage | yes | no |
 | `session.log` | `op_id`, `item_id?` / `project_id?`, `date?`, `block?`, `minutes?` (none: a tick), `values?`, `note?` | mutation result | validation, not_found, storage | yes | no |
-| `session.edit` | `op_id`, `id`, `expected_version?`, `minutes?`, `values?`, `note?` (`null` clears), `block?` | mutation result | validation, not_found, conflict, storage | yes | yes |
+| `session.edit` | `op_id`, `id`, `expected_version?`, `minutes?`, `values?`, `note?` (`null` clears), `block?`, `remove_note_ids?: [id]` | mutation result | validation, not_found, conflict, storage | yes | yes |
 | `session.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`) | not_found, conflict, storage | yes | yes |
 | `prayer.mark` | `op_id`, `prayer`, `date?`, `expected_version?` | mutation result (`changed.marks`) | validation, conflict, storage | yes | optional |
 | `prayer.unmark` | same as `prayer.mark` | mutation result (`changed.marks`) | validation, conflict, storage | yes | optional |
@@ -140,13 +142,24 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
 
 - `SessionView`: `id`, `item_id`, `project_id`, `day`, `block`, `started_at`,
   `ended_at`, `minutes` (`null` while running and for a tick), `running`, `stale`,
-  `note`, `values` (`{metric_id: number}`), `version`. A session of an item
-  copies the item's project.
-- `status.get.prompt` lists the running session's active project metrics in the project's
-  configured order. A running routine without a project gets focus and quality. Idle status
-  returns an empty list. Each `PromptMetric` carries `metric_id`, `name`, `unit`, `kind`,
-  `scale_max` and `required: false`. The `required` field on `ProjectMetric` is retained
-  for compatibility and is not enforced. All session metrics and notes are optional.
+  `note`, `notes: [{id, at, text}]`, `values` (`{metric_id: number}`), and `version`.
+  A session of an item copies the item's project when written. Timestamped notes are
+  ordered oldest first and `at` is a UTC instant.
+- `ItemView` and day rows expose `metric_ids` and the effective `metrics` list.
+  `metric_ids: null` inherits the project's active asked metrics. Without a project it
+  inherits focus, quality, and distractions. An explicit list selects only those metrics
+  and can be empty. Each selected ID must be an active metric the project asks for or a
+  built-in. Effective prompts follow project order, with extra selected built-ins
+  appended in selection order. Historical rows use the current item's metric selection
+  for their session editors.
+- Changing an item's project resets its selection to `null`. When a project drops an
+  asked metric, the server removes that ID from the project's custom item selections
+  in the same write. Updated live items appear in `changed.items`.
+- `status.get.prompt` uses the running item's effective `metrics` list, or the active
+  project metrics for a project-only timer. Idle status returns an empty list. Each
+  `PromptMetric` carries `metric_id`, `name`, `unit`, `kind`, `scale_max`, and
+  `required: false`. The `required` field on `ProjectMetric` is retained for compatibility.
+  All session metrics and notes are optional.
 - Day rows (`day.get` blocks and `status.get` planner): `id`, `title`, `block`,
   `repeat`, `weekdays`, `position`, `version`, `project` (`{id,name,color}` or
   `null`), `planned_minutes` (the day's snapshot), `actual_minutes`,
@@ -159,7 +172,10 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   `unplanned_minutes` (every other session: unplanned items, bare projects).
   Each day block carries `capacity_minutes`, `planned_minutes`,
   `actual_minutes` and `unplanned_minutes` the same way.
-- `stats.get`: only finished sessions count. An `avg` rollup is weighted by
+- `stats.get` accepts an inclusive range of 1–730 planning days. The item, project, and
+  tag filters intersect. Only finished sessions count. The item filter uses the session's
+  recorded item ID, including historical sessions for removed items. It also narrows
+  planned minutes and fulfilment to that item. An `avg` rollup is weighted by
   session minutes, a tick weighing 1. Each `days[]` row is `{day, minutes,
   capacity_minutes, planned_minutes, unplanned_minutes, fulfilment_ratio}`;
   `fulfilment_ratio` is plan-line minutes over planned minutes, capped at 1,
@@ -179,6 +195,22 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   with minutes records timed work. Either operation accepts an empty or partial values map.
   Supplied values must pass the metric's kind and range checks. Archived metrics are
   omitted from prompts and reject new values. Edits retain existing archived samples.
+- `session.stop.minutes` overrides the recorded duration. It must be an integer between
+  1 and the rounded, clamped elapsed minutes. The recorded end instant uses the ordinary
+  timer cutoff. With `done: true`, the server also ticks the item on the timer's planning
+  day and returns the stopped timer followed by the tick in `changed.sessions`. The timed
+  session receives the supplied values and note. The server creates an empty tick or
+  reuses an existing live tick on the same day. The stop and new tick share one revision
+  and `op_id`. A project-only timer rejects `done: true` with `validation`.
+- `session.bump` adjusts an active count metric on the running timer, flooring the value at
+  zero. `distractions` is a built-in count with sum rollup and unit `times`. It can be
+  bumped regardless of the prompt. When stopping, supplied values override the corresponding
+  live values and omitted values retain them.
+- `session.note` appends a separate timestamped entry to the running timer. Trimmed text
+  must contain 1–500 characters. `session.edit.note` edits the main note.
+  `session.edit.remove_note_ids` soft-deletes the named entries belonging to the session.
+  Removing a session soft-deletes all of its live entries. Note writes advance the
+  session version and use the `sessions` notification scope.
 - To mark an item done, call `session.log` with its `item_id` and omit `minutes`.
   If that item has a running timer, the server stops it at the usual clamp point first
   and writes the tick in the same transaction. The tick receives the supplied metrics
@@ -266,7 +298,7 @@ Example stale edit:
   intent.
 - `expected_version` applies per entity on every `*.edit` and `*.remove`,
   `item.move`, and optionally prayer marks. Appends (`*.add`, `session.start`,
-  `session.stop`, `session.log`) need no precondition, only `op_id`. A stale
+  `session.stop`, `session.bump`, `session.note`, `session.log`) need no precondition, only `op_id`. A stale
   version is `data.kind = "conflict"` and writes nothing.
 - Every entity row carries its `version` (lists, day rows, and `changed`). `revision` orders pushes and de-duplicates them; it
   is never sent as a mutation precondition.

@@ -1,5 +1,5 @@
 //! Statistics over a range of days, optionally narrowed to one project or to
-//! the projects carrying one tag. Only finished sessions count.
+//! the projects carrying one tag or to one task. Only finished sessions count.
 //!
 //! An `avg` rollup is weighted by session minutes; a tick weighs 1.
 
@@ -16,7 +16,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The longest range one request covers.
-pub const MAX_DAYS: i64 = 366;
+pub const MAX_DAYS: i64 = 730;
 
 /// The pseudo-metric that leads `series`: logged minutes per day.
 const MINUTES_SERIES: &str = "minutes";
@@ -25,6 +25,7 @@ const MINUTES_SERIES: &str = "minutes";
 pub struct Filter {
     pub tag_id: Option<String>,
     pub project_id: Option<String>,
+    pub item_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -129,13 +130,14 @@ pub fn stats(
         .iter_days()
         .take_while(|d| *d <= range.to)
         .collect();
+    let scope = Scope::new(store, &filter)?;
     if range.from < today {
         store.write(|tx| {
             days.iter()
                 .try_for_each(|d| day::freeze(tx, config, *d, today))
         })?;
     }
-    let ledger = Ledger::load(store, config, today, days, &filter)?;
+    let ledger = Ledger::load(store, config, today, days, scope)?;
     Ok(Stats {
         days: ledger.day_stats(),
         series: ledger.series(),
@@ -164,14 +166,13 @@ impl Ledger {
         config: &Config,
         today: NaiveDate,
         days: Vec<NaiveDate>,
-        filter: &Filter,
+        scope: Scope,
     ) -> Result<Self, Error> {
-        let scope = Scope::new(store, filter)?;
         let (Some(first), Some(last)) = (days.first(), days.last()) else {
             return Err(Error::validation("from", "the range is empty"));
         };
         let sessions = store
-            .sessions_between(*first, *last)?
+            .sessions_between_for_item(*first, *last, scope.item_id.as_deref())?
             .into_iter()
             .filter(|s| s.is_live() && !s.is_running() && scope.covers(s.project_id.as_deref()))
             .collect();
@@ -207,11 +208,18 @@ impl Ledger {
                 // a plan line to a different project must not turn a session
                 // attached to that line into unplanned work.
                 let unplanned_minutes = day_plan.unplanned_minutes;
-                let fulfilment = if self.scope.projects.is_some() {
+                let fulfilment = if self.scope.projects.is_some() || self.scope.item_id.is_some() {
                     let lines = snapshot
                         .plan
                         .iter()
-                        .filter(|line| self.scope.covers(line.project_id.as_deref()))
+                        .filter(|line| {
+                            self.scope.covers(line.project_id.as_deref())
+                                && self
+                                    .scope
+                                    .item_id
+                                    .as_ref()
+                                    .is_none_or(|id| id == &line.item_id)
+                        })
                         .cloned()
                         .collect::<Vec<_>>();
                     Fulfilment::of(&lines, &sessions)
@@ -382,6 +390,7 @@ fn rollup<'a>(
 /// The projects a filter keeps; `None` keeps everything.
 struct Scope {
     projects: Option<BTreeSet<String>>,
+    item_id: Option<String>,
 }
 
 impl Scope {
@@ -403,7 +412,15 @@ impl Scope {
                 None => tagged,
             });
         }
-        Ok(Self { projects })
+        if let Some(id) = &filter.item_id
+            && store.item(id)?.is_none()
+        {
+            return Err(crate::guard::not_found("item", id));
+        }
+        Ok(Self {
+            projects,
+            item_id: filter.item_id.clone(),
+        })
     }
 
     fn covers(&self, project_id: Option<&str>) -> bool {
@@ -505,6 +522,7 @@ mod tests {
             Filter {
                 tag_id: Some(tag.id),
                 project_id: None,
+                item_id: None,
             },
         )
         .unwrap();

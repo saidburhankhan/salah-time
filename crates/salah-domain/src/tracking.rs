@@ -82,6 +82,9 @@ pub struct Item {
     pub id: String,
     pub title: String,
     pub project_id: Option<String>,
+    /// Inherit from the project when absent. An empty list asks for nothing.
+    #[serde(default)]
+    pub metric_ids: Option<Vec<String>>,
     pub block: BoundaryId,
     pub repeat: Repeat,
     #[serde(default)]
@@ -120,6 +123,14 @@ pub struct Session {
 pub struct SessionValue {
     pub metric_id: String,
     pub value: f64,
+}
+
+/// The visible fields of one timestamped note on a session.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SessionNote {
+    pub id: String,
+    pub at: DateTime<Utc>,
+    pub text: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -274,6 +285,7 @@ mod tests {
             id: "item".into(),
             title: "Item".into(),
             project_id: None,
+            metric_ids: None,
             block: BoundaryId::Fajr,
             repeat,
             weekdays,

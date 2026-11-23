@@ -329,7 +329,7 @@ fn an_op_id_must_be_non_empty_and_belongs_to_one_method() {
 }
 
 #[test]
-fn routine_timer_prompts_for_two_optional_metrics_and_stops_without_them() {
+fn routine_timer_prompts_for_optional_builtin_metrics_and_stops_without_them() {
     let mut f = Fixture::new();
     f.handshake();
     assert_eq!(f.ok("status.get", json!({}))["prompt"], json!([]));
@@ -340,8 +340,8 @@ fn routine_timer_prompts_for_two_optional_metrics_and_stops_without_them() {
     f.ok("session.start", json!({"op_id":"start","item_id":item}));
     let status = f.ok("status.get", json!({}));
     let prompt = status["prompt"].as_array().unwrap();
-    assert_eq!(prompt.len(), 2);
-    for (row, id) in prompt.iter().zip(["focus", "quality"]) {
+    assert_eq!(prompt.len(), 3);
+    for (row, id) in prompt.iter().zip(["focus", "quality", "distractions"]) {
         assert_eq!(row["metric_id"], id);
         assert_eq!(row["required"], false);
     }

@@ -74,14 +74,14 @@ fn mutate(
     })
 }
 
-fn item_views(today: NaiveDate, rows: Vec<Item>) -> Changed {
-    Changed {
+fn item_views(store: &Store, today: NaiveDate, rows: Vec<Item>) -> Result<Changed, Error> {
+    Ok(Changed {
         items: rows
             .into_iter()
-            .map(|item| ItemView::new(item, today))
-            .collect(),
+            .map(|item| ItemView::new(store, item, today))
+            .collect::<Result<_, _>>()?,
         ..Changed::default()
-    }
+    })
 }
 
 fn project_view(store: &Store, project: Project) -> Result<Changed, Error> {
@@ -140,9 +140,10 @@ pub(crate) fn item_add(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, R
         new.weekdays = p.weekdays.or(new.weekdays);
         new.planned_minutes = p.planned_minutes.or(new.planned_minutes);
         new.project_id = p.project_id.clone();
+        new.metric_ids = p.metric_ids.clone();
         new.date = p.date;
         let item = items::add(tx, &config, now, ids, new)?;
-        Ok(item_views(today, vec![item]))
+        item_views(tx, today, vec![item])
     })
 }
 
@@ -160,7 +161,7 @@ pub(crate) fn item_edit(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, 
             p.changes.clone(),
             p.expected_version,
         )?;
-        Ok(item_views(today, vec![item]))
+        item_views(tx, today, vec![item])
     })
 }
 
@@ -192,7 +193,7 @@ pub(crate) fn item_move(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, 
             position.clone(),
             p.expected_version,
         )?;
-        Ok(item_views(today, moved))
+        item_views(tx, today, moved)
     })
 }
 
@@ -219,9 +220,16 @@ pub(crate) fn project_add(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value
 pub(crate) fn project_edit(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let p: ProjectEditParams = parse(call.params)?;
     let now = ctx.now();
+    let config = ctx.config;
     mutate(ctx.store, call.method, &p.op_id, |tx| {
-        let project = projects::edit(tx, now, &p.id, p.changes.clone(), p.expected_version)?;
-        project_view(tx, project)
+        let (project, affected) =
+            projects::edit(tx, now, &p.id, p.changes.clone(), p.expected_version)?;
+        let mut changed = project_view(tx, project)?;
+        if !affected.is_empty() {
+            let today = day::current(&config.load()?, now)?;
+            changed.items = item_views(tx, today, affected)?.items;
+        }
+        Ok(changed)
     })
 }
 
@@ -314,16 +322,34 @@ pub(crate) fn session_start(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Val
 pub(crate) fn session_stop(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let p: SessionStopParams = parse(call.params)?;
     let config = ctx.config.load()?;
-    let now = ctx.now();
+    let (now, ids) = (ctx.now(), ctx.ids);
     mutate(ctx.store, call.method, &p.op_id, |tx| {
-        let session = sessions::stop(
+        let result = sessions::stop(tx, &config, now, ids, p.id.as_deref(), p.stop.clone())?;
+        session_views(
             tx,
             &config,
             now,
-            p.id.as_deref(),
-            p.values.clone(),
-            p.note.clone(),
-        )?;
+            std::iter::once(&result.stopped).chain(&result.tick),
+        )
+    })
+}
+
+pub(crate) fn session_bump(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: SessionBumpParams = parse(call.params)?;
+    let config = ctx.config.load()?;
+    let now = ctx.now();
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
+        let session = sessions::bump(tx, now, p.id.as_deref(), &p.metric_id, p.delta)?;
+        session_views(tx, &config, now, [&session])
+    })
+}
+
+pub(crate) fn session_note(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: SessionNoteParams = parse(call.params)?;
+    let config = ctx.config.load()?;
+    let (now, ids) = (ctx.now(), ctx.ids);
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
+        let session = sessions::append_note(tx, now, ids, p.id.as_deref(), &p.text)?;
         session_views(tx, &config, now, [&session])
     })
 }

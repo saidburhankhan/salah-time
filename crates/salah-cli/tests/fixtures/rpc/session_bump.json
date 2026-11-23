@@ -1,0 +1,36 @@
+{
+  "id": 6,
+  "jsonrpc": "2.0",
+  "result": {
+    "changed": {
+      "deleted": [],
+      "items": [],
+      "marks": [],
+      "metrics": [],
+      "projects": [],
+      "sessions": [
+        {
+          "block": "fajr",
+          "day": "2031-05-14",
+          "ended_at": null,
+          "id": "<id:1>",
+          "item_id": "<id:2>",
+          "minutes": null,
+          "note": null,
+          "notes": [],
+          "project_id": null,
+          "running": true,
+          "stale": false,
+          "started_at": "2031-05-14T04:30:00Z",
+          "values": {
+            "distractions": 1.0
+          },
+          "version": 2
+        }
+      ],
+      "tags": []
+    },
+    "op_id": "bump",
+    "revision": 3
+  }
+}

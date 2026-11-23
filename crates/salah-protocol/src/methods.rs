@@ -6,7 +6,7 @@ use salah_core::config::Config;
 use salah_core::items::{ItemChanges, ItemView};
 use salah_core::metrics::{MetricChanges, NewMetric};
 use salah_core::projects::{NewProject, ProjectChanges, ProjectView};
-use salah_core::sessions::{NewLog, SessionChanges, SessionView, Target, Values};
+use salah_core::sessions::{NewLog, SessionChanges, SessionView, Stop, Target};
 use salah_domain::day::BoundaryId;
 use salah_domain::item::{PrayerMark, Repeat, Weekdays};
 use salah_domain::tracking::{Metric, Tag};
@@ -67,6 +67,8 @@ pub struct StatsParams {
     pub tag_id: Option<String>,
     #[serde(default)]
     pub project_id: Option<String>,
+    #[serde(default)]
+    pub item_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -108,6 +110,8 @@ pub struct ItemAddParams {
     pub weekdays: Option<Weekdays>,
     #[serde(default)]
     pub project_id: Option<String>,
+    #[serde(default)]
+    pub metric_ids: Option<Vec<String>>,
     #[serde(default)]
     pub planned_minutes: Option<i64>,
     #[serde(default)]
@@ -225,10 +229,25 @@ pub struct SessionStopParams {
     pub op_id: String,
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(flatten)]
+    pub stop: Stop,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct SessionBumpParams {
+    pub op_id: String,
     #[serde(default)]
-    pub values: Values,
+    pub id: Option<String>,
+    pub metric_id: String,
+    pub delta: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct SessionNoteParams {
+    pub op_id: String,
     #[serde(default)]
-    pub note: Option<String>,
+    pub id: Option<String>,
+    pub text: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]

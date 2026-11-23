@@ -537,3 +537,6 @@ fn a_timer_becomes_stale_only_after_its_own_sleep_boundary() {
     let status = later.request("status.get", json!({}));
     assert!(status["result"]["running"].is_null());
 }
+
+#[path = "rpc/phase2.rs"]
+mod phase2;

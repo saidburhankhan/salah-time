@@ -55,3 +55,30 @@ New projects ask for distractions after focus and quality. The new binding has `
 - `docs/work/architecture/protocol-v1.md`, `docs/work/tracking-ui/c2-progress.md`
 
 CHECKPOINT 0b: Preserve good backups across failed migrations, validate table rebuilds and default new projects to optional distractions
+
+## Tasks 1–2d — stats filters and session writes
+
+- `stats.get` intersects the item, project, and tag filters and accepts up to 730 inclusive planning days. Item filtering narrows planned minutes and fulfilment. Historical sessions can still be queried by a removed item's ID.
+- `session.stop` accepts an override up to the Sleep-clamped, rounded elapsed duration. The end instant follows the original timer cutoff. Save & Done returns the timed session first and the completion tick second. Completion uses the timer's planning day and reuses an existing tick on that day. The stopped session receives the supplied values and main note. Both new writes share the replay record and revision. The CLI supports `session stop --done --minutes N` and `stats --item ID`.
+- `session.bump` updates one active count value on the running timer and floors it at zero. Distractions are available even for a task with an empty prompt. A pause that omits the count retains it, and finished counts appear in the stats series.
+- Item views and day rows expose the stored `metric_ids` and effective prompt. The running timer uses its current task's prompt. A project change resets the selection to inheritance, and a project metric removal strips that ID from custom selections in the same write. Historical day rows display their frozen plan and use the current metric selection for session input.
+- `session.note` appends a separate session note and returns it in `SessionView.notes`. Notes are ordered oldest first. Editing can soft-delete named entries, and removing a session soft-deletes its live entries. Note and count mutations advance the session revision and replay by `op_id`.
+
+The derived distractions-per-hour column belongs to the upcoming `stats.table` slice. The Notes page query is also in the upcoming slice.
+
+### Verification
+
+145 tests passed with `cargo test --offline --workspace --no-fail-fast`. The same eight tests listed at checkpoint 0 in `crates/salah-cli/tests/daemon.rs` failed during Unix socket setup. All eight stdio RPC tests passed, including fixture regeneration and a subsequent comparison. A structural comparison verified that existing fixtures gained fields or the new prompt metric while retaining existing values. Strict Clippy, formatting and diff checks passed.
+
+### Checkpoint files
+
+- `crates/salah-cli/src/tracking.rs`, `crates/salah-cli/tests/{rpc.rs,rpc/phase2.rs,tracking_cli.rs}`
+- New RPC fixtures in `crates/salah-cli/tests/fixtures/rpc/` (`item_edit_metrics.json`, `session_bump.json`, `session_edit_remove_note.json`, `session_note.json`, `session_stop_done.json`, `session_stop_minutes.json`, `stats_item_filter.json`)
+- Updated RPC fixtures in the same directory (`day_tracking.json`, `item_add.json`, `item_add_quick.json`, `item_edit.json`, `item_move.json`, `items_list.json`, `session_edit.json`, `session_log.json`, `session_log_tick.json`, `session_log_tick_stops_timer.json`, `session_start.json`, `session_stop.json`, `stats.json`, `stats_by_tag.json`, `status_running.json`, `status_stale.json`)
+- `crates/salah-core/src/{day/view.rs,items.rs,projects.rs,sessions.rs,sessions/running.rs,sessions/tests.rs,stats.rs,status.rs}`
+- `crates/salah-domain/src/tracking.rs`
+- `crates/salah-protocol/src/{dispatcher,methods,reads,writes}.rs`, `crates/salah-protocol/tests/dispatch.rs`
+- `crates/salah-store/src/{codec.rs,lib.rs,migrations/tests.rs,read.rs,write.rs}`
+- `docs/work/architecture/protocol-v1.md`, `docs/work/tracking-ui/c2-progress.md`
+
+CHECKPOINT 2d: Add task-filtered stats, atomic Save & Done, live counters, task metrics and timestamped notes

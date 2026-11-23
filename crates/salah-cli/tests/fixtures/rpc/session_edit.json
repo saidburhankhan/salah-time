@@ -17,6 +17,7 @@
           "item_id": null,
           "minutes": 20,
           "note": "Review",
+          "notes": [],
           "project_id": "<id:3>",
           "running": false,
           "stale": false,

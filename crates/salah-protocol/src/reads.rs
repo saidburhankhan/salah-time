@@ -36,14 +36,15 @@ pub(crate) fn items(_: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcErro
     let today = day::current(&ctx.config.load()?, ctx.now())?;
     let rows: Vec<ItemView> = items::list(ctx.store)?
         .into_iter()
-        .map(|item| ItemView::new(item, today))
-        .collect();
+        .map(|item| ItemView::new(ctx.store, item, today))
+        .collect::<Result<_, _>>()?;
     to_value(rows)
 }
 
 pub(crate) fn stats(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let params: StatsParams = parse(call.params)?;
     let config = ctx.config.load()?;
+    let today = day::current(&config, ctx.now())?;
     let range = match (params.from, params.to, params.days) {
         (Some(from), Some(to), None) => Range { from, to },
         (None, None, days) => {
@@ -55,9 +56,13 @@ pub(crate) fn stats(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcE
                 )
                 .into());
             }
-            let to = day::current(&config, ctx.now())?;
+            let to = today;
             Range {
-                from: to - Duration::days(days - 1),
+                from: to
+                    .checked_sub_signed(Duration::days(days - 1))
+                    .ok_or_else(|| {
+                        Error::validation("days", "the range starts before the supported calendar")
+                    })?,
                 to,
             }
         }
@@ -70,8 +75,8 @@ pub(crate) fn stats(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcE
     let filter = Filter {
         tag_id: params.tag_id,
         project_id: params.project_id,
+        item_id: params.item_id,
     };
-    let today = day::current(&config, ctx.now())?;
     to_value(statistics::stats(ctx.store, &config, today, range, filter)?)
 }
 

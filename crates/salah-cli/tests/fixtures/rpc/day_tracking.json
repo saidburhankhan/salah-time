@@ -23,6 +23,33 @@
             "detail_text": "25 / 30 min · Daily",
             "done": false,
             "id": "<id:4>",
+            "metric_ids": null,
+            "metrics": [
+              {
+                "kind": "scale",
+                "metric_id": "focus",
+                "name": "Focus",
+                "required": false,
+                "scale_max": 5,
+                "unit": ""
+              },
+              {
+                "kind": "scale",
+                "metric_id": "quality",
+                "name": "Quality",
+                "required": false,
+                "scale_max": 5,
+                "unit": ""
+              },
+              {
+                "kind": "count",
+                "metric_id": "<id:1>",
+                "name": "Pages read",
+                "required": false,
+                "scale_max": null,
+                "unit": "pages"
+              }
+            ],
             "next_occurrence": "2031-05-14",
             "planned_minutes": 30,
             "position": 0,
@@ -42,6 +69,7 @@
                 "item_id": "<id:4>",
                 "minutes": 25,
                 "note": null,
+                "notes": [],
                 "project_id": "<id:3>",
                 "running": false,
                 "stale": false,
@@ -60,6 +88,33 @@
             "detail_text": "0 / 15 min · Once",
             "done": true,
             "id": "<id:5>",
+            "metric_ids": null,
+            "metrics": [
+              {
+                "kind": "scale",
+                "metric_id": "focus",
+                "name": "Focus",
+                "required": false,
+                "scale_max": 5,
+                "unit": ""
+              },
+              {
+                "kind": "scale",
+                "metric_id": "quality",
+                "name": "Quality",
+                "required": false,
+                "scale_max": 5,
+                "unit": ""
+              },
+              {
+                "kind": "count",
+                "metric_id": "distractions",
+                "name": "Distractions",
+                "required": false,
+                "scale_max": null,
+                "unit": "times"
+              }
+            ],
             "next_occurrence": "2031-05-14",
             "planned_minutes": 15,
             "position": 1,
@@ -75,6 +130,7 @@
                 "item_id": "<id:5>",
                 "minutes": null,
                 "note": null,
+                "notes": [],
                 "project_id": null,
                 "running": false,
                 "stale": false,

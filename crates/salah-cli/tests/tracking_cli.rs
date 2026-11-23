@@ -341,3 +341,26 @@ fn status_attaches_the_planner_and_survives_a_store_failure() {
     assert!(status["planner"].is_null());
     assert!(status["planner_error"].is_string());
 }
+
+#[test]
+fn save_done_and_item_filtered_stats_are_available_without_a_daemon() {
+    let fixture = Fixture::new();
+    let item = fixture.added("items", &["item", "add", "Read", "--json"]);
+    fixture.json(&["session", "start", "--item", &item, "--json"]);
+    let saved = fixture.json_at(
+        LATER,
+        &["session", "stop", "--minutes", "20", "--done", "--json"],
+    );
+    let sessions = saved["changed"]["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 2);
+    assert_eq!(sessions[0]["minutes"], 20);
+    assert!(sessions[1]["minutes"].is_null());
+
+    let stats = fixture.json_at(
+        LATER,
+        &["stats", "--days", "1", "--item", &item[..8], "--json"],
+    );
+    assert_eq!(stats["filter"]["item_id"], item);
+    assert_eq!(stats["totals"]["minutes"], 20);
+    assert_eq!(stats["totals"]["sessions"], 2);
+}

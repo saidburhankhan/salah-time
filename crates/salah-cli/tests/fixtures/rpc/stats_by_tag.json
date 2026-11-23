@@ -99,6 +99,7 @@
       }
     ],
     "filter": {
+      "item_id": null,
       "project_id": null,
       "tag_id": "<id:2>"
     },

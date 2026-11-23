@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use salah_domain::{
     error::Error,
     runtime::IdGenerator,
-    tracking::{Metric, Project, ProjectMetric, Tag},
+    tracking::{Item, Metric, Project, ProjectMetric, Tag},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -164,7 +164,7 @@ pub fn edit(
     id: &str,
     changes: ProjectChanges,
     expected_version: Option<i64>,
-) -> Result<Project, Error> {
+) -> Result<(Project, Vec<Item>), Error> {
     let mut project = find(tx, id)?;
     ensure_version("project", id, project.version, expected_version)?;
     if let Some(name) = &changes.name {
@@ -188,10 +188,46 @@ pub fn edit(
         .transpose()?;
     project.updated_at = now;
     project.version = tx.put_project(&project)?;
-    if let Some(links) = links {
+    let items = if let Some(links) = links {
+        let previous = tx.project_metrics(&project.id)?;
+        let removed: BTreeSet<_> = previous
+            .iter()
+            .filter(|old| !links.iter().any(|new| new.metric_id == old.metric_id))
+            .map(|link| &link.metric_id)
+            .collect();
         tx.set_project_metrics(&project.id, &links)?;
+        drop_removed_choices(tx, now, &project.id, &removed)?
+    } else {
+        Vec::new()
+    };
+    Ok((project, items))
+}
+
+fn drop_removed_choices(
+    tx: &WriteTx<'_>,
+    now: DateTime<Utc>,
+    project_id: &str,
+    removed: &BTreeSet<&String>,
+) -> Result<Vec<Item>, Error> {
+    let mut changed = Vec::new();
+    if removed.is_empty() {
+        return Ok(changed);
     }
-    Ok(project)
+    for mut item in tx.custom_items_in_project(project_id)? {
+        let Some(ids) = &mut item.metric_ids else {
+            continue;
+        };
+        let count = ids.len();
+        ids.retain(|id| !removed.contains(id));
+        if ids.len() != count {
+            item.updated_at = now;
+            item.version = tx.put_item(&item)?;
+            if item.is_live() {
+                changed.push(item);
+            }
+        }
+    }
+    Ok(changed)
 }
 
 fn checked_tags(store: &Store, tag_ids: Vec<String>) -> Result<Vec<String>, Error> {

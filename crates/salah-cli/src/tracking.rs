@@ -206,6 +206,12 @@ pub struct SessionStopArgs {
     /// The running session; default: whichever runs
     #[arg(long)]
     id: Option<String>,
+    /// Override worked minutes, up to the elapsed time
+    #[arg(long)]
+    minutes: Option<i64>,
+    /// Also tick the item on the timer's planning day
+    #[arg(long)]
+    done: bool,
     /// A metric value, e.g. --value focus=4 (repeatable)
     #[arg(long = "value", value_name = "METRIC=VALUE")]
     values: Vec<String>,
@@ -371,6 +377,8 @@ pub struct StatsArgs {
     project: Option<String>,
     #[arg(long, value_name = "ID")]
     tag: Option<String>,
+    #[arg(long, value_name = "ID")]
+    item: Option<String>,
     #[command(flatten)]
     output: Output,
 }
@@ -522,6 +530,8 @@ pub fn session(local: &mut Local<'_>, command: SessionCommand) -> Result<(), Str
         SessionCommand::Stop(a) => {
             let params = Params::default()
                 .opt("id", a.id)
+                .opt("minutes", a.minutes)
+                .set("done", a.done)
                 .set("values", values(&a.values)?)
                 .opt("note", a.note);
             ("session.stop", params.done(), a.output)
@@ -669,12 +679,14 @@ pub fn day(local: &mut Local<'_>, args: DayArgs) -> Result<(), String> {
 }
 
 pub fn stats(local: &mut Local<'_>, args: StatsArgs) -> Result<(), String> {
+    let item = args.item.map(|id| local.item_id(&id)).transpose()?;
     let params = Params::default()
         .opt("from", args.from)
         .opt("to", args.to)
         .opt("days", args.days)
         .opt("project_id", args.project)
-        .opt("tag_id", args.tag);
+        .opt("tag_id", args.tag)
+        .opt("item_id", item);
     let result = local.call("stats.get", params.done())?;
     print(&args.output, &result, render::stats)
 }

@@ -135,6 +135,7 @@ pub(crate) fn item(row: &Row) -> rusqlite::Result<Item> {
         id: row.get("id")?,
         title: row.get("title")?,
         project_id: row.get("project_id")?,
+        metric_ids: row.get::<_, bool>("metrics_custom")?.then(Vec::new),
         block: get_name(row, "block")?,
         repeat: get_name(row, "repeat")?,
         weekdays: row.get::<_, Option<u8>>("weekdays")?.map(Weekdays),

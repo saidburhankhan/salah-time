@@ -96,11 +96,23 @@ impl Status {
             let Some(session) = running else {
                 return Ok((None, Vec::new()));
             };
-            let view = SessionView::at(store, config, now, &session).unwrap_or_else(|error| {
-                errors.push(error.to_string());
-                SessionView::for_day(&session, None)
-            });
-            let prompt = sessions::prompt(store, session.project_id.as_deref())?;
+            let view = match SessionView::at(store, config, now, &session) {
+                Ok(view) => view,
+                Err(error) => {
+                    errors.push(error.to_string());
+                    SessionView::for_day(store, &session, None)?
+                }
+            };
+            let item = session
+                .item_id
+                .as_ref()
+                .map(|id| store.item(id))
+                .transpose()?
+                .flatten();
+            let prompt = match item {
+                Some(item) => crate::items::effective_metrics(store, &item)?,
+                None => sessions::prompt(store, session.project_id.as_deref())?,
+            };
             Ok((Some(view), prompt))
         });
         match running {

@@ -215,6 +215,7 @@ mod tests {
             id: "i".into(),
             title: "I".into(),
             project_id: Some("p".into()),
+            metric_ids: None,
             block: BoundaryId::Fajr,
             repeat: Repeat::Daily,
             weekdays: None,

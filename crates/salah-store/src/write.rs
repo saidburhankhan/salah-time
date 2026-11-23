@@ -11,7 +11,8 @@ use salah_domain::{
     error::Error,
     item::PrayerMark,
     tracking::{
-        DayBlock, DayClock, DayPlanLine, Item, Metric, Project, ProjectMetric, Session, Tag,
+        DayBlock, DayClock, DayPlanLine, Item, Metric, Project, ProjectMetric, Session,
+        SessionNote, Tag,
     },
 };
 use std::{
@@ -212,8 +213,8 @@ impl WriteTx<'_> {
         self.execute(
             "INSERT INTO items
                  (id, title, project_id, block, repeat, weekdays, start_day, planned_minutes,
-                  position, created_at, updated_at, deleted_at, version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                  position, created_at, updated_at, deleted_at, version, metrics_custom)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT (id) DO UPDATE SET
                  title = excluded.title,
                  project_id = excluded.project_id,
@@ -225,7 +226,8 @@ impl WriteTx<'_> {
                  position = excluded.position,
                  updated_at = excluded.updated_at,
                  deleted_at = excluded.deleted_at,
-                 version = excluded.version",
+                 version = excluded.version,
+                 metrics_custom = excluded.metrics_custom",
             params![
                 item.id,
                 item.title,
@@ -240,8 +242,18 @@ impl WriteTx<'_> {
                 codec::timestamp(item.updated_at),
                 item.deleted_at.map(codec::timestamp),
                 version,
+                item.metric_ids.is_some(),
             ],
         )?;
+        self.execute("DELETE FROM item_metrics WHERE item_id = ?1", [&item.id])?;
+        if let Some(ids) = &item.metric_ids {
+            for (position, metric_id) in ids.iter().enumerate() {
+                self.execute(
+                    "INSERT INTO item_metrics (item_id, metric_id, position) VALUES (?1, ?2, ?3)",
+                    params![item.id, metric_id, position as i64],
+                )?;
+            }
+        }
         self.log_change("item", &item.id, op, version)
     }
 
@@ -291,6 +303,80 @@ impl WriteTx<'_> {
             )?;
         }
         self.log_change("session", &session.id, op, version)
+    }
+
+    /// Replace a single metric value while leaving the other samples in place.
+    pub fn put_session_value(
+        &self,
+        session_id: &str,
+        metric_id: &str,
+        value: f64,
+        now: DateTime<Utc>,
+    ) -> Result<i64, Error> {
+        self.execute(
+            "INSERT INTO session_values (session_id, metric_id, value) VALUES (?1, ?2, ?3)
+             ON CONFLICT (session_id, metric_id) DO UPDATE SET value = excluded.value",
+            params![session_id, metric_id, value],
+        )?;
+        self.touch_session(session_id, now)
+    }
+
+    pub fn add_session_note(&self, session_id: &str, note: &SessionNote) -> Result<i64, Error> {
+        self.execute(
+            "INSERT INTO session_notes (id, session_id, at, text, created_at, updated_at, version)
+             VALUES (?1, ?2, ?3, ?4, ?3, ?3, 1)",
+            params![note.id, session_id, codec::timestamp(note.at), note.text],
+        )?;
+        self.touch_session(session_id, note.at)
+    }
+
+    pub fn remove_session_notes(
+        &self,
+        session_id: &str,
+        note_ids: &[String],
+        now: DateTime<Utc>,
+    ) -> Result<(), Error> {
+        for id in note_ids {
+            let deleted = self.store.one(
+                "UPDATE session_notes SET deleted_at = ?3, updated_at = ?3, version = version + 1
+                 WHERE session_id = ?1 AND id = ?2 AND deleted_at IS NULL RETURNING id",
+                params![session_id, id, codec::timestamp(now)],
+                |row| row.get::<_, String>(0),
+            )?;
+            if deleted.is_none() {
+                return Err(Error::validation(
+                    "remove_note_ids",
+                    format!("no live note {id:?} on this session"),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn remove_all_session_notes(
+        &self,
+        session_id: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), Error> {
+        self.execute(
+            "UPDATE session_notes SET deleted_at = ?2, updated_at = ?2, version = version + 1
+             WHERE session_id = ?1 AND deleted_at IS NULL",
+            params![session_id, codec::timestamp(now)],
+        )
+    }
+
+    fn touch_session(&self, session_id: &str, now: DateTime<Utc>) -> Result<i64, Error> {
+        let version = self
+            .store
+            .conn
+            .query_row(
+                "UPDATE sessions SET updated_at = ?2, version = version + 1
+             WHERE id = ?1 AND deleted_at IS NULL RETURNING version",
+                params![session_id, codec::timestamp(now)],
+                |row| row.get(0),
+            )
+            .map_err(storage_error)?;
+        self.log_change("session", session_id, "update", version)
     }
 
     pub fn put_mark(&self, mark: &PrayerMark) -> Result<i64, Error> {

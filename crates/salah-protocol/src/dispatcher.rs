@@ -79,6 +79,8 @@ const METHODS: &[(&str, Kind, Handler)] = &[
     ("metric.edit", Kind::Write, writes::metric_edit),
     ("session.start", Kind::Write, writes::session_start),
     ("session.stop", Kind::Write, writes::session_stop),
+    ("session.bump", Kind::Write, writes::session_bump),
+    ("session.note", Kind::Write, writes::session_note),
     ("session.log", Kind::Write, writes::session_log),
     ("session.edit", Kind::Write, writes::session_edit),
     ("session.remove", Kind::Write, writes::session_remove),

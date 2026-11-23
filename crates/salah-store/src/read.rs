@@ -12,7 +12,7 @@ use salah_domain::{
     item::PrayerMark,
     tracking::{
         DayBlock, DayClock, DayPlanLine, Item, Metric, Project, ProjectMetric, Session,
-        SessionValue, Tag,
+        SessionNote, SessionValue, Tag,
     },
 };
 
@@ -98,7 +98,9 @@ impl Store {
     }
 
     pub fn item(&self, id: &str) -> Result<Option<Item>, Error> {
-        self.one("SELECT * FROM items WHERE id = ?1", [id], codec::item)
+        self.one("SELECT * FROM items WHERE id = ?1", [id], codec::item)?
+            .map(|item| self.with_metric_ids(item))
+            .transpose()
     }
 
     pub fn items(&self) -> Result<Vec<Item>, Error> {
@@ -106,7 +108,32 @@ impl Store {
             "SELECT * FROM items ORDER BY created_at, id",
             [],
             codec::item,
-        )
+        )?
+        .into_iter()
+        .map(|item| self.with_metric_ids(item))
+        .collect()
+    }
+
+    pub fn custom_items_in_project(&self, project_id: &str) -> Result<Vec<Item>, Error> {
+        self.all(
+            "SELECT * FROM items WHERE project_id = ?1 AND metrics_custom = 1 ORDER BY id",
+            [project_id],
+            codec::item,
+        )?
+        .into_iter()
+        .map(|item| self.with_metric_ids(item))
+        .collect()
+    }
+
+    fn with_metric_ids(&self, mut item: Item) -> Result<Item, Error> {
+        if let Some(ids) = &mut item.metric_ids {
+            *ids = self.all(
+                "SELECT metric_id FROM item_metrics WHERE item_id = ?1 ORDER BY position",
+                [&item.id],
+                |row| row.get(0),
+            )?;
+        }
+        Ok(item)
     }
 
     /// Item state at the close of a past day, including tombstones.
@@ -167,9 +194,40 @@ impl Store {
         first: NaiveDate,
         last: NaiveDate,
     ) -> Result<Vec<Session>, Error> {
+        self.sessions_between_for_item(first, last, None)
+    }
+
+    pub fn sessions_between_for_item(
+        &self,
+        first: NaiveDate,
+        last: NaiveDate,
+        item_id: Option<&str>,
+    ) -> Result<Vec<Session>, Error> {
+        if let Some(id) = item_id {
+            return self.sessions_where(
+                "SELECT * FROM sessions WHERE item_id = ?1 AND day BETWEEN ?2 AND ?3
+                 ORDER BY day, created_at, id",
+                rusqlite::params![id, codec::day(first), codec::day(last)],
+            );
+        }
         self.sessions_where(
             "SELECT * FROM sessions WHERE day BETWEEN ?1 AND ?2 ORDER BY day, created_at, id",
             [codec::day(first), codec::day(last)],
+        )
+    }
+
+    pub fn session_notes(&self, session_id: &str) -> Result<Vec<SessionNote>, Error> {
+        self.all(
+            "SELECT id, at, text FROM session_notes WHERE session_id = ?1 AND deleted_at IS NULL
+             ORDER BY at, rowid",
+            [session_id],
+            |row| {
+                Ok(SessionNote {
+                    id: row.get("id")?,
+                    at: codec::get_timestamp(row, "at")?,
+                    text: row.get("text")?,
+                })
+            },
         )
     }
 

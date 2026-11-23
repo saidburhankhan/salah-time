@@ -178,6 +178,14 @@
         "required": false,
         "scale_max": 5,
         "unit": ""
+      },
+      {
+        "kind": "count",
+        "metric_id": "distractions",
+        "name": "Distractions",
+        "required": false,
+        "scale_max": null,
+        "unit": "times"
       }
     ],
     "running": {
@@ -188,6 +196,7 @@
       "item_id": "<id:2>",
       "minutes": null,
       "note": null,
+      "notes": [],
       "project_id": null,
       "running": true,
       "stale": true,

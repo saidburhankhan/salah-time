@@ -29,14 +29,16 @@ impl Database {
             conn.execute_batch(STEPS[1].sql).unwrap();
             let item = conn
                 .query_row(
-                    "SELECT * FROM items WHERE id='daily'",
+                    "SELECT *, 0 AS metrics_custom FROM items WHERE id='daily'",
                     [],
                     crate::codec::item,
                 )
                 .unwrap();
+            let mut legacy = serde_json::to_value(item).unwrap();
+            legacy.as_object_mut().unwrap().remove("metric_ids");
             conn.execute(
                 "INSERT INTO item_history VALUES ('daily','2031-05-13',?1)",
-                [serde_json::to_string(&item).unwrap()],
+                [legacy.to_string()],
             )
             .unwrap();
             conn.execute_batch(

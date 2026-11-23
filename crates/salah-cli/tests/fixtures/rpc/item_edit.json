@@ -11,6 +11,33 @@
           "day": "2031-05-14",
           "deleted_at": null,
           "id": "<id:4>",
+          "metric_ids": null,
+          "metrics": [
+            {
+              "kind": "scale",
+              "metric_id": "focus",
+              "name": "Focus",
+              "required": false,
+              "scale_max": 5,
+              "unit": ""
+            },
+            {
+              "kind": "scale",
+              "metric_id": "quality",
+              "name": "Quality",
+              "required": false,
+              "scale_max": 5,
+              "unit": ""
+            },
+            {
+              "kind": "count",
+              "metric_id": "<id:1>",
+              "name": "Pages read",
+              "required": false,
+              "scale_max": null,
+              "unit": "pages"
+            }
+          ],
           "next_occurrence": "2031-05-14",
           "planned_minutes": 30,
           "position": 0,

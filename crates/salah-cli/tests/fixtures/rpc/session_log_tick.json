@@ -17,6 +17,7 @@
           "item_id": "<id:5>",
           "minutes": null,
           "note": null,
+          "notes": [],
           "project_id": null,
           "running": false,
           "stale": false,

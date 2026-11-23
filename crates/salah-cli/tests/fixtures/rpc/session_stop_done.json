@@ -1,0 +1,52 @@
+{
+  "id": 8,
+  "jsonrpc": "2.0",
+  "result": {
+    "changed": {
+      "deleted": [],
+      "items": [],
+      "marks": [],
+      "metrics": [],
+      "projects": [],
+      "sessions": [
+        {
+          "block": "fajr",
+          "day": "2031-05-14",
+          "ended_at": "2031-05-14T04:55:00Z",
+          "id": "<id:3>",
+          "item_id": "<id:2>",
+          "minutes": 1,
+          "note": "Finished a chapter",
+          "notes": [],
+          "project_id": null,
+          "running": false,
+          "stale": false,
+          "started_at": "2031-05-14T04:55:00Z",
+          "values": {
+            "focus": 5.0
+          },
+          "version": 2
+        },
+        {
+          "block": "fajr",
+          "day": "2031-05-14",
+          "ended_at": null,
+          "id": "<id:4>",
+          "item_id": "<id:2>",
+          "minutes": null,
+          "note": null,
+          "notes": [],
+          "project_id": null,
+          "running": false,
+          "stale": false,
+          "started_at": null,
+          "values": {},
+          "version": 1
+        }
+      ],
+      "tags": []
+    },
+    "op_id": "save-done",
+    "revision": 5
+  }
+}
