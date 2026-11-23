@@ -12,9 +12,17 @@ omarchy plugin validate "$plugin_source"
 for check in "$plugin_source"/tests/*_test.js; do node "$check" >/dev/null; done
 
 test_home=$(mktemp -d)
+test_runtime=$(mktemp -d /tmp/salah-test-rt.XXXXXX)
 # The scripts must never change the user's live bar while testing.
 export SALAH_NO_SHELL=1
-cleanup() { rm -rf -- "$test_home"; }
+# Desktop sessions export XDG_* paths, which win over HOME: point every one of
+# them into the scratch home so no step can reach the live database, config or
+# daemon socket.
+export XDG_CONFIG_HOME="$test_home/.config" XDG_DATA_HOME="$test_home/.local/share" \
+  XDG_CACHE_HOME="$test_home/.cache" XDG_STATE_HOME="$test_home/.local/state" \
+  XDG_RUNTIME_DIR="$test_runtime"
+unset SALAH_SOCKET
+cleanup() { rm -rf -- "$test_home" "$test_runtime"; }
 trap cleanup EXIT
 
 HOME="$test_home" "$project_dir/scripts/install"
