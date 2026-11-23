@@ -4,7 +4,7 @@ You are worker C7 for work item `tracking-ui` phase 3 in /home/saidburxon/rust/s
 `architecture`). You own `app/**` and `docs/work/tracking-ui/c7-progress.md`. Other workers may edit
 other directories concurrently; never touch them.
 
-Read: `docs/AGENTS.md`, `docs/work/tracking-ui/plan.md` (the "User decisions", "Phase 2" and
+Read: `docs/AGENTS.md`, `docs/work/tracking-ui/data-model.md` (locked storage and protocol rules; it wins over plan.md on storage), `docs/work/tracking-ui/plan.md` (the "User decisions", "Phase 2" and
 "Phase 3" sections; phase 3's contract is locked, implement it exactly), the previous progress files
 in `docs/work/tracking-ui/` for how this area was built and verified, and the code you own.
 

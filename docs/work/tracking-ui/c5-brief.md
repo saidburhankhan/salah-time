@@ -4,11 +4,13 @@ You are worker C5 for work item `tracking-ui` phase 3 in /home/saidburxon/rust/s
 `architecture`). You own `crates/**` and `docs/work/architecture/protocol-v1.md` and `docs/work/tracking-ui/c5-progress.md`. Other workers may edit
 other directories concurrently; never touch them.
 
-Read: `docs/AGENTS.md`, `docs/work/tracking-ui/plan.md` (the "User decisions", "Phase 2" and
+Read: `docs/AGENTS.md`, `docs/work/tracking-ui/data-model.md` (locked storage and protocol rules; it wins over plan.md on storage), `docs/work/tracking-ui/plan.md` (the "User decisions", "Phase 2" and
 "Phase 3" sections; phase 3's contract is locked, implement it exactly), the previous progress files
 in `docs/work/tracking-ui/` for how this area was built and verified, and the code you own.
 
-Tasks: (1) nullable day/block for one-time items with a CHECK, backlog semantics in day plans,
+Tasks: (0) migration 004 exactly as data-model.md specifies (items rebuild, epics, resources,
+session/day_plan epic_id) with its migration test; CHECKPOINT after this alone for the independent
+review. (1) nullable day/block for one-time items with a CHECK, backlog semantics in day plans,
 snapshots, stats and fulfilment (backlog items never count), `item.add backlog`, `item.schedule`,
 `item.backlog`, `backlog.list`, `item.move` in the backlog; (2) resources table and methods with
 validation, day-row resource counts, `status.get.reminders`, `changed` entity `resources`;

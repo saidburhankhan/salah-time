@@ -1,5 +1,7 @@
 # Plan: tracking-ui
 
+Storage for every phase 2/3 change is locked in `data-model.md`; read it before any backend work.
+
 ## Outcome
 
 The app and the widget make the tracking model (archived in `docs/archive/tracking-model/`,
@@ -183,8 +185,8 @@ the required and optional metrics, and see results in charts. Both surfaces stay
   App item editor: under the project chips, "Asks" with the project's metrics as toggle chips (all
   on by default; "Reset to project"). Widget: no editor needed (the app owns it); the creation
   sheet (phase 3) may add it later. Fixtures `item_edit_metrics.json`.
-- **Notes during a running session** (user request): `session.note {id?, text, op_id}` appends a
-  line `HH:MM text` (local time) to the session's note without stopping it or touching earlier
+- **Notes during a running session** (user request; storage per data-model.md: separate
+  `session_notes` entries shown as `HH:MM text`): `session.note {id?, text, op_id}` adds an entry without stopping it or touching earlier
   lines (default: the running session; text 1–500 chars, trimmed; replay-safe). Fixture
   `session_note.json`. Earlier notes are never replaced by this method; `session.edit note` still
   edits the whole note.

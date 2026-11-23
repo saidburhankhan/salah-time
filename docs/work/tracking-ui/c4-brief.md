@@ -6,7 +6,7 @@ You are worker C4 for work item `tracking-ui` phase 2 in /home/saidburxon/rust/s
 `crates/salah-cli/tests/fixtures/rpc/` (stats_table_*.json, stats_item_filter.json,
 session_stop_done.json); if some are still missing, build against plan.md's contract and say so.
 
-Read: `docs/AGENTS.md`, `docs/work/tracking-ui/plan.md` ("User decisions" and "Phase 2"),
+Read: `docs/AGENTS.md`, `docs/work/tracking-ui/data-model.md` (locked storage and protocol rules; it wins over plan.md on storage), `docs/work/tracking-ui/plan.md` ("User decisions" and "Phase 2"),
 `docs/work/tracking-ui/ui-a-progress.md` (how the app UI was built, its theme tokens
 selectedFill/selectedBorder/selectedText, and how screenshots are rendered with
 `SALAH_UI_SHOT_DIR=<dir> app/bin/test`), then the app sources (`app/src/qml/pages/StatisticsPage.qml`,
@@ -20,7 +20,7 @@ Tasks, in order, one CHECKPOINT each:
    in the pause panel and session editor.
 1c. Item editor: "Asks" toggle chips of the project's metrics (all on by default, "Reset to
    project"), sent as `metric_ids`; every panel asks the row's `metrics` list.
-1d. Running card "Add note": one-line field sending `session.note` (appends; no pause).
+1d. Running card "Add note": one-line field sending `session.note` (adds a timestamped entry; no pause).
 2. Stats filters: separate Tags, Projects (narrowed by tag) and Tasks (narrowed by project)
    lists; range presets 7/28/90 plus Custom with from/to date pickers; every request carries
    the filter.

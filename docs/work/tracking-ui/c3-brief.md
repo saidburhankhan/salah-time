@@ -4,7 +4,7 @@ You are worker C3 for work item `tracking-ui` phase 2 in /home/saidburxon/rust/s
 `architecture`). You own `plugin/**` and `docs/work/tracking-ui/c3-progress.md`. Worker C2 edits
 `crates/**` concurrently (it adds `session.stop done`); do not touch crates.
 
-Read: `docs/AGENTS.md`, `docs/work/tracking-ui/plan.md` (the "User decisions" and "Phase 2"
+Read: `docs/AGENTS.md`, `docs/work/tracking-ui/data-model.md` (locked storage and protocol rules; it wins over plan.md on storage), `docs/work/tracking-ui/plan.md` (the "User decisions" and "Phase 2"
 sections), `docs/work/tracking-ui/ui-w-progress.md` (how the widget was built and how its
 screens were rendered offscreen), and the widget files `plugin/local.salah/{BarWidget,SessionPanel,
 MetricField,SalahClient,TimelineRow,RowActions}.qml` and `SessionLogic.js`.
@@ -17,7 +17,7 @@ The pause panel also shows "Worked" with the elapsed minutes in an editable fiel
 and never toggles the popup (its own click target; brief pulse feedback); the running card shows
 "Distractions N" with − and +. Every panel for an item asks exactly the row's `metrics` list (plan.md "Per-task metrics") instead
 of computing it from the project. Bar "+": left click = bump +1; right click = bump +1 and a compact note popover anchored to the
-bar (one line, Enter/Save sends `session.note`, Esc cancels; never toggles the main popup). The
+bar (one line, Enter/Save sends `session.note`, Esc cancels; show a session's note entries (`notes`) as `HH:MM text` lines wherever its note is shown; never toggles the main popup). The
 running card gets "Add note" (same field, no bump). Keep the existing done panel and Log panel as they are. Add node checks in
 `plugin/local.salah/tests/session_logic_test.js` for any new pure logic (params built for Save
 vs Save & Done, empty values). Update the CLI fallback in SalahClient (`salah session stop --done`).
