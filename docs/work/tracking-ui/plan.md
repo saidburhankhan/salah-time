@@ -315,3 +315,80 @@ Starts after phase 2's backend (C2) is committed, so two workers never edit the 
 - [ ] R2 widget (C6)
 - [ ] R3 app (C7)
 - [ ] R4 integration, screenshots reviewed, install, user check
+
+## Phase 4: insights, goals, weekly review (user request 2026-11-23 12:2x)
+
+The user chose these three from a list so Codex keeps a queue through the 25 Nov renewal. Same
+rules as before: everything optional, dark muted colours, `Text.PlainText`, sessions are the facts
+(progress and insights are computed from sessions, never stored), additive protocol, storage per
+data-model.md "005". Builds on phase 3 (epics); starts after phase 3's backend is committed.
+
+### Insights (read-only)
+- **App Insights page** (sidebar entry), with the shared Stats filter bar (range, tag, project, epic, task):
+  - "By prayer block": minutes, average focus and distractions per hour for each block (night…isha, sleep);
+  - "By hour of day" (timed sessions only) and "By weekday": the same three measures;
+  - "Distractions per hour" by week, as a line;
+  - "Best sessions" and "Hardest sessions": the top 5 by focus (ties broken by minutes), each with its notes, opening the session.
+- Small samples are shown as such ("3 sessions"), never hidden; no fake precision (one decimal).
+- `insights.get {from, to, tag_id?, project_id?|"none", epic_id?|"none", item_id?}` →
+  `{by_block:[{block, minutes, sessions, focus_avg|null, distractions_per_hour|null}],
+    by_hour:[{hour 0..23, …same}], by_weekday:[{weekday 1..7 (Mon=1), …same}],
+    distractions_by_week:[{week (Monday), per_hour|null}],
+    best:[SessionView+item/project names], hardest:[…]}`. Ranges up to 730 days. Tick sessions
+  (no minutes) are excluded; `focus_avg` is minutes-weighted like stats.
+
+### Goals
+- A goal is a target for a period (day or week, weeks start Monday) on all work, one project, one
+  epic or one task/routine:
+  - minutes, at least N;
+  - or a metric with a direction, e.g. focus average at least 4, distractions at most 10 per week.
+- Progress is computed from sessions. Changing a target ends the old goal and starts a new one, so
+  past periods keep the target they had.
+- **App:**
+  - a Goals section in each project/epic/task editor and an overall Goals page;
+  - progress bars in muted tints, with goals met shown by a check;
+  - history per goal (period, value, target, met) as a small table.
+- **Widget:** the panel header shows today's and this week's goals as compact progress chips (max 3, then "+N").
+- **Protocol:**
+  - `goals.list {at?: day}` → `[{id, project_id, epic_id, item_id, period, metric_id|null,
+    direction, target, starts_on, ends_on|null, progress:{from, to, value, met}}]`. Active goals
+    only unless `include_ended`.
+  - `goal.add {scope ids?, period, metric_id?, direction?, target, op_id}`.
+  - `goal.edit {id, target, op_id}`: ends this goal at the end of the previous period, adds the
+    successor, and returns it.
+  - `goal.end {id, op_id}`.
+  - `goal.remove {id, op_id}`: only while its first period has not ended (soft delete).
+  - `goals.history {id, from, to}` → `[{from, to, value, target, met}]`.
+  - `status.get` gains `goals` (the same rows as `goals.list` for today; the widget's source).
+  - `changed` entity `goals`.
+
+### Weekly review
+- **App Review page:**
+  - a week picker (default: the last full week; the current week is allowed);
+  - a computed summary: minutes by project and epic with "No project"/"No epic", goals met, the
+    sessions that have notes (newest first, filterable), open backlog count, distractions per hour
+    vs the previous week;
+  - one free-text reflection the user writes and saves (optional).
+- **Widget:** on Monday after Fajr, a quiet "Weekly review" link in the panel footer while last
+  week has no saved reflection. No notification.
+- **Protocol:**
+  - `review.get {week}` → `{week, summary:{…as above}, note|null, updated_at|null}`.
+  - `review.save {week, note, op_id}`: an empty note removes it.
+  - `changed` entity `reviews`.
+
+### Workers
+- **C8 backend (`crates/**`, Astra for 005 and insights SQL, Sol for CLI/fixtures):**
+  - migration 005;
+  - goals, insights and review in salah-core modules `goals`, `insights`, `reviews`;
+  - CLI `salah goal …`, `salah insights`, `salah review`;
+  - fixtures `insights.json`, `goals_list.json`, `goal_add.json`, `goal_edit_successor.json`,
+    `goals_history.json`, `review_get.json`, `review_save.json`, `status_goals.json`;
+  - protocol-v1.md.
+- **C9 app (`app/**`, Astra for the Insights page, Sol for Goals and Review):** screenshots of each page reviewed.
+- **C10 widget (`plugin/**`, Sol):** goal chips and the review link; offscreen render reviewed.
+
+### Slices
+- [ ] G1 backend (C8): 005 + goals (CHECKPOINT 0 alone for the independent review), then insights, then review
+- [ ] G2 app (C9)
+- [ ] G3 widget (C10)
+- [ ] G4 integration, screenshots reviewed, install, user check

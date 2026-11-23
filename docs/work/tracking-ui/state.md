@@ -41,12 +41,15 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   and wants every bit used. Measured: one 5h window = about 31% of the weekly; three Astra workers
   burned a window in ~40 min, so quota (not wall clock) is the limit and Sol stretches it.
   Weekly 76% now, so the 16:27 window (~24% left) ends on the weekly cap; then the user applies
-  reset 1, later reset 2. Keep the Codex queue full (disjoint dirs: crates / app / plugin / reviews):
+  reset 1, later reset 2 (a reset clears weekly + 5h; use one ONLY at a 100% weekly cap, never for
+  a 5h cap). Keep the Codex queue full (disjoint dirs: crates / app / plugin / reviews):
   1. 16:27: C5 task 0 = migration 004 (Astra, crates; Claude review gate), C4 tasks 4-5 = general
      table + Notes page (Astra, app; needs C2 3b), widget stale-timer display (Sol, plugin).
   2. After reset 1: C5 rest (backlog/epic rules Astra; resources, CLI, fixtures Sol), C6 widget
      phase 3 (creation sheet Astra, rest Sol), C7 app phase 3 (Sol).
-  3. After reset 2: Astra reviews of phase 3, fix rounds, U5 polish, phase 4 items from the user.
+  3. Phase 4 (user chose insights, goals, weekly review; plan.md "Phase 4", data-model.md "005"):
+     C8 backend (005 Astra + review gate), C9 app (Insights Astra), C10 widget (Sol).
+  4. After reset 2: Astra reviews of phases 3-4, fix rounds, U5 polish.
   When Codex hits a cap: Claude subagents inherit (Opus hard, Sonnet normal) and the orchestrator
   tells the user so they can apply a reset.
 - U5: user visual check after `omarchy restart shell`; fix what they report.

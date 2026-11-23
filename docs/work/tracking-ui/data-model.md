@@ -170,9 +170,61 @@ Rules:
   project, `epic: null` ("No epic"); filters accept `"none"`.
 - `changes` entity names: `epics`, `resources`; session notes are reported under `sessions`.
 
+## 005 — phase 4 (worker C8)
+
+```sql
+CREATE TABLE goals (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT REFERENCES projects (id),
+    epic_id     TEXT REFERENCES epics (id),
+    item_id     TEXT REFERENCES items (id),
+    period      TEXT NOT NULL CHECK (period IN ('day', 'week')),
+    metric_id   TEXT REFERENCES metrics (id),          -- NULL: the goal is on minutes
+    direction   TEXT NOT NULL DEFAULT 'at_least' CHECK (direction IN ('at_least', 'at_most')),
+    target      REAL NOT NULL CHECK (target > 0),
+    starts_on   TEXT NOT NULL,                          -- first day of its first period
+    ends_on     TEXT,                                   -- last day of its last period; NULL = active
+    replaces_id TEXT REFERENCES goals (id),             -- predecessor when a target was edited
+    position    INTEGER NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    deleted_at  TEXT,
+    version     INTEGER NOT NULL CHECK (version >= 1),
+    CHECK ((project_id IS NOT NULL) + (epic_id IS NOT NULL) + (item_id IS NOT NULL) <= 1),
+    CHECK (metric_id IS NOT NULL OR direction = 'at_least'),
+    CHECK (ends_on IS NULL OR ends_on >= starts_on)
+);
+CREATE INDEX goals_active ON goals (ends_on, deleted_at);
+
+CREATE TABLE reviews (
+    id          TEXT PRIMARY KEY,
+    week        TEXT NOT NULL,                          -- the Monday, YYYY-MM-DD
+    note        TEXT NOT NULL CHECK (length(note) BETWEEN 1 AND 5000),
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    deleted_at  TEXT,
+    version     INTEGER NOT NULL CHECK (version >= 1)
+);
+CREATE UNIQUE INDEX reviews_by_week ON reviews (week) WHERE deleted_at IS NULL;
+CREATE INDEX sessions_by_day ON sessions (day);
+```
+
+Rules:
+- Progress, history, insights and the review summary are computed from sessions (and
+  `session_values`, `session_notes`) at read time; nothing derived is stored.
+- A goal with no scope ids is on all work. A goal's metric must be one its scope asks (or any
+  built-in for all-work goals); the store checks this on write.
+- `goal.edit` never changes a stored target: it sets `ends_on` on the old row to the last day of
+  the previous period (or soft-deletes it if its first period has not ended) and inserts the
+  successor with `replaces_id`, in one write.
+- Week periods start Monday; a `day` goal's period is the tracking day (Sleep boundary), the same
+  `day` value sessions carry.
+- Removing a project/epic/item ends its goals (`ends_on` = last full period), never deletes them.
+- `changes` entity names: `goals`, `reviews`.
+
 ## Review gates
 
-1. After C2's migration 003 checkpoint and after C5's migration 004 checkpoint, an independent
+1. After C2's migration 003 checkpoint, C5's migration 004 checkpoint and C8's migration 005 checkpoint, an independent
    reviewer (not the author) checks the migration, constraints, indexes, layering and the
    migration tests against this file before any frontend builds on it.
 2. The orchestrator migrates a copy of the live database and diffs row counts per table before
