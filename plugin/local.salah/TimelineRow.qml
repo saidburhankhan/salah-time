@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // One row in the day timeline: a prayer header, an item, an add row, or a
@@ -23,8 +24,6 @@ Item {
   required property int count
   required property string repeat
   required property bool timerRunning
-  required property string timerStartedAt
-  required property int timerMinutes
   required property string detailText
   required property string scheduleText
   required property string nextOccurrence
@@ -51,11 +50,6 @@ Item {
 
   onExpandedChanged: if (!expanded) editing = false
 
-  function focusTimeField() {
-    if (!expanded) return
-    actions.focusCorrection()
-  }
-
   function selectRow() {
     timeline.currentIndex = index
     if (controller.expandedItemId !== ""
@@ -72,25 +66,20 @@ Item {
     titleEditor.selectAll()
   }
 
-  readonly property int elapsedMinutes: {
-    host.minuteTick
-    host.timerSnapshotMs
-    var base = Math.max(0, timerMinutes)
-    if (!timerRunning) return base
-    return base + Math.max(0, Math.floor((Date.now() - host.timerSnapshotMs) / 60000))
-  }
   readonly property var itemData: ({
     "id": itemId, "title": title, "block": block, "state": itemState,
     "projectId": projectId, "projectColor": projectColor, "plannedMinutes": plannedMinutes, "minutes": minutes,
     "count": count, "repeat": repeat, "timerRunning": timerRunning,
-    "timerStartedAt": timerStartedAt, "timerMinutes": timerMinutes,
     "detailText": detailText, "scheduleText": scheduleText,
     "nextOccurrence": nextOccurrence, "carried": carried
   })
+  // Today's sessions of this item, read from the latest status report.
+  readonly property var sessions: rowType === "item" && expanded && host
+    ? host.itemSessions(itemId, host.report) : []
 
   width: timeline ? timeline.width : 0
   height: rowType === "header" ? Style.space(40)
-    : (rowType === "item" ? Style.space(expanded ? (actions.correctionError !== "" ? 102 : 84) : 42)
+    : (rowType === "item" ? (expanded ? Style.space(48) + actions.implicitHeight : Style.space(42))
       : (rowType === "marker" ? Style.space(24) : Style.space(27)))
   Behavior on height {
     NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic }
@@ -270,12 +259,6 @@ Item {
         elide: Text.ElideRight
       }
 
-      Rectangle {
-        visible: row.projectId !== ""
-        width: Style.space(7); height: width; radius: width / 2
-        color: row.projectColor
-      }
-
       TextField {
         id: titleEditor
         visible: row.editing
@@ -302,15 +285,30 @@ Item {
         }
       }
 
-      Text {
-        visible: !row.editing && text !== ""
+      Row {
+        visible: !row.editing && detail.text !== ""
         width: parent.width
-        textFormat: Text.PlainText
-        text: row.pending ? row.strings.t("panel.pending") : row.detailText
-        color: row.mutedForeground
-        font.family: row.fontFamily
-        font.pixelSize: Style.font.caption
-        elide: Text.ElideRight
+        spacing: Style.space(4)
+
+        Rectangle {
+          visible: row.projectId !== ""
+          anchors.verticalCenter: parent.verticalCenter
+          width: Style.space(6)
+          height: width
+          radius: width / 2
+          color: row.projectColor
+        }
+
+        Text {
+          id: detail
+          width: parent.width - (row.projectId !== "" ? Style.space(10) : 0)
+          textFormat: Text.PlainText
+          text: row.pending ? row.strings.t("panel.pending") : row.detailText
+          color: row.mutedForeground
+          font.family: row.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
       }
     }
 
@@ -331,15 +329,17 @@ Item {
         font.pixelSize: Style.font.caption
       }
       Button {
-        width: Style.space(68)
+        width: row.timerRunning ? Style.space(68) : Style.space(32)
         height: Style.space(26)
-        text: (row.timerRunning
-            ? row.strings.t("panel.pauseWithTime") : row.strings.t("panel.startWithTime"))
-          .arg(row.host.formatMinutes(row.elapsedMinutes))
+        text: row.timerRunning
+          ? row.strings.t("panel.stopWithTime").arg(row.host.runningElapsedText)
+          : row.strings.t("panel.startSymbol")
         tooltipText: row.timerRunning
-          ? row.strings.t("panel.pauseTimer") : row.strings.t("panel.startTimer")
+          ? row.strings.t("panel.stopTimer") : row.strings.t("panel.startTimer")
         foreground: row.foreground
-        fontFamily: "monospace"
+        fontFamily: row.fontFamily
+        fontSize: Style.font.bodySmall
+        selected: row.timerRunning
         horizontalPadding: 0
         verticalPadding: 0
         bordered: true
@@ -375,19 +375,25 @@ Item {
     anchors.top: parent.top
     anchors.topMargin: Style.space(44)
     strings: row.strings
-    host: row.host
     controller: row.controller
-    itemData: row.itemData
     rowKey: row.rowKey
     fontFamily: row.fontFamily
     foreground: row.foreground
     mutedForeground: row.mutedForeground
     repeat: row.repeat
-    titleEditing: row.editing
+    done: row.done
+    sessions: row.sessions
+    runningElapsed: row.host ? row.host.runningElapsedText : ""
+    errorText: row.host && row.host.rowErrorKey === row.rowKey ? row.host.rowErrorText : ""
     onBeginEdit: row.beginTitleEdit()
     onRemoveConfirmed: {
       row.controller.collapseExpanded()
       row.host.removeItem(row.itemData)
+    }
+    onAddTimeRequested: row.host.openLogPanel("item:" + row.itemId)
+    onRemoveSessionRequested: function(sessionId) { row.host.removeSession(row.itemData, sessionId) }
+    onMinutesEdited: function(sessionId, minutes) {
+      row.host.editSessionMinutes(row.itemData, sessionId, minutes)
     }
   }
 

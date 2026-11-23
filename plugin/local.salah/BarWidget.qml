@@ -5,6 +5,7 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 import "DragLogic.js" as DragLogic
+import "SessionLogic.js" as SessionLogic
 
 BarWidget {
   id: root
@@ -34,12 +35,16 @@ BarWidget {
   property bool popoutSwitchClosing: false
   property string actionError: ""
   property string quickAddBlock: ""
-  property int minuteTick: 0
   property var pendingOps: ({})
   property var projects: []
-  property bool sessionPanelOpen: false
-  property bool sessionLogMode: false
-  property double timerSnapshotMs: Date.now()
+  property var metricCatalogue: []
+  // "" (closed), "stop" (finish the running session) or "log" (record time).
+  property string sessionPanelMode: ""
+  property string sessionPanelOp: ""
+  property string sessionPanelError: ""
+  // An error from a row's own action, shown inside that expanded row.
+  property string rowErrorKey: ""
+  property string rowErrorText: ""
 
   readonly property string nextName: report && report.next
     ? String(report.next.name || "")
@@ -54,17 +59,29 @@ BarWidget {
   readonly property string remainingShort: formatRemaining(remainingSeconds, true)
   readonly property var planner: report && report.planner ? report.planner : null
   readonly property var runningTimer: report && report.running ? report.running : null
-  readonly property int runningMinutes: {
-    minuteTick
-    timerSnapshotMs
-    if (!runningTimer) return 0
-    var started = Date.parse(String(runningTimer.started_at || ""))
-    return isNaN(started) ? 0 : Math.max(0, Math.floor((Date.now() - started) / 60000))
+  readonly property int runningMinutes: runningTimer
+    ? SessionLogic.elapsedMinutes(runningTimer.started_at, countdownNowMs) : 0
+  readonly property string runningElapsedText: formatDuration(runningMinutes)
+  readonly property var runningItem: runningTimer ? plannerItem(runningTimer.item_id) : null
+  readonly property var runningProject: runningTimer
+    ? SessionLogic.findProject(projects, runningTimer.project_id) : null
+  readonly property string runningTitle: runningItem ? String(runningItem.title || "")
+    : (runningProject ? String(runningProject.name || "") : strings.t("session.untitled"))
+  readonly property color runningColor: {
+    if (runningItem && runningItem.project && runningItem.project.color)
+      return String(runningItem.project.color)
+    if (runningProject && runningProject.color) return String(runningProject.color)
+    return Commons.Color.accent
   }
-  readonly property string displayText: localizedNextName !== ""
-    ? strings.t("bar.nextStatus").arg(localizedNextName).arg(remainingShort)
-        .arg(runningTimer ? strings.t("bar.runningTimer").arg(formatMinutes(runningMinutes)) : "")
+  readonly property string barPrefix: localizedNextName !== ""
+    ? strings.t("bar.nextStatus").arg(localizedNextName).arg(remainingShort).arg("")
     : (firstLoad ? strings.t("bar.loading") : strings.t("bar.unavailableShort"))
+  // Three en spaces hold the running session's colour dot, painted over the
+  // middle one, then the elapsed time.
+  readonly property string runningGap: "\u2002\u2002\u2002"
+  readonly property string displayText: runningTimer
+    ? barPrefix + runningGap + strings.t("bar.runningTimer").arg(runningElapsedText)
+    : barPrefix
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color mutedForeground: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.58)
   readonly property bool opened: panel.open
@@ -88,6 +105,14 @@ BarWidget {
     return strings.t("unit.minutesShort").arg(Math.max(0, Math.floor(Number(value) || 0)))
   }
 
+  function formatDuration(value) {
+    var total = Math.max(0, Math.floor(Number(value) || 0))
+    if (total < 60) return formatMinutes(total)
+    var minutes = total % 60
+    return strings.t("unit.hoursMinutesShort").arg(Math.floor(total / 60))
+      .arg(minutes < 10 ? "0" + minutes : String(minutes))
+  }
+
   function countdownDeadline(status) {
     var next = status && status.next ? status.next : null
     if (!next) return 0
@@ -104,6 +129,10 @@ BarWidget {
 
   function beginOp(kind, rowKey, tempKey) {
     actionError = ""
+    if (rowErrorKey === String(rowKey || "")) {
+      rowErrorKey = ""
+      rowErrorText = ""
+    }
     var opId = client.newOpId()
     var entry = { "kind": String(kind || ""), "rowKey": String(rowKey || "") }
     if (tempKey) entry.tempKey = String(tempKey)
@@ -171,30 +200,110 @@ BarWidget {
     return null
   }
 
-  function toggleItem(row) {
-    var opId = beginOp("tick", "item:" + String(row.id))
-    client.logSession(opId, String(row.id), String(row.projectId || ""), null, {}, "", String(row.block || ""))
+  function plannerItem(id) {
+    var key = String(id || "")
+    var items = planner && planner.items ? planner.items : []
+    if (key === "") return null
+    for (var i = 0; i < items.length; i++)
+      if (String(items[i].id || "") === key) return items[i]
+    return null
   }
 
+  // `status` is passed only so a binding re-reads after each report.
+  function itemSessions(id, status) {
+    var item = plannerItem(id)
+    return item && item.sessions ? item.sessions : []
+  }
+
+  // Done box: tick an item with no sessions today, untick one whose only
+  // sessions are ticks, and open the session list of a timed one (plan.md).
+  function toggleItem(row) {
+    var rowKey = "item:" + String(row.id)
+    var decision = SessionLogic.doneAction(plannerItem(row.id))
+    if (decision.action === "tick") {
+      var opId = beginOp("tick", rowKey)
+      client.logSession(opId, String(row.id), "", null, {}, "", String(row.block || ""))
+    } else if (decision.action === "untick") {
+      for (var i = 0; i < decision.ids.length; i++)
+        client.removeSession(beginOp("untick", rowKey), "untick", decision.ids[i])
+    } else {
+      var content = panel.loadedContent
+      if (content && content.expandedItemId !== String(row.id)) content.toggleExpanded(String(row.id))
+    }
+  }
+
+  // The row's timer button: Stop (with the metric panel) on the running
+  // item, otherwise start a timer for this item.
   function toggleTimer(row) {
-    if (runningTimer) {
-      sessionLogMode = false
-      sessionPanelOpen = true
+    if (runningTimer && String(runningTimer.item_id || "") === String(row.id)) {
+      openStopPanel()
       return
     }
     var opId = beginOp("startSession", "item:" + String(row.id))
-    client.startSession(opId, String(row.id), String(row.projectId || ""))
+    client.startSession(opId, String(row.id), "")
   }
 
-  function saveSession(projectId, values, minutes, note) {
-    if (sessionLogMode) {
-      var logOp = beginOp("logSession", "")
-      client.logSession(logOp, "", projectId, minutes, values, note, "")
-    } else {
-      var stopOp = beginOp("stopSession", "")
-      client.stopSession(stopOp, runningTimer ? String(runningTimer.id || "") : "", values, note)
-    }
-    sessionPanelOpen = false
+  function openStopPanel() {
+    if (!runningTimer) return
+    sessionPanelMode = "stop"
+    sessionPanelOp = ""
+    sessionPanelError = ""
+    sessionEditorReset("")
+  }
+
+  function openLogPanel(presetKey) {
+    sessionPanelMode = "log"
+    sessionPanelOp = ""
+    sessionPanelError = ""
+    client.loadProjects()
+    client.loadMetrics()
+    sessionEditorReset(presetKey)
+  }
+
+  function closeSessionPanel() {
+    sessionPanelMode = ""
+    sessionPanelOp = ""
+    sessionPanelError = ""
+  }
+
+  function sessionEditorReset(presetKey) {
+    var content = panel.loadedContent
+    if (content && content.sessionEditor) content.sessionEditor.reset(presetKey)
+  }
+
+  function stopRunning(values, note) {
+    if (!runningTimer || sessionPanelOp !== "") return
+    sessionPanelError = ""
+    var opId = beginOp("stopSession", runningItem ? "item:" + String(runningItem.id) : "")
+    pendingOps[opId].panel = true
+    sessionPanelOp = opId
+    client.stopSession(opId, String(runningTimer.id || ""), values, note)
+  }
+
+  function logTime(target, minutes, values, note) {
+    if (!target || sessionPanelOp !== "") return
+    sessionPanelError = ""
+    var opId = beginOp("logSession", target.kind === "item" ? "item:" + String(target.id) : "")
+    pendingOps[opId].panel = true
+    sessionPanelOp = opId
+    if (target.kind === "item") client.logSession(opId, String(target.id), "", minutes, values, note, "")
+    else client.logSession(opId, "", String(target.id), minutes, values, note, "")
+  }
+
+  function removeSession(row, sessionId) {
+    var opId = beginOp("removeSession", "item:" + String(row.id))
+    client.removeSession(opId, "removeSession", sessionId)
+  }
+
+  function editSessionMinutes(row, sessionId, minutes) {
+    var opId = beginOp("editSession", "item:" + String(row.id))
+    client.editSessionMinutes(opId, sessionId, minutes)
+  }
+
+  function openApp() {
+    // A fixed argv, no shell. The app opens on its own pages.
+    Quickshell.execDetached(["salah-app"])
+    close()
   }
 
   function editItem(row, title) {
@@ -245,7 +354,10 @@ BarWidget {
       if (!status || !status.next || !(status.prayers instanceof Array))
         throw new Error("missing next/prayers fields")
       report = status
-      timerSnapshotMs = Date.now()
+      // The running session ended elsewhere (the app, the CLI): nothing is
+      // left to stop.
+      if (sessionPanelMode === "stop" && !status.running && sessionPanelOp === "")
+        closeSessionPanel()
       countdownAtMs = countdownDeadline(status)
       countdownNowMs = Date.now()
       var content = panel.loadedContent
@@ -264,6 +376,7 @@ BarWidget {
   }
 
   function handleMutationSuccess(opId, kind, result) {
+    if (opId === sessionPanelOp) closeSessionPanel()
     if (result && result.fallback) {
       clearPending(opId)
       if (kind === "add" && result.raw) {
@@ -284,16 +397,30 @@ BarWidget {
     client.refreshStatus()
   }
 
+  // Daemon errors are shown where the action was taken: inside the session
+  // panel, inside an expanded row, or under the quick-add field.
   function handleMutationFailure(opId, kind, message, data) {
+    var pending = pendingOps[opId] || {}
     clearPending(opId)
     var detail = String(message || "").trim().replace(/[\r\n]+/g, " ")
-    actionError = detail === "" ? strings.t("panel.commandFailed") : detail.slice(0, 240)
-    if ((kind === "stopSession" || kind === "logSession") && data && data.missing) {
-      sessionLogMode = kind === "logSession"
-      sessionPanelOpen = true
-      Qt.callLater(function() {
-        if (sessionEditor) sessionEditor.markMissing(data.missing)
-      })
+    detail = detail === "" ? strings.t("panel.commandFailed") : detail.slice(0, 240)
+    var content = panel.loadedContent
+    if (opId === sessionPanelOp) {
+      sessionPanelOp = ""
+      var editor = content ? content.sessionEditor : null
+      var missing = data && data.missing instanceof Array ? data.missing : []
+      if (missing.length > 0 && editor) {
+        editor.markMissing(missing)
+        sessionPanelError = strings.t("session.needMetrics").arg(editor.metricNames(missing))
+      } else {
+        sessionPanelError = detail
+      }
+    } else if (pending.rowKey && content
+        && "item:" + content.expandedItemId === pending.rowKey) {
+      rowErrorKey = pending.rowKey
+      rowErrorText = detail
+    } else {
+      actionError = detail
     }
     client.refreshStatus()
   }
@@ -318,14 +445,6 @@ BarWidget {
     running: true
     repeat: true
     onTriggered: root.countdownNowMs = Date.now()
-  }
-
-  Timer {
-    interval: 60000
-    running: root.runningTimer !== null
-    repeat: true
-    triggeredOnStart: false
-    onTriggered: root.minuteTick++
   }
 
   Timer {
@@ -354,9 +473,18 @@ BarWidget {
     onMutationSucceeded: function(opId, kind, result) { root.handleMutationSuccess(opId, kind, result) }
     onMutationFailed: function(opId, kind, message, data) { root.handleMutationFailure(opId, kind, message, data) }
     onProjectsLoaded: function(rows) { root.projects = rows || [] }
+    onMetricsLoaded: function(rows) { root.metricCatalogue = rows || [] }
+    onEntitiesChanged: function(scopes) {
+      if (scopes.indexOf("projects") >= 0 || scopes.indexOf("tags") >= 0
+          || scopes.indexOf("metrics") >= 0) client.loadProjects()
+      if (scopes.indexOf("metrics") >= 0) client.loadMetrics()
+    }
     onTransportChanged: function(active) {
       if (!active) root.refresh()
-      else client.loadProjects()
+      else {
+        client.loadProjects()
+        client.loadMetrics()
+      }
     }
   }
 
@@ -414,17 +542,49 @@ BarWidget {
     text: root.vertical ? strings.t("bar.symbol") : root.displayText
     labelVisible: true
     fixedWidth: root.vertical ? -1 : root.width
-    fontFamily: root.runningTimer ? "monospace" : (root.bar ? root.bar.fontFamily : Style.font.family)
     horizontalMargin: 8.75
     verticalPadding: 8.75
-    tooltipText: root.localizedNextName !== ""
+    tooltipText: (root.localizedNextName !== ""
       ? strings.t("bar.tooltip").arg(root.localizedNextName).arg(root.nextTime).arg(root.remainingLong)
-      : strings.t("bar.unavailable")
+      : strings.t("bar.unavailable"))
+      + (root.runningTimer
+        ? "\n" + strings.t("bar.runningTooltip").arg(root.runningTitle).arg(root.runningElapsedText) : "")
     pressFeedbackButtons: Qt.NoButton
     onPressed: function(mouseButton) {
       if (mouseButton === Qt.MiddleButton) root.syncLocation(true)
       else if (mouseButton === Qt.LeftButton) root.toggle()
     }
+  }
+
+  TextMetrics {
+    id: barPrefixMetrics
+    font.family: button.fontFamily
+    font.pixelSize: button.fontSize
+    text: root.barPrefix + "\u2002"
+  }
+
+  TextMetrics {
+    id: barGapMetrics
+    font.family: button.fontFamily
+    font.pixelSize: button.fontSize
+    text: "\u2002"
+  }
+
+  // The running session's project colour, painted into the gap the label
+  // leaves for it (the label itself is one plain-text colour). A vertical
+  // bar shows only the dot, in the corner of the symbol.
+  Rectangle {
+    readonly property real size: Math.max(5, Math.round(button.fontSize * 0.55))
+    visible: root.runningTimer !== null && button.visible
+    width: size
+    height: size
+    radius: size / 2
+    color: root.runningColor
+    x: root.vertical
+      ? button.width - size - Style.space(3)
+      : Math.round((button.width - button.labelWidth) / 2 + barPrefixMetrics.advanceWidth
+        + (barGapMetrics.advanceWidth - size) / 2)
+    y: root.vertical ? Style.space(3) : Math.round((button.height - size) / 2)
   }
 
   KeyboardPanel {
@@ -440,6 +600,7 @@ BarWidget {
     content: PanelKeyCatcher {
       id: keyCatcher
       property alias quickField: quickAdd.quickField
+      property alias sessionEditor: sessionEditor
       property alias timelineModel: timelineModel
       property alias timelineList: timelineList
       property string dragKey: ""
@@ -452,25 +613,20 @@ BarWidget {
       anchors.fill: parent
       implicitHeight: Math.min(dayColumn.implicitHeight,
         Math.max(Style.space(240), panel.availableCardHeight - panel.padding * 2))
-      blocked: quickField.activeFocus || editingKey !== ""
+      blocked: quickField.activeFocus || editingKey !== "" || sessionEditor.textFocus
       function collapseExpanded() {
         expandedItemId = ""
         editingKey = ""
       }
 
       function toggleExpanded(id) {
-        var next = expandedItemId === id ? "" : id
-        expandedItemId = next
+        expandedItemId = expandedItemId === id ? "" : id
         editingKey = ""
-        if (next !== "") Qt.callLater(function() {
-          var index = indexOfKey("item:" + next)
-          var delegate = index >= 0 ? timelineList.itemAtIndex(index) : null
-          if (delegate && delegate.focusTimeField) delegate.focusTimeField()
-        })
       }
 
       onCloseRequested: {
         if (dragKey !== "") cancelDrag()
+        else if (root.sessionPanelMode !== "") root.closeSessionPanel()
         else if (expandedItemId !== "") collapseExpanded()
         else root.close()
       }
@@ -489,7 +645,7 @@ BarWidget {
           "rowType": type, "rowKey": key, "block": block || "", "itemId": "",
           "title": "", "time": "", "itemState": "", "projectId": "", "projectColor": "transparent", "plannedMinutes": 0,
           "minutes": 0, "count": 0, "repeat": "none", "timerRunning": false,
-          "timerStartedAt": "", "timerMinutes": 0, "detailText": "",
+          "detailText": "",
           "scheduleText": "", "nextOccurrence": "", "carried": false,
           "current": false, "marked": false, "passed": false, "pending": false
         }
@@ -538,9 +694,8 @@ BarWidget {
             item.plannedMinutes = Number(source.planned_minutes) || 0
             item.minutes = Number(source.actual_minutes) || 0
             item.repeat = String(source.repeat || "none")
-            item.timerRunning = root.runningTimer && String(root.runningTimer.item_id || "") === item.itemId
-            item.timerStartedAt = item.timerRunning ? String(root.runningTimer.started_at || "") : ""
-            item.timerMinutes = item.timerRunning ? root.runningMinutes : 0
+            item.timerRunning = status.running !== null && status.running !== undefined
+              && String(status.running.item_id || "") === item.itemId
             item.detailText = String(source.detail_text || "")
             item.scheduleText = String(source.schedule_text || "")
             item.nextOccurrence = source.next_occurrence ? String(source.next_occurrence) : ""
@@ -847,6 +1002,96 @@ BarWidget {
             }
           }
 
+          // The running session: colour, what it is, elapsed time, and Stop,
+          // which works whether or not its item is already done.
+          Rectangle {
+            visible: root.runningTimer !== null && root.sessionPanelMode !== "stop"
+            width: parent.width
+            implicitHeight: Style.space(40)
+            radius: Style.cornerRadius
+            color: Style.hoverFillFor(root.foreground, Commons.Color.accent)
+
+            Rectangle {
+              id: runningDot
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(10)
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(9)
+              height: width
+              radius: width / 2
+              color: root.runningColor
+            }
+
+            Text {
+              anchors.left: runningDot.right
+              anchors.leftMargin: Style.space(8)
+              anchors.right: runningElapsed.left
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: root.runningTitle
+              color: root.foreground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.body
+              elide: Text.ElideRight
+            }
+
+            Text {
+              id: runningElapsed
+              anchors.right: stopButton.left
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: root.runningElapsedText
+              color: root.foreground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.body
+              font.bold: true
+            }
+
+            Button {
+              id: stopButton
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(6)
+              anchors.verticalCenter: parent.verticalCenter
+              height: Style.space(28)
+              text: strings.t("session.stop")
+              tooltipText: strings.t("session.stopTooltip")
+              bordered: true
+              foreground: root.foreground
+              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+              fontSize: Style.font.bodySmall
+              horizontalPadding: Style.space(8)
+              verticalPadding: 0
+              onClicked: root.openStopPanel()
+            }
+          }
+
+          SessionPanel {
+            id: sessionEditor
+            visible: root.sessionPanelMode !== ""
+            mode: root.sessionPanelMode === "log" ? "log" : "stop"
+            sessionTitle: root.runningTitle
+            elapsedText: root.runningElapsedText
+            stopMetrics: SessionLogic.stopMetrics(root.report ? root.report.prompt : [],
+              root.runningTimer, root.metricCatalogue)
+            items: root.planner && root.planner.items ? root.planner.items : []
+            projects: root.projects
+            metricCatalogue: root.metricCatalogue
+            busy: root.sessionPanelOp !== ""
+            errorText: root.sessionPanelError
+            strings: root.tr
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            foreground: root.foreground
+            mutedForeground: root.mutedForeground
+            onStopRequested: function(values, note) { root.stopRunning(values, note) }
+            onLogRequested: function(target, minutes, values, note) {
+              root.logTime(target, minutes, values, note)
+            }
+            onCancelRequested: root.closeSessionPanel()
+            onOpenAppRequested: root.openApp()
+          }
+
           QuickAdd {
             id: quickAdd
             strings: root.tr
@@ -858,46 +1103,17 @@ BarWidget {
             actionError: root.actionError
           }
 
-          Row {
-            width: parent.width
-            spacing: Style.space(6)
-            Button {
-              text: "+ Log"
-              foreground: root.foreground
-              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-              bordered: true
-              onClicked: {
-                root.sessionLogMode = true
-                root.sessionPanelOpen = true
-                sessionEditor.reset()
-                client.loadProjects()
-              }
-            }
-            Text {
-              visible: root.runningTimer !== null
-              anchors.verticalCenter: parent.verticalCenter
-              textFormat: Text.PlainText
-              text: root.runningTimer && root.runningTimer.project
-                ? String(root.runningTimer.project.name || "") + " · " + root.formatMinutes(root.runningMinutes) : ""
-              color: root.mutedForeground
-              font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            }
-          }
-
-          SessionPanel {
-            id: sessionEditor
-            visible: root.sessionPanelOpen
-            logMode: root.sessionLogMode
-            metrics: root.report && root.report.prompt ? root.report.prompt : []
-            projects: root.projects
-            strings: root.tr
-            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+          Button {
+            visible: root.sessionPanelMode !== "log"
+            height: Style.space(26)
+            text: strings.t("panel.log")
             foreground: root.foreground
-            mutedForeground: root.mutedForeground
-            onSaveRequested: function(projectId, values, minutes, note) {
-              root.saveSession(projectId, values, minutes, note)
-            }
-            onCancelRequested: root.sessionPanelOpen = false
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            fontSize: Style.font.bodySmall
+            horizontalPadding: Style.space(8)
+            verticalPadding: 0
+            bordered: true
+            onClicked: root.openLogPanel("")
           }
 
           PanelSeparator {

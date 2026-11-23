@@ -25,6 +25,10 @@ Item {
   signal statusLoaded(var report)
   signal statusFailed(string message)
   signal projectsLoaded(var projects)
+  signal metricsLoaded(var metrics)
+  // Entity scopes named by a `changed` notification (items, sessions,
+  // projects, tags, metrics, marks), for lists the status does not carry.
+  signal entitiesChanged(var scopes)
   signal mutationSucceeded(string opId, string kind, var result)
   signal mutationFailed(string opId, string kind, string message, var data)
   signal transportChanged(bool socketActive)
@@ -220,7 +224,9 @@ Item {
     if (message.error) {
       var detail = client.errorDetail(message.error)
       if (meta.type === "status") client.handleStatusFailure(detail)
-      else if (meta.type === "projects") client.statusFailed(detail)
+      else if (meta.type === "projects" || meta.type === "metrics") {
+        // The planner still works without these lists; the panels say so.
+      }
       else if (meta.type === "mutation") {
         delete client.activeOps[meta.opId]
         client.mutationFailed(meta.opId, meta.kind, detail, message.error.data || {})
@@ -239,6 +245,8 @@ Item {
       client.handleStatusResult(meta, result)
     } else if (meta.type === "projects") {
       client.projectsLoaded(result || [])
+    } else if (meta.type === "metrics") {
+      client.metricsLoaded(result || [])
     } else if (meta.type === "mutation") {
       delete client.activeOps[meta.opId]
       var revision = Number(result && result.revision) || 0
@@ -334,7 +342,9 @@ Item {
     var revision = Number(params.revision) || 0
     client.lastKnownRevision = Math.max(client.lastKnownRevision, revision)
     var opId = String(params.op_id || "")
-    // Our own mutation response already carries the canonical rows.
+    client.entitiesChanged(params.scopes instanceof Array ? params.scopes : [])
+    // Our own mutation response already carries the canonical rows, and the
+    // widget refetches status after every mutation it sends.
     if (opId !== "" && client.activeOps[opId]) return
     if (revision !== 0 && revision <= client.lastStatusRevision) return
     client.requestStatus(revision)
@@ -381,6 +391,13 @@ Item {
     client.fallback(opId, "add", command)
   }
 
+  function valueArgs(values) {
+    var args = []
+    for (var key in values || {})
+      args = args.concat(["--value", String(key) + "=" + String(Number(values[key]))])
+    return args
+  }
+
   function logSession(opId, itemId, projectId, minutes, values, note, block) {
     if (client.socketActive) {
       var params = { "values": values || {} }
@@ -396,6 +413,9 @@ Item {
     if (String(itemId || "") !== "") command = command.concat(["--item", String(itemId)])
     if (String(projectId || "") !== "") command = command.concat(["--project", String(projectId)])
     if (minutes !== undefined && minutes !== null) command = command.concat(["--minutes", String(Number(minutes))])
+    if (String(block || "") !== "") command = command.concat(["--block", String(block)])
+    command = command.concat(client.valueArgs(values))
+    if (String(note || "") !== "") command.push("--note=" + String(note))
     client.fallback(opId, "logSession", command)
   }
 
@@ -407,7 +427,10 @@ Item {
       client.sendMutation(opId, "startSession", "session.start", params)
       return
     }
-    client.fallback(opId, "startSession", ["salah", "session", "start", "--json", "--item", String(itemId)])
+    var command = ["salah", "session", "start", "--json"]
+    if (String(itemId || "") !== "") command = command.concat(["--item", String(itemId)])
+    else if (String(projectId || "") !== "") command = command.concat(["--project", String(projectId)])
+    client.fallback(opId, "startSession", command)
   }
 
   function stopSession(opId, sessionId, values, note) {
@@ -418,7 +441,29 @@ Item {
       client.sendMutation(opId, "stopSession", "session.stop", params)
       return
     }
-    client.fallback(opId, "stopSession", ["salah", "session", "stop", "--json"])
+    var command = ["salah", "session", "stop", "--json"]
+    if (String(sessionId || "") !== "") command = command.concat(["--id", String(sessionId)])
+    command = command.concat(client.valueArgs(values))
+    if (String(note || "") !== "") command.push("--note=" + String(note))
+    client.fallback(opId, "stopSession", command)
+  }
+
+  function removeSession(opId, kind, sessionId) {
+    if (client.socketActive) {
+      client.sendMutation(opId, kind, "session.remove", { "id": String(sessionId) })
+      return
+    }
+    client.fallback(opId, kind, ["salah", "session", "remove", "--json", String(sessionId)])
+  }
+
+  function editSessionMinutes(opId, sessionId, minutes) {
+    if (client.socketActive) {
+      client.sendMutation(opId, "editSession", "session.edit",
+        { "id": String(sessionId), "minutes": Number(minutes) })
+      return
+    }
+    client.fallback(opId, "editSession", ["salah", "session", "edit", "--json",
+      "--minutes", String(Number(minutes)), String(sessionId)])
   }
 
   function moveItem(opId, itemId, block, index, afterId, beforeId) {
@@ -485,6 +530,11 @@ Item {
   function loadProjects() {
     if (client.socketActive)
       client.request("projects.list", { "archived": false }, { "type": "projects" })
+  }
+
+  function loadMetrics() {
+    if (client.socketActive)
+      client.request("metrics.list", { "archived": false }, { "type": "metrics" })
   }
 
   Component.onCompleted: {

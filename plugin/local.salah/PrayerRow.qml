@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // One prayer/block header row with its mark circle, time, and NOW tag.
@@ -24,11 +25,9 @@ Item {
   Rectangle {
     anchors.fill: parent
     radius: Style.cornerRadius
-    color: root.current
-      ? Style.selectedFillFor(root.foreground, Commons.Color.accent)
-      : (headerHover.containsMouse
-          ? Style.hoverFillFor(root.foreground, Commons.Color.accent)
-          : "transparent")
+    color: root.current || headerHover.containsMouse
+      ? Style.hoverFillFor(root.foreground, Commons.Color.accent)
+      : "transparent"
 
     Rectangle {
       id: prayerCircle
