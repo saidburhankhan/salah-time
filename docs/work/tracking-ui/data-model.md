@@ -217,7 +217,9 @@ CREATE TABLE item_tags (
 );
 CREATE INDEX item_tags_by_tag ON item_tags (tag_id);
 INSERT INTO item_tags (item_id, tag_id)
-    SELECT i.id, pt.tag_id FROM items i JOIN project_tags pt ON pt.project_id = i.project_id;
+    SELECT i.id, pt.tag_id FROM items i
+    JOIN project_tags pt ON pt.project_id = i.project_id
+    JOIN tags t ON t.id = pt.tag_id AND t.deleted_at IS NULL;
 ```
 
 Rules:
@@ -237,6 +239,9 @@ Rules:
   set = its item's tags, or its project's tags when it has no item, resolved at read time. The
   migration test checks every pre-005 item of a tagged project ends up with that project's tags
   and that `stats.table` group "tag" totals are identical before and after 005.
+  Accepted change (orchestrator, 23:20): a session whose task later moved to another project, or
+  was given one, takes the task's current tags (live copy: 6 sessions, 21 min, logged before their
+  task had a project, move from "No tag" to the task's tags). Removed tags are not copied.
 
 ## Review gates
 
