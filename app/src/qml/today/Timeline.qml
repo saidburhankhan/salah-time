@@ -89,6 +89,30 @@ Item {
             model.moveRow(from, Math.max(0, Math.min(idx, model.count - 1)))
     }
 
+    // The prayer block under a point (win.contentItem coordinates) while a
+    // backlog task is dragged over Today; "" outside a block.
+    function dropBlock(point) {
+        var p = todayList.mapFromItem(win.contentItem, point.x, point.y)
+        if (!todayList.contains(p)) return ""
+        var model = backend.dayTimeline
+        var idx = todayList.indexAt(10, p.y + todayList.contentY)
+        if (idx < 0 || model.kindAt(idx) === "marker") return ""
+        for (var h = idx; h >= 0; h--) {
+            if (model.kindAt(h) === "header") return model.blockAt(h)
+        }
+        return ""
+    }
+
+    function scrollForBacklogDrag(point) {
+        var p = todayList.mapFromItem(win.contentItem, point.x, point.y)
+        if (!todayList.contains(p)) return
+        var delta = p.y < 36 ? -14 : p.y > todayList.height - 36 ? 14 : 0
+        if (delta !== 0)
+            todayList.contentY = Math.max(todayList.originY,
+                Math.min(todayList.originY + Math.max(0, todayList.contentHeight - todayList.height),
+                         todayList.contentY + delta))
+    }
+
     function finishDrag(cancelled) {
         if (!dragging) return
         var model = backend.dayTimeline

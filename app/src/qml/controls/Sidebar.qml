@@ -6,6 +6,7 @@ import "."
 Rectangle {
     id: sidebar
     property var win
+    property alias todayLink: todayLink
     Layout.preferredWidth: 220
     Layout.fillHeight: true
     color: "#1c1b18"
@@ -45,16 +46,32 @@ Rectangle {
                 font.weight: Font.DemiBold
             }
         }
+        SidebarItem {
+            id: todayLink
+            objectName: "todaySidebarItem"
+            appWindow: sidebar.win
+            pageIndex: 0
+            label: qsTr("Today")
+            iconKind: "today"
+            dropTarget: sidebar.win.backlogDrag.active
+        }
+        SidebarItem {
+            objectName: "backlogSidebarItem"
+            appWindow: sidebar.win
+            pageIndex: 5
+            label: qsTr("Backlog")
+            iconKind: "backlog"
+        }
         Repeater {
-            model: [qsTr("Today"), qsTr("Routines"), qsTr("Statistics")]
+            model: [qsTr("Routines"), qsTr("Statistics")]
             SidebarItem {
                 required property string modelData
                 required property int index
                 appWindow: sidebar.win
-                pageIndex: index
+                pageIndex: index + 1
                 label: modelData
-                iconKind: index === 0 ? "today" : index === 1 ? "routines" : "statistics"
-                loadStatsOnClick: index === 2
+                iconKind: index === 0 ? "routines" : "statistics"
+                loadStatsOnClick: index === 1
             }
         }
         Rectangle {

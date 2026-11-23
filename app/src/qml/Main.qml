@@ -8,6 +8,7 @@ import "pages"
 import "overlays"
 import "controls"
 import "today"
+import "backlog"
 
 ApplicationWindow {
     id: win
@@ -22,7 +23,7 @@ ApplicationWindow {
     Material.accent: theme.accent
     Material.roundedScale: theme.radius
 
-    // 0 Today, 1 Routines, 2 Statistics, 3 Settings, 4 an Epic (not in the sidebar).
+    // 0 Today, 1 Routines, 2 Statistics, 3 Settings, 4 an Epic, 5 Backlog.
     property int page: 0
     property string epicId: ""
     property int epicBackPage: 2
@@ -68,6 +69,7 @@ ApplicationWindow {
     property alias dragDetail: todayPage.dragDetail
     property alias dragDone: todayPage.dragDone
     property alias dragPayload: todayPage.dragPayload
+    property alias backlogDrag: backlogDrag
 
     function beginDrag(rowIndex, id, globalY, title, detail, done) { todayPage.beginDrag(rowIndex, id, globalY, title, detail, done) }
     function updateDrag(globalY) { todayPage.updateDrag(globalY) }
@@ -87,6 +89,8 @@ ApplicationWindow {
         entryVisible = true
     }
     function openEntryFromParse(title) { editItem = backend.itemFromParse(title || ""); entryVisible = true }
+    function openBacklogEntry() { openEntry({ backlog: true }) }
+    function openSchedule(item) { scheduleDialog.show(item) }
     function locationName() { return backend.config.locationName || backend.config.location || qsTr("Location") }
     function methodName() { return backend.config.methodName || backend.config.method || "—" }
     function capitalized(s) { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1) }
@@ -122,6 +126,7 @@ ApplicationWindow {
         if (entryVisible) { entryVisible = false; return true }
         if (quickVisible) { quickVisible = false; return true }
         if (dragging) { finishDrag(true); return true }
+        if (backlogDrag.active) { backlogDrag.finish(true); return true }
         return false
     }
     function joinedDetail(block, schedule) {
@@ -431,6 +436,7 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
         Sidebar {
+            id: sidebar
             win: win
         }
         Item {
@@ -446,13 +452,26 @@ ApplicationWindow {
                     win: win
                 }
 
-                TodayPage {
-                    id: todayPage
-                    visible: win.page === 0
+                Item {
+                    visible: win.page === 0 || win.page === 5
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.margins: 28
-                    win: win
+                    TodayPage {
+                        id: todayPage
+                        anchors.fill: parent
+                        visible: win.page === 0
+                        win: win
+                    }
+                    BacklogPage {
+                        id: backlogPage
+                        anchors.fill: parent
+                        visible: win.page === 5 || backlogDrag.active
+                        // A drag handle keeps its mouse grab across navigation.
+                        opacity: win.page === 5 ? 1 : 0
+                        enabled: win.page === 5 || backlogDrag.active
+                        win: win
+                    }
                 }
                 RoutinesPage {
                     visible: win.page === 1
@@ -490,6 +509,17 @@ ApplicationWindow {
     }
 
     DragGhost {
+        win: win
+    }
+    BacklogDrag {
+        id: backlogDrag
+        win: win
+        backlogPage: backlogPage
+        todayPage: todayPage
+        todayLink: sidebar.todayLink
+    }
+    ScheduleDialog {
+        id: scheduleDialog
         win: win
     }
 

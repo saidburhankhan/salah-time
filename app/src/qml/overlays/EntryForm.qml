@@ -8,6 +8,7 @@ Popup {
     objectName: "entryPopup"
     property var win
     property var item: ({})
+    readonly property bool backlog: !!item.backlog
     property string block: item.block || "fajr"
     property string repeat: item.repeat || "none"
     property var days: item.weekdays || []
@@ -63,7 +64,7 @@ Popup {
         refreshPreview()
     }
     function refreshPreview() {
-        if (!weeklyValid) return
+        if (!visible || backlog || !weeklyValid) return
         backend.previewItem(draft())
     }
     onBlockChanged: previewTimer.restart()
@@ -83,12 +84,15 @@ Popup {
         var result = {
             id: item.id || "",
             title: entryFields.titleText,
-            block: block,
             project_id: projectId,
             planned_minutes: goal > 0 ? goal : 0,
             repeat: repeat,
             weekdays: repeat === "weekly" ? days : []
         }
+        if (backlog)
+            result.backlog = true
+        else
+            result.block = block
         if (metricIdsEdited && !projectChanged)
             result.metric_ids = metricIds
         // Sent when an epic is chosen, or to clear the one the task had.
@@ -126,12 +130,20 @@ Popup {
         metricIds = null
         metricIdsEdited = true
     }
-    function submitTitle() {
+    function submitTitle(keepOpen) {
         if (!entryFields.titleText.trim() || !weeklyValid) return
         var d = draft()
-        win.maybeToast(d)
+        if (!backlog)
+            win.maybeToast(d)
         backend.saveItem(d)
-        win.entryVisible = false
+        if (keepOpen) {
+            win.editItem = backlog ? ({ backlog: true }) : ({})
+            metricIds = null
+            metricIdsEdited = false
+            entryFields.clearTitle()
+        } else {
+            win.entryVisible = false
+        }
     }
     function toggleDay(d) {
         var a = days.slice()
@@ -169,7 +181,9 @@ Popup {
             Layout.leftMargin: 22
             Layout.rightMargin: 22
             Label {
-                text: entryPopup.item.id ? qsTr("Edit entry") : qsTr("New entry")
+                text: entryPopup.backlog
+                    ? (entryPopup.item.id ? qsTr("Edit backlog task") : qsTr("New backlog task"))
+                    : (entryPopup.item.id ? qsTr("Edit entry") : qsTr("New entry"))
                 color: entryPopup.win.text
                 font.pixelSize: 20
                 font.weight: Font.DemiBold
@@ -197,27 +211,14 @@ Popup {
                 win: entryPopup.win
                 text: qsTr("Save & add another")
                 enabled: entryFields.titleText.trim() !== "" && entryPopup.weeklyValid
-                onClicked: {
-                    var d = entryPopup.draft()
-                    entryPopup.win.maybeToast(d)
-                    backend.saveItem(d)
-                    entryPopup.win.editItem = ({})
-                    entryPopup.metricIds = null
-                    entryPopup.metricIdsEdited = false
-                    entryFields.clearTitle()
-                }
+                onClicked: entryPopup.submitTitle(true)
             }
             AppButton {
                 win: entryPopup.win
                 text: qsTr("Save  ↵")
                 primary: true
                 enabled: entryFields.titleText.trim() !== "" && entryPopup.weeklyValid
-                onClicked: {
-                    var d = entryPopup.draft()
-                    entryPopup.win.maybeToast(d)
-                    backend.saveItem(d)
-                    entryPopup.win.entryVisible = false
-                }
+                onClicked: entryPopup.submitTitle(false)
             }
         }
         Rectangle {
@@ -236,6 +237,7 @@ Popup {
                 form: entryPopup
             }
             ColumnLayout {
+                visible: !entryPopup.backlog
                 Layout.preferredWidth: 340
                 Layout.minimumWidth: 280
                 Layout.maximumWidth: 360

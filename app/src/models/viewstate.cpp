@@ -129,6 +129,7 @@ void PreviewState::clear() {
 ItemDraft::ItemDraft(QObject *parent) : QObject(parent) {}
 
 void ItemDraft::update(const QJsonObject &row) {
+    m_backlog = row.value(QStringLiteral("backlog")).toBool();
     m_id = row.value(QStringLiteral("id")).toString();
     m_title = row.value(QStringLiteral("title")).toString();
     m_block = row.value(QStringLiteral("block")).toString();
@@ -157,6 +158,7 @@ void ItemDraft::update(const Dto::ParseDraft &draft) {
 }
 
 void ItemDraft::clear() {
+    m_backlog = false;
     m_id.clear();
     m_title.clear();
     m_block = QStringLiteral("fajr");

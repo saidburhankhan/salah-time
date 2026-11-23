@@ -27,6 +27,8 @@ Item {
             PathSvg {
                 path: sidebarIcon.kind === "today"
                     ? "M3 5.5 L15 5.5 M6 2.5 L6 5 M12 2.5 L12 5 M4.5 3.5 L13.5 3.5 Q15 3.5 15 5 L15 14 Q15 15.5 13.5 15.5 L4.5 15.5 Q3 15.5 3 14 L3 5 Q3 3.5 4.5 3.5"
+                    : sidebarIcon.kind === "backlog"
+                        ? "M3 4 L15 4 L15 14 L3 14 Z M3 10 L6.5 10 L7.5 11.5 L10.5 11.5 L11.5 10 L15 10"
                     : sidebarIcon.kind === "routines"
                         ? "M14.5 5.5 L14.5 2.5 M14.5 5.5 L11.5 5.5 M14.3 5.3 A6.5 6.5 0 1 0 15 11"
                         : sidebarIcon.kind === "statistics"

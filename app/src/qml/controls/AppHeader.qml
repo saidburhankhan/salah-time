@@ -39,18 +39,26 @@ Rectangle {
             Layout.fillWidth: true
             text: header.win.page === 1 ? qsTr("Routines")
                 : header.win.page === 2 ? qsTr("Statistics")
-                : header.win.page === 4 ? qsTr("Epic") : qsTr("Settings")
+                : header.win.page === 4 ? qsTr("Epic")
+                : header.win.page === 5 ? qsTr("Backlog") : qsTr("Settings")
             color: header.win.text
             font.pixelSize: 22
             font.weight: Font.DemiBold
         }
         AppButton {
             win: header.win
-            visible: header.win.page === 0
+            objectName: "addEntryButton"
+            visible: header.win.page === 0 || header.win.page === 5
+            enabled: header.win.page === 0 || !backend.offlineMode
             text: qsTr("+  Add")
             primary: true
             Layout.alignment: Qt.AlignRight
-            onClicked: header.win.openQuick("")
+            onClicked: {
+                if (header.win.page === 5)
+                    header.win.openBacklogEntry()
+                else
+                    header.win.openQuick("")
+            }
         }
     }
     Rectangle {

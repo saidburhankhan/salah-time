@@ -190,6 +190,7 @@ private:
 
 class ItemDraft : public QObject {
     Q_OBJECT
+    Q_PROPERTY(bool backlog READ backlog NOTIFY changed)
     Q_PROPERTY(QString id READ id NOTIFY changed)
     Q_PROPERTY(QString title READ title NOTIFY changed)
     Q_PROPERTY(QString block READ block NOTIFY changed)
@@ -205,6 +206,7 @@ public:
     explicit ItemDraft(QObject *parent = nullptr);
 
     QString id() const { return m_id; }
+    bool backlog() const { return m_backlog; }
     QString title() const { return m_title; }
     QString block() const { return m_block; }
     QString repeat() const { return m_repeat; }
@@ -225,6 +227,7 @@ signals:
 
 private:
     QString m_id, m_title, m_block = QStringLiteral("fajr"), m_repeat = QStringLiteral("none");
+    bool m_backlog = false;
     QStringList m_weekdays;
     QString m_measure = QStringLiteral("check");
     int m_target = 0;

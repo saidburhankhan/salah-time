@@ -196,6 +196,7 @@ void Backend::reload() {
     m_client.status(readResponse([this](const CoreClient::Result &result) {
         if (const auto *json = std::get_if<Dto::Json>(&result.value)) applyStatus(json->json);
     }));
+    refreshBacklog();
 }
 
 void Backend::applyStatus(const QJsonObject &status) {
@@ -593,6 +594,7 @@ void Backend::saveItem(const QVariantMap &item) {
     const QString id = item.value(QStringLiteral("id")).toString();
     CoreClient::ItemFields fields;
     fields.title = item.value(QStringLiteral("title")).toString();
+    fields.backlog = item.value(QStringLiteral("backlog")).toBool();
     fields.block = item.value(QStringLiteral("block"), QStringLiteral("fajr")).toString();
     fields.repeat = item.value(QStringLiteral("repeat"), QStringLiteral("none")).toString();
     fields.weekdays = item.value(QStringLiteral("weekdays")).toStringList();
@@ -606,6 +608,10 @@ void Backend::saveItem(const QVariantMap &item) {
     fields.plannedMinutes = item.value(QStringLiteral("planned_minutes")).toInt();
     fields.hasPlannedMinutes = fields.plannedMinutes > 0;
     if (id.isEmpty()) {
+        if (fields.backlog) {
+            m_client.itemAdd(fields, mutationResponse());
+            return;
+        }
         if (fields.repeat == QStringLiteral("none") && m_selected != m_today) fields.date = m_selected;
         fields.opId = CoreClient::makeOpId();
         PendingCreate pending;
@@ -621,13 +627,14 @@ void Backend::saveItem(const QVariantMap &item) {
         m_client.itemAdd(fields, mutationResponse(pending.localId, fields.opId));
     } else {
         setItemPending(id, true);
-        m_client.itemEdit(id, fields, mutationResponse(id), versionFor(id));
+        m_client.itemEdit(id, fields, mutationResponse(id),
+                          fields.backlog ? backlogVersionFor(id) : versionFor(id));
     }
 }
 
 void Backend::removeItem(const QString &id) {
     setItemPending(id, true);
-    m_client.itemRemove(id, mutationResponse(id), versionFor(id));
+    m_client.itemRemove(id, mutationResponse(id), m_backlogOpen ? backlogVersionFor(id) : versionFor(id));
 }
 
 int Backend::legacyMoveIndex(const QString &id, const QString &block, const QString &afterId,
@@ -904,6 +911,14 @@ void Backend::setSelectedStatsItem(const QString &id) {
 }
 
 ItemDraft *Backend::itemForId(const QString &id) {
+    if (m_backlogOpen) {
+        const QVariantMap row = backlogItem(id);
+        if (!row.isEmpty()) {
+            m_editItem->update(QJsonObject::fromVariantMap(row));
+            emit editItemChanged();
+            return m_editItem;
+        }
+    }
     bool found = false;
     for (const Dto::DayBlock &block : m_dayPlan.blocks) {
         for (const Dto::DayItem &item : block.items) {

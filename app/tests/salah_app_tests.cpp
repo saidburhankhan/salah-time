@@ -384,6 +384,7 @@ esac
     struct TrackingState {
         QJsonObject day;
         QJsonObject status;
+        QJsonArray backlog;
         qint64 revision = 100;
     };
     static QJsonObject emptyChanged() {
@@ -455,6 +456,16 @@ esac
                 QJsonArray rows;
                 for (const QJsonValue &row : TrackingFixture::epics())
                     if (!params.contains("project_id") || row.toObject().value("project_id") == params.value("project_id")) rows.append(row);
+                server->respond(socket, request, rows);
+            }
+            else if (method == "backlog.list") {
+                QJsonArray rows;
+                for (const QJsonValue &row : state->backlog) {
+                    const QString project = params.value("project_id").toString();
+                    const QJsonObject owner = row.toObject().value("project").toObject();
+                    if (project.isEmpty() || (project == "none" ? owner.isEmpty() : owner.value("id").toString() == project))
+                        rows.append(row);
+                }
                 server->respond(socket, request, rows);
             }
             else if (method == "tags.list") server->respond(socket, request, TrackingFixture::tags());
@@ -2776,6 +2787,139 @@ fi
                                       "--min-minutes 10 --max-minutes 60 --interval day --measure minutes --min focus=3.5"));
     }
 
+    static QJsonArray backlogRows() {
+        const QJsonObject base = readJson(QStringLiteral(TEST_SOURCE_DIR "/../../crates/salah-cli/tests/fixtures/rpc/backlog_list.json")).object().value("result").toArray().first().toObject();
+        auto row = [&](const QString &id, const QString &title, const QString &project, const QString &name,
+                       const QString &color, const QString &epic, int minutes, int notes, int links) {
+            QJsonObject r = base;
+            r["id"] = id; r["title"] = title; r["epic_id"] = epic.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(epic);
+            r["project"] = project.isEmpty() ? QJsonValue(QJsonValue::Null)
+                : QJsonValue(QJsonObject{{"id", project}, {"name", name}, {"color", color}, {"tag_ids", QJsonArray{}}});
+            r["planned_minutes"] = minutes > 0 ? QJsonValue(minutes) : QJsonValue(QJsonValue::Null);
+            r["resources"] = QJsonObject{{"notes", notes}, {"links", links}, {"reminders", 0}};
+            return r;
+        };
+        return QJsonArray{
+            row("b1", "Read chapter 4", "study", "Study", "#4f7a6a", "e-grammar", 40, 1, 2),
+            row("b2", "Verb tables", "study", "Study", "#4f7a6a", "e-grammar", 25, 0, 0),
+            row("b3", "Sort the reading list", "study", "Study", "#4f7a6a", "", 0, 0, 1),
+            row("b4", "Review Juz 30", "quran", "Quran", "#7a6a4f", "e-juz", 30, 2, 0),
+            row("b5", "Call the bank", "", "", "", "", 15, 0, 0)};
+    }
+    void backlogRequestsFollowCanonicalFixtures() {
+        for (const char *name : {"item_add_backlog", "item_schedule", "item_backlog"})
+            QVERIFY2(Dto::decode<Dto::MutationResult>(fixture(name)), name);
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        auto state = trackingState();
+        state->backlog = backlogRows();
+        daemon.setHandler(trackingHandler(state));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        backend.reload();
+        waitForBackendIdle(backend);
+        backend.loadBacklog("", "study");
+        QTRY_COMPARE_WITH_TIMEOUT(backend.backlogItems().size(), 3, 3000);
+        QCOMPARE(lastRequest(daemon, "backlog.list").value("params").toObject().value("project_id").toString(), QString("study"));
+        backend.loadBacklog("", "");
+        QTRY_COMPARE_WITH_TIMEOUT(backend.backlogItems().size(), 5, 3000);
+
+        backend.scheduleItem("b1", "2031-05-15", "asr");
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "item.schedule").isEmpty(), 3000);
+        QJsonObject params = lastRequest(daemon, "item.schedule").value("params").toObject();
+        QCOMPARE(params.value("id").toString(), QString("b1"));
+        QCOMPARE(params.value("day").toString(), QString("2031-05-15"));
+        QCOMPARE(params.value("block").toString(), QString("asr"));
+        QVERIFY(params.contains("expected_version") && params.contains("op_id"));
+
+        backend.moveBacklogItem("b2", "b1", true);
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "item.move").isEmpty(), 3000);
+        params = lastRequest(daemon, "item.move").value("params").toObject();
+        QVERIFY(params.value("block").isNull());
+        QCOMPARE(params.value("before_id").toString(), QString("b1"));
+        QVERIFY(!params.contains("after_id"));
+
+        backend.sendToBacklog("deep");
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "item.backlog").isEmpty(), 3000);
+        QCOMPARE(lastRequest(daemon, "item.backlog").value("params").toObject().value("id").toString(), QString("deep"));
+
+        backend.saveItem(QVariantMap{{"title", "Plan trip"}, {"backlog", true}, {"repeat", "none"}});
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "item.add").isEmpty(), 3000);
+        params = lastRequest(daemon, "item.add").value("params").toObject();
+        QVERIFY(params.value("backlog").toBool());
+        QVERIFY(!params.contains("block") && !params.contains("date"));
+        QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
+    }
+    void backlogScreens() {
+        QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        auto state = trackingState();
+        state->backlog = backlogRows();
+        {
+            // One one-time item in view: only those offer "-> Backlog".
+            QJsonArray blocks = state->day.value("blocks").toArray();
+            for (int b = 0; b < blocks.size(); ++b) {
+                QJsonObject block = blocks.at(b).toObject();
+                QJsonArray items = block.value("items").toArray();
+                for (int i = 0; i < items.size(); ++i) {
+                    QJsonObject item = items.at(i).toObject();
+                    if (item.value("id").toString() == "dhikr") { item["repeat"] = "none"; items[i] = item; }
+                }
+                block["items"] = items; blocks[b] = block;
+            }
+            state->day["blocks"] = blocks;
+        }
+        daemon.setHandler(trackingHandler(state));
+        Backend backend(nullptr, QString(), 3000, daemon_path(dir));
+        Theme theme(dir.path());
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(TEST_SOURCE_DIR "/../src/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create()); QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data()); QVERIFY(window);
+        window->setWidth(1440); window->setHeight(900); window->show();
+        backend.reload();
+        waitForBackendIdle(backend);
+        shotWindow(window, "today-to-backlog.png");
+        bool anyToBacklog = false;
+        for (QObject *button : visualNamed(window, "toBacklogButton"))
+            anyToBacklog = anyToBacklog || button->property("visible").toBool();
+        QVERIFY(anyToBacklog);
+
+        root->setProperty("page", 5);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.backlogItems().size(), 5, 3000);
+        shotWindow(window, "backlog-page.png");
+        QObject *list = findByName(root.data(), "backlogTaskList"); QVERIFY(list);
+        // 3 project headings + 2 epic headings + (study has one epic-less group) + 5 tasks.
+        QVERIFY(list->property("count").toInt() >= 10);
+        QVERIFY(!visualNamed(window, "backlogHandle_b1").isEmpty());
+        QObject *project = visualNamed(window, "backlogProject_quran").value(0); QVERIFY(project);
+        QVERIFY(QMetaObject::invokeMethod(project, "clicked"));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.backlogItems().size(), 1, 3000);
+        QCOMPARE(lastRequest(daemon, "backlog.list").value("params").toObject().value("project_id").toString(), QString("quran"));
+        shotWindow(window, "backlog-filtered.png");
+        QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "backlogProject_").value(0), "clicked"));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.backlogItems().size(), 5, 3000);
+
+        QObject *dialog = findByName(root.data(), "scheduleDialog"); QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "openSchedule", Q_ARG(QVariant, backend.backlogItems().first())));
+        QTRY_VERIFY_WITH_TIMEOUT(dialog->property("visible").toBool(), 2000);
+        QObject *tomorrow = findItemByName(dialog->property("contentItem").value<QQuickItem *>(), "scheduleTomorrow"); QVERIFY(tomorrow);
+        QVERIFY(QMetaObject::invokeMethod(tomorrow, "clicked"));
+        shotWindow(window, "schedule-dialog.png");
+        QObject *dateChip = findItemByName(dialog->property("contentItem").value<QQuickItem *>(), "scheduleDate");
+        QVERIFY(QMetaObject::invokeMethod(dateChip, "clicked"));
+        shotWindow(window, "schedule-dialog-date.png");
+        QVERIFY(QMetaObject::invokeMethod(tomorrow, "clicked"));
+        QObject *asr = findItemByName(dialog->property("contentItem").value<QQuickItem *>(), "scheduleBlock_asr");
+        QVERIFY(QMetaObject::invokeMethod(asr, "clicked"));
+        QVERIFY(dialog->property("canSave").toBool());
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(dialog->property("contentItem").value<QQuickItem *>(), "scheduleConfirm"), "clicked"));
+        QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "item.schedule").isEmpty(), 3000);
+        const QJsonObject params = lastRequest(daemon, "item.schedule").value("params").toObject();
+        QCOMPARE(params.value("block").toString(), QString("asr"));
+        QCOMPARE(params.value("day").toString(), dialog->property("tomorrowText").toString());
+        QTRY_VERIFY_WITH_TIMEOUT(!dialog->property("visible").toBool(), 3000);
+        QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
+        window->hide();
+    }
     void trackingUiScreens() {
         QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
         auto state = trackingState();
@@ -2825,6 +2969,16 @@ fi
         QVERIFY(QMetaObject::invokeMethod(finish, "clicked"));
         QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "epic.edit").isEmpty(), 3000);
         QCOMPARE(lastRequest(daemon, "epic.edit").value("params").toObject().value("status").toString(), QString("finished"));
+        {
+            // Rename through the UI: the field is filled, Save sends epic.edit with the new name.
+            QVERIFY(QMetaObject::invokeMethod(findItemByName(emptyRow, "epicRenameButton"), "clicked"));
+            QObject *field = findItemByName(emptyRow, "epicRenameField"); QVERIFY(field);
+            QCOMPARE(field->property("text").toString(), QString("Reading list"));
+            field->setProperty("text", "Reading shelf");
+            QVERIFY(QMetaObject::invokeMethod(findItemByName(emptyRow, "epicRenameSave"), "clicked"));
+            QTRY_COMPARE_WITH_TIMEOUT(lastRequest(daemon, "epic.edit").value("params").toObject().value("name").toString(),
+                                      QString("Reading shelf"), 3000);
+        }
         QVERIFY(QMetaObject::invokeMethod(findItemByName(emptyRow, "epicRemoveButton"), "clicked"));
         QVERIFY(QMetaObject::invokeMethod(findItemByName(emptyRow, "epicRemoveConfirm"), "clicked"));
         QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "epic.remove").isEmpty(), 3000);

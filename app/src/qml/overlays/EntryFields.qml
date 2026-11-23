@@ -68,6 +68,7 @@ ScrollView {
                 }
                 TextInput {
                     id: titleField
+                    objectName: "entryTitleField"
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
@@ -76,7 +77,7 @@ ScrollView {
                     selectedTextColor: theme.accentForeground
                     font.pixelSize: 28
                     clip: true
-                    onAccepted: form.submitTitle()
+                    onAccepted: form.submitTitle(false)
                 }
                 Rectangle {
                     anchors.left: parent.left
@@ -88,6 +89,7 @@ ScrollView {
             }
         }
         Rectangle {
+            visible: !form.backlog
             width: parent.width
             height: 150
             radius: theme.radius
@@ -296,6 +298,7 @@ ScrollView {
             }
         }
         Rectangle {
+            visible: !form.backlog
             width: parent.width
             height: form.repeat === "weekly" ? 220 : 150
             radius: theme.radius

@@ -199,6 +199,14 @@ Rectangle {
             }
         }
         AppButton {
+            objectName: "toBacklogButton"
+            visible: itemCard.repeat === "none"
+            win: itemCard.win
+            text: qsTr("→ Backlog")
+            enabled: !itemCard.pending && !itemCard.timerRunning && !backend.offlineMode
+            onClicked: backend.sendToBacklog(itemCard.itemId)
+        }
+        AppButton {
             objectName: "addTimeButton"
             win: itemCard.win
             text: qsTr("+ time")

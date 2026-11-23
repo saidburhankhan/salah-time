@@ -17,6 +17,8 @@ RowLayout {
     function beginDrag(rowIndex, id, globalY, title, detail, done) { timeline.beginDrag(rowIndex, id, globalY, title, detail, done) }
     function updateDrag(globalY) { timeline.updateDrag(globalY) }
     function finishDrag(cancelled) { timeline.finishDrag(cancelled) }
+    function dropBlock(point) { return timeline.dropBlock(point) }
+    function scrollForBacklogDrag(point) { timeline.scrollForBacklogDrag(point) }
     function syncTimeline() { timeline.syncTimeline() }
 
     spacing: 26

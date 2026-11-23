@@ -43,6 +43,7 @@ public:
         bool hasPlannedMinutes = false;
         QDate date;
         bool quick = false;
+        bool backlog = false;
         // Optional caller-supplied idempotency key (used by the UI to map a
         // pending create to its canonical row). Empty means generate one.
         QString opId;

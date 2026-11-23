@@ -54,6 +54,8 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList metrics READ metrics NOTIFY settingsChanged)
     Q_PROPERTY(QVariantMap statsData READ statsData NOTIFY statsDataChanged)
     Q_PROPERTY(QVariantList trackingItems READ trackingItems NOTIFY trackingItemsChanged)
+    Q_PROPERTY(QVariantList backlogItems READ backlogItems NOTIFY backlogChanged)
+    Q_PROPERTY(bool backlogLoading READ backlogLoading NOTIFY backlogChanged)
     Q_PROPERTY(QVariantMap running READ running NOTIFY runningChanged)
     Q_PROPERTY(QVariantList runningPrompt READ runningPrompt NOTIFY runningChanged)
     Q_PROPERTY(QString runningTitle READ runningTitle NOTIFY runningChanged)
@@ -113,6 +115,8 @@ public:
     QVariantList epicSessions() const { return m_epicSessions; }
     QVariantList metrics() const { return m_metrics; }
     QVariantList trackingItems() const { return m_trackingItems; }
+    QVariantList backlogItems() const { return m_backlogItems; }
+    bool backlogLoading() const { return m_backlogLoading; }
     QVariantMap statsData() const { return m_stats.json.toVariantMap(); }
     QVariantMap running() const { return m_running; }
     QVariantList runningPrompt() const { return m_runningPrompt; }
@@ -145,6 +149,11 @@ public:
     Q_INVOKABLE QVariant uiSetting(const QString &key, const QVariant &fallback = {}) const;
     Q_INVOKABLE void setUiSetting(const QString &key, const QVariant &value);
     Q_INVOKABLE void loadTrackingItems();
+    Q_INVOKABLE void loadBacklog(const QString &tagId, const QString &projectId);
+    Q_INVOKABLE void closeBacklog();
+    Q_INVOKABLE void moveBacklogItem(const QString &id, const QString &anchorId, bool before);
+    Q_INVOKABLE void scheduleItem(const QString &id, const QString &day, const QString &block);
+    Q_INVOKABLE void sendToBacklog(const QString &id);
     Q_INVOKABLE void moveDay(int amount);
     Q_INVOKABLE void selectDay(const QString &day);
     Q_INVOKABLE void jumpToday();
@@ -204,6 +213,8 @@ signals:
     void settingsChanged();
     void statsDataChanged();
     void trackingItemsChanged();
+    void backlogChanged();
+    void scheduleFinished(const QString &id, bool ok, const QString &message);
     // A project/tag/metric write finished. `id` is the saved row's id (empty
     // for a removal); on failure `error` carries the server message.
     void entitySaved(const QString &kind, const QString &id);
@@ -263,6 +274,9 @@ private:
                         const QString &beforeId) const;
     void reloadFromNotification(qint64 revision);
     bool dayContains(const QString &id) const;
+    void refreshBacklog();
+    QVariantMap backlogItem(const QString &id) const;
+    qint64 backlogVersionFor(const QString &id) const;
 
     CoreClient m_client;
     QDate m_today = QDate::currentDate();
@@ -300,6 +314,11 @@ private:
     QVariantList m_epicSessions;
     quint64 m_epicRequest = 0;
     QVariantList m_trackingItems;
+    QVariantList m_backlogItems;
+    QJsonObject m_backlogParams;
+    quint64 m_backlogRequest = 0;
+    bool m_backlogOpen = false;
+    bool m_backlogLoading = false;
     quint64 m_statsRequest = 0;
     QVariantMap m_running, m_lastRunning;
     QVariantList m_runningPrompt, m_lastRunningPrompt;

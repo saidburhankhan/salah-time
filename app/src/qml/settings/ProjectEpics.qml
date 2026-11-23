@@ -24,14 +24,14 @@ ColumnLayout {
         backend.saveEntity("epic", { project_id: projectId, name: name })
         addField.text = ""
     }
-    function startRename(epic) {
+    function startRename(epic, field) {
         removeId = ""
         renameId = String(epic.id)
-        renameField.text = String(epic.name || "")
-        renameField.forceActiveFocus()
+        field.text = String(epic.name || "")
+        field.forceActiveFocus()
     }
-    function commitRename() {
-        var name = renameField.text.trim()
+    function commitRename(text) {
+        var name = String(text).trim()
         if (name !== "" && renameId !== "")
             backend.saveEntity("epic", { id: renameId, name: name })
         renameId = ""
@@ -96,7 +96,7 @@ ColumnLayout {
                     objectName: "epicRenameField"
                     visible: epicRow.renaming
                     Layout.fillWidth: true
-                    onAccepted: epics.commitRename()
+                    onAccepted: epics.commitRename(renameField.text)
                     Keys.onEscapePressed: epics.renameId = ""
                 }
                 ColumnLayout {
@@ -122,11 +122,12 @@ ColumnLayout {
                     }
                 }
                 AppButton {
+                    objectName: "epicRenameSave"
                     visible: epicRow.renaming
                     win: epics.win
                     text: qsTr("Save")
                     primary: true
-                    onClicked: epics.commitRename()
+                    onClicked: epics.commitRename(renameField.text)
                 }
                 AppButton {
                     visible: !epicRow.renaming && epics.removeId !== String(epicRow.modelData.id)
@@ -139,7 +140,7 @@ ColumnLayout {
                     visible: !epicRow.renaming && epics.removeId !== String(epicRow.modelData.id)
                     win: epics.win
                     text: qsTr("Rename")
-                    onClicked: epics.startRename(epicRow.modelData)
+                    onClicked: epics.startRename(epicRow.modelData, renameField)
                 }
                 AppButton {
                     objectName: "epicStatusButton"

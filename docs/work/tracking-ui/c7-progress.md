@@ -12,3 +12,13 @@
 CHECKPOINT 2b: App: epics (Settings list, Epic page, epic chips in item editor and Log, Statistics Epics filter, Table/Trends Epic grouping, muted No project/No epic rows)
 
 Files: app/salah-app.pro, app/src/backend.cpp, app/src/backend.h, app/src/backend_epics.cpp, app/src/backend_reports.cpp, app/src/client/coreclient.cpp, app/src/client/coreclient.h, app/src/models/viewstate.cpp, app/src/models/viewstate.h, app/src/resources.qrc, app/src/qml/Main.qml, app/src/qml/controls/AppHeader.qml, app/src/qml/overlays/EntryFields.qml, app/src/qml/overlays/EntryForm.qml, app/src/qml/overlays/SessionPrompt.qml, app/src/qml/pages/EpicPage.qml, app/src/qml/settings/ProjectEpics.qml, app/src/qml/settings/ProjectsSettings.qml, app/src/qml/statistics/ChartsView.qml, app/src/qml/statistics/FilterBar.qml, app/src/qml/statistics/GeneralTable.qml, app/src/qml/statistics/LineChart.qml, app/src/qml/statistics/NoteRow.qml, app/src/qml/statistics/TrendsChart.qml, app/src/qml/today/SessionRow.qml, app/tests/salah_app_tests.cpp, app/tests/salah_app_tests.pro, app/tests/tracking_fixture.h, docs/work/tracking-ui/c7-progress.md
+
+## Task 2: Backlog page
+
+- Sidebar Backlog (page 5): grouped project -> epic, tag and project filters, manual order by drag handle (item.move block null), planned minutes and resource count per row, Edit, Schedule dialog (Today / Tomorrow / typed date + block chips, item.schedule), drag a row onto the Today sidebar entry then onto a block, "+ Add" creates backlog tasks (item.add backlog), "-> Backlog" on one-time Today items (item.backlog).
+- Also fixed ProjectEpics.qml Rename/Save (renameField scope) with a UI rename test.
+- Tests: 66 passed, 0 skipped. New: backlogRequestsFollowCanonicalFixtures, backlogScreens, rename in trackingUiScreens. Screenshots in /tmp/claude-1000/c7-shots2 (today-to-backlog, backlog-page, backlog-filtered, schedule-dialog, schedule-dialog-date), reviewed.
+
+CHECKPOINT 2: App: Backlog page (grouped by project/epic, filters, manual order, Schedule dialog, drag to Today block, -> Backlog on one-time items), epic rename fix
+
+Files: app/salah-app.pro, app/src/backend.cpp, app/src/backend.h, app/src/backend_backlog.cpp, app/src/client/coreclient.cpp, app/src/client/coreclient.h, app/src/models/viewstate.cpp, app/src/models/viewstate.h, app/src/resources.qrc, app/src/qml/Main.qml, app/src/qml/controls/{AppHeader,LineIcon,Sidebar,SidebarItem}.qml, app/src/qml/overlays/{EntryFields,EntryForm}.qml, app/src/qml/pages/{BacklogPage,TodayPage}.qml, app/src/qml/backlog/{BacklogRow,BacklogDrag,ScheduleDialog}.qml, app/src/qml/today/{ItemCard,Timeline}.qml, app/src/qml/settings/ProjectEpics.qml, app/tests/salah_app_tests.cpp, app/tests/salah_app_tests.pro, docs/work/tracking-ui/c7-progress.md

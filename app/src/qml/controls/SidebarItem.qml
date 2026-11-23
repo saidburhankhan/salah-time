@@ -10,12 +10,13 @@ Rectangle {
     property string label: ""
     property string iconKind: ""
     property bool loadStatsOnClick: false
+    property bool dropTarget: false
     readonly property bool active: appWindow ? appWindow.page === pageIndex : false
     Layout.fillWidth: true
     height: 48
     radius: theme.radius
-    color: active ? appWindow.card : "transparent"
-    border.color: active ? appWindow.border : "transparent"
+    color: dropTarget ? appWindow.selectedFill : active ? appWindow.card : "transparent"
+    border.color: dropTarget ? appWindow.selectedBorder : active ? appWindow.border : "transparent"
     Row {
         anchors.verticalCenter: parent.verticalCenter
         leftPadding: 14
