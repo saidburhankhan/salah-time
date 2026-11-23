@@ -61,6 +61,11 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   filler; when Salah's queue is truly empty, ask the user which other project gets Codex.
   When Codex hits a cap: Claude subagents inherit (Opus hard, Sonnet normal) and the orchestrator
   tells the user so they can apply a reset.
+- 12:45 installed phase 2 (backend through 8c7adfa, widget 029912a, app 0b1cf3e). The live DB was
+  migrated to v3 at 12:43 by `scripts/test` (it overrode only HOME; the session exports XDG_*),
+  checked lossless against bak-v1 (only 003's additions), integrity ok; script fixed in 461786e.
+  Pending small fixes: widget Worked cap at `max_minutes` + stale display, and the app running card
+  showing 600:01 for a stale timer (both Sol, with the 16:27 window); Pause could refetch status.
 - U5: user visual check after `omarchy restart shell`; fix what they report.
 - Optional: app/widget could show `stale` on an overnight timer (backend reports it since 47fb1d1).
 - Codex 5h limit hit at 06:59 (resets 11:26); weekly was 45% at 06:20.
