@@ -13,6 +13,7 @@ Item {
   property var strings
   property var metric: ({})
   property var value: undefined
+  property var storedValue: undefined
   property string fontFamily
   property color foreground
   property color mutedForeground
@@ -27,13 +28,21 @@ Item {
   signal escapePressed()
 
   function reset() {
-    countInput.text = ""
+    countInput.edited = false
+    countInput.text = storedValue === undefined || storedValue === null ? "" : String(storedValue)
+  }
+
+  onStoredValueChanged: {
+    if (countInput && !countInput.edited) reset()
   }
 
   implicitHeight: Math.max(label.implicitHeight, controls.implicitHeight)
 
   Component.onCompleted: {
-    if (kind === "count" && hasValue) countInput.text = String(value)
+    if (kind === "count" && hasValue) {
+      countInput.edited = value !== storedValue
+      countInput.text = String(value)
+    }
   }
 
   Text {
@@ -79,6 +88,7 @@ Item {
 
     TextField {
       id: countInput
+      property bool edited: false
       visible: field.kind === "count"
       width: Style.space(70)
       height: Style.space(26)
@@ -90,7 +100,10 @@ Item {
       verticalPadding: 0
       maximumLength: 9
       inputMethodHints: Qt.ImhFormattedNumbersOnly
-      onTextEdited: field.valueEdited(SessionLogic.parseCount(text))
+      onTextEdited: {
+        edited = true
+        field.valueEdited(SessionLogic.parseCount(text))
+      }
       Keys.onEscapePressed: function(event) {
         field.escapePressed()
         event.accepted = true

@@ -60,10 +60,13 @@ same(logic.tickIds(status.planner.items[0]), [], "a running session is not a tic
 // ---- metrics ----------------------------------------------------------------
 
 const projectRows = logic.projectMetrics(projects[0])
-same(ids(projectRows), ["focus", "quality", "<id:1>"], "project metrics follow position")
+const expectedProjectIds = projects[0].metrics.slice().sort((a, b) => a.position - b.position)
+  .filter(binding => !binding.metric.archived).map(binding => binding.metric_id)
+same(ids(projectRows), expectedProjectIds, "project metrics follow position")
 same(projectRows[2], { "metric_id": "<id:1>", "name": "Pages read", "unit": "pages", "kind": "count",
   "scale_max": null }, "a count metric keeps its unit and carries no required flag")
 const shuffled = JSON.parse(JSON.stringify(projects[0]))
+shuffled.metrics = shuffled.metrics.slice(0, 3)
 shuffled.metrics[0].position = 5
 shuffled.metrics[2].required = true
 shuffled.metrics[1].metric.archived = true
@@ -80,17 +83,26 @@ same(ids(logic.builtinMetrics([{ "id": "focus", "name": "Focus", "kind": "scale"
 
 // ---- targets ----------------------------------------------------------------
 
-const targets = logic.logTargets(status.planner.items, projects)
+const itemRows = status.planner.items.map((row, i) => ({
+  ...row, metrics: i === 0 ? [projectRows[2], projectRows[0]] : []
+}))
+const targets = logic.logTargets(itemRows, projects)
 same(targets.map(function(t) { return t.kind + ":" + t.label }),
   ["item:Read Quran", "item:Walk", "project:Quran"], "today's items, then projects")
 same(targets[0].projectId, "<id:3>", "an item target carries its project")
 same(logic.logTargets([], [{ "id": "x", "name": "Old", "archived": true }]), [],
   "archived projects are not offered")
-same(ids(logic.targetMetrics(targets[0], projects, catalogue)), ["focus", "quality", "<id:1>"],
-  "an item asks its project's metrics")
-same(ids(logic.targetMetrics(targets[1], projects, catalogue)), ["focus", "quality"],
-  "an item without a project asks focus and quality")
-same(ids(logic.targetMetrics(targets[2], projects, catalogue)), ["focus", "quality", "<id:1>"],
+same(ids(logic.targetMetrics(targets[0], projects, catalogue)), ["<id:1>", "focus"],
+  "item prompts use the exact row metrics and order")
+same(ids(logic.targetMetrics(targets[1], projects, catalogue)), [],
+  "an explicitly empty list stays empty on an item without a project")
+same(logic.targetMetrics({ ...targets[0], metrics: [] }, projects, catalogue), [],
+  "a project item can opt out of every metric")
+same(ids(logic.targetMetrics({ kind: "item", id: "old" }, projects, catalogue)), ["focus", "quality"],
+  "a legacy item without a project or prompts gets the built-in ratings")
+same(ids(logic.targetMetrics({ kind: "item", id: "old", projectId: projects[0].id }, projects, catalogue)),
+  expectedProjectIds, "a legacy server without per-item metrics keeps its project defaults")
+same(ids(logic.targetMetrics(targets[2], projects, catalogue)), expectedProjectIds,
   "a project asks its metrics")
 same(ids(logic.targetMetrics({ "kind": "project", "id": "p", "projectId": "p" },
   [{ "id": "p", "name": "Bare", "metrics": [] }], catalogue)), [], "a project without metrics asks nothing")
@@ -107,6 +119,39 @@ const check = [{ "metric_id": "fasted", "kind": "check" }]
 same(logic.collectValues(check, {}), {}, "an untouched check is not sent")
 same(logic.collectValues(check, { "fasted": 0 }), { "fasted": 0 }, "a check switched off is sent as 0")
 same(logic.collectValues(check, { "fasted": 1 }), { "fasted": 1 }, "a check switched on is sent as 1")
+
+// ---- pause ----------------------------------------------------------------
+
+const running = { id: "s", item_id: "i", values: { distractions: 3 } }
+const prompts = [projectRows[0], { metric_id: "distractions", kind: "count" }]
+const pause = (edits, note, minutes, done, session = running) =>
+  logic.pauseParams(session, prompts, edits, note, minutes, 30, done)
+same(pause({}, "  ", "30", false), { id: "s" },
+  "empty Save leaves minutes and live counts to the server")
+same(pause({ focus: "", distractions: null, other: 2 }, "", "", true), { id: "s", done: true },
+  "empty Save & Done sends only the session id and done flag")
+same(pause({ distractions: "0", focus: 4, quality: 5 }, "  paused  ", "25", false),
+  { id: "s", values: { focus: 4, distractions: 0 }, note: "paused", minutes: 25 },
+  "Save sends asked edits, including zero, trimmed note and changed minutes")
+same(pause({ focus: 4 }, "ok", "15", true),
+  { id: "s", values: { focus: 4 }, note: "ok", minutes: 15, done: true },
+  "Save & Done uses one stop carrying the edits and done flag")
+same(pause({}, "", "030", true, { id: "p", item_id: null }), { id: "p" },
+  "project-only pause omits done and a numerically unchanged duration")
+const start = "2031-05-14T04:30:00Z"
+same([0, 89, 90, 999999].map(s => logic.workedMinutes(start, Date.parse(start) + 1000 * s)),
+  [1, 1, 2, 1440], "Worked matches the stop rounding and limits")
+
+// ---- session notes ---------------------------------------------------------
+
+const localTime = new Date(2031, 4, 14, 9, 5).toISOString()
+const notes = [{ at: localTime, text: "<b>one</b>" }, { at: localTime, text: "two" }]
+same(logic.sessionNotesText({ note: "summary", notes }), "summary\n09:05 <b>one</b>\n09:05 two",
+  "main note and chronological entries use local 24-hour time and literal text")
+same(logic.sessionNotesText({ notes }), "09:05 <b>one</b>\n09:05 two",
+  "timestamped entries show when the main note is empty")
+same(logic.sessionNotesText({ note: "older" }), "older", "legacy notes render without a notes array")
+same(logic.sessionNotesText({}), "", "a session with no notes adds no empty line")
 
 // ---- parsing ----------------------------------------------------------------
 

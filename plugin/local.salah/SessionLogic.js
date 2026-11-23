@@ -1,12 +1,6 @@
 .pragma library
 
-// Pure session rules for the bar widget: what tapping "done" does, which
-// metrics the done and log panels ask, and which values a save sends. No I/O
-// and no prayer-time maths; tests/session_logic_test.js covers it.
-//
-// User decisions (plan.md, 2026-11-23): a timer is play/pause and asks
-// nothing; "done" is an explicit tick that may carry metric values; every
-// metric is optional.
+// Pure session rules shared by the widget and its Node checks.
 
 // Built-in metrics have fixed ids (interface.md). They are asked for an item
 // or session without a project. The catalogue from metrics.list wins; this is
@@ -104,16 +98,14 @@ function projectMetrics(project) {
   return rows
 }
 
-// Metrics for a done tick or a log against a target
-// ({ kind: "item"|"project", id, projectId }): the project's metrics, or the
-// built-ins when there is no project.
+// Item rows already carry their effective prompts, including an empty list.
 function targetMetrics(target, projects, catalogue) {
   if (!target || text(target.id) === "") return []
-  var projectId = target.kind === "project" ? text(target.id) : text(target.projectId)
-  if (projectId === "") return builtinMetrics(catalogue)
-  var project = findProject(projects, projectId)
-  if (!project) return builtinMetrics(catalogue)
-  return projectMetrics(project)
+  if (target.kind === "project") return projectMetrics(findProject(projects, target.id))
+  if (target.metrics) return target.metrics
+  // Pre-phase-2 daemons omit the field entirely and only support project defaults.
+  var legacyProject = findProject(projects, target.projectId)
+  return legacyProject ? projectMetrics(legacyProject) : builtinMetrics(catalogue)
 }
 
 function hasValue(values, id) {
@@ -142,6 +134,25 @@ function parseMinutes(value) {
   return minutes >= 1 && minutes <= MAX_MINUTES ? minutes : null
 }
 
+// Match the timer's whole-minute rounding and its one-day limit.
+function workedMinutes(startedAt, nowMs) {
+  return Math.max(1, Math.min(MAX_MINUTES, Math.round(elapsedSeconds(startedAt, nowMs) / 60)))
+}
+
+// The server merges supplied values with counts recorded during the timer.
+// Send only edits so a later bump on another surface survives a plain Save.
+function pauseParams(session, metrics, edits, note, worked, initialMinutes, done) {
+  var params = { "id": session.id }
+  var values = collectValues(metrics, edits)
+  if (Object.keys(values).length > 0) params.values = values
+  var trimmed = text(note).trim()
+  if (trimmed) params.note = trimmed
+  var minutes = parseMinutes(worked)
+  if (minutes !== null && minutes !== initialMinutes) params.minutes = minutes
+  if (done && session.item_id) params.done = true
+  return params
+}
+
 // A count field: a non-negative number, otherwise null.
 function parseCount(value) {
   var raw = text(value).trim()
@@ -161,6 +172,7 @@ function logTargets(items, projects) {
       "kind": "item",
       "id": text(item.id),
       "label": text(item.title),
+      "metrics": item.metrics,
       "projectId": item.project ? text(item.project.id) : "",
       "color": item.project ? text(item.project.color) : ""
     })
@@ -199,4 +211,16 @@ function clockText(totalSeconds) {
   var total = Math.max(0, Math.floor(Number(totalSeconds) || 0))
   function pad(value) { return value < 10 ? "0" + value : String(value) }
   return pad(Math.floor(total / 60)) + ":" + pad(total % 60)
+}
+
+function sessionNotesText(session) {
+  var lines = session.note ? [session.note] : []
+  var entries = session.notes || []
+  for (var i = 0; i < entries.length; i++) {
+    var at = new Date(entries[i].at)
+    var stamp = isNaN(at.getTime()) ? "" : ("0" + at.getHours()).slice(-2)
+      + ":" + ("0" + at.getMinutes()).slice(-2) + " "
+    lines.push(stamp + entries[i].text)
+  }
+  return lines.join("\n")
 }

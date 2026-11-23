@@ -362,9 +362,9 @@ Item {
     }
   }
 
-  function fallback(opId, kind, command) {
+  function fallback(opId, kind, command, rpcInput) {
     client.fallbackQueue = client.fallbackQueue.concat([{
-      "opId": opId, "kind": kind, "command": command
+      "opId": opId, "kind": kind, "command": command, "rpcInput": rpcInput || ""
     }])
     client.runNextFallback()
   }
@@ -374,6 +374,7 @@ Item {
     client.activeFallback = client.fallbackQueue[0]
     client.fallbackQueue = client.fallbackQueue.slice(1)
     actionProcess.command = client.activeFallback.command
+    actionProcess.stdinEnabled = client.activeFallback.rpcInput !== ""
     actionProcess.running = true
   }
 
@@ -433,19 +434,32 @@ Item {
     client.fallback(opId, "startSession", command)
   }
 
-  function stopSession(opId, sessionId, values, note) {
+  function stopSession(opId, params) {
     if (client.socketActive) {
-      var params = { "values": values || {} }
-      if (String(sessionId || "") !== "") params.id = String(sessionId)
-      if (String(note || "") !== "") params.note = String(note)
       client.sendMutation(opId, "stopSession", "session.stop", params)
       return
     }
     var command = ["salah", "session", "stop", "--json"]
-    if (String(sessionId || "") !== "") command = command.concat(["--id", String(sessionId)])
-    command = command.concat(client.valueArgs(values))
-    if (String(note || "") !== "") command.push("--note=" + String(note))
+    if (params.id) command.push("--id", params.id)
+    if (params.done) command.push("--done")
+    if (params.minutes !== undefined) command.push("--minutes", String(params.minutes))
+    command = command.concat(client.valueArgs(params.values))
+    if (params.note) command.push("--note=" + params.note)
     client.fallback(opId, "stopSession", command)
+  }
+
+  function runningMutation(opId, method, params) {
+    if (client.socketActive) {
+      client.sendMutation(opId, method, method, params)
+      return
+    }
+    // The in-process CLI dispatcher accepts the same bump/note protocol.
+    params.op_id = opId
+    var hello = { "jsonrpc": "2.0", "id": 1, "method": "hello",
+      "params": { "protocol": [1], "client": "salah-widget", "actor": "widget" } }
+    var request = { "jsonrpc": "2.0", "id": 2, "method": method, "params": params }
+    client.fallback(opId, method, ["salah", "rpc"],
+      JSON.stringify(hello) + "\n" + JSON.stringify(request) + "\n")
   }
 
   function removeSession(opId, kind, sessionId) {
@@ -622,6 +636,12 @@ Item {
 
   Process {
     id: actionProcess
+    onStarted: {
+      if (client.activeFallback && client.activeFallback.rpcInput) {
+        write(client.activeFallback.rpcInput)
+        stdinEnabled = false
+      }
+    }
     stdout: StdioCollector { id: actionStdout; waitForEnd: true }
     stderr: StdioCollector { id: actionStderr; waitForEnd: true }
     onExited: function(exitCode) {
@@ -629,13 +649,26 @@ Item {
       var active = client.activeFallback
       client.activeFallback = null
       if (active) {
+        var failure = String(actionStderr.text || "").trim().replace(/[\r\n]+/g, " ")
+        if (exitCode === 0 && active.rpcInput) {
+          try {
+            var lines = String(actionStdout.text || "").trim().split("\n")
+            var reply = JSON.parse(lines[lines.length - 1])
+            if (reply.id !== 2 || !reply.result) {
+              exitCode = 1
+              failure = client.errorDetail(reply.error)
+            }
+          } catch (error) {
+            exitCode = 1
+            failure = String(error)
+          }
+        }
         if (exitCode === 0) {
           client.mutationSucceeded(active.opId, active.kind, {
             "fallback": true, "raw": String(actionStdout.text || "")
           })
         } else {
-          client.mutationFailed(active.opId, active.kind,
-            String(actionStderr.text || "").trim().replace(/[\r\n]+/g, " "), {})
+          client.mutationFailed(active.opId, active.kind, failure, {})
         }
         client.statusAfterFallback = true
       }

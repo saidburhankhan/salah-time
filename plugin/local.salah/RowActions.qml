@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "SessionLogic.js" as SessionLogic
 
 // Expanded-row controls: edit, a two-step delete, "+ Time", and today's
 // sessions for the item. Each finished session shows its minutes, which can
@@ -166,86 +167,101 @@ Item {
     Repeater {
       model: root.shownSessions
 
-      Row {
+      Column {
         id: sessionRow
         required property var modelData
         readonly property bool running: modelData.running === true
-        height: Style.space(28)
-        spacing: Style.space(5)
+        width: column.width
 
-        Text {
-          anchors.verticalCenter: parent.verticalCenter
-          width: Style.space(48)
-          textFormat: Text.PlainText
-          text: root.sessionLabel(sessionRow.modelData)
-          color: root.mutedForeground
-          font.family: "monospace"
-          font.pixelSize: Style.font.caption
-        }
+        Row {
+          height: Style.space(28)
+          spacing: Style.space(5)
 
-        Text {
-          visible: sessionRow.running
-          anchors.verticalCenter: parent.verticalCenter
-          textFormat: Text.PlainText
-          text: root.strings.t("session.running") + "  " + root.runningElapsed
-          color: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.bodySmall
-        }
-
-        TextField {
-          visible: !sessionRow.running
-          anchors.verticalCenter: parent.verticalCenter
-          width: Style.space(54)
-          height: Style.space(24)
-          text: sessionRow.modelData.minutes === null || sessionRow.modelData.minutes === undefined
-            ? "" : String(sessionRow.modelData.minutes)
-          placeholderText: "—"
-          foreground: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.bodySmall
-          horizontalPadding: Style.space(5)
-          verticalPadding: 0
-          maximumLength: 4
-          inputMethodHints: Qt.ImhDigitsOnly
-          validator: IntValidator { bottom: 1; top: 1440 }
-          onActiveFocusChanged: root.fieldFocusChanged(activeFocus)
-          onAccepted: {
-            var minutes = Number(text)
-            if (minutes !== Number(sessionRow.modelData.minutes))
-              root.minutesEdited(String(sessionRow.modelData.id), minutes)
-            focus = false
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            width: Style.space(48)
+            textFormat: Text.PlainText
+            text: root.sessionLabel(sessionRow.modelData)
+            color: root.mutedForeground
+            font.family: "monospace"
+            font.pixelSize: Style.font.caption
           }
-          Keys.onEscapePressed: function(event) {
-            text = sessionRow.modelData.minutes === null || sessionRow.modelData.minutes === undefined
+
+          Text {
+            visible: sessionRow.running
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: root.strings.t("session.running") + "  " + root.runningElapsed
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          TextField {
+            visible: !sessionRow.running
+            anchors.verticalCenter: parent.verticalCenter
+            width: Style.space(54)
+            height: Style.space(24)
+            text: sessionRow.modelData.minutes === null || sessionRow.modelData.minutes === undefined
               ? "" : String(sessionRow.modelData.minutes)
-            focus = false
-            event.accepted = true
+            placeholderText: "—"
+            foreground: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            horizontalPadding: Style.space(5)
+            verticalPadding: 0
+            maximumLength: 4
+            inputMethodHints: Qt.ImhDigitsOnly
+            validator: IntValidator { bottom: 1; top: 1440 }
+            onActiveFocusChanged: root.fieldFocusChanged(activeFocus)
+            onAccepted: {
+              var minutes = Number(text)
+              if (minutes !== Number(sessionRow.modelData.minutes))
+                root.minutesEdited(String(sessionRow.modelData.id), minutes)
+              focus = false
+            }
+            Keys.onEscapePressed: function(event) {
+              text = sessionRow.modelData.minutes === null || sessionRow.modelData.minutes === undefined
+                ? "" : String(sessionRow.modelData.minutes)
+              focus = false
+              event.accepted = true
+            }
+          }
+
+          Text {
+            visible: !sessionRow.running
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: root.strings.t("session.minutesUnit")
+            color: root.mutedForeground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Button {
+            visible: !sessionRow.running
+            anchors.verticalCenter: parent.verticalCenter
+            width: Style.space(26)
+            height: Style.space(24)
+            text: root.strings.t("session.remove")
+            tooltipText: root.strings.t("session.removeTooltip")
+            foreground: root.mutedForeground
+            fontFamily: root.fontFamily
+            horizontalPadding: 0
+            verticalPadding: 0
+            onClicked: root.removeSessionRequested(String(sessionRow.modelData.id))
           }
         }
 
         Text {
-          visible: !sessionRow.running
-          anchors.verticalCenter: parent.verticalCenter
+          width: parent.width
+          visible: text !== ""
           textFormat: Text.PlainText
-          text: root.strings.t("session.minutesUnit")
+          text: SessionLogic.sessionNotesText(sessionRow.modelData)
           color: root.mutedForeground
           font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-        }
-
-        Button {
-          visible: !sessionRow.running
-          anchors.verticalCenter: parent.verticalCenter
-          width: Style.space(26)
-          height: Style.space(24)
-          text: root.strings.t("session.remove")
-          tooltipText: root.strings.t("session.removeTooltip")
-          foreground: root.mutedForeground
-          fontFamily: root.fontFamily
-          horizontalPadding: 0
-          verticalPadding: 0
-          onClicked: root.removeSessionRequested(String(sessionRow.modelData.id))
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.Wrap
         }
       }
     }

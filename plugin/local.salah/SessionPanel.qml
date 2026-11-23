@@ -4,11 +4,7 @@ import qs.Commons as Commons
 import qs.Ui
 import "SessionLogic.js" as SessionLogic
 
-// Inline panel for recording work (plan.md, user decisions 2026-11-23).
-// "done" mode ticks an item: its metrics (the project's, or focus and quality
-// without a project) and a note, all optional; "Done" saves what is filled,
-// "Skip" ticks with nothing. "log" mode records minutes against a today item
-// or a project, with the same optional metrics. Nothing is required.
+// Inline editor for pausing a timer, ticking an item or logging minutes.
 Rectangle {
   id: panel
 
@@ -16,6 +12,11 @@ Rectangle {
   property string mode: "log"
   // done mode: the item being ticked (a planner row: id, title, project).
   property var doneItem: null
+  property var pauseSession: null
+  property var pauseMetrics: []
+  property string pauseTitle: ""
+  property int elapsed: 1
+  property int initialMinutes: 1
   property var items: []
   property var projects: []
   property var metricCatalogue: []
@@ -31,6 +32,7 @@ Rectangle {
   property string hintText: ""
 
   readonly property bool logMode: mode === "log"
+  readonly property bool pauseMode: mode === "pause"
   readonly property var targets: SessionLogic.logTargets(items, projects)
   readonly property var itemTargets: targets.filter(function(t) { return t.kind === "item" })
   readonly property var projectTargets: targets.filter(function(t) { return t.kind === "project" })
@@ -41,6 +43,7 @@ Rectangle {
         "kind": "item",
         "id": String(doneItem.id || ""),
         "label": String(doneItem.title || ""),
+        "metrics": doneItem.metrics,
         "projectId": doneItem.project ? String(doneItem.project.id || "") : ""
       }
     }
@@ -48,7 +51,8 @@ Rectangle {
       if (targets[i].kind + ":" + targets[i].id === targetKey) return targets[i]
     return null
   }
-  readonly property var askedMetrics: SessionLogic.targetMetrics(target, projects, metricCatalogue)
+  readonly property var askedMetrics: pauseMode ? pauseMetrics
+    : SessionLogic.targetMetrics(target, projects, metricCatalogue)
   // A copy that only changes when the asked metrics really do, so a status
   // refresh does not rebuild the fields (and drop a half-typed count).
   property var metrics: []
@@ -57,6 +61,13 @@ Rectangle {
   }
   Component.onCompleted: metrics = askedMetrics
   readonly property var minutes: SessionLogic.parseMinutes(minutesText)
+  onElapsedChanged: {
+    if (pauseMode && minutesField && !minutesField.activeFocus && minutes === initialMinutes) {
+      initialMinutes = elapsed
+      minutesText = String(elapsed)
+      minutesField.text = minutesText
+    }
+  }
   // A metric's count field reports its focus here, so the panel's key
   // catcher can step aside while text is typed.
   property bool metricFocus: false
@@ -65,6 +76,7 @@ Rectangle {
   onVisibleChanged: if (!visible) metricFocus = false
 
   signal doneRequested(var item, var values, string note)
+  signal pauseRequested(var params)
   signal logRequested(var target, int minutes, var values, string note)
   signal cancelRequested()
   signal openAppRequested()
@@ -75,11 +87,16 @@ Rectangle {
     metricFocus = false
     values = ({})
     hintText = ""
-    minutesText = ""
-    minutesField.text = ""
+    initialMinutes = elapsed
+    minutesText = pauseMode ? String(initialMinutes) : ""
+    minutesField.text = minutesText
     noteField.text = ""
     targetKey = String(presetKey || "")
     if (targetKey === "" && targets.length === 1) targetKey = targets[0].kind + ":" + targets[0].id
+    resetMetricFields()
+  }
+
+  function resetMetricFields() {
     for (var i = 0; i < metricRepeater.count; i++) {
       var child = metricRepeater.itemAt(i)
       if (child) child.reset()
@@ -99,11 +116,28 @@ Rectangle {
     targetKey = key
     values = ({})
     hintText = ""
+    resetMetricFields()
+  }
+
+  function savePause(done) {
+    if (busy || !pauseSession) return
+    if (minutesText.trim() && (minutes === null || minutes > elapsed)) {
+      hintText = strings.t("session.workedRange").arg(elapsed)
+      minutesField.forceActiveFocus()
+      return
+    }
+    hintText = ""
+    pauseRequested(SessionLogic.pauseParams(pauseSession, metrics, values, noteField.text,
+      minutesText, initialMinutes, done))
   }
 
   // Done: tick with whatever is filled. Skip: tick with nothing.
   function save(skip) {
     if (busy) return
+    if (pauseMode) {
+      savePause(false)
+      return
+    }
     if (!logMode) {
       if (!doneItem) return
       if (skip === true) doneRequested(doneItem, {}, "")
@@ -143,7 +177,8 @@ Rectangle {
     Text {
       width: parent.width
       textFormat: Text.PlainText
-      text: panel.logMode ? panel.strings.t("session.logTitle")
+      text: panel.pauseMode ? panel.strings.t("session.pauseTitle").arg(panel.pauseTitle)
+        : panel.logMode ? panel.strings.t("session.logTitle")
         : panel.strings.t("session.doneTitle").arg(panel.target ? panel.target.label : "")
       color: panel.foreground
       font.family: panel.fontFamily
@@ -242,14 +277,14 @@ Rectangle {
     // ---- minutes ----------------------------------------------------------
 
     Row {
-      visible: panel.logMode && panel.targets.length > 0
+      visible: panel.pauseMode || (panel.logMode && panel.targets.length > 0)
       spacing: Style.space(4)
 
       Text {
         anchors.verticalCenter: parent.verticalCenter
         width: Style.space(96)
         textFormat: Text.PlainText
-        text: panel.strings.t("session.minutes")
+        text: panel.pauseMode ? panel.strings.t("session.worked") : panel.strings.t("session.minutes")
         color: panel.foreground
         font.family: panel.fontFamily
         font.pixelSize: Style.font.bodySmall
@@ -276,14 +311,14 @@ Rectangle {
       }
 
       Repeater {
-        model: [15, 30, 60]
+        model: panel.pauseMode ? [5, 15, 30] : [15, 30, 60]
 
         Button {
           required property int modelData
           width: Style.space(34)
           height: Style.space(24)
-          text: String(modelData)
-          selected: panel.minutes === modelData
+          text: panel.pauseMode ? "−" + modelData : String(modelData)
+          selected: !panel.pauseMode && panel.minutes === modelData
           bordered: true
           foreground: panel.foreground
           fontFamily: panel.fontFamily
@@ -291,8 +326,10 @@ Rectangle {
           horizontalPadding: 0
           verticalPadding: 0
           onClicked: {
-            minutesField.text = String(modelData)
-            panel.minutesText = String(modelData)
+            var next = panel.pauseMode
+              ? Math.max(1, (panel.minutes || panel.initialMinutes) - modelData) : modelData
+            minutesField.text = String(next)
+            panel.minutesText = minutesField.text
           }
         }
       }
@@ -309,7 +346,9 @@ Rectangle {
         width: form.width
         strings: panel.strings
         metric: modelData
-        value: panel.values[String(modelData.metric_id)]
+        storedValue: panel.pauseMode && panel.pauseSession && panel.pauseSession.values
+          ? panel.pauseSession.values[metricId] : undefined
+        value: panel.values[metricId] !== undefined ? panel.values[metricId] : storedValue
         fontFamily: panel.fontFamily
         foreground: panel.foreground
         mutedForeground: panel.mutedForeground
@@ -363,7 +402,7 @@ Rectangle {
       }
 
       Button {
-        visible: !panel.logMode
+        visible: panel.mode === "done"
         enabled: !panel.busy
         text: panel.strings.t("session.skip")
         tooltipText: panel.strings.t("session.skipTooltip")
@@ -378,12 +417,23 @@ Rectangle {
         visible: !panel.logMode || panel.targets.length > 0
         enabled: !panel.busy
         text: panel.busy ? panel.strings.t("session.saving")
-          : (panel.logMode ? panel.strings.t("session.save") : panel.strings.t("session.done"))
+          : (panel.mode === "done" ? panel.strings.t("session.done") : panel.strings.t("session.save"))
         bordered: true
         foreground: panel.foreground
         fontFamily: panel.fontFamily
         fontSize: Style.font.bodySmall
         onClicked: panel.save(false)
+      }
+
+      Button {
+        visible: panel.pauseMode && !!(panel.pauseSession && panel.pauseSession.item_id)
+        enabled: !panel.busy
+        text: panel.strings.t("session.saveDone")
+        bordered: true
+        foreground: panel.foreground
+        fontFamily: panel.fontFamily
+        fontSize: Style.font.bodySmall
+        onClicked: panel.savePause(true)
       }
     }
   }
