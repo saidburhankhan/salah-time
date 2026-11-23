@@ -88,10 +88,10 @@ impl Store {
         self.one("SELECT * FROM metrics WHERE id = ?1", [id], codec::metric)
     }
 
-    /// Built-in metrics first, then by name.
+    /// Keep the original built-ins first, followed by distractions and named custom metrics.
     pub fn metrics(&self) -> Result<Vec<Metric>, Error> {
         self.all(
-            "SELECT * FROM metrics ORDER BY builtin DESC, name, id",
+            "SELECT * FROM metrics ORDER BY builtin DESC, (id = 'distractions'), name, id",
             [],
             codec::metric,
         )

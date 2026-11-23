@@ -1,6 +1,7 @@
 //! SQLite persistence for Salah's v1 tracking model.
 
 mod codec;
+mod migrations;
 mod read;
 mod write;
 
@@ -13,16 +14,14 @@ use salah_domain::error::Error;
 use std::{
     cell::{Cell, RefCell},
     path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
-const SCHEMA: &str = include_str!("schema.sql");
-const SCHEMA_VERSION: i64 = 1;
 /// Attempts for a write that keeps hitting `SQLITE_BUSY`.
 const WRITE_ATTEMPTS: u32 = 5;
 
 pub fn schema_version() -> i64 {
-    SCHEMA_VERSION
+    migrations::STEPS.len() as i64
 }
 
 /// `$SALAH_DATA`, else `$XDG_DATA_HOME/salah/salah.db`, else `~/.local/share/salah/salah.db`.
@@ -65,50 +64,29 @@ pub struct Store {
 }
 
 impl Store {
-    /// Opens (creating if needed) the database at `path`. A database from the
-    /// pre-tracking schema is renamed to `<name>.old-<unix seconds>` and a
-    /// fresh one is created in its place.
+    /// Opens the database and migrates it in place, backing up each existing schema version first.
     pub fn open(path: &Path) -> Result<Self, Error> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| Error::Storage(format!("store: {e}")))?;
         }
-        if path.exists() && is_old_schema(path)? {
-            set_aside(path)?;
-        }
-        Self::init(Connection::open(path).map_err(storage_error)?)
+        Self::init(Connection::open(path).map_err(storage_error)?, Some(path))
     }
 
     pub fn open_in_memory() -> Result<Self, Error> {
-        Self::init(Connection::open_in_memory().map_err(storage_error)?)
+        Self::init(Connection::open_in_memory().map_err(storage_error)?, None)
     }
 
-    fn init(conn: Connection) -> Result<Self, Error> {
+    fn init(mut conn: Connection, path: Option<&Path>) -> Result<Self, Error> {
         conn.busy_timeout(Duration::from_secs(3))
             .map_err(storage_error)?;
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(storage_error)?;
-        conn.execute_batch("BEGIN IMMEDIATE")
-            .map_err(storage_error)?;
-        let created = match user_version(&conn)? {
-            0 => conn
-                .execute_batch(SCHEMA)
-                .and_then(|()| conn.pragma_update(None, "user_version", SCHEMA_VERSION))
-                .map_err(storage_error),
-            SCHEMA_VERSION => Ok(()),
-            other => Err(Error::Storage(format!("store: unsupported schema {other}"))),
-        };
-        // These additive tables also install on existing tracking-v1 databases.
-        let created = created.and_then(|()| {
-            conn.execute_batch(include_str!("history.sql"))
-                .map_err(storage_error)
-        });
-        match created {
-            Ok(()) => conn.execute_batch("COMMIT").map_err(storage_error)?,
-            Err(error) => {
-                let _ = conn.execute_batch("ROLLBACK");
-                return Err(error);
-            }
-        }
+        let filename = conn.path().map(PathBuf::from);
+        let file = filename
+            .as_deref()
+            .or(path)
+            .filter(|p| !p.as_os_str().is_empty());
+        migrations::apply(&mut conn, file)?;
         Ok(Self { conn })
     }
 
@@ -202,34 +180,6 @@ fn user_version(conn: &Connection) -> Result<i64, Error> {
         .map_err(storage_error)
 }
 
-/// A versioned database from before this schema: the planner schema, or an
-/// unreleased tracking draft without the `days_written` table.
-fn is_old_schema(path: &Path) -> Result<bool, Error> {
-    let conn = Connection::open(path).map_err(storage_error)?;
-    // Both facts must describe the same SQLite snapshot during first open.
-    conn.query_row(
-        "SELECT user_version > 0 AND NOT EXISTS (
-            SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'days_written'
-        ) FROM pragma_user_version",
-        [],
-        |row| row.get(0),
-    )
-    .map_err(storage_error)
-}
-
-fn set_aside(path: &Path) -> Result<(), Error> {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("salah.db");
-    std::fs::rename(path, path.with_file_name(format!("{name}.old-{seconds}")))
-        .map_err(|e| Error::Storage(format!("store: {e}")))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,7 +231,7 @@ mod tests {
     fn schema_rows() {
         let mut s = Store::open_in_memory().unwrap();
         assert!(s.foreign_keys_enabled().unwrap());
-        assert_eq!(s.metrics().unwrap().len(), 2);
+        assert_eq!(s.metrics().unwrap().len(), 3);
         s.write(|x| {
             x.put_project(&p())?;
             x.put_item(&i())
@@ -384,8 +334,8 @@ mod tests {
 
     #[test]
     fn failed_commit_rolls_back_before_the_next_request() {
-        let path =
-            std::env::temp_dir().join(format!("salah-commit-busy-{}.db", std::process::id()));
+        let root = std::env::temp_dir().join(format!("salah-commit-busy-{}", std::process::id()));
+        let path = root.join("salah.db");
         let mut store = Store::open(&path).unwrap();
         let reader = Connection::open(&path).unwrap();
         reader.execute_batch("BEGIN; SELECT * FROM meta").unwrap();
@@ -396,58 +346,6 @@ mod tests {
         assert_eq!(store.revision().unwrap(), 0);
         assert!(store.project("p").unwrap().is_none());
         assert_eq!(store.write(|tx| tx.put_project(&p())).unwrap(), 1);
-        std::fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn tracking_v1_gets_history_tables_without_losing_applied_ops_or_snapshots() {
-        let path = std::env::temp_dir().join(format!("salah-upgrade-{}.db", std::process::id()));
-        let conn = Connection::open(&path).unwrap();
-        conn.execute_batch(SCHEMA).unwrap();
-        conn.execute_batch(
-            "PRAGMA user_version=1;
-            INSERT INTO days_written VALUES ('2031-05-14','2031-05-15T00:00:00Z');
-            INSERT INTO applied_ops VALUES ('op','session.start',0,'{}','2031-05-14T00:00:00Z')",
-        )
-        .unwrap();
-        drop(conn);
-        let mut store = Store::open(&path).unwrap();
-        assert_eq!(
-            store.applied_op("op").unwrap().unwrap().method,
-            "session.start"
-        );
-        assert!(store.day_written(d()).unwrap());
-        assert!(store.day_clock(d()).unwrap().is_none());
-        store
-            .write(|tx| {
-                tx.put_project(&p())?;
-                tx.put_item(&i())?;
-                tx.preserve_item(&i(), d())
-            })
-            .unwrap();
-        assert_eq!(store.items_on(d()).unwrap(), [i()]);
-        drop(store);
-        std::fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn old_database_is_renamed_aside() {
-        let root = std::env::temp_dir().join(format!("salah-store-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("salah.db");
-        let old = Connection::open(&path).unwrap();
-        old.execute_batch("CREATE TABLE items(id TEXT); PRAGMA user_version=3;")
-            .unwrap();
-        drop(old);
-        let store = Store::open(&path).unwrap();
-        assert_eq!(store.version().unwrap(), 1);
-        assert!(std::fs::read_dir(&root).unwrap().any(|e| {
-            e.unwrap()
-                .file_name()
-                .to_string_lossy()
-                .starts_with("salah.db.old-")
-        }));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -398,6 +398,6 @@ mod tests {
         let running = serde_json::to_value(report.running.as_ref().unwrap()).unwrap();
         assert_eq!(running["running"], true);
         assert!(running.get("stale").is_none());
-        assert_eq!(report.prompt.len(), 2);
+        assert_eq!(report.prompt.len(), 3);
     }
 }

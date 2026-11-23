@@ -230,6 +230,42 @@
         "unit": ""
       },
       {
+        "metric_id": "distractions",
+        "name": "Distractions",
+        "points": [
+          {
+            "day": "2031-05-08",
+            "value": null
+          },
+          {
+            "day": "2031-05-09",
+            "value": null
+          },
+          {
+            "day": "2031-05-10",
+            "value": null
+          },
+          {
+            "day": "2031-05-11",
+            "value": null
+          },
+          {
+            "day": "2031-05-12",
+            "value": null
+          },
+          {
+            "day": "2031-05-13",
+            "value": null
+          },
+          {
+            "day": "2031-05-14",
+            "value": null
+          }
+        ],
+        "rollup": "sum",
+        "unit": "times"
+      },
+      {
         "metric_id": "<id:1>",
         "name": "Pages read",
         "points": [

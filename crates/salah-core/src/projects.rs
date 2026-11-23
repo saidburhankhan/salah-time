@@ -15,7 +15,8 @@ use std::collections::BTreeSet;
 const NAME_MAX: usize = 60;
 const DEFAULT_COLOR: &str = "#4c8bf5";
 /// Metrics a new project asks for unless the caller chooses its own.
-const DEFAULT_METRICS: [&str; 2] = ["focus", "quality"];
+const DEFAULT_METRICS: [(&str, bool); 3] =
+    [("focus", true), ("quality", true), ("distractions", false)];
 
 /// One metric a project asks for, in list order.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -33,7 +34,7 @@ pub struct NewProject {
     pub note: Option<String>,
     #[serde(default)]
     pub tag_ids: Vec<String>,
-    /// Defaults to the built-in `focus` and `quality`, with the legacy `required` flags set.
+    /// Defaults to all three built-ins. Focus and quality retain their legacy `required` flag.
     #[serde(default)]
     pub metrics: Option<Vec<MetricChoice>>,
 }
@@ -145,9 +146,9 @@ pub fn add(
     };
     let choices = new.metrics.unwrap_or_else(|| {
         DEFAULT_METRICS
-            .map(|id| MetricChoice {
+            .map(|(id, required)| MetricChoice {
                 metric_id: id.into(),
-                required: true,
+                required,
             })
             .into()
     });

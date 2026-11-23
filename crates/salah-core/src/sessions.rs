@@ -588,7 +588,14 @@ mod tests {
             .iter()
             .map(|m| (m.metric_id.as_str(), m.required))
             .collect();
-        assert_eq!(ids, [("focus", false), ("quality", false)]);
+        assert_eq!(
+            ids,
+            [
+                ("focus", false),
+                ("quality", false),
+                ("distractions", false)
+            ]
+        );
         assert_eq!(prompt[0].scale_max, Some(5));
     }
 

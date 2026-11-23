@@ -29,6 +29,20 @@
       "unit": "",
       "updated_at": "1970-01-01T00:00:00Z",
       "version": 1
+    },
+    {
+      "archived": false,
+      "builtin": true,
+      "created_at": "1970-01-01T00:00:00Z",
+      "deleted_at": null,
+      "id": "distractions",
+      "kind": "count",
+      "name": "Distractions",
+      "rollup": "sum",
+      "scale_max": null,
+      "unit": "times",
+      "updated_at": "1970-01-01T00:00:00Z",
+      "version": 1
     }
   ]
 }

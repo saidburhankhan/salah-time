@@ -256,7 +256,8 @@ fn pausing_records_time_and_ticking_marks_the_item_done() {
     fixture.json(&["session", "start", "--item", &item[..8], "--json"]);
     let status = fixture.json(&["status", "--json"]);
     assert_eq!(status["running"]["item_id"], item.as_str());
-    assert_eq!(status["prompt"].as_array().unwrap().len(), 2);
+    assert_eq!(status["prompt"].as_array().unwrap().len(), 3);
+    assert_eq!(status["prompt"][2]["metric_id"], "distractions");
 
     let stopped = fixture.json_at(LATER, &["session", "stop", "--json"]);
     assert_eq!(stopped["changed"]["sessions"][0]["minutes"], 25);
