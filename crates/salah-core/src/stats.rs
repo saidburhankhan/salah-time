@@ -504,7 +504,10 @@ pub(crate) fn rollup<'a>(
     )
 }
 
-fn aggregate(kind: Rollup, mut samples: impl Iterator<Item = (f64, f64)>) -> Option<f64> {
+pub(crate) fn aggregate(
+    kind: Rollup,
+    mut samples: impl Iterator<Item = (f64, f64)>,
+) -> Option<f64> {
     let (first, mut weight) = samples.next()?;
     Some(match kind {
         Rollup::Sum => samples.fold(first, |sum, (value, _)| sum + value),
@@ -538,7 +541,8 @@ struct Scope {
     epic: Option<Pick>,
     tag: Option<Pick>,
     item: Option<Pick>,
-    /// Each project's live tag ids.
+    /// The live tags of each task and each project's defaults (for work
+    /// without a task), by name.
     tags: salah_store::ReportTags,
 }
 

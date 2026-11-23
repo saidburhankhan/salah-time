@@ -86,7 +86,7 @@ fn get_optional_name<T: DeserializeOwned>(row: &Row, column: &str) -> rusqlite::
         .transpose()
 }
 
-fn get_optional_day(row: &Row, column: &str) -> rusqlite::Result<Option<NaiveDate>> {
+pub(crate) fn get_optional_day(row: &Row, column: &str) -> rusqlite::Result<Option<NaiveDate>> {
     let text: Option<String> = row.get(column)?;
     text.map(|text| NaiveDate::parse_from_str(&text, "%Y-%m-%d").map_err(invalid))
         .transpose()

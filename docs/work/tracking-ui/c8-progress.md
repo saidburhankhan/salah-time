@@ -97,3 +97,63 @@ Task tags now drive session and backlog filters, table and trend groups, and the
 218 workspace tests passed. The same eight socket tests listed under 0b were filtered out. Strict Clippy, formatting and diff checks passed. Existing fixtures gained only tag_ids fields.
 
 CHECKPOINT 0c: Add task tags, project defaults and read-time session tag reporting — files: crates/salah-cli/src/tracking.rs, crates/salah-cli/tests/fixtures/rpc/backlog_list.json, crates/salah-cli/tests/fixtures/rpc/day_tracking.json, crates/salah-cli/tests/fixtures/rpc/item_add.json, crates/salah-cli/tests/fixtures/rpc/item_add_backlog.json, crates/salah-cli/tests/fixtures/rpc/item_add_quick.json, crates/salah-cli/tests/fixtures/rpc/item_add_quick_tomorrow.json, crates/salah-cli/tests/fixtures/rpc/item_add_tags.json, crates/salah-cli/tests/fixtures/rpc/item_backlog.json, crates/salah-cli/tests/fixtures/rpc/item_edit.json, crates/salah-cli/tests/fixtures/rpc/item_edit_metrics.json, crates/salah-cli/tests/fixtures/rpc/item_move.json, crates/salah-cli/tests/fixtures/rpc/item_schedule.json, crates/salah-cli/tests/fixtures/rpc/items_list.json, crates/salah-cli/tests/fixtures/rpc/stats_table_tag_items.json, crates/salah-cli/tests/fixtures/rpc/status_reminders.json, crates/salah-cli/tests/fixtures/rpc/status_running.json, crates/salah-cli/tests/rpc.rs, crates/salah-cli/tests/rpc/item_tags.rs, crates/salah-cli/tests/tracking_cli.rs, crates/salah-core/src/backlog.rs, crates/salah-core/src/day/view.rs, crates/salah-core/src/items.rs, crates/salah-core/src/projects.rs, crates/salah-core/src/sessions/list/tests.rs, crates/salah-core/src/stats.rs, crates/salah-core/src/stats/table.rs, crates/salah-core/src/stats/table/tests.rs, crates/salah-core/src/tags.rs, crates/salah-protocol/src/methods.rs, crates/salah-protocol/src/writes.rs, crates/salah-store/src/item_tags.rs, crates/salah-store/src/lib.rs, crates/salah-store/src/reports.rs, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md
+
+## 1 — goals
+
+Inherited from C8's uncommitted work (Codex hit its cap) and finished by Claude.
+
+- Domain `salah_domain::goal`: `Period` (day = tracking day, week = Monday–Sunday,
+  `bounds`), `Direction`, `Scope`, `Goal`, `Progress`, `GoalView`, `HistoryRow`.
+- Store `salah-store/src/goals.rs`: goal reads, the edit chain (recursive CTE over
+  `replaces_id` both ways), `goal_samples` over the same finished live sessions as
+  `stats.*`, and writes that validate before SQLite: finite positive target, at most one
+  scope id, live scope, the metric active and asked by the scope (task effective metrics,
+  project/epic project metrics, built-ins for all work and project-less tasks), minutes
+  goals `at_least`, `starts_on`/`ends_on` on period boundaries. Dates are parsed strictly
+  as `YYYY-MM-DD` (`goals::parse_day`). No migration change.
+- Core `salah-core/src/goals.rs`: progress per period from sessions; minutes sum (a tick
+  adds 0, empty = 0); metrics use the metric's rollup through `stats::aggregate` with the
+  stats weight (`max(minutes, 1)`, so a tick weighs 1); a metric with no samples is
+  `null`/not met (also for `at_most`). Samples are sorted per period so a minutes-weighted
+  mean does not depend on the random-id tie order of same-instant sessions. `list`,
+  `history` (whole chain, one row per period with that period's target, through today's
+  period, max 730 days), `add`, `edit` (successor rule from data-model.md), `end`,
+  `remove` (first period only), `end_scope` (item.remove and epic.remove end the scope's
+  goals at the last full period, or the first period's end; never deleted) and
+  `ending_scope` so those removals list the ended goals in `changed.goals`.
+- Protocol: `goals.list`, `goals.history`, `goal.add`, `goal.edit`, `goal.end`,
+  `goal.remove`; `status.get.goals` (= `goals.list` for the current tracking day);
+  `changed.goals` on every mutation result; change-log entity `goals` → `changed` scope
+  `goals`. Documented in protocol-v1.md (method rows, GoalView shape, scopes).
+- Decisions: running timers do not count toward progress (same set as stats); `goal.end`
+  and scope removal in the first period set `ends_on` to that period's end (the CHECK
+  forbids ending before `starts_on`); `goal.edit` re-validates the metric against the
+  scope's current asked metrics. Projects have no remove method, so project goals end only
+  by `goal.end` (archiving a project leaves them active).
+- Tests: `tests/rpc/goals.rs` (scope/no-project/at_most/metric weighting, Sunday 22:59 →
+  23:00 Sleep rollover into Monday for day and week goals, mid-week edits keeping history,
+  re-edit in the first period, remove/end rules, validation incl. bad dates and ranges,
+  item/epic removal ending goals), a socket success/error check for each goal method in
+  `tests/daemon/methods.rs`, `Period::bounds` unit test; the goal.add/list fixture test
+  now logs each session at its own instant (same-instant sessions made `status_goals.json`
+  flaky by id order). `mutations_are_exactly_the_writing_methods` allows `goal.end`.
+- Fixtures: new `goal_add`, `goal_edit_successor`, `goals_history`, `goals_list`,
+  `status_goals`; existing ones only gained `changed.goals: []` / `status.goals: []`
+  (plus `tag_remove.json` items, below).
+- Checks: `cargo fmt --all --check`, `cargo clippy --offline --all-targets -- -D warnings`,
+  `cargo test --offline --workspace` 230 passed, 0 failed (socket tests included, none
+  skipped), `git diff --check`.
+- Pre-existing flake noticed, not fixed: `stats_table_week.json` once regenerated with
+  focus `2.608695652173913` instead of `…26` — stats' running mean depends on the
+  random-id order of sessions with the same `created_at`. 12 reruns passed; left as is.
+
+0c review nits (separate): `tag.remove` lists the live tasks it re-versioned in
+`changed.items` (existing `tag_remove.json` `items: []` became that list, the only
+non-field-only fixture change); `detach_item_tag` logs `update` for every re-versioned
+item (removed ones too) and returns their ids; `item_tag_ids` orders by tag name then id
+like `report_tags` (no existing fixture reordered); stale comments fixed in stats.rs
+(`Scope::tags`), tags.rs (module doc, `remove` doc). Test: `item_tags.rs` checks name
+order and the `tag.remove` items.
+
+CHECKPOINT 1: Goals: domain, store, core progress from sessions, goals.*/goal.* methods, status.get.goals, changed goals, removal ends scope goals — files: crates/salah-cli/tests/daemon/methods.rs, crates/salah-cli/tests/fixtures/rpc/epic_add.json, crates/salah-cli/tests/fixtures/rpc/epic_edit_finish.json, crates/salah-cli/tests/fixtures/rpc/item_add.json, crates/salah-cli/tests/fixtures/rpc/item_add_backlog.json, crates/salah-cli/tests/fixtures/rpc/item_add_quick.json, crates/salah-cli/tests/fixtures/rpc/item_add_quick_tomorrow.json, crates/salah-cli/tests/fixtures/rpc/item_add_tags.json, crates/salah-cli/tests/fixtures/rpc/item_backlog.json, crates/salah-cli/tests/fixtures/rpc/item_edit.json, crates/salah-cli/tests/fixtures/rpc/item_edit_metrics.json, crates/salah-cli/tests/fixtures/rpc/item_move.json, crates/salah-cli/tests/fixtures/rpc/item_remove.json, crates/salah-cli/tests/fixtures/rpc/item_schedule.json, crates/salah-cli/tests/fixtures/rpc/metric_add.json, crates/salah-cli/tests/fixtures/rpc/metric_edit.json, crates/salah-cli/tests/fixtures/rpc/prayer_mark.json, crates/salah-cli/tests/fixtures/rpc/project_add.json, crates/salah-cli/tests/fixtures/rpc/project_edit.json, crates/salah-cli/tests/fixtures/rpc/resource_add_link.json, crates/salah-cli/tests/fixtures/rpc/resource_add_reminder.json, crates/salah-cli/tests/fixtures/rpc/resource_edit_done.json, crates/salah-cli/tests/fixtures/rpc/session_bump.json, crates/salah-cli/tests/fixtures/rpc/session_edit.json, crates/salah-cli/tests/fixtures/rpc/session_edit_remove_note.json, crates/salah-cli/tests/fixtures/rpc/session_log.json, crates/salah-cli/tests/fixtures/rpc/session_log_epic.json, crates/salah-cli/tests/fixtures/rpc/session_log_tick.json, crates/salah-cli/tests/fixtures/rpc/session_log_tick_stops_timer.json, crates/salah-cli/tests/fixtures/rpc/session_note.json, crates/salah-cli/tests/fixtures/rpc/session_remove.json, crates/salah-cli/tests/fixtures/rpc/session_start.json, crates/salah-cli/tests/fixtures/rpc/session_stop.json, crates/salah-cli/tests/fixtures/rpc/session_stop_done.json, crates/salah-cli/tests/fixtures/rpc/session_stop_minutes.json, crates/salah-cli/tests/fixtures/rpc/status.json, crates/salah-cli/tests/fixtures/rpc/status_reminders.json, crates/salah-cli/tests/fixtures/rpc/status_running.json, crates/salah-cli/tests/fixtures/rpc/status_stale.json, crates/salah-cli/tests/fixtures/rpc/tag_add.json, crates/salah-cli/tests/fixtures/rpc/tag_edit.json, crates/salah-cli/tests/fixtures/rpc/tag_remove.json, crates/salah-cli/tests/rpc.rs, crates/salah-core/src/epics.rs, crates/salah-core/src/items.rs, crates/salah-core/src/lib.rs, crates/salah-core/src/stats.rs, crates/salah-core/src/status.rs, crates/salah-domain/src/lib.rs, crates/salah-protocol/src/dispatcher.rs, crates/salah-protocol/src/lib.rs, crates/salah-protocol/src/message.rs, crates/salah-protocol/src/methods.rs, crates/salah-protocol/src/writes.rs, crates/salah-protocol/tests/dispatch.rs, crates/salah-store/src/codec.rs, crates/salah-store/src/lib.rs, docs/work/architecture/protocol-v1.md, crates/salah-cli/tests/fixtures/rpc/goal_add.json, crates/salah-cli/tests/fixtures/rpc/goal_edit_successor.json, crates/salah-cli/tests/fixtures/rpc/goals_history.json, crates/salah-cli/tests/fixtures/rpc/goals_list.json, crates/salah-cli/tests/fixtures/rpc/status_goals.json, crates/salah-cli/tests/rpc/goals.rs, crates/salah-core/src/goals.rs, crates/salah-domain/src/goal.rs, crates/salah-protocol/src/goals.rs, crates/salah-store/src/goals.rs, docs/work/tracking-ui/c8-progress.md
+CHECKPOINT 0c-nits: tag.remove lists re-versioned tasks, detach logs update, item tag_ids in name order, stale tag comments — files: crates/salah-store/src/item_tags.rs, crates/salah-core/src/tags.rs, crates/salah-core/src/stats.rs (comment only), crates/salah-protocol/src/writes.rs (tag_remove), crates/salah-cli/tests/rpc/item_tags.rs, crates/salah-cli/tests/fixtures/rpc/tag_remove.json, docs/work/architecture/protocol-v1.md (tag_ids order, tag.remove row) — stats.rs, writes.rs, tag_remove.json and protocol-v1.md also carry checkpoint-1 hunks

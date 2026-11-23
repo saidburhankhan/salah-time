@@ -3,6 +3,7 @@
 pub mod day;
 pub mod epic;
 pub mod error;
+pub mod goal;
 pub mod item;
 pub mod resource;
 pub mod runtime;

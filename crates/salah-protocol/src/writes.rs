@@ -11,9 +11,11 @@ use salah_core::items::{ItemView, MovePosition, NewItem};
 use salah_core::projects::ProjectView;
 use salah_core::sessions::SessionView;
 use salah_core::{
-    Store, WriteTx, backlog, day, epics, items, marks, metrics, projects, quick, sessions, tags,
+    Store, WriteTx, backlog, day, epics, goals, items, marks, metrics, projects, quick, sessions,
+    tags,
 };
 use salah_domain::error::Error;
+use salah_domain::goal::Scope;
 use salah_domain::tracking::{Item, Project, Session};
 use serde::Serialize;
 use serde_json::Value;
@@ -211,10 +213,19 @@ pub(crate) fn item_remove(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value
     let p: RemoveParams = parse(call.params)?;
     let config = ctx.config.load()?;
     let now = ctx.now();
+    let today = day::current(&config, now)?;
+    let scope = Scope {
+        item_id: Some(p.id.clone()),
+        ..Scope::default()
+    };
     mutate(ctx.store, call.method, &p.op_id, |tx| {
-        Ok(removed(
-            items::remove(tx, &config, now, &p.id, p.expected_version)?.id,
-        ))
+        let (item, goals) = goals::ending_scope(tx, &scope, today, || {
+            items::remove(tx, &config, now, &p.id, p.expected_version)
+        })?;
+        Ok(Changed {
+            goals,
+            ..removed(item.id)
+        })
     })
 }
 
@@ -273,9 +284,16 @@ pub(crate) fn epic_remove(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value
     let now = ctx.now();
     let config = ctx.config.load()?;
     let today = day::current(&config, now)?;
+    let scope = Scope {
+        epic_id: Some(p.id.clone()),
+        ..Scope::default()
+    };
     mutate(ctx.store, call.method, &p.op_id, |tx| {
-        let affected = epics::remove(tx, &config, now, &p.id, p.expected_version)?;
+        let (affected, goals) = goals::ending_scope(tx, &scope, today, || {
+            epics::remove(tx, &config, now, &p.id, p.expected_version)
+        })?;
         let mut changed = item_views(tx, today, affected)?;
+        changed.goals = goals;
         changed.deleted.push(p.id.clone());
         Ok(changed)
     })
@@ -340,6 +358,7 @@ pub(crate) fn tag_edit(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, R
 pub(crate) fn tag_remove(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let p: RemoveParams = parse(call.params)?;
     let now = ctx.now();
+    let today = day::current(&ctx.config.load()?, now)?;
     mutate(ctx.store, call.method, &p.op_id, |tx| {
         let tagged: Vec<String> = tx
             .projects()?
@@ -347,14 +366,21 @@ pub(crate) fn tag_remove(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value,
             .filter(|project| project.deleted_at.is_none() && project.tag_ids.contains(&p.id))
             .map(|project| project.id)
             .collect();
-        let tag = tags::remove(tx, now, &p.id, p.expected_version)?;
+        let (tag, retagged) = tags::remove(tx, now, &p.id, p.expected_version)?;
         let projects: Vec<ProjectView> = tagged
             .iter()
             .map(|id| projects::view(tx, projects::find(tx, id)?))
             .collect::<Result<_, Error>>()?;
+        let mut items = Vec::new();
+        for id in retagged {
+            if let Some(item) = tx.item(&id)?.filter(Item::is_live) {
+                items.push(item);
+            }
+        }
         Ok(Changed {
             projects,
-            ..removed(tag.id)
+            deleted: vec![tag.id],
+            ..item_views(tx, today, items)?
         })
     })
 }

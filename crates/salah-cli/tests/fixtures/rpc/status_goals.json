@@ -1,0 +1,734 @@
+{
+  "id": 6,
+  "jsonrpc": "2.0",
+  "result": {
+    "boundaries": [
+      {
+        "id": "fajr",
+        "is_next": false,
+        "kind": "prayer",
+        "name": "Fajr",
+        "passed": true,
+        "time": "03:12"
+      },
+      {
+        "id": "sunrise",
+        "is_next": false,
+        "kind": "sunrise",
+        "name": "Sunrise",
+        "passed": true,
+        "time": "05:06"
+      },
+      {
+        "id": "dhuhr",
+        "is_next": true,
+        "kind": "prayer",
+        "name": "Dhuhr",
+        "passed": false,
+        "time": "12:19"
+      },
+      {
+        "id": "asr",
+        "is_next": false,
+        "kind": "prayer",
+        "name": "Asr",
+        "passed": false,
+        "time": "17:24"
+      },
+      {
+        "id": "maghrib",
+        "is_next": false,
+        "kind": "prayer",
+        "name": "Maghrib",
+        "passed": false,
+        "time": "19:33"
+      },
+      {
+        "id": "isha",
+        "is_next": false,
+        "kind": "prayer",
+        "name": "Isha",
+        "passed": false,
+        "time": "21:20"
+      },
+      {
+        "id": "sleep",
+        "is_next": false,
+        "kind": "sleep",
+        "name": "Sleep",
+        "passed": false,
+        "time": "23:00"
+      }
+    ],
+    "current_block": {
+      "block": {
+        "day": "2031-05-14",
+        "start": "fajr"
+      },
+      "end": {
+        "date": "2031-05-14",
+        "id": "dhuhr",
+        "kind": "prayer",
+        "name": "Dhuhr",
+        "time": "12:19"
+      },
+      "sleeping": false,
+      "start": {
+        "date": "2031-05-14",
+        "id": "fajr",
+        "kind": "prayer",
+        "name": "Fajr",
+        "time": "03:12"
+      }
+    },
+    "date": "2031-05-14",
+    "day": "2031-05-14",
+    "goals": [
+      {
+        "created_at": "2031-05-14T04:30:00Z",
+        "deleted_at": null,
+        "direction": "at_least",
+        "ends_on": null,
+        "epic_id": null,
+        "id": "<id:1>",
+        "item_id": null,
+        "metric_id": null,
+        "period": "day",
+        "position": 0,
+        "progress": {
+          "from": "2031-05-14",
+          "met": true,
+          "to": "2031-05-14",
+          "value": 62.0
+        },
+        "project_id": null,
+        "replaces_id": null,
+        "starts_on": "2031-05-14",
+        "target": 60.0,
+        "updated_at": "2031-05-14T04:30:00Z",
+        "version": 1
+      },
+      {
+        "created_at": "2031-05-14T04:30:00Z",
+        "deleted_at": null,
+        "direction": "at_least",
+        "ends_on": null,
+        "epic_id": null,
+        "id": "<id:2>",
+        "item_id": null,
+        "metric_id": null,
+        "period": "day",
+        "position": 1,
+        "progress": {
+          "from": "2031-05-14",
+          "met": true,
+          "to": "2031-05-14",
+          "value": 50.0
+        },
+        "project_id": "<id:3>",
+        "replaces_id": null,
+        "starts_on": "2031-05-14",
+        "target": 50.0,
+        "updated_at": "2031-05-14T04:30:00Z",
+        "version": 1
+      },
+      {
+        "created_at": "2031-05-14T04:30:00Z",
+        "deleted_at": null,
+        "direction": "at_least",
+        "ends_on": null,
+        "epic_id": "<id:4>",
+        "id": "<id:5>",
+        "item_id": null,
+        "metric_id": null,
+        "period": "week",
+        "position": 2,
+        "progress": {
+          "from": "2031-05-12",
+          "met": true,
+          "to": "2031-05-18",
+          "value": 40.0
+        },
+        "project_id": null,
+        "replaces_id": null,
+        "starts_on": "2031-05-12",
+        "target": 40.0,
+        "updated_at": "2031-05-14T04:30:00Z",
+        "version": 1
+      },
+      {
+        "created_at": "2031-05-14T04:30:00Z",
+        "deleted_at": null,
+        "direction": "at_least",
+        "ends_on": null,
+        "epic_id": null,
+        "id": "<id:6>",
+        "item_id": "<id:7>",
+        "metric_id": null,
+        "period": "day",
+        "position": 3,
+        "progress": {
+          "from": "2031-05-14",
+          "met": true,
+          "to": "2031-05-14",
+          "value": 30.0
+        },
+        "project_id": null,
+        "replaces_id": null,
+        "starts_on": "2031-05-14",
+        "target": 30.0,
+        "updated_at": "2031-05-14T04:30:00Z",
+        "version": 1
+      },
+      {
+        "created_at": "2031-05-14T04:30:00Z",
+        "deleted_at": null,
+        "direction": "at_least",
+        "ends_on": null,
+        "epic_id": null,
+        "id": "<id:8>",
+        "item_id": null,
+        "metric_id": "focus",
+        "period": "week",
+        "position": 4,
+        "progress": {
+          "from": "2031-05-12",
+          "met": true,
+          "to": "2031-05-18",
+          "value": 4.414634146341463
+        },
+        "project_id": null,
+        "replaces_id": null,
+        "starts_on": "2031-05-12",
+        "target": 4.0,
+        "updated_at": "2031-05-14T04:30:00Z",
+        "version": 1
+      },
+      {
+        "created_at": "2031-05-14T04:30:00Z",
+        "deleted_at": null,
+        "direction": "at_most",
+        "ends_on": null,
+        "epic_id": null,
+        "id": "<id:9>",
+        "item_id": null,
+        "metric_id": "distractions",
+        "period": "week",
+        "position": 5,
+        "progress": {
+          "from": "2031-05-12",
+          "met": false,
+          "to": "2031-05-18",
+          "value": 4.0
+        },
+        "project_id": "<id:3>",
+        "replaces_id": null,
+        "starts_on": "2031-05-12",
+        "target": 3.0,
+        "updated_at": "2031-05-14T04:30:00Z",
+        "version": 1
+      }
+    ],
+    "label": "☾ Dhuhr 2h 39m",
+    "location": "Tashkent",
+    "method": "mwl",
+    "method_name": "Muslim World League",
+    "next": {
+      "at": "2031-05-14T07:19:00Z",
+      "date": "2031-05-14",
+      "id": "dhuhr",
+      "kind": "prayer",
+      "name": "Dhuhr",
+      "remaining": "02:39:00",
+      "remaining_seconds": 9540,
+      "remaining_short": "2h 39m",
+      "time": "12:19"
+    },
+    "planner": {
+      "block": "fajr",
+      "current": [
+        {
+          "actual_minutes": 30,
+          "block": "fajr",
+          "detail_text": "30 min · Once",
+          "done": true,
+          "epic_id": "<id:4>",
+          "id": "<id:7>",
+          "metric_ids": null,
+          "metrics": [
+            {
+              "kind": "scale",
+              "metric_id": "focus",
+              "name": "Focus",
+              "required": false,
+              "scale_max": 5,
+              "unit": ""
+            },
+            {
+              "kind": "scale",
+              "metric_id": "quality",
+              "name": "Quality",
+              "required": false,
+              "scale_max": 5,
+              "unit": ""
+            },
+            {
+              "kind": "count",
+              "metric_id": "distractions",
+              "name": "Distractions",
+              "required": false,
+              "scale_max": null,
+              "unit": "times"
+            }
+          ],
+          "next_occurrence": "2031-05-14",
+          "planned_minutes": null,
+          "position": 0,
+          "project": {
+            "color": "#4c8bf5",
+            "id": "<id:3>",
+            "name": "Study"
+          },
+          "repeat": "none",
+          "resources": {
+            "links": 0,
+            "notes": 0,
+            "reminders": 0
+          },
+          "schedule_text": "Once",
+          "sessions": [
+            {
+              "block": "fajr",
+              "day": "2031-05-14",
+              "ended_at": null,
+              "epic_id": "<id:4>",
+              "id": "<id:10>",
+              "item_id": "<id:7>",
+              "minutes": 30,
+              "note": null,
+              "notes": [],
+              "project_id": "<id:3>",
+              "running": false,
+              "stale": false,
+              "started_at": null,
+              "values": {
+                "distractions": 1.0,
+                "focus": 5.0
+              },
+              "version": 1
+            },
+            {
+              "block": "fajr",
+              "day": "2031-05-14",
+              "ended_at": null,
+              "epic_id": "<id:4>",
+              "id": "<id:11>",
+              "item_id": "<id:7>",
+              "minutes": null,
+              "note": null,
+              "notes": [],
+              "project_id": "<id:3>",
+              "running": false,
+              "stale": false,
+              "started_at": null,
+              "values": {
+                "distractions": 1.0,
+                "focus": 1.0
+              },
+              "version": 1
+            },
+            {
+              "block": "fajr",
+              "day": "2031-05-14",
+              "ended_at": null,
+              "epic_id": "<id:4>",
+              "id": "<id:12>",
+              "item_id": "<id:7>",
+              "max_minutes": 1,
+              "minutes": null,
+              "note": null,
+              "notes": [],
+              "project_id": "<id:3>",
+              "running": true,
+              "stale": false,
+              "started_at": "2031-05-14T04:40:00Z",
+              "values": {},
+              "version": 1
+            }
+          ],
+          "tag_ids": [],
+          "title": "Read",
+          "version": 1,
+          "weekdays": null
+        },
+        {
+          "actual_minutes": 12,
+          "block": "fajr",
+          "detail_text": "12 min · Once",
+          "done": false,
+          "epic_id": null,
+          "id": "<id:13>",
+          "metric_ids": null,
+          "metrics": [
+            {
+              "kind": "scale",
+              "metric_id": "focus",
+              "name": "Focus",
+              "required": false,
+              "scale_max": 5,
+              "unit": ""
+            },
+            {
+              "kind": "scale",
+              "metric_id": "quality",
+              "name": "Quality",
+              "required": false,
+              "scale_max": 5,
+              "unit": ""
+            },
+            {
+              "kind": "count",
+              "metric_id": "distractions",
+              "name": "Distractions",
+              "required": false,
+              "scale_max": null,
+              "unit": "times"
+            }
+          ],
+          "next_occurrence": "2031-05-14",
+          "planned_minutes": null,
+          "position": 1,
+          "project": null,
+          "repeat": "none",
+          "resources": {
+            "links": 0,
+            "notes": 0,
+            "reminders": 0
+          },
+          "schedule_text": "Once",
+          "sessions": [
+            {
+              "block": "fajr",
+              "day": "2031-05-14",
+              "ended_at": null,
+              "epic_id": null,
+              "id": "<id:14>",
+              "item_id": "<id:13>",
+              "minutes": 12,
+              "note": null,
+              "notes": [],
+              "project_id": null,
+              "running": false,
+              "stale": false,
+              "started_at": null,
+              "values": {
+                "distractions": 5.0
+              },
+              "version": 1
+            }
+          ],
+          "tag_ids": [],
+          "title": "Walk",
+          "version": 1,
+          "weekdays": null
+        }
+      ],
+      "day": "2031-05-14",
+      "fulfilment": {
+        "actual_minutes": 42,
+        "done_items": 1,
+        "planned_items": 2,
+        "planned_minutes": 0,
+        "unplanned_minutes": 20
+      },
+      "items": [
+        {
+          "actual_minutes": 30,
+          "block": "fajr",
+          "detail_text": "30 min · Once",
+          "done": true,
+          "epic_id": "<id:4>",
+          "id": "<id:7>",
+          "metric_ids": null,
+          "metrics": [
+            {
+              "kind": "scale",
+              "metric_id": "focus",
+              "name": "Focus",
+              "required": false,
+              "scale_max": 5,
+              "unit": ""
+            },
+            {
+              "kind": "scale",
+              "metric_id": "quality",
+              "name": "Quality",
+              "required": false,
+              "scale_max": 5,
+              "unit": ""
+            },
+            {
+              "kind": "count",
+              "metric_id": "distractions",
+              "name": "Distractions",
+              "required": false,
+              "scale_max": null,
+              "unit": "times"
+            }
+          ],
+          "next_occurrence": "2031-05-14",
+          "planned_minutes": null,
+          "position": 0,
+          "project": {
+            "color": "#4c8bf5",
+            "id": "<id:3>",
+            "name": "Study"
+          },
+          "repeat": "none",
+          "resources": {
+            "links": 0,
+            "notes": 0,
+            "reminders": 0
+          },
+          "schedule_text": "Once",
+          "sessions": [
+            {
+              "block": "fajr",
+              "day": "2031-05-14",
+              "ended_at": null,
+              "epic_id": "<id:4>",
+              "id": "<id:10>",
+              "item_id": "<id:7>",
+              "minutes": 30,
+              "note": null,
+              "notes": [],
+              "project_id": "<id:3>",
+              "running": false,
+              "stale": false,
+              "started_at": null,
+              "values": {
+                "distractions": 1.0,
+                "focus": 5.0
+              },
+              "version": 1
+            },
+            {
+              "block": "fajr",
+              "day": "2031-05-14",
+              "ended_at": null,
+              "epic_id": "<id:4>",
+              "id": "<id:11>",
+              "item_id": "<id:7>",
+              "minutes": null,
+              "note": null,
+              "notes": [],
+              "project_id": "<id:3>",
+              "running": false,
+              "stale": false,
+              "started_at": null,
+              "values": {
+                "distractions": 1.0,
+                "focus": 1.0
+              },
+              "version": 1
+            },
+            {
+              "block": "fajr",
+              "day": "2031-05-14",
+              "ended_at": null,
+              "epic_id": "<id:4>",
+              "id": "<id:12>",
+              "item_id": "<id:7>",
+              "max_minutes": 1,
+              "minutes": null,
+              "note": null,
+              "notes": [],
+              "project_id": "<id:3>",
+              "running": true,
+              "stale": false,
+              "started_at": "2031-05-14T04:40:00Z",
+              "values": {},
+              "version": 1
+            }
+          ],
+          "tag_ids": [],
+          "title": "Read",
+          "version": 1,
+          "weekdays": null
+        },
+        {
+          "actual_minutes": 12,
+          "block": "fajr",
+          "detail_text": "12 min · Once",
+          "done": false,
+          "epic_id": null,
+          "id": "<id:13>",
+          "metric_ids": null,
+          "metrics": [
+            {
+              "kind": "scale",
+              "metric_id": "focus",
+              "name": "Focus",
+              "required": false,
+              "scale_max": 5,
+              "unit": ""
+            },
+            {
+              "kind": "scale",
+              "metric_id": "quality",
+              "name": "Quality",
+              "required": false,
+              "scale_max": 5,
+              "unit": ""
+            },
+            {
+              "kind": "count",
+              "metric_id": "distractions",
+              "name": "Distractions",
+              "required": false,
+              "scale_max": null,
+              "unit": "times"
+            }
+          ],
+          "next_occurrence": "2031-05-14",
+          "planned_minutes": null,
+          "position": 1,
+          "project": null,
+          "repeat": "none",
+          "resources": {
+            "links": 0,
+            "notes": 0,
+            "reminders": 0
+          },
+          "schedule_text": "Once",
+          "sessions": [
+            {
+              "block": "fajr",
+              "day": "2031-05-14",
+              "ended_at": null,
+              "epic_id": null,
+              "id": "<id:14>",
+              "item_id": "<id:13>",
+              "minutes": 12,
+              "note": null,
+              "notes": [],
+              "project_id": null,
+              "running": false,
+              "stale": false,
+              "started_at": null,
+              "values": {
+                "distractions": 5.0
+              },
+              "version": 1
+            }
+          ],
+          "tag_ids": [],
+          "title": "Walk",
+          "version": 1,
+          "weekdays": null
+        }
+      ],
+      "open": 1,
+      "planning_block": {
+        "day": "2031-05-14",
+        "start": "fajr"
+      },
+      "prayer_marks": []
+    },
+    "planner_error": null,
+    "prayers": [
+      {
+        "id": "fajr",
+        "is_next": false,
+        "name": "Fajr",
+        "passed": true,
+        "time": "03:12"
+      },
+      {
+        "id": "sunrise",
+        "is_next": false,
+        "name": "Sunrise",
+        "passed": true,
+        "time": "05:06"
+      },
+      {
+        "id": "dhuhr",
+        "is_next": true,
+        "name": "Dhuhr",
+        "passed": false,
+        "time": "12:19"
+      },
+      {
+        "id": "asr",
+        "is_next": false,
+        "name": "Asr",
+        "passed": false,
+        "time": "17:24"
+      },
+      {
+        "id": "maghrib",
+        "is_next": false,
+        "name": "Maghrib",
+        "passed": false,
+        "time": "19:33"
+      },
+      {
+        "id": "isha",
+        "is_next": false,
+        "name": "Isha",
+        "passed": false,
+        "time": "21:20"
+      }
+    ],
+    "prompt": [
+      {
+        "kind": "scale",
+        "metric_id": "focus",
+        "name": "Focus",
+        "required": false,
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "kind": "scale",
+        "metric_id": "quality",
+        "name": "Quality",
+        "required": false,
+        "scale_max": 5,
+        "unit": ""
+      },
+      {
+        "kind": "count",
+        "metric_id": "distractions",
+        "name": "Distractions",
+        "required": false,
+        "scale_max": null,
+        "unit": "times"
+      }
+    ],
+    "reminders": [],
+    "running": {
+      "block": "fajr",
+      "day": "2031-05-14",
+      "ended_at": null,
+      "epic_id": "<id:4>",
+      "id": "<id:12>",
+      "item_id": "<id:7>",
+      "max_minutes": 1,
+      "minutes": null,
+      "note": null,
+      "notes": [],
+      "project_id": "<id:3>",
+      "running": true,
+      "stale": false,
+      "started_at": "2031-05-14T04:40:00Z",
+      "values": {},
+      "version": 1
+    },
+    "schema_version": 1,
+    "sleep_time": "23:00",
+    "source": "calculated",
+    "source_name": "Muslim World League",
+    "source_updated": null
+  }
+}

@@ -1,0 +1,341 @@
+//! Day and Monday-first week targets. Session progress is computed on read.
+use crate::{
+    Store, WriteTx,
+    guard::{ensure_version, not_found},
+    stats,
+};
+use chrono::{DateTime, NaiveDate, Utc};
+use salah_domain::{
+    error::Error,
+    goal::{Direction, Goal, GoalView, HistoryRow, Period, Progress, Scope},
+    runtime::IdGenerator,
+    tracking::Rollup,
+};
+use std::collections::BTreeMap;
+
+#[derive(Clone, Debug)]
+pub struct NewGoal {
+    pub scope: Scope,
+    pub period: Period,
+    pub metric_id: Option<String>,
+    pub direction: Direction,
+    pub target: f64,
+}
+
+/// Parse an external calendar date without chrono's abbreviated month/day or extended years.
+pub fn parse_day(field: &'static str, s: &str) -> Result<NaiveDate, Error> {
+    s.parse::<NaiveDate>()
+        .ok()
+        .filter(|d| s.len() == 10 && d.to_string() == s)
+        .ok_or_else(|| Error::validation(field, "use a valid YYYY-MM-DD date"))
+}
+
+fn progress(
+    goal: &Goal,
+    from: NaiveDate,
+    to: NaiveDate,
+    rollup: Rollup,
+    samples: &[(f64, f64)],
+) -> Progress {
+    let value = stats::aggregate(rollup, samples.iter().copied())
+        .or_else(|| goal.metric_id.is_none().then_some(0.0));
+    let met = value.is_some_and(|v| match goal.direction {
+        Direction::AtLeast => v >= goal.target,
+        Direction::AtMost => v <= goal.target,
+    });
+    Progress {
+        from,
+        to,
+        value,
+        met,
+    }
+}
+
+/// One read per version for the full range, including empty periods.
+fn periods(
+    store: &Store,
+    g: &Goal,
+    first: NaiveDate,
+    last: NaiveDate,
+) -> Result<Vec<HistoryRow>, Error> {
+    let mut from = g.period.bounds(first)?.0.max(g.starts_on);
+    let through = g
+        .period
+        .bounds(last)?
+        .1
+        .min(g.ends_on.unwrap_or(NaiveDate::MAX));
+    if from > through {
+        return Ok(vec![]);
+    }
+    let rollup = match &g.metric_id {
+        None => Rollup::Sum,
+        Some(id) => {
+            store
+                .metric(id)?
+                .ok_or_else(|| not_found("metric", id))?
+                .rollup
+        }
+    };
+    let mut groups = BTreeMap::<NaiveDate, Vec<(f64, f64)>>::new();
+    for (day, value, weight) in store.goal_samples(g, from, through)? {
+        groups
+            .entry(g.period.bounds(day)?.0)
+            .or_default()
+            .push((value, weight));
+    }
+    // Sessions logged at the same instant tie in store order (by random id);
+    // a fixed sample order keeps the running mean reproducible to the bit.
+    for samples in groups.values_mut() {
+        samples.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    }
+    let mut rows = Vec::new();
+    loop {
+        let to = g.period.bounds(from)?.1;
+        rows.push(HistoryRow {
+            progress: progress(
+                g,
+                from,
+                to,
+                rollup,
+                groups.get(&from).map(Vec::as_slice).unwrap_or_default(),
+            ),
+            target: g.target,
+        });
+        if to >= through {
+            break;
+        }
+        from = to
+            .succ_opt()
+            .ok_or_else(|| Error::validation("to", "date out of range"))?;
+    }
+    Ok(rows)
+}
+
+pub fn view(store: &Store, g: Goal, at: NaiveDate) -> Result<GoalView, Error> {
+    let at = at.min(g.ends_on.unwrap_or(at)).max(g.starts_on);
+    let p = periods(store, &g, at, at)?
+        .pop()
+        .ok_or_else(|| Error::Storage("goal has no valid period".into()))?;
+    Ok(GoalView {
+        goal: g,
+        progress: p.progress,
+    })
+}
+
+pub fn list(
+    store: &Store,
+    at: NaiveDate,
+    today: NaiveDate,
+    include_ended: bool,
+) -> Result<Vec<GoalView>, Error> {
+    store.read_snapshot(|store| {
+        store
+            .goals_at(at, include_ended)?
+            .into_iter()
+            .filter(|g| include_ended || at < today || g.ends_on.is_none())
+            .map(|g| view(store, g, at))
+            .collect()
+    })
+}
+
+/// Each period of the goal's whole edit chain (any member's id) within
+/// `from..=to`, up to today's period, with the target that period had.
+pub fn history(
+    store: &Store,
+    id: &str,
+    from: NaiveDate,
+    to: NaiveDate,
+    today: NaiveDate,
+) -> Result<Vec<HistoryRow>, Error> {
+    if from > to {
+        return Err(Error::validation("to", "range ends before its start"));
+    }
+    if (to - from).num_days() >= stats::MAX_DAYS {
+        return Err(Error::validation(
+            "to",
+            format!("a range covers at most {} days", stats::MAX_DAYS),
+        ));
+    }
+    store.read_snapshot(|store| {
+        let versions = store.goal_history_versions(id)?;
+        if versions.is_empty() {
+            return Err(not_found("goal", id));
+        }
+        let mut rows = Vec::new();
+        for goal in versions {
+            let first = from.max(goal.starts_on);
+            let last = to.min(today).min(goal.ends_on.unwrap_or(to));
+            if first <= last {
+                rows.extend(periods(store, &goal, first, last)?);
+            }
+        }
+        Ok(rows)
+    })
+}
+
+pub fn add(
+    tx: &WriteTx<'_>,
+    new: NewGoal,
+    now: DateTime<Utc>,
+    today: NaiveDate,
+    ids: &dyn IdGenerator,
+) -> Result<GoalView, Error> {
+    let g = Goal {
+        id: ids.new_id(),
+        scope: new.scope,
+        period: new.period,
+        metric_id: new.metric_id,
+        direction: new.direction,
+        target: new.target,
+        starts_on: new.period.bounds(today)?.0,
+        ends_on: None,
+        replaces_id: None,
+        position: tx.next_goal_position()?,
+        created_at: now,
+        updated_at: now,
+        deleted_at: None,
+        version: 1,
+    };
+    tx.insert_goal(&g)?;
+    view(tx, g, today)
+}
+
+fn active(store: &Store, id: &str, today: NaiveDate, expected: Option<i64>) -> Result<Goal, Error> {
+    let g = store
+        .goal(id)?
+        .filter(|g| g.deleted_at.is_none())
+        .ok_or_else(|| not_found("goal", id))?;
+    ensure_version("goal", id, g.version, expected)?;
+    if g.ends_on.is_some() || today < g.starts_on {
+        return Err(Error::validation("id", "goal is outside its active period"));
+    }
+    Ok(g)
+}
+
+pub struct EditResult {
+    pub previous: Goal,
+    pub successor: GoalView,
+}
+
+pub fn edit(
+    tx: &WriteTx<'_>,
+    id: &str,
+    target: f64,
+    expected: Option<i64>,
+    now: DateTime<Utc>,
+    today: NaiveDate,
+    ids: &dyn IdGenerator,
+) -> Result<EditResult, Error> {
+    let mut old = active(tx, id, today, expected)?;
+    let start = old.period.bounds(today)?.0;
+    let successor = Goal {
+        id: ids.new_id(),
+        target,
+        starts_on: start,
+        replaces_id: Some(old.id.clone()),
+        created_at: now,
+        updated_at: now,
+        version: 1,
+        ..old.clone()
+    };
+    if start == old.starts_on {
+        old.deleted_at = Some(now);
+    } else {
+        old.ends_on = start.pred_opt();
+    }
+    old.updated_at = now;
+    old.version = tx.close_goal(&old)?;
+    tx.insert_goal(&successor)?;
+    Ok(EditResult {
+        previous: old,
+        successor: view(tx, successor, today)?,
+    })
+}
+
+fn close(
+    tx: &WriteTx<'_>,
+    mut g: Goal,
+    today: NaiveDate,
+    now: DateTime<Utc>,
+) -> Result<Goal, Error> {
+    let (start, end) = g.period.bounds(today)?;
+    g.ends_on = Some(if start <= g.starts_on {
+        g.period.bounds(g.starts_on)?.1
+    } else {
+        start.pred_opt().unwrap_or(end)
+    });
+    g.updated_at = now;
+    g.version = tx.close_goal(&g)?;
+    Ok(g)
+}
+
+pub fn end(
+    tx: &WriteTx<'_>,
+    id: &str,
+    expected: Option<i64>,
+    today: NaiveDate,
+    now: DateTime<Utc>,
+) -> Result<GoalView, Error> {
+    view(
+        tx,
+        close(tx, active(tx, id, today, expected)?, today, now)?,
+        today,
+    )
+}
+
+/// Ends the active goals of a removed project, epic or task at their last
+/// full period (or their first period's end); they are never deleted.
+pub(crate) fn end_scope(
+    tx: &WriteTx<'_>,
+    scope: Scope,
+    today: NaiveDate,
+    now: DateTime<Utc>,
+) -> Result<(), Error> {
+    for g in tx.goals_for_scope(&scope)? {
+        close(tx, g, today, now)?;
+    }
+    Ok(())
+}
+
+/// Runs `remove` (which ends the goals of `scope`) and returns the goals it
+/// ended, so a removal's result can list them.
+pub fn ending_scope<T>(
+    store: &Store,
+    scope: &Scope,
+    today: NaiveDate,
+    remove: impl FnOnce() -> Result<T, Error>,
+) -> Result<(T, Vec<GoalView>), Error> {
+    let active = store.goals_for_scope(scope)?;
+    let removed = remove()?;
+    let mut ended = Vec::new();
+    for g in active {
+        if let Some(g) = store.goal(&g.id)? {
+            ended.push(view(store, g, today)?);
+        }
+    }
+    Ok((removed, ended))
+}
+
+pub fn remove(
+    tx: &WriteTx<'_>,
+    id: &str,
+    expected: Option<i64>,
+    today: NaiveDate,
+    now: DateTime<Utc>,
+) -> Result<(), Error> {
+    let mut g = tx
+        .goal(id)?
+        .filter(|g| g.deleted_at.is_none())
+        .ok_or_else(|| not_found("goal", id))?;
+    ensure_version("goal", id, g.version, expected)?;
+    if g.period.bounds(today)?.0 != g.starts_on {
+        return Err(Error::validation(
+            "id",
+            "only a goal in its first period can be removed",
+        ));
+    }
+    g.updated_at = now;
+    g.deleted_at = Some(now);
+    tx.close_goal(&g)?;
+    Ok(())
+}

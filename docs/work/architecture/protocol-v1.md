@@ -95,7 +95,7 @@ store-wide counter, never a precondition.
 | Method | Params | Result | Errors | Idempotent | Version-checked |
 |---|---|---|---|---|---|
 | `hello` | `protocol[]`, `client`, `actor?` | `protocol`, `server`, `capabilities`, `revision` | protocol | — | — |
-| `status.get` | — | `Status`: prayer projection, `planner` (today's rows), `running: SessionView\|null`, `prompt: [PromptMetric]`, `reminders: [DueReminder]` | config, source, storage | — | — |
+| `status.get` | — | `Status`: prayer projection, `planner` (today's rows), `running: SessionView\|null`, `prompt: [PromptMetric]`, `goals: [GoalView]` (as `goals.list` for the current tracking day), `reminders: [DueReminder]` | config, source, storage | — | — |
 | `day.get` | `date?` | `DayPlan`: prayers, blocks with `capacity_minutes`/`planned_minutes`/`actual_minutes`/`unplanned_minutes` and rows, `open`, `fulfilment` | validation, source, storage | — | — |
 | `items.list` | — | `[ItemView]`, the backlog last | storage | — | — |
 | `backlog.list` | `project_id?`, `tag_id?` (each also `"none"`) | `[ItemView + project: {id,name,color,tag_ids}\|null + resources: {notes,links,reminders}]` in backlog order | not_found, storage | — | — |
@@ -114,18 +114,18 @@ store-wide counter, never a precondition.
 | `item.move` | `op_id`, `id`, `block` (required; `null` reorders the backlog), `after_id?` / `before_id?` / `index?`, `expected_version?` | mutation result (every renumbered item) | validation, not_found, conflict, storage | yes | yes |
 | `item.schedule` | `op_id`, `id`, `day`, `block`, `expected_version?` (one-time items only) | mutation result (`changed.items`) | validation, not_found, conflict, source, storage | yes | yes |
 | `item.backlog` | `op_id`, `id`, `expected_version?` (one-time items only) | mutation result (`changed.items`) | validation, not_found, conflict, source, storage | yes | yes |
-| `item.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`) | not_found, conflict, storage | yes | yes |
+| `item.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`, the task's ended goals in `changed.goals`) | not_found, conflict, storage | yes | yes |
 | `epics.list` | `project_id?`, `status?` (`active` or `finished`) | epics with work totals and task counts, in project and position order | validation, storage | — | — |
 | `epic.add` | `op_id`, `project_id`, `name`, `note?` | mutation result (`changed.epics`) | validation, not_found, storage | yes | no |
 | `epic.edit` | `op_id`, `id`, `expected_version?`, `name?`, `note?`, `status?` | mutation result (`changed.epics`) | validation, not_found, conflict, storage | yes | yes |
-| `epic.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`, detached `changed.items`) | not_found, conflict, storage | yes | yes |
+| `epic.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`, detached `changed.items`, the epic's ended goals in `changed.goals`) | not_found, conflict, storage | yes | yes |
 | `projects.list` | `archived?` | `[Project + tags:[Tag] + metrics:[ProjectMetric + metric:Metric]]` | storage | — | — |
 | `project.add` | `op_id`, `name`, `color?`, `note?`, `tag_ids?`, `metrics?:[{metric_id, required}]` (defaults to focus, quality and distractions in that order, with `required: false` for distractions) | mutation result (`changed.projects`) | validation, not_found, storage | yes | no |
 | `project.edit` | `op_id`, `id`, `expected_version?`, any add field (`note: null` clears), `archived?` | mutation result | validation, not_found, conflict, storage | yes | yes |
 | `tags.list` | — | `[Tag]` | storage | — | — |
 | `tag.add` | `op_id`, `name`, `color` | mutation result (`changed.tags`) | validation, storage | yes | no |
 | `tag.edit` | `op_id`, `id`, `expected_version?`, `name?`, `color?` | mutation result | validation, not_found, conflict, storage | yes | yes |
-| `tag.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`, detached `changed.projects`) | not_found, conflict, storage | yes | yes |
+| `tag.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`, detached `changed.projects`, the live tasks it re-versioned in `changed.items`) | not_found, conflict, storage | yes | yes |
 | `metrics.list` | `archived?` | `[Metric]`, built-ins first | storage | — | — |
 | `metric.add` | `op_id`, `name`, `unit?`, `kind` (`count`/`scale`/`check`), `scale_max?` (scale: 2–10), `rollup?` (default `avg` for a scale, else `sum`) | mutation result (`changed.metrics`) | validation, storage | yes | no |
 | `metric.edit` | `op_id`, `id`, `expected_version?`, `name?`, `unit?`, `archived?` (a built-in cannot be archived; `kind` never changes) | mutation result | validation, not_found, conflict, storage | yes | yes |
@@ -138,6 +138,12 @@ store-wide counter, never a precondition.
 | `session.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`) | not_found, conflict, storage | yes | yes |
 | `prayer.mark` | `op_id`, `prayer`, `date?`, `expected_version?` | mutation result (`changed.marks`) | validation, conflict, storage | yes | optional |
 | `prayer.unmark` | same as `prayer.mark` | mutation result (`changed.marks`) | validation, conflict, storage | yes | optional |
+| `goals.list` | `at?` (a tracking day, default today), `include_ended?` (default false) | `[GoalView]` in position order: goals active on `at` (with `include_ended`, every goal started by `at`) | validation, storage | — | — |
+| `goals.history` | `id` (any goal of an edit chain), `from`, `to` (at most 730 days) | `[{from, to, value, target, met}]`, oldest first, through today's period | validation, not_found, storage | — | — |
+| `goal.add` | `op_id`, at most one of `project_id` / `epic_id` / `item_id` (none: all work), `period` (`day`/`week`), `metric_id?` (none: minutes), `direction?` (`at_least` default, `at_most` only with a metric), `target` (finite, > 0) | mutation result (`changed.goals`) | validation, not_found, storage | yes | no |
+| `goal.edit` | `op_id`, `id`, `target`, `expected_version?` | mutation result (`changed.goals`: the successor first, then the ended predecessor; or the predecessor's id in `changed.deleted`) | validation, not_found, conflict, storage | yes | yes |
+| `goal.end` | `op_id`, `id`, `expected_version?` | mutation result (`changed.goals`) | validation, not_found, conflict, storage | yes | yes |
+| `goal.remove` | `op_id`, `id`, `expected_version?` (only during the goal's first period) | mutation result (`changed.deleted`) | validation, not_found, conflict, storage | yes | yes |
 | `config.get` | — | `Config` | config | — | — |
 | `config.set` | `op_id?`, any `Config` field | `Config` | validation, config | yes with `op_id` | no |
 | `subscribe` | `topics?` (`["changes"]`, `["clock"]`, or both), `after_revision?` | `revision`, `after_revision?`; the socket transport then pushes `changed` and/or `clock.boundary` | validation | — | — |
@@ -149,7 +155,7 @@ shapes for clients.
 
 A mutation result is `{revision, op_id, changed}`. `changed` always carries
 every list — `items` (`ItemView`: the stored item plus `schedule_text` and
-`next_occurrence`), `sessions` (`SessionView`), `projects`, `epics`, `resources`, `tags`, `metrics`,
+`next_occurrence`), `sessions` (`SessionView`), `projects`, `epics`, `resources`, `goals` (`GoalView`), `tags`, `metrics`,
 `marks`, and `deleted` (removed ids) — so clients never guard for a missing key.
 
 ## Shapes
@@ -249,8 +255,41 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   copies the project's live defaults, or an empty set for an item without a
   project. An explicit list replaces those defaults, including `[]`. An
   `item.edit` with `tag_ids` replaces the set. Project changes preserve existing
-  task tags. Both methods validate each id against live tags. Removing a tag
-  detaches it from tasks and projects and bumps the affected versions.
+  task tags. Both methods validate each id against live tags. `tag_ids` lists
+  live tags in name order (then id), like the tag breakdowns. Removing a tag
+  detaches it from tasks and projects and bumps the affected versions; its result
+  lists the re-versioned live tasks in `changed.items`.
+- A `GoalView` has `id`, `project_id`, `epic_id`, `item_id` (at most one set; none
+  means all work), `period` (`day` or `week`), `metric_id` (`null`: minutes),
+  `direction` (`at_least`/`at_most`), `target`, `starts_on` (first day of its first
+  period), `ends_on` (last day of its last period, `null` while active),
+  `replaces_id` (the predecessor of an edited target), `position`, sync fields, and
+  `progress: {from, to, value, met}` for the period containing the requested day
+  (clamped to the goal's own span). A `day` period is the tracking day (the Sleep
+  boundary, the same `day` sessions carry); a `week` runs Monday to Sunday.
+  Progress is computed at read time from finished live sessions (the `stats.*`
+  set; running timers do not count) whose recorded `item_id`, `epic_id` or
+  `project_id` matches the scope; work without a project counts only toward
+  all-work goals. Minutes goals sum `minutes` (a tick adds 0, `value` is 0 with no
+  work). Metric goals use the metric's rollup over the sessions that recorded it:
+  `sum`, or the minutes-weighted mean `stats.*` uses (a tick weighs 1); `value`
+  is `null`, and `met` false, when no session recorded it. `met` is
+  `value >= target` (`at_least`) or `value <= target` (`at_most`).
+  `goal.add` starts the goal at the current period's first day. Its metric must be
+  active and asked by the scope: the task's effective metrics, the project's (an
+  epic's project's) asked metrics, or a built-in for all-work goals and tasks
+  without a project; minutes goals are `at_least`. `goal.edit` never changes a
+  stored target: the old goal ends on the day before the current period (or, still
+  in its first period, is soft-deleted) and a successor with `replaces_id` starts
+  the current period with the new target, so past periods keep theirs. `goal.end`
+  sets `ends_on` to the end of the last full period (the first period's end while
+  still in it). `goal.edit` and `goal.end` need an active goal. `goal.remove`
+  soft-deletes and is allowed only during the first period. Removing a task or
+  epic ends its active goals the same way as `goal.end`; they are never deleted.
+  `goals.history` follows the whole edit chain, one row per period with that
+  period's target. Dates are strict `YYYY-MM-DD`. Fixtures are `goals_list.json`,
+  `goal_add.json`, `goal_edit_successor.json`, `goals_history.json` and
+  `status_goals.json`.
 - All session reports resolve tags at read time using the task's current tags,
   or the recorded project's current defaults for sessions without a task.
   Re-tagging a task therefore updates its historical reports.
@@ -508,7 +547,7 @@ Notifications have no `id`:
 
 `changed` is an invalidation, not a patch: refetch `status.get` or `day.get`.
 `days` and `op_id` may be omitted; each scope is one of `items`, `sessions`,
-`projects`, `epics`, `resources`, `tags`, `metrics`, `marks`, `config`. The daemon emits these from its `data_version` watcher; a
+`projects`, `epics`, `resources`, `goals`, `tags`, `metrics`, `marks`, `config`. The daemon emits these from its `data_version` watcher; a
 notification may cover more than one commit observed in the same poll, so
 clients treat its `revision` as the newest state to fetch and de-duplicate by
 revision.

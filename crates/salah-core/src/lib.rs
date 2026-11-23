@@ -9,6 +9,7 @@ pub mod backlog;
 pub mod config;
 pub mod day;
 pub mod epics;
+pub mod goals;
 pub mod items;
 pub mod location;
 pub mod marks;

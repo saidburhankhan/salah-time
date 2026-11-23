@@ -100,7 +100,25 @@ fn defaults_explicit_tags_and_retagged_history() {
         json!({"tag_id":tag,"days":1,"split":"tag","measures":["minutes"]}),
     );
     assert_eq!(trends["series"][0]["points"][0]["value"], 10.0);
-    good(&mut rpc, "tag.remove", json!({"op_id":"remove","id":tag}));
+    let alpha = added(
+        &mut rpc,
+        "tag.add",
+        "tags",
+        json!({"op_id":"alpha","name":"Alpha","color":"#334455"}),
+    );
+    let both = good(
+        &mut rpc,
+        "item.edit",
+        json!({"id":inherited,"op_id":"both","tag_ids":[tag,alpha]}),
+    );
+    // Item views list tags in name order, like the tag breakdowns.
+    assert_eq!(both["changed"]["items"][0]["tag_ids"], json!([alpha, tag]));
+    let removed = good(&mut rpc, "tag.remove", json!({"op_id":"remove","id":tag}));
+    let retagged = removed["changed"]["items"].as_array().unwrap();
+    assert_eq!(retagged.len(), 1);
+    assert_eq!(retagged[0]["id"], inherited);
+    assert_eq!(retagged[0]["tag_ids"], json!([alpha]));
+    assert_eq!(removed["changed"]["deleted"], json!([tag]));
     let items = good(&mut rpc, "items.list", json!({}));
     let task = items
         .as_array()
@@ -108,8 +126,8 @@ fn defaults_explicit_tags_and_retagged_history() {
         .iter()
         .find(|r| r["id"] == inherited)
         .unwrap();
-    assert_eq!(task["tag_ids"], json!([]));
-    assert_eq!(task["version"], 3);
+    assert_eq!(task["tag_ids"], json!([alpha]));
+    assert_eq!(task["version"], 4);
     bad(
         &mut rpc,
         "item.edit",

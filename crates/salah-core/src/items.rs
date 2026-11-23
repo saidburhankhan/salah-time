@@ -360,6 +360,15 @@ pub fn remove(
     let today = day::current(config, now)?;
     day::freeze_past(tx, config, today)?;
     tx.preserve_item(&item, today)?;
+    crate::goals::end_scope(
+        tx,
+        salah_domain::goal::Scope {
+            item_id: Some(id.into()),
+            ..Default::default()
+        },
+        today,
+        now,
+    )?;
     item.deleted_at = Some(now);
     item.updated_at = now;
     item.version = tx.put_item(&item)?;

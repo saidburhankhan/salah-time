@@ -1,4 +1,5 @@
-//! Tags group projects for filtering statistics.
+//! Tags label tasks (projects keep default tags for new tasks) for filtering
+//! statistics and the backlog.
 
 use crate::guard::{color, ensure_version, label, not_found};
 use crate::{Store, WriteTx};
@@ -98,13 +99,14 @@ pub fn edit(
     Ok(tag)
 }
 
-/// Removes a tag and detaches it from every project.
+/// Removes a tag: takes it off every task and every project's defaults.
+/// Sessions are kept. Returns the tag and the ids of the tasks it re-versioned.
 pub fn remove(
     tx: &WriteTx<'_>,
     now: DateTime<Utc>,
     id: &str,
     expected_version: Option<i64>,
-) -> Result<Tag, Error> {
+) -> Result<(Tag, Vec<String>), Error> {
     let mut tag = find(tx, id)?;
     ensure_version("tag", id, tag.version, expected_version)?;
     for mut project in tx.projects()? {
@@ -114,11 +116,11 @@ pub fn remove(
             tx.put_project(&project)?;
         }
     }
-    tx.detach_item_tag(&tag.id, now)?;
+    let items = tx.detach_item_tag(&tag.id, now)?;
     tag.deleted_at = Some(now);
     tag.updated_at = now;
     tag.version = tx.put_tag(&tag)?;
-    Ok(tag)
+    Ok((tag, items))
 }
 
 #[cfg(test)]

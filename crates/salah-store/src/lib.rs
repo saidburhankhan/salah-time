@@ -2,6 +2,7 @@
 
 mod codec;
 mod epics;
+mod goals;
 mod item_tags;
 pub use item_tags::ReportTags;
 mod migrations;

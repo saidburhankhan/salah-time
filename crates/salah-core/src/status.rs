@@ -81,6 +81,8 @@ pub struct Status {
     pub running: Option<SessionView>,
     /// The metrics to ask for when `running` stops.
     pub prompt: Vec<PromptMetric>,
+    /// Active targets for the tracking day in progress.
+    pub goals: Vec<salah_domain::goal::GoalView>,
     /// Open reminders due at or before the request instant, oldest first.
     pub reminders: Vec<DueReminder>,
 }
@@ -123,6 +125,11 @@ impl Status {
                 self.running = running;
                 self.prompt = prompt;
             }
+            Err(error) => errors.push(error.to_string()),
+        }
+        let today = self.current_block.block.day;
+        match crate::goals::list(store, today, today, false) {
+            Ok(goals) => self.goals = goals,
             Err(error) => errors.push(error.to_string()),
         }
         match store.due_reminders(now) {
@@ -193,6 +200,7 @@ pub fn build(config: &Config, utc_now: DateTime<Utc>) -> Result<Status, Error> {
         planner_error: None,
         running: None,
         prompt: Vec::new(),
+        goals: Vec::new(),
         reminders: Vec::new(),
     })
 }

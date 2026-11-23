@@ -140,6 +140,15 @@ pub fn remove(
             item.version = tx.put_item(item)?;
         }
     }
+    crate::goals::end_scope(
+        tx,
+        salah_domain::goal::Scope {
+            epic_id: Some(id.into()),
+            ..Default::default()
+        },
+        day::current(config, now)?,
+        now,
+    )?;
     epic.deleted_at = Some(now);
     epic.updated_at = now;
     tx.put_epic(&epic)?;

@@ -23,10 +23,11 @@ impl ReportTags {
 }
 
 impl Store {
+    /// A task's live tag ids in tag-name order, like [`Store::report_tags`].
     pub fn item_tag_ids(&self, id: &str) -> Result<Vec<String>, Error> {
         self.all(
             "SELECT it.tag_id FROM item_tags it JOIN tags t ON t.id=it.tag_id
-                  WHERE it.item_id=?1 AND t.deleted_at IS NULL ORDER BY it.tag_id",
+                  WHERE it.item_id=?1 AND t.deleted_at IS NULL ORDER BY t.name, t.id",
             [id],
             |r| r.get(0),
         )
@@ -82,22 +83,22 @@ impl WriteTx<'_> {
         Ok(())
     }
 
-    pub fn detach_item_tag(&self, id: &str, now: DateTime<Utc>) -> Result<(), Error> {
-        let changed = self.all(
+    /// Takes a tag off every task, bumping each task's version (removed tasks
+    /// too: their row changed, so the op is "update" like `next_version`).
+    /// Returns the re-versioned item ids in id order.
+    pub fn detach_item_tag(&self, id: &str, now: DateTime<Utc>) -> Result<Vec<String>, Error> {
+        let mut changed = self.all(
             "UPDATE items SET version=version+1, updated_at=?2
             WHERE id IN (SELECT item_id FROM item_tags WHERE tag_id=?1)
-            RETURNING id, version, deleted_at IS NOT NULL",
+            RETURNING id, version",
             params![id, codec::timestamp(now)],
-            |r| Ok((r.get::<_, String>(0)?, r.get(1)?, r.get::<_, bool>(2)?)),
+            |r| Ok((r.get::<_, String>(0)?, r.get(1)?)),
         )?;
-        for (item, version, removed) in changed {
-            self.log_change(
-                "item",
-                &item,
-                if removed { "delete" } else { "update" },
-                version,
-            )?;
+        changed.sort();
+        for (item, version) in &changed {
+            self.log_change("item", item, "update", *version)?;
         }
-        self.execute("DELETE FROM item_tags WHERE tag_id=?1", [id])
+        self.execute("DELETE FROM item_tags WHERE tag_id=?1", [id])?;
+        Ok(changed.into_iter().map(|(item, _)| item).collect())
     }
 }

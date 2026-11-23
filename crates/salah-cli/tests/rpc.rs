@@ -584,6 +584,8 @@ fn a_timer_becomes_stale_only_after_its_own_sleep_boundary() {
 mod backlog;
 #[path = "rpc/epics.rs"]
 mod epics;
+#[path = "rpc/goals.rs"]
+mod goals;
 #[path = "rpc/item_tags.rs"]
 mod item_tags;
 #[path = "rpc/phase2.rs"]

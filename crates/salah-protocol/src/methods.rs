@@ -368,6 +368,7 @@ pub struct SessionEditParams {
 /// ids of removed items, tags, and sessions.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Changed {
+    pub goals: Vec<salah_domain::goal::GoalView>,
     pub items: Vec<ItemView>,
     pub sessions: Vec<SessionView>,
     pub projects: Vec<ProjectView>,

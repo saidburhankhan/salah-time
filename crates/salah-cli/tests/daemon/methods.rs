@@ -195,6 +195,7 @@ fn method_success_and_error(client: &mut Client) {
         -32001
     );
     check_resources(client, &id);
+    check_goals(client);
     let extra = client.good(
         "item.add",
         json!({"op_id":"s4-extra","title":"Extra","block":"fajr"}),
@@ -470,6 +471,77 @@ fn check_resources(client: &mut Client, item_id: &str) {
     );
     assert_eq!(
         client.bad("resource.remove", json!({"op_id":"remove-again","id":id})),
+        -32002
+    );
+}
+
+fn check_goals(client: &mut Client) {
+    let added = client.good(
+        "goal.add",
+        json!({"op_id":"goal","period":"week","target":60}),
+    );
+    let id = added["changed"]["goals"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        client.bad(
+            "goal.add",
+            json!({"op_id":"goal-bad","period":"week","target":0})
+        ),
+        -32001
+    );
+    assert_eq!(client.good("goals.list", json!({}))[0]["id"], id);
+    assert_eq!(client.bad("goals.list", json!({"at":"2031-5-14"})), -32001);
+    let edited = client.good(
+        "goal.edit",
+        json!({"op_id":"goal-edit","id":id,"target":90}),
+    );
+    let successor = edited["changed"]["goals"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(edited["changed"]["deleted"], json!([id]));
+    assert_eq!(
+        client.bad(
+            "goal.edit",
+            json!({"op_id":"goal-edit-gone","id":id,"target":90})
+        ),
+        -32002
+    );
+    let history = client.good(
+        "goals.history",
+        json!({"id":successor,"from":DATE,"to":DATE}),
+    );
+    assert_eq!(history[0]["target"], 90.0);
+    assert_eq!(
+        client.bad(
+            "goals.history",
+            json!({"id":"missing","from":DATE,"to":DATE})
+        ),
+        -32002
+    );
+    assert_eq!(
+        client.bad(
+            "goal.end",
+            json!({"op_id":"goal-end-stale","id":successor,"expected_version":2})
+        ),
+        -32004
+    );
+    assert!(
+        client.good("goal.end", json!({"op_id":"goal-end","id":successor}))["changed"]["goals"][0]
+            ["ends_on"]
+            .is_string()
+    );
+    assert_eq!(
+        client.good("goal.remove", json!({"op_id":"goal-remove","id":successor}))["changed"]["deleted"],
+        json!([successor])
+    );
+    assert_eq!(
+        client.bad(
+            "goal.remove",
+            json!({"op_id":"goal-remove-again","id":successor})
+        ),
         -32002
     );
 }

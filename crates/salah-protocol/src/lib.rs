@@ -8,6 +8,7 @@
 
 pub mod dispatcher;
 pub mod error;
+mod goals;
 pub mod message;
 pub mod methods;
 mod reads;
