@@ -12,7 +12,7 @@ use salah_domain::{
     day::{BlockKey, BoundaryId},
     error::Error,
     item::{Repeat, Weekdays},
-    tracking::{DayBlock, DayPlanLine, Item, Project, Session},
+    tracking::{DayBlock, DayClock, DayPlanLine, Item, Project, Session},
 };
 use salah_prayer::schedule;
 use serde::Serialize;
@@ -153,13 +153,11 @@ pub fn day_plan(
     let current = is_today.then(|| schedule.current_block().start);
     let ledger = Ledger::load(store, config, day, today)?;
 
-    let (prayer_times, _) = schedule::prayers_for(config, day)?;
-    let sunrise = prayer_times
-        .iter()
-        .find(|p| p.id == "sunrise")
-        .map(|p| format_minutes(p.minutes));
+    let sunrise = ledger.clock.sunrise_minutes.map(format_minutes);
     let marks = live_marks(store, day)?;
-    let clock = |at: DateTime<Utc>| local_clock(config, at);
+    let zone = FixedOffset::east_opt(ledger.clock.offset_seconds)
+        .ok_or_else(|| Error::Storage("invalid snapshot timezone offset".into()))?;
+    let clock = |at: DateTime<Utc>| at.with_timezone(&zone).format("%H:%M").to_string();
     let prayers = ledger
         .blocks
         .iter()
@@ -174,7 +172,7 @@ pub fn day_plan(
         })
         .collect();
     let night_start = ledger.blocks.first().map(|block| block.starts_at);
-    let sleep_at = ledger.blocks.last().map(|block| block.ends_at);
+    let sleep_at = ledger.clock.sleep_at;
     let blocks: Vec<BlockPlan> = BoundaryId::AWAKE
         .into_iter()
         .map(|start| ledger.block_plan(start))
@@ -207,8 +205,8 @@ pub fn day_plan(
         sunrise,
         night_start: night_start.map(clock).unwrap_or_default(),
         sleep: SleepRow {
-            time: sleep_at.map(clock).unwrap_or_default(),
-            passed: day < today || (is_today && sleep_at.is_some_and(|at| at <= now)),
+            time: clock(sleep_at),
+            passed: day < today || (is_today && sleep_at <= now),
         },
         blocks,
         open,
@@ -245,6 +243,7 @@ pub fn today(store: &mut Store, config: &Config, now: DateTime<Utc>) -> Result<T
 
 /// The snapshots, items, projects, and sessions of one day.
 struct Ledger {
+    clock: DayClock,
     day: NaiveDate,
     blocks: Vec<DayBlock>,
     plan: Vec<DayPlanLine>,
@@ -263,12 +262,21 @@ impl Ledger {
         if day < today {
             store.write(|tx| freeze(tx, config, day, today))?;
         }
-        let Snapshot { blocks, plan } = snapshot(store, config, day, today)?;
+        let Snapshot {
+            blocks,
+            clock,
+            plan,
+        } = snapshot(store, config, day, today)?;
         Ok(Self {
             day,
+            clock,
             blocks,
             plan,
-            items: store.items()?,
+            items: if day < today {
+                store.items_on(day)?
+            } else {
+                store.items()?
+            },
             projects: store.projects()?,
             sessions: store
                 .sessions_between(day, day)?
@@ -357,13 +365,6 @@ impl Ledger {
             detail_text,
         }
     }
-}
-
-/// `HH:MM` of an instant in the configured zone.
-fn local_clock(config: &Config, at: DateTime<Utc>) -> String {
-    let offset = FixedOffset::east_opt((config.timezone_offset * 3600.0).round() as i32)
-        .unwrap_or(FixedOffset::east_opt(0).expect("zero offset"));
-    at.with_timezone(&offset).format("%H:%M").to_string()
 }
 
 #[cfg(test)]
@@ -564,6 +565,42 @@ mod tests {
     }
 
     #[test]
+    fn sparse_reads_and_long_gaps_preserve_the_plan_and_row_at_day_end() {
+        let mut store = Store::open_in_memory().unwrap();
+        let book = project(&mut store, "Book");
+        let read = add(
+            &mut store,
+            "Read",
+            BoundaryId::Fajr,
+            Some(30),
+            Some(&book.id),
+        );
+        let later = at(20, 9, 0) + chrono::Duration::days(400);
+        let yesterday = later.date_naive().pred_opt().unwrap();
+        day_plan(&mut store, &config(), later, Some(yesterday)).unwrap();
+        let changes = ItemChanges {
+            title: Some("Walk".into()),
+            block: Some(BoundaryId::Asr),
+            project_id: Some(None),
+            planned_minutes: Some(Some(15)),
+            repeat: Some(Repeat::None),
+            ..Default::default()
+        };
+        store
+            .write(|tx| items::edit(tx, &config(), later, &read.id, changes.clone(), None))
+            .unwrap();
+        assert!(store.day_written(yesterday.pred_opt().unwrap()).unwrap());
+        for day in [date(21), yesterday] {
+            let past = day_plan(&mut store, &config(), later, Some(day)).unwrap();
+            let row = &past.blocks[1].items[0];
+            assert_eq!(row.title, "Read");
+            assert_eq!(row.repeat, Repeat::Daily);
+            assert_eq!(row.planned_minutes, Some(30));
+            assert_eq!(row.project.as_ref().unwrap().id, book.id);
+        }
+    }
+
+    #[test]
     fn an_empty_written_plan_stays_empty() {
         let mut store = Store::open_in_memory().unwrap();
         day_plan(&mut store, &config(), at(21, 9, 0), Some(date(20))).unwrap();
@@ -579,11 +616,14 @@ mod tests {
         let past = day_plan(&mut store, &config(), at(21, 9, 0), Some(date(20))).unwrap();
         let moved = Config {
             sleep_time: "22:00".into(),
+            timezone_offset: -3.0,
             latitude: 39.65,
             longitude: 66.96,
             ..config()
         };
         let again = day_plan(&mut store, &moved, at(21, 9, 0), Some(date(20))).unwrap();
+        assert_eq!(again.sunrise, past.sunrise);
+        assert_eq!(again.night_start, past.night_start);
         assert_eq!(again.sleep.time, past.sleep.time);
         assert_eq!(again.prayers[0].time, past.prayers[0].time);
         let today = day_plan(&mut store, &moved, at(21, 9, 0), None).unwrap();

@@ -297,6 +297,10 @@ fn a_config_set_replay_keeps_the_first_body() {
         json!({"op_id":"op-config","sleep_time":"21:00"}),
     );
     assert_eq!(replay, updated);
+    assert_eq!(
+        fixture.ok("config.set", json!({"op_id":"op-config"})),
+        updated
+    );
     assert_eq!(fixture.ok("config.get", Value::Null)["sleep_time"], "22:30");
     let error = fixture.err("config.set", json!({"op_id":"op-config-empty"}));
     assert_eq!(error.data.unwrap().kind, "validation");
@@ -330,6 +334,185 @@ fn an_op_id_must_be_non_empty_and_belongs_to_one_method() {
             .unwrap()
             .is_empty()
     );
+    let malformed = fixture.err("project.add", json!({"op_id":"op-1"}));
+    assert_eq!(malformed.data.unwrap().field.as_deref(), Some("op_id"));
     let config = fixture.err("config.set", json!({"op_id":"op-1","sleep_time":"22:00"}));
     assert_eq!(config.data.unwrap().kind, "validation");
+}
+
+#[test]
+fn routine_timer_prompts_for_two_optional_metrics_and_stops_without_them() {
+    let mut f = Fixture::new();
+    f.handshake();
+    assert_eq!(f.ok("status.get", json!({}))["prompt"], json!([]));
+    let item = first_id(
+        &f.ok("item.add", json!({"op_id":"item","title":"Read"})),
+        "items",
+    );
+    f.ok("session.start", json!({"op_id":"start","item_id":item}));
+    let status = f.ok("status.get", json!({}));
+    let prompt = status["prompt"].as_array().unwrap();
+    assert_eq!(prompt.len(), 2);
+    for (row, id) in prompt.iter().zip(["focus", "quality"]) {
+        assert_eq!(row["metric_id"], id);
+        assert_eq!(row["required"], false);
+    }
+    f.ok("session.stop", json!({"op_id":"stop"}));
+}
+
+#[test]
+fn settings_changes_preserve_even_unread_past_days() {
+    let mut f = Fixture::new();
+    f.handshake();
+    let expected = {
+        let mut reference = Fixture::new();
+        reference.handshake();
+        reference.ok("day.get", json!({"date":"2031-05-12"}))
+    };
+    f.ok(
+        "config.set",
+        json!({"timezone_offset": -5.0, "sleep_time":"22:00","longitude":-74.0}),
+    );
+    let past = f.ok("day.get", json!({"date":"2031-05-12"}));
+    assert_eq!(past, expected);
+    assert_eq!(f.ok("day.get", json!({}))["sleep"]["time"], "22:00");
+    let changes = f.store.changes_since(0, 10).unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].entity, "config");
+}
+
+#[test]
+fn running_session_keeps_partial_ratings_and_notes_until_stop() {
+    let mut f = Fixture::new();
+    f.handshake();
+    let project = first_id(
+        &f.ok("project.add", json!({"op_id":"p","name":"Book"})),
+        "projects",
+    );
+    let session = first_id(
+        &f.ok("session.start", json!({"op_id":"s","project_id":project})),
+        "sessions",
+    );
+    f.ok(
+        "session.edit",
+        json!({"op_id":"e","id":session,"values":{"focus":4},"note":"chapter 1"}),
+    );
+    let missing = f.err("session.stop", json!({"op_id":"stop"}));
+    assert_eq!(
+        missing.data.unwrap().missing,
+        Some(vec!["quality".to_owned()])
+    );
+    let stopped = f.ok(
+        "session.stop",
+        json!({"op_id":"stop","values":{"quality":3}}),
+    );
+    let row = &stopped["changed"]["sessions"][0];
+    assert_eq!(row["values"], json!({"focus":4.0,"quality":3.0}));
+    assert_eq!(row["note"], "chapter 1");
+}
+
+#[test]
+fn edits_removals_and_prayer_marks_freeze_the_day_they_write() {
+    let mut f = Fixture::new();
+    f.handshake();
+    let project = first_id(
+        &f.ok(
+            "project.add",
+            json!({"op_id":"p","name":"Book","metrics":[]}),
+        ),
+        "projects",
+    );
+    let mut sessions = Vec::new();
+    for day in [12, 13] {
+        f.clock = FixedClock::new(Utc.with_ymd_and_hms(2031, 5, day, 8, 0, 0).unwrap());
+        let logged = f.ok(
+            "session.log",
+            json!({"op_id":format!("log-{day}"),"project_id":project}),
+        );
+        sessions.push(first_id(&logged, "sessions"));
+    }
+    f.clock = FixedClock::new(Utc.with_ymd_and_hms(2031, 5, 14, 8, 0, 0).unwrap());
+    f.ok(
+        "session.edit",
+        json!({"op_id":"edit","id":sessions[0],"minutes":10}),
+    );
+    f.ok("session.remove", json!({"op_id":"remove","id":sessions[1]}));
+    f.ok(
+        "prayer.mark",
+        json!({"op_id":"mark","date":"2031-05-11","prayer":"fajr"}),
+    );
+    for day in [11, 12, 13] {
+        assert!(
+            f.store
+                .day_written(chrono::NaiveDate::from_ymd_opt(2031, 5, day).unwrap())
+                .unwrap()
+        );
+    }
+}
+
+#[test]
+fn a_large_finite_count_has_a_finite_minute_weighted_average() {
+    let mut f = Fixture::new();
+    f.handshake();
+    let metric = first_id(
+        &f.ok(
+            "metric.add",
+            json!({"op_id":"m","name":"Count","kind":"count","rollup":"avg"}),
+        ),
+        "metrics",
+    );
+    let project = first_id(
+        &f.ok(
+            "project.add",
+            json!({"op_id":"p","name":"Book","metrics":[]}),
+        ),
+        "projects",
+    );
+    for (key, count) in [("a", 1e308_f64), ("b", 0.0)] {
+        f.ok("session.log", json!({"op_id":key,"project_id":project,"minutes":10,"values":{(metric.as_str()):count}}));
+    }
+    let stats = f.ok("stats.get", json!({"days":1}));
+    assert_eq!(stats["projects"][0]["metrics"][&metric], json!(5e307));
+}
+
+#[test]
+fn project_filters_keep_plan_line_sessions_distinct_from_unplanned_minutes() {
+    let mut f = Fixture::new();
+    f.handshake();
+    let a = first_id(
+        &f.ok("project.add", json!({"op_id":"a","name":"A","metrics":[]})),
+        "projects",
+    );
+    let b = first_id(
+        &f.ok("project.add", json!({"op_id":"b","name":"B","metrics":[]})),
+        "projects",
+    );
+    let item = first_id(&f.ok("item.add", json!({"op_id":"item","title":"Read","project_id":a,"planned_minutes":15,"block":"asr"})), "items");
+    f.ok(
+        "session.log",
+        json!({"op_id":"planned","item_id":item,"minutes":10,"block":"dhuhr"}),
+    );
+    f.ok(
+        "session.log",
+        json!({"op_id":"extra","project_id":a,"minutes":5,"block":"dhuhr"}),
+    );
+    f.ok(
+        "item.edit",
+        json!({"op_id":"move","id":item,"project_id":b}),
+    );
+    let stats = f.ok("stats.get", json!({"days":1,"project_id":a}));
+    let day = &stats["days"][0];
+    assert_eq!(day["minutes"], 15);
+    assert_eq!(day["planned_minutes"], 0);
+    assert!(day["fulfilment_ratio"].is_null());
+    assert_eq!(day["unplanned_minutes"], 5);
+    let plan = f.ok("day.get", json!({}));
+    let block = plan["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["start"] == "dhuhr")
+        .unwrap();
+    assert_eq!(block["actual_minutes"], 10);
+    assert_eq!(block["unplanned_minutes"], 5);
 }

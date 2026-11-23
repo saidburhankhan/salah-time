@@ -93,11 +93,11 @@ impl Status {
             Err(error) => errors.push(error.to_string()),
         }
         let running = sessions::running(store).and_then(|running| {
-            let project = running.as_ref().and_then(|s| s.project_id.as_deref());
-            Ok((
-                running.as_ref().map(SessionView::from),
-                sessions::prompt(store, project)?,
-            ))
+            let prompt = match &running {
+                Some(session) => sessions::prompt(store, session.project_id.as_deref())?,
+                None => Vec::new(),
+            };
+            Ok((running.as_ref().map(SessionView::from), prompt))
         });
         match running {
             Ok((running, prompt)) => {

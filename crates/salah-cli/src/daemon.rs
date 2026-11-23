@@ -16,10 +16,13 @@ use salah_core::status;
 use salah_domain::day::BoundaryId;
 use salah_domain::runtime::{Clock, FixedClock, SystemClock, UuidV4};
 use salah_protocol::{
-    ChangeScope, ChangedNotification, ClockBoundaryNext, ClockBoundaryNotification,
-    ConfigRepository, Context, Dispatcher, Request, Response, RpcError,
+    ClockBoundaryNext, ClockBoundaryNotification, ConfigRepository, Context, Dispatcher, Request,
+    Response, RpcError,
 };
 use salah_store::{Store, default_path};
+
+mod events;
+use events::{Subscribers, Topic};
 use serde::Serialize;
 use serde_json::Value;
 use std::env;
@@ -102,7 +105,7 @@ fn daemon_clock() -> Result<DaemonClock, String> {
 }
 
 struct Shared {
-    subscribers: Mutex<Vec<(u64, mpsc::Sender<Vec<u8>>)>>,
+    subscribers: Mutex<Subscribers>,
     next_subscriber: AtomicU64,
     last_activity: Mutex<Instant>,
     boundary: Mutex<Option<ClockBoundaryNotification>>,
@@ -111,7 +114,7 @@ struct Shared {
 impl Shared {
     fn new() -> Self {
         Self {
-            subscribers: Mutex::new(Vec::new()),
+            subscribers: Mutex::default(),
             next_subscriber: AtomicU64::new(1),
             last_activity: Mutex::new(Instant::now()),
             boundary: Mutex::new(None),
@@ -134,22 +137,8 @@ impl Shared {
         self.last_activity.lock().unwrap().elapsed()
     }
 
-    fn subscribe(&self, id: u64, sender: mpsc::Sender<Vec<u8>>) {
-        self.subscribers.lock().unwrap().push((id, sender));
-    }
-
-    fn unsubscribe(&self, id: u64) {
-        self.subscribers
-            .lock()
-            .unwrap()
-            .retain(|(key, _)| *key != id);
-    }
-
-    fn broadcast(&self, line: &str) {
-        let mut bytes = line.as_bytes().to_vec();
-        bytes.push(b'\n');
-        let mut subscribers = self.subscribers.lock().unwrap();
-        subscribers.retain(|(_, sender)| sender.send(bytes.clone()).is_ok());
+    fn broadcast(&self, topic: Topic, line: &str) {
+        self.subscribers.lock().unwrap().broadcast(topic, line);
     }
 }
 
@@ -199,8 +188,11 @@ pub fn serve(idle_minutes: u64) -> Result<(), String> {
     }
 
     let watcher_shared = Arc::clone(&shared);
-    let watcher_data = data.clone();
-    thread::spawn(move || watcher_loop(watcher_data, watcher_shared));
+    // Establish the watch cursor before accepting any subscribers or writes.
+    let watcher = Store::open(&data).map_err(|e| e.to_string())?;
+    let version = watcher.data_version().map_err(|e| e.to_string())?;
+    let seq = watcher.last_change_seq().map_err(|e| e.to_string())?;
+    thread::spawn(move || events::watch(watcher, watcher_shared, version, seq));
 
     let boundary_shared = Arc::clone(&shared);
     let boundary_config = config.path.clone();
@@ -390,75 +382,6 @@ fn writer_loop(
     }
 }
 
-fn watcher_loop(data: PathBuf, shared: Arc<Shared>) {
-    let store = match Store::open(&data) {
-        Ok(store) => store,
-        Err(error) => {
-            eprintln!(
-                "salah: change watcher cannot open {}: {error}",
-                data.display()
-            );
-            return;
-        }
-    };
-    let mut last_data_version = store.data_version().unwrap_or(0);
-    let mut last_seq = store.last_change_seq().unwrap_or(0);
-    while !SHUTDOWN.load(Ordering::SeqCst) {
-        thread::sleep(WATCH_INTERVAL);
-        let data_version = match store.data_version() {
-            Ok(version) => version,
-            Err(error) => {
-                eprintln!("salah: data_version: {error}");
-                continue;
-            }
-        };
-        if data_version == last_data_version {
-            continue;
-        }
-        last_data_version = data_version;
-        loop {
-            let changes = match store.changes_since(last_seq, 10_000) {
-                Ok(changes) => changes,
-                Err(error) => {
-                    eprintln!("salah: read changes: {error}");
-                    break;
-                }
-            };
-            if changes.is_empty() {
-                break;
-            }
-            let mut revision = None;
-            let mut scopes = Vec::new();
-            let mut op_id = None;
-            for change in &changes {
-                last_seq = change.seq;
-                if revision != Some(change.revision) {
-                    if let Some(revision) = revision {
-                        emit_changed(&shared, revision, &scopes, &op_id);
-                    }
-                    revision = Some(change.revision);
-                    scopes.clear();
-                    op_id = None;
-                }
-                if let Some(scope) = ChangeScope::of_entity(&change.entity)
-                    && !scopes.contains(&scope)
-                {
-                    scopes.push(scope);
-                }
-                if op_id.is_none() {
-                    op_id.clone_from(&change.op_id);
-                }
-            }
-            if let Some(revision) = revision {
-                emit_changed(&shared, revision, &scopes, &op_id);
-            }
-            if changes.len() < 10_000 {
-                break;
-            }
-        }
-    }
-}
-
 /// The current block and next boundary as the daemon sees them.
 fn clock_boundary(
     clock: &DaemonClock,
@@ -499,7 +422,7 @@ fn boundary_loop(config_path: PathBuf, clock: DaemonClock, shared: Arc<Shared>) 
             if changed {
                 shared.set_boundary(current.clone());
                 if let Ok(line) = serde_json::to_string(&current.clone().envelope()) {
-                    shared.broadcast(&line);
+                    shared.broadcast(Topic::Clock, &line);
                 }
                 last = Some(current);
             }
@@ -517,19 +440,6 @@ fn boundary_key(
         boundary.next.id,
         boundary.next.at,
     )
-}
-
-fn emit_changed(shared: &Shared, revision: i64, scopes: &[ChangeScope], op_id: &Option<String>) {
-    let notification = ChangedNotification {
-        revision,
-        days: Vec::new(),
-        scopes: scopes.to_vec(),
-        op_id: op_id.clone(),
-        actor: "daemon".into(),
-    };
-    if let Ok(line) = serde_json::to_string(&notification.envelope()) {
-        shared.broadcast(&line);
-    }
 }
 
 fn handle_connection(
@@ -644,18 +554,6 @@ fn handle_connection(
         // `subscribe` is connection state: dispatch it locally to validate the
         // parameters, then attach this connection's outbound queue.
         if request.method == "subscribe" {
-            let requested: Vec<String> = request
-                .params
-                .get("topics")
-                .and_then(Value::as_array)
-                .map(|topics| {
-                    topics
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_string)
-                        .collect()
-                })
-                .unwrap_or_default();
             if !dispatcher.hello_done() {
                 let response = Response::err(
                     request.id.clone(),
@@ -666,6 +564,9 @@ fn handle_connection(
                 }
                 continue;
             }
+            // A broadcast cannot slip between reading the revision and
+            // registering the queue. The response is queued before any push.
+            let mut subscribers = shared.subscribers.lock().unwrap();
             let response = {
                 let mut context = Context {
                     store: &mut store,
@@ -679,10 +580,11 @@ fn handle_connection(
             if !send_response(&out_tx, &response) {
                 break;
             }
-            if ok && !subscribed {
-                shared.subscribe(subscriber_id, out_tx.clone());
+            if ok {
+                let wants_clock =
+                    subscribers.subscribe(subscriber_id, &request.params, out_tx.clone());
                 subscribed = true;
-                let wants_clock = requested.iter().any(|topic| topic == "clock");
+                drop(subscribers);
                 if wants_clock {
                     let notification = shared
                         .boundary()
@@ -736,7 +638,11 @@ fn handle_connection(
     }
 
     if subscribed {
-        shared.unsubscribe(subscriber_id);
+        shared
+            .subscribers
+            .lock()
+            .unwrap()
+            .unsubscribe(subscriber_id);
     }
     drop(out_tx);
     let _ = writer_handle.join();

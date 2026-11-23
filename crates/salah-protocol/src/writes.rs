@@ -15,6 +15,26 @@ use salah_domain::tracking::{Item, Project, Session};
 use serde::Serialize;
 use serde_json::Value;
 
+/// Looks up an operation before parsing its retry body. The writer repeats
+/// the lookup inside its transaction in case another caller won the race.
+pub(crate) fn replay(store: &Store, method: &str, op_id: &str) -> Result<Option<Value>, Error> {
+    if op_id.trim().is_empty() {
+        return Err(Error::validation("op_id", "op_id must not be empty"));
+    }
+    let Some(applied) = store.applied_op(op_id)? else {
+        return Ok(None);
+    };
+    if applied.method != method {
+        return Err(Error::validation(
+            "op_id",
+            format!("op_id {op_id:?} was already used for {}", applied.method),
+        ));
+    }
+    serde_json::from_str(&applied.result_json)
+        .map(Some)
+        .map_err(|error| Error::Storage(format!("invalid applied op result: {error}")))
+}
+
 /// Runs `work` once per `op_id` and stores its result under the op id and
 /// `method`. A replay returns the stored result before any validation or
 /// write; reusing an op id for another method is a validation error.
@@ -24,20 +44,10 @@ fn replayable<T: Serialize>(
     op_id: &str,
     mut work: impl FnMut(&WriteTx<'_>) -> Result<T, Error>,
 ) -> Result<Value, RpcError> {
-    if op_id.trim().is_empty() {
-        return Err(Error::validation("op_id", "op_id must not be empty").into());
-    }
     let result = store.write(|tx| {
         tx.set_op_id(Some(op_id));
-        if let Some(applied) = tx.applied_op(op_id)? {
-            if applied.method != method {
-                return Err(Error::validation(
-                    "op_id",
-                    format!("op_id {op_id:?} was already used for {}", applied.method),
-                ));
-            }
-            return serde_json::from_str(&applied.result_json)
-                .map_err(|error| Error::Storage(format!("invalid applied op result: {error}")));
+        if let Some(result) = replay(tx, method, op_id)? {
+            return Ok(result);
         }
         let result = serde_json::to_value(work(tx)?)
             .map_err(|error| Error::Internal(format!("serialize result: {error}")))?;
@@ -321,19 +331,28 @@ pub(crate) fn session_log(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value
 
 pub(crate) fn session_edit(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let p: SessionEditParams = parse(call.params)?;
+    let config = ctx.config.load()?;
     let now = ctx.now();
     mutate(ctx.store, call.method, &p.op_id, |tx| {
-        let session = sessions::edit(tx, now, &p.id, p.changes.clone(), p.expected_version)?;
+        let session = sessions::edit(
+            tx,
+            &config,
+            now,
+            &p.id,
+            p.changes.clone(),
+            p.expected_version,
+        )?;
         Ok(session_view(&session))
     })
 }
 
 pub(crate) fn session_remove(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let p: RemoveParams = parse(call.params)?;
+    let config = ctx.config.load()?;
     let now = ctx.now();
     mutate(ctx.store, call.method, &p.op_id, |tx| {
         Ok(removed(
-            sessions::remove(tx, now, &p.id, p.expected_version)?.id,
+            sessions::remove(tx, &config, now, &p.id, p.expected_version)?.id,
         ))
     })
 }
@@ -372,17 +391,18 @@ pub(crate) fn config_set(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value,
             Error::validation("config", "no settings supplied; set at least one field").into(),
         );
     }
-    let Some(op_id) = &p.op_id else {
-        let config = p.apply(ctx.config.load()?);
-        config.validate()?;
-        ctx.config.save(&config)?;
-        return to_value(config);
-    };
     let repository = ctx.config;
-    replayable(ctx.store, call.method, op_id, |_| {
-        let config = p.apply(repository.load()?);
+    let now = ctx.now();
+    let save = |tx: &WriteTx<'_>| {
+        let old = repository.load()?;
+        let config = p.apply(old.clone());
         config.validate()?;
+        salah_core::config::record_change(tx, now, &old, &config)?;
         repository.save(&config)?;
         Ok(config)
-    })
+    };
+    match &p.op_id {
+        Some(id) => replayable(ctx.store, call.method, id, save),
+        None => to_value(ctx.store.write(save)?),
+    }
 }

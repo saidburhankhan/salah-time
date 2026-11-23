@@ -11,7 +11,8 @@ use salah_domain::{
     error::Error,
     item::PrayerMark,
     tracking::{
-        DayBlock, DayPlanLine, Item, Metric, Project, ProjectMetric, Session, SessionValue, Tag,
+        DayBlock, DayClock, DayPlanLine, Item, Metric, Project, ProjectMetric, Session,
+        SessionValue, Tag,
     },
 };
 
@@ -108,6 +109,53 @@ impl Store {
         )
     }
 
+    /// Item state at the close of a past day, including tombstones.
+    pub fn items_on(&self, day: NaiveDate) -> Result<Vec<Item>, Error> {
+        let mut items = self.items()?;
+        let bodies: Vec<String> = self.all(
+            "SELECT h.item_json FROM item_history h WHERE h.until_day = (
+                SELECT MIN(v.until_day) FROM item_history v
+                WHERE v.item_id = h.item_id AND v.until_day > ?1)",
+            [codec::day(day)],
+            |row| row.get(0),
+        )?;
+        let mut previous = std::collections::HashMap::new();
+        for body in bodies {
+            let item: Item =
+                serde_json::from_str(&body).map_err(|e| Error::Storage(e.to_string()))?;
+            previous.insert(item.id.clone(), item);
+        }
+        for item in &mut items {
+            if let Some(old) = previous.remove(&item.id) {
+                // The editable entity still needs its current version as a precondition.
+                *item = Item {
+                    version: item.version,
+                    ..old
+                };
+            }
+        }
+        Ok(items)
+    }
+
+    pub fn historical_config(&self, day: NaiveDate) -> Result<Option<String>, Error> {
+        self.one("SELECT config_json FROM config_history WHERE until_day > ?1 ORDER BY until_day LIMIT 1",
+            [codec::day(day)], |row| row.get(0))
+    }
+
+    pub fn day_clock(&self, day: NaiveDate) -> Result<Option<DayClock>, Error> {
+        self.one(
+            "SELECT * FROM day_clocks WHERE day = ?1",
+            [codec::day(day)],
+            |row| {
+                Ok(DayClock {
+                    offset_seconds: row.get("offset_seconds")?,
+                    sunrise_minutes: row.get("sunrise_minutes")?,
+                    sleep_at: codec::get_timestamp(row, "sleep_at")?,
+                })
+            },
+        )
+    }
+
     pub fn session(&self, id: &str) -> Result<Option<Session>, Error> {
         let session = self.one("SELECT * FROM sessions WHERE id = ?1", [id], codec::session)?;
         session.map(|session| self.with_values(session)).transpose()
@@ -183,16 +231,17 @@ impl Store {
             .is_some())
     }
 
-    /// The latest day whose snapshot was written.
-    pub fn last_written_day(&self) -> Result<Option<NaiveDate>, Error> {
-        let day: Option<String> = self
-            .one("SELECT MAX(day) FROM days_written", [], |row| row.get(0))?
-            .flatten();
-        day.map(|day| {
-            NaiveDate::parse_from_str(&day, "%Y-%m-%d")
-                .map_err(|e| Error::Storage(format!("store: {e}")))
-        })
-        .transpose()
+    pub fn written_days(
+        &self,
+        from: NaiveDate,
+        until: NaiveDate,
+    ) -> Result<std::collections::BTreeSet<NaiveDate>, Error> {
+        let days = self.all(
+            "SELECT day FROM days_written WHERE day >= ?1 AND day < ?2",
+            [codec::day(from), codec::day(until)],
+            |row| codec::get_day(row, "day"),
+        )?;
+        Ok(days.into_iter().collect())
     }
 
     pub fn mark(&self, id: &str) -> Result<Option<PrayerMark>, Error> {

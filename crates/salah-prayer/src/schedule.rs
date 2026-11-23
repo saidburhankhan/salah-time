@@ -177,8 +177,21 @@ pub fn resolve(config: &Config, utc_now: DateTime<Utc>) -> Result<Schedule, Erro
 /// block runs from the previous evening's sleep time to Fajr; the Isha block
 /// ends at this evening's sleep time.
 pub fn day_blocks(config: &Config, day: NaiveDate) -> Result<Vec<BlockWindow>, Error> {
+    Ok(day_schedule(config, day)?.blocks)
+}
+
+/// The block windows and the timetable they were derived from.
+pub struct DaySchedule {
+    pub blocks: Vec<BlockWindow>,
+    pub prayers: Vec<PrayerTime>,
+    pub source: Source,
+    pub sleep_at: DateTime<Utc>,
+    pub offset_seconds: i32,
+}
+
+pub fn day_schedule(config: &Config, day: NaiveDate) -> Result<DaySchedule, Error> {
     let zone = offset(config)?;
-    let (prayers, _) = prayers_for(config, day)?;
+    let (prayers, source) = prayers_for(config, day)?;
     let sleep_minutes = day::parse_clock_minutes(&config.sleep_time)?;
     let minutes_of = |id: BoundaryId| -> Result<i64, Error> {
         Ok(prayers
@@ -202,7 +215,7 @@ pub fn day_blocks(config: &Config, day: NaiveDate) -> Result<Vec<BlockWindow>, E
     let sleep = instant(sleep_offset, sleep_minutes)?;
     // Yesterday's Fajr is close enough to today's to place last night's sleep.
     let last_night = instant(sleep_offset - 1, sleep_minutes)?;
-    BoundaryId::AWAKE
+    let blocks = BoundaryId::AWAKE
         .into_iter()
         .map(|id| {
             let start = match id {
@@ -218,10 +231,17 @@ pub fn day_blocks(config: &Config, day: NaiveDate) -> Result<Vec<BlockWindow>, E
                 start,
                 // A sleep time configured before Isha leaves an empty block
                 // rather than one that ends before it starts.
-                end: end.max(start),
+                end: end.min(sleep).max(start),
             })
         })
-        .collect()
+        .collect::<Result<_, Error>>()?;
+    Ok(DaySchedule {
+        blocks,
+        prayers,
+        source,
+        sleep_at: sleep,
+        offset_seconds: zone.local_minus_utc(),
+    })
 }
 
 #[cfg(test)]

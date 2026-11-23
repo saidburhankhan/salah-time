@@ -152,6 +152,7 @@ pub fn stats(
 struct Ledger {
     days: Vec<(NaiveDate, Snapshot)>,
     sessions: Vec<Session>,
+    scope: Scope,
     metrics: Vec<Metric>,
     projects: Vec<projects::ProjectView>,
     tags: Vec<Tag>,
@@ -176,17 +177,12 @@ impl Ledger {
             .collect();
         let days = days
             .into_iter()
-            .map(|d| {
-                let mut snapshot = day::snapshot(store, config, d, today)?;
-                snapshot
-                    .plan
-                    .retain(|line| scope.covers(line.project_id.as_deref()));
-                Ok((d, snapshot))
-            })
+            .map(|d| Ok((d, day::snapshot(store, config, d, today)?)))
             .collect::<Result<_, Error>>()?;
         Ok(Self {
             days,
             sessions,
+            scope,
             metrics: store
                 .metrics()?
                 .into_iter()
@@ -206,13 +202,28 @@ impl Ledger {
             .iter()
             .map(|(day, snapshot)| {
                 let sessions: Vec<Session> = self.on(*day).cloned().collect();
-                let fulfilment = Fulfilment::of(&snapshot.plan, &sessions);
+                let day_plan = Fulfilment::of(&snapshot.plan, &sessions);
+                // Project filters narrow the plan used for the ratio. Moving
+                // a plan line to a different project must not turn a session
+                // attached to that line into unplanned work.
+                let unplanned_minutes = day_plan.unplanned_minutes;
+                let fulfilment = if self.scope.projects.is_some() {
+                    let lines = snapshot
+                        .plan
+                        .iter()
+                        .filter(|line| self.scope.covers(line.project_id.as_deref()))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    Fulfilment::of(&lines, &sessions)
+                } else {
+                    day_plan
+                };
                 DayStat {
                     day: *day,
                     minutes: total_minutes(&sessions),
                     capacity_minutes: day_capacity(&snapshot.blocks),
                     planned_minutes: fulfilment.planned_minutes,
-                    unplanned_minutes: fulfilment.unplanned_minutes,
+                    unplanned_minutes,
                     fulfilment_ratio: fulfilment.ratio(),
                 }
             })
@@ -342,7 +353,7 @@ impl Ledger {
             active_days: self
                 .days
                 .iter()
-                .filter(|(day, _)| total_minutes(self.on(*day)) > 0)
+                .filter(|(day, _)| self.on(*day).next().is_some())
                 .count() as i64,
             avg_focus: rollup(Rollup::Avg, self.sessions.iter(), "focus"),
             avg_quality: rollup(Rollup::Avg, self.sessions.iter(), "quality"),
@@ -357,22 +368,14 @@ fn rollup<'a>(
     sessions: impl Iterator<Item = &'a Session>,
     metric_id: &str,
 ) -> Option<f64> {
-    let samples: Vec<(f64, f64)> = sessions
-        .filter_map(|s| Some((s.value(metric_id)?, s.weight())))
-        .collect();
-    if samples.is_empty() {
-        return None;
-    }
+    let mut samples = sessions.filter_map(|s| Some((s.value(metric_id)?, s.weight())));
+    let (first, mut weight) = samples.next()?;
     Some(match kind {
-        Rollup::Sum => samples.iter().map(|(value, _)| value).sum(),
-        Rollup::Avg => {
-            let weight: f64 = samples.iter().map(|(_, weight)| weight).sum();
-            samples
-                .iter()
-                .map(|(value, weight)| value * weight)
-                .sum::<f64>()
-                / weight
-        }
+        Rollup::Sum => samples.fold(first, |sum, (value, _)| sum + value),
+        Rollup::Avg => samples.fold(first, |mean, (value, minutes)| {
+            weight += minutes;
+            mean + (value - mean) * (minutes / weight)
+        }),
     })
 }
 
@@ -463,12 +466,13 @@ mod tests {
                 log(tx, &quran.id, Some(30), 5.0, 20);
                 log(tx, &quran.id, None, 2.0, 20);
                 log(tx, &gym.id, Some(10), 1.0, 21);
+                log(tx, &gym.id, None, 2.0, 22);
                 Ok(())
             })
             .unwrap();
         let range = || Range {
             from: date(20),
-            to: date(21),
+            to: date(22),
         };
         let all = stats(&mut store, &config(), date(22), range(), Filter::default()).unwrap();
         assert_eq!(
@@ -477,10 +481,10 @@ mod tests {
                 all.totals.sessions,
                 all.totals.active_days
             ),
-            (40, 3, 2)
+            (40, 4, 3)
         );
-        // (5·30 + 2·1 + 1·10) / 41
-        assert!((all.totals.avg_focus.unwrap() - 162.0 / 41.0).abs() < 1e-9);
+        // (5·30 + 2·1 + 1·10 + 2·1) / 42
+        assert!((all.totals.avg_focus.unwrap() - 164.0 / 42.0).abs() < 1e-9);
         assert_eq!(all.series[0].metric_id, "minutes");
         assert_eq!(all.series[1].metric_id, "focus");
         assert!(all.days[0].capacity_minutes > 0);

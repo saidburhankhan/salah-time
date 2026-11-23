@@ -92,7 +92,19 @@ pub fn sync_saved(
         });
     }
     let (updated, provider) = sync(&current, now, local_timezone_offset)?;
-    config::save(&updated)?;
+    let mut store = crate::Store::open(&salah_store::default_path())?;
+    store.write(|tx| {
+        // The network lookup ran outside the writer lock. A settings edit
+        // during that lookup takes precedence over this outdated result.
+        let latest = config::load()?;
+        if latest != current {
+            return Err(Error::Conflict(
+                "settings changed during location sync".into(),
+            ));
+        }
+        config::record_change(tx, now, &current, &updated)?;
+        config::save(&updated)
+    })?;
     Ok(SyncOutcome {
         config: updated,
         updated: true,

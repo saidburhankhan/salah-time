@@ -9,13 +9,14 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 use salah_domain::{
     day::BoundaryId,
     error::Error,
-    tracking::{DayBlock, DayBlockSource, DayPlanLine, Item},
+    tracking::{DayBlock, DayBlockSource, DayClock, DayPlanLine, Item},
 };
 use salah_prayer::schedule;
 
 /// A day's blocks and plan lines.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Snapshot {
+    pub clock: DayClock,
     pub blocks: Vec<DayBlock>,
     pub plan: Vec<DayPlanLine>,
 }
@@ -28,14 +29,37 @@ pub fn snapshot(
     today: NaiveDate,
 ) -> Result<Snapshot, Error> {
     if day < today && store.day_written(day)? {
+        let blocks = store.day_blocks(day)?;
+        let clock = match store.day_clock(day)? {
+            Some(clock) => clock,
+            None => {
+                // Older snapshots stored only UTC block windows. Both nights
+                // were built with the same fixed offset and sleep time.
+                let mut clock = blocks_for_day(store, config, day, today)?.1;
+                if let Some(night) = blocks.iter().find(|b| b.block == BoundaryId::Night) {
+                    clock.sleep_at = night.starts_at + Duration::days(1);
+                }
+                clock
+            }
+        };
         return Ok(Snapshot {
-            blocks: store.day_blocks(day)?,
+            blocks,
+            clock,
             plan: store.day_plan(day)?,
         });
     }
-    let blocks = scheduled_blocks(config, day)?;
-    let plan = planned_lines(store, day, day_end(&blocks))?;
-    Ok(Snapshot { blocks, plan })
+    let (blocks, clock) = blocks_for_day(store, config, day, today)?;
+    let items = if day < today {
+        store.items_on(day)?
+    } else {
+        store.items()?
+    };
+    let plan = planned_lines(items, day, clock.sleep_at);
+    Ok(Snapshot {
+        blocks,
+        clock,
+        plan,
+    })
 }
 
 /// Writes the snapshot of a past day that was never written; days from
@@ -46,29 +70,34 @@ pub fn freeze(
     day: NaiveDate,
     today: NaiveDate,
 ) -> Result<(), Error> {
-    if day >= today || tx.day_written(day)? {
+    if day >= today {
         return Ok(());
     }
-    let Snapshot { blocks, plan } = snapshot(tx, config, day, today)?;
-    tx.write_day(day, &blocks, &plan)
+    if tx.day_written(day)? {
+        if tx.day_clock(day)?.is_none() {
+            tx.put_day_clock(day, &snapshot(tx, config, day, today)?.clock)?;
+        }
+        return Ok(());
+    }
+    let Snapshot {
+        blocks,
+        clock,
+        plan,
+    } = snapshot(tx, config, day, today)?;
+    tx.write_day(day, &clock, &blocks, &plan)
 }
 
-/// Freezes every past day not yet written, from the day after the last
-/// written one (or the first item's day) up to yesterday, at most a year
-/// back. Item writes call this first, so the plan of a day that has ended is
-/// kept as it stood rather than rebuilt from later edits.
+/// Freezes unwritten days in the past year before an item changes. Reads may
+/// have materialized isolated days anywhere in that range.
 pub fn freeze_past(tx: &WriteTx<'_>, config: &Config, today: NaiveDate) -> Result<(), Error> {
-    let first_item = tx.items()?.iter().map(|item| item.day).min();
-    let Some(from) = tx
-        .last_written_day()?
-        .map(|day| day + Duration::days(1))
-        .or(first_item)
-    else {
+    let Some(first) = tx.items()?.iter().map(|item| item.day).min() else {
         return Ok(());
     };
-    let from = from.max(today - Duration::days(366));
+    let from = first.max(today - Duration::days(366));
+    let written = tx.written_days(from, today)?;
     from.iter_days()
         .take_while(|day| *day < today)
+        .filter(|day| !written.contains(day))
         .try_for_each(|day| freeze(tx, config, day, today))
 }
 
@@ -86,19 +115,38 @@ pub fn day_capacity<'a>(blocks: impl IntoIterator<Item = &'a DayBlock>) -> i64 {
         .sum()
 }
 
-/// The day ends at its sleep boundary, the end of the last block.
-fn day_end(blocks: &[DayBlock]) -> Option<DateTime<Utc>> {
-    blocks.iter().map(|block| block.ends_at).max()
-}
-
-fn scheduled_blocks(config: &Config, day: NaiveDate) -> Result<Vec<DayBlock>, Error> {
-    let (_, source) = schedule::prayers_for(config, day)?;
-    let source = if source.id == "official" {
+fn blocks_for_day(
+    store: &Store,
+    config: &Config,
+    day: NaiveDate,
+    today: NaiveDate,
+) -> Result<(Vec<DayBlock>, DayClock), Error> {
+    let historical: Option<Config> = if day < today {
+        store
+            .historical_config(day)?
+            .map(|body| serde_json::from_str(&body))
+            .transpose()
+            .map_err(|e| Error::Storage(e.to_string()))?
+    } else {
+        None
+    };
+    let schedule = schedule::day_schedule(historical.as_ref().unwrap_or(config), day)?;
+    let clock = DayClock {
+        offset_seconds: schedule.offset_seconds,
+        sunrise_minutes: schedule
+            .prayers
+            .iter()
+            .find(|p| p.id == "sunrise")
+            .map(|p| p.minutes),
+        sleep_at: schedule.sleep_at,
+    };
+    let source = if schedule.source.id == "official" {
         DayBlockSource::Official
     } else {
         DayBlockSource::Calculated
     };
-    Ok(schedule::day_blocks(config, day)?
+    let blocks = schedule
+        .blocks
         .into_iter()
         .map(|window| DayBlock {
             day,
@@ -107,23 +155,19 @@ fn scheduled_blocks(config: &Config, day: NaiveDate) -> Result<Vec<DayBlock>, Er
             ends_at: window.end,
             source,
         })
-        .collect())
+        .collect();
+    Ok((blocks, clock))
 }
 
 /// The lines of the items that existed at the day's end and recur on it.
-fn planned_lines(
-    store: &Store,
-    day: NaiveDate,
-    end: Option<DateTime<Utc>>,
-) -> Result<Vec<DayPlanLine>, Error> {
-    let existed = |item: &Item| match end {
-        Some(end) => item.created_at <= end && item.deleted_at.is_none_or(|at| at > end),
-        None => item.is_live(),
-    };
-    let mut lines: Vec<DayPlanLine> = store
-        .items()?
+fn planned_lines(items: Vec<Item>, day: NaiveDate, end: DateTime<Utc>) -> Vec<DayPlanLine> {
+    let mut lines: Vec<DayPlanLine> = items
         .into_iter()
-        .filter(|item| existed(item) && item.recurs_on(day))
+        .filter(|item| {
+            item.created_at <= end
+                && item.deleted_at.is_none_or(|at| at > end)
+                && item.recurs_on(day)
+        })
         .map(|item| DayPlanLine {
             day,
             block: item.block,
@@ -133,5 +177,5 @@ fn planned_lines(
         })
         .collect();
     lines.sort_by(|a, b| (a.block, &a.item_id).cmp(&(b.block, &b.item_id)));
-    Ok(lines)
+    lines
 }

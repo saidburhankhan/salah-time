@@ -50,7 +50,7 @@ fn invalid(error: impl std::error::Error + Send + Sync + 'static) -> rusqlite::E
     rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
 }
 
-fn get_timestamp(row: &Row, column: &str) -> rusqlite::Result<DateTime<Utc>> {
+pub(crate) fn get_timestamp(row: &Row, column: &str) -> rusqlite::Result<DateTime<Utc>> {
     let text: String = row.get(column)?;
     DateTime::parse_from_rfc3339(&text)
         .map(|value| value.with_timezone(&Utc))
@@ -67,7 +67,7 @@ fn get_optional_timestamp(row: &Row, column: &str) -> rusqlite::Result<Option<Da
     .transpose()
 }
 
-fn get_day(row: &Row, column: &str) -> rusqlite::Result<NaiveDate> {
+pub(crate) fn get_day(row: &Row, column: &str) -> rusqlite::Result<NaiveDate> {
     let text: String = row.get(column)?;
     NaiveDate::parse_from_str(&text, "%Y-%m-%d").map_err(invalid)
 }

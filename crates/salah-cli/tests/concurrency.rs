@@ -246,6 +246,13 @@ fn concurrent_first_opens_migrate_once_without_failing() {
     let store = fixture.store();
     assert_eq!(store.version().unwrap(), salah_store::schema_version());
     assert_eq!(live_positions(&store, BoundaryId::Asr).len(), WRITERS);
+    assert!(std::fs::read_dir(&fixture.root).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".old-")
+    }));
 }
 
 #[test]

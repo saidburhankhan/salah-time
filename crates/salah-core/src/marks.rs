@@ -36,10 +36,9 @@ pub fn set(
             format!("{} is not a prayer", prayer.name()),
         ));
     }
-    let day = match date {
-        Some(day) => day,
-        None => schedule::resolve(config, now)?.day(),
-    };
+    let today = schedule::resolve(config, now)?.day();
+    let day = date.unwrap_or(today);
+    crate::day::freeze(tx, config, day, today)?;
     let id = PrayerMark::id_for(day, prayer);
     let mut mark = tx.mark(&id)?.unwrap_or(PrayerMark {
         id: id.clone(),

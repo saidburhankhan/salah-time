@@ -137,6 +137,14 @@ pub struct DayBlock {
     pub source: DayBlockSource,
 }
 
+/// Clock data needed to display a frozen day in its original local time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DayClock {
+    pub offset_seconds: i32,
+    pub sunrise_minutes: Option<i64>,
+    pub sleep_at: DateTime<Utc>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DayPlanLine {
     pub day: NaiveDate,
@@ -199,6 +207,9 @@ impl Item {
 
     /// First date on or after `from` (and the item's first day) on which it applies.
     pub fn next_occurrence(&self, from: NaiveDate) -> Option<NaiveDate> {
+        if self.repeat == Repeat::None && self.day < from {
+            return None;
+        }
         item::next_occurrence(self.repeat, self.weekdays, self.day.max(from))
     }
 
@@ -278,6 +289,8 @@ mod tests {
     fn items_apply_by_repeat_rule_from_their_first_day() {
         let once = item(Repeat::None, None);
         assert!(once.applies_to(day(20)) && !once.applies_to(day(21)));
+        assert_eq!(once.next_occurrence(day(19)), Some(day(20)));
+        assert_eq!(once.next_occurrence(day(21)), None);
         let daily = item(Repeat::Daily, None);
         assert!(daily.applies_to(day(25)) && !daily.applies_to(day(19)));
         // 2026-11-23 is a Monday.

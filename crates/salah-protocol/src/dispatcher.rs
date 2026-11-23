@@ -177,7 +177,7 @@ impl Dispatcher {
                 "hello must be the first request on a connection",
             ));
         }
-        let (method, _, handler) = METHODS
+        let (method, kind, handler) = METHODS
             .iter()
             .find(|(name, _, _)| *name == method)
             .ok_or_else(|| RpcError::method_not_found(method))?;
@@ -185,6 +185,12 @@ impl Dispatcher {
             return Err(RpcError::invalid_params(
                 "params must be a JSON object or omitted",
             ));
+        }
+        if *kind == Kind::Write
+            && let Some(op_id) = params.get("op_id").and_then(Value::as_str)
+            && let Some(result) = writes::replay(ctx.store, method, op_id)?
+        {
+            return Ok(result);
         }
         handler(Call { method, params }, ctx)
     }

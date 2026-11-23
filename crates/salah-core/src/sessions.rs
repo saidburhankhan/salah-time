@@ -119,7 +119,14 @@ pub fn running(store: &Store) -> Result<Option<Session>, Error> {
 
 /// The metrics a session of `project_id` asks for, in the project's order.
 pub fn prompt(store: &Store, project_id: Option<&str>) -> Result<Vec<PromptMetric>, Error> {
-    Ok(asked(store, project_id)?
+    let metrics = match project_id {
+        Some(_) => asked(store, project_id)?,
+        None => ["focus", "quality"]
+            .into_iter()
+            .map(|id| Ok((metrics::find(store, id)?, false)))
+            .collect::<Result<_, Error>>()?,
+    };
+    Ok(metrics
         .into_iter()
         .map(|(metric, required)| PromptMetric {
             metric_id: metric.id,
@@ -182,15 +189,20 @@ pub fn stop(
         .ok_or_else(|| not_found("running session", id.unwrap_or("")))?;
     let started = session.started_at.unwrap_or(now);
     let day = session.block.day;
-    let day_end = day::snapshot(tx, config, day, day::current(config, now)?)?
-        .blocks
-        .iter()
-        .map(|block| block.ends_at)
-        .max()
-        .unwrap_or(now);
+    let today = day::current(config, now)?;
+    day::freeze(tx, config, day, today)?;
+    let day_end = day::snapshot(tx, config, day, today)?.clock.sleep_at;
     let ended = now.min(day_end).max(started);
-    session.values = checked_values(tx, session.project_id.as_deref(), values, &[])?;
-    session.note = note(session_note)?;
+    let mut combined: Values = session
+        .values
+        .iter()
+        .map(|v| (v.metric_id.clone(), v.value))
+        .collect();
+    combined.extend(values);
+    session.values = checked_values(tx, session.project_id.as_deref(), combined, &session.values)?;
+    if session_note.is_some() {
+        session.note = note(session_note)?;
+    }
     session.ended_at = Some(ended);
     session.minutes = Some(elapsed_minutes(started, ended));
     session.updated_at = now;
@@ -233,6 +245,7 @@ pub fn log(
 
 pub fn edit(
     tx: &WriteTx<'_>,
+    config: &Config,
     now: DateTime<Utc>,
     id: &str,
     changes: SessionChanges,
@@ -240,6 +253,7 @@ pub fn edit(
 ) -> Result<Session, Error> {
     let mut session = find(tx, id)?;
     ensure_version("session", id, session.version, expected_version)?;
+    day::freeze(tx, config, session.block.day, day::current(config, now)?)?;
     if let Some(value) = changes.minutes {
         if session.is_running() {
             return Err(Error::validation(
@@ -250,8 +264,12 @@ pub fn edit(
         session.minutes = Some(minutes("minutes", value)?);
     }
     if let Some(values) = changes.values {
-        session.values =
-            checked_values(tx, session.project_id.as_deref(), values, &session.values)?;
+        let required_project = if session.is_running() {
+            None
+        } else {
+            session.project_id.as_deref()
+        };
+        session.values = checked_values(tx, required_project, values, &session.values)?;
     }
     if let Some(value) = changes.note {
         session.note = note(value)?;
@@ -266,12 +284,14 @@ pub fn edit(
 
 pub fn remove(
     tx: &WriteTx<'_>,
+    config: &Config,
     now: DateTime<Utc>,
     id: &str,
     expected_version: Option<i64>,
 ) -> Result<Session, Error> {
     let mut session = find(tx, id)?;
     ensure_version("session", id, session.version, expected_version)?;
+    day::freeze(tx, config, session.block.day, day::current(config, now)?)?;
     session.deleted_at = Some(now);
     session.updated_at = now;
     session.version = tx.put_session(&session)?;
@@ -343,7 +363,7 @@ fn resolve(store: &Store, target: Target) -> Result<(Option<String>, Option<Stri
 fn checked_values(
     store: &Store,
     project_id: Option<&str>,
-    values: Values,
+    mut values: Values,
     kept: &[SessionValue],
 ) -> Result<Vec<SessionValue>, Error> {
     for (metric_id, value) in &values {
@@ -355,6 +375,11 @@ fn checked_values(
             metric
                 .validate_value(*value)
                 .map_err(|message| Error::validation("values", message))?;
+        }
+    }
+    for old in kept {
+        if !values.contains_key(&old.metric_id) && metrics::find(store, &old.metric_id)?.archived {
+            values.insert(old.metric_id.clone(), old.value);
         }
     }
     let given: BTreeSet<&str> = values.keys().map(String::as_str).collect();
@@ -516,16 +541,25 @@ mod tests {
             ..SessionChanges::default()
         };
         let edited = store
-            .write(|tx| edit(tx, at(20, 14, 0), &logged.id, changes.clone(), Some(1)))
+            .write(|tx| {
+                edit(
+                    tx,
+                    &config(),
+                    at(20, 14, 0),
+                    &logged.id,
+                    changes.clone(),
+                    Some(1),
+                )
+            })
             .unwrap();
         assert_eq!(
             (edited.minutes, edited.block.start),
             (Some(40), BoundaryId::Asr)
         );
-        let stale = store.write(|tx| remove(tx, at(20, 14, 0), &logged.id, Some(1)));
+        let stale = store.write(|tx| remove(tx, &config(), at(20, 14, 0), &logged.id, Some(1)));
         assert_eq!(stale.unwrap_err().code(), "conflict");
         store
-            .write(|tx| remove(tx, at(20, 14, 0), &logged.id, Some(2)))
+            .write(|tx| remove(tx, &config(), at(20, 14, 0), &logged.id, Some(2)))
             .unwrap();
         assert_eq!(find(&store, &logged.id).unwrap_err().code(), "not_found");
     }
@@ -556,6 +590,49 @@ mod tests {
         // 13:00 to the 23:00 sleep boundary of the session's day.
         assert_eq!(stopped.minutes, Some(600));
         assert_eq!(stopped.ended_at, Some(at(20, 23, 0)));
+    }
+
+    #[test]
+    fn early_sleep_ends_the_timer_and_the_planning_day_even_before_isha() {
+        let mut store = Store::open_in_memory().unwrap();
+        let project = project(&mut store, "Book");
+        let config = Config {
+            sleep_time: "14:00".into(),
+            ..config()
+        };
+        store
+            .write(|tx| start(tx, &config, at(20, 13, 0), ids(), on_project(&project.id)))
+            .unwrap();
+        let after = at(20, 21, 0);
+        assert_eq!(day::current(&config, after).unwrap(), date(21));
+        let stopped = store
+            .write(|tx| stop(tx, &config, after, None, rated(3.0, 3.0), None))
+            .unwrap();
+        assert_eq!(stopped.ended_at, Some(at(20, 14, 0)));
+        assert_eq!(stopped.minutes, Some(60));
+        assert!(store.day_written(date(20)).unwrap());
+        let day = day::day_plan(&mut store, &config, after, Some(date(20))).unwrap();
+        assert_eq!(day.sleep.time, "14:00");
+        let dhuhr = day
+            .blocks
+            .iter()
+            .find(|b| b.start == BoundaryId::Dhuhr)
+            .unwrap();
+        let start = day
+            .prayers
+            .iter()
+            .find(|p| p.id == BoundaryId::Dhuhr)
+            .unwrap();
+        assert_eq!(
+            dhuhr.capacity_minutes,
+            14 * 60 - salah_domain::day::parse_clock_minutes(&start.time).unwrap()
+        );
+        assert!(
+            day.blocks
+                .iter()
+                .filter(|b| b.start > BoundaryId::Dhuhr)
+                .all(|b| b.capacity_minutes == 0)
+        );
     }
 
     #[test]
@@ -632,13 +709,39 @@ mod tests {
             ..SessionChanges::default()
         };
         store
-            .write(|tx| edit(tx, at(20, 15, 0), &logged.id, keep.clone(), None))
+            .write(|tx| edit(tx, &config(), at(20, 15, 0), &logged.id, keep.clone(), None))
             .expect("an existing archived value stays valid");
+        let visible_only = SessionChanges {
+            values: Some(Values::new()),
+            ..Default::default()
+        };
+        let edited = store
+            .write(|tx| {
+                edit(
+                    tx,
+                    &config(),
+                    at(20, 15, 0),
+                    &logged.id,
+                    visible_only.clone(),
+                    None,
+                )
+            })
+            .unwrap();
+        assert_eq!(edited.value(&pages.id), Some(12.0));
         let change = SessionChanges {
             values: Some(Values::from([(pages.id.clone(), 13.0)])),
             ..SessionChanges::default()
         };
-        let rejected = store.write(|tx| edit(tx, at(20, 15, 0), &logged.id, change.clone(), None));
+        let rejected = store.write(|tx| {
+            edit(
+                tx,
+                &config(),
+                at(20, 15, 0),
+                &logged.id,
+                change.clone(),
+                None,
+            )
+        });
         assert_eq!(rejected.unwrap_err().code(), "validation");
     }
 }

@@ -177,7 +177,9 @@ pub fn edit(
 ) -> Result<Item, Error> {
     let mut item = find(tx, id)?;
     ensure_version("item", id, item.version, expected_version)?;
-    day::freeze_past(tx, config, day::current(config, now)?)?;
+    let today = day::current(config, now)?;
+    day::freeze_past(tx, config, today)?;
+    tx.preserve_item(&item, today)?;
     if let Some(title) = &changes.title {
         item.title = validate_title(title)?;
     }
@@ -222,7 +224,8 @@ pub fn move_to(
     let block = validate_block(block)?;
     let mut moved = find(tx, id)?;
     ensure_version("item", id, moved.version, expected_version)?;
-    day::freeze_past(tx, config, day::current(config, now)?)?;
+    let today = day::current(config, now)?;
+    day::freeze_past(tx, config, today)?;
     let mut siblings: Vec<Item> = list(tx)?
         .into_iter()
         .filter(|i| i.block == block && i.id != moved.id)
@@ -232,6 +235,7 @@ pub fn move_to(
         MovePosition::After(anchor) => sibling_index(&siblings, anchor)? + 1,
         MovePosition::Before(anchor) => sibling_index(&siblings, anchor)?,
     };
+    tx.preserve_item(&moved, today)?;
     moved.block = block;
     let moved_id = moved.id.clone();
     siblings.insert(index, moved);
@@ -239,6 +243,9 @@ pub fn move_to(
     for (position, mut item) in siblings.into_iter().enumerate() {
         let position = position as i64;
         if item.position != position || item.id == moved_id {
+            if item.id != moved_id {
+                tx.preserve_item(&item, today)?;
+            }
             item.position = position;
             item.updated_at = now;
             item.version = tx.put_item(&item)?;
@@ -258,7 +265,9 @@ pub fn remove(
 ) -> Result<Item, Error> {
     let mut item = find(tx, id)?;
     ensure_version("item", id, item.version, expected_version)?;
-    day::freeze_past(tx, config, day::current(config, now)?)?;
+    let today = day::current(config, now)?;
+    day::freeze_past(tx, config, today)?;
+    tx.preserve_item(&item, today)?;
     item.deleted_at = Some(now);
     item.updated_at = now;
     item.version = tx.put_item(&item)?;

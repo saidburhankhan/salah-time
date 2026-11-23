@@ -1,0 +1,43 @@
+# C1 tracking backend
+
+## Task 1 — review and regressions
+
+Locations below refer to the code before this checkpoint (architecture, `9bcc596`).
+The RPC contract fixtures pass with their existing contents.
+
+| Finding and original location | Failing scenario | Fix and regression coverage |
+|---|---|---|
+| Replay after body validation, `crates/salah-protocol/src/writes.rs:21`, `:148`, `:368` | Retry an applied `config.set` with just the same op ID. The server rejected the empty body. Reusing an existing op ID on another method with missing fields also returned the wrong field. | Check for replay before parsing the mutation body or loading config. Recheck under the write lock for racing requests. Dispatcher tests cover exact replay, cross-method rejection, revision and empty IDs. |
+| Routine prompt, `crates/salah-core/src/sessions.rs:138` | Start a timer on an item without a project. Status supplied no focus or quality controls. | A running routine gets the two optional built-ins. Idle status keeps its empty prompt. A dispatcher test exercises start, status and stop without ratings. |
+| Archived value loss, `crates/salah-core/src/sessions.rs:343` | Archive Pages after recording 12. Edit the session using just the fields still visible in its prompt. Replacing the values map silently deleted Pages. | Preserve omitted archived samples, accept an unchanged sample and reject a changed or newly supplied archived one. Covered by the archived-metric core test. |
+| In-progress session edits, `crates/salah-core/src/sessions.rs:254`, `:192` | Enter just focus and a note while the timer runs, then enter quality on stop. The edit required both ratings and stop discarded previously entered values and notes. | Validate each supplied value immediately, enforce required fields at finish and retain the saved note when omitted on stop. A dispatcher test covers partial entry, a rejected stop and a successful retry. |
+| Sleep clamp, `crates/salah-core/src/sessions.rs:185`, `crates/salah-prayer/src/schedule.rs:179`, `crates/salah-domain/src/day.rs:222` | With Sleep at 14:00, a 13:00 timer stopped at 21:00 counted past Sleep. Later prayers reopened the previous planning day. Waking capacity also included time after Sleep. | Carry the actual Sleep instant, end waking capacity at Sleep and keep Night current until Fajr. Core coverage checks the 60-minute result, end instant, planning date, displayed Sleep and block capacities. |
+| Incomplete historical plans, `crates/salah-core/src/day/snapshot.rs:60`, `crates/salah-core/src/day/view.rs:325` | Read yesterday after a long gap, then rename and reassign a daily item. The latest-written-day cursor skipped earlier holes. Unread days beyond the catch-up window acquired the new recurrence and project. Frozen rows also displayed the new title and recurrence. | Check actual written days in the bounded window. Retain the first pre-edit item state per planning day for historical reconstruction, including ordering and removal. The sparse-read regression checks both a written day and an unread day over a year old. |
+| Clock history and first writes, `crates/salah-core/src/day/view.rs:156`, `:162`, `crates/salah-protocol/src/writes.rs:376`, `crates/salah-core/src/location.rs:95` | Change location and UTC offset. Frozen prayer and Sleep labels shifted, sunrise was recalculated, and an unread past day used the new settings. Stopping, editing or removing a past session or marking a past prayer also left its day unwritten. | Persist local clock metadata with a frozen day. Keep previous settings for unread days on manual updates and successful location sync. Materialize the affected past day inside the write. Core, dispatcher and v1 store-upgrade tests cover these paths and retained data. |
+| Day and stats totals, `crates/salah-core/src/stats.rs:183`, `:345`, `:372` | A tick-only day counted as inactive. Moving a plan line from project A to B made the original A session count as unplanned in the A filter. A count of 1e308 with a ten-minute weight overflowed before division and produced a null average. | Count days with any finished session, classify unplanned work against the whole day's plan, and compute the weighted mean incrementally. Tests include a project filter, a session done in another block, a bare-project log, ticks and large finite counts. |
+| One-time item recurrence, `crates/salah-domain/src/tracking.rs:201` | List yesterday's one-time item today. It advertised today as its next occurrence. | Return null after its one applicable day. Domain assertions cover both sides of the date. |
+| Notification delivery, `crates/salah-cli/src/daemon.rs:148`, `:203`, `:418`, `:682` | A clock-only subscriber received changes. An update between subscription revision lookup and registration could be lost. Splitting a tag removal across watcher pages emitted one revision twice, which let revision deduplication hide the tag scope. A read failure advanced the poll version before publication. | Register atomically with the revision lookup, filter by topic, establish the watcher cursor before serving and group whole revisions across pages. A socket-free test runs every project/tag/metric/session mutation through dispatch and the watcher with one change per page. Removing an attached tag emits both projects and tags. A second test covers subscription replacement. Config writes also emit the documented config scope. |
+| SQLite recovery, `crates/salah-store/src/lib.rs:177`, `:200` | A reader holding a shared lock can make COMMIT return busy and leave the writer inside its transaction. Concurrent first opens could read schema presence before initialization and version after it, then set aside the newly initialized database. | Use transaction rollback on failed commit and read the two schema facts in one SQLite statement. Tests force a busy commit and reuse that connection, and verify concurrent first opens retain all writes without creating an old-database backup. |
+
+The review also checked scale/count/check validation, one running timer, item-to-session project copying, required and optional project metrics, archived metrics in prompts, version conflicts, running and removed session exclusion, minute rounding, fulfilment ratios, Night capacity and tag filtering. Project prompts retain the project's configured metric order under the task 1 contract.
+
+### Compatibility
+
+The existing tracking-v1 database receives additive history tables on open. Entity IDs, applied operations and existing day snapshots survive. Older databases did not record the original timezone or sunrise. For those snapshots, the first subsequent read fills the missing metadata from the earliest applicable settings available. Item edits that predate history capture cannot be reconstructed if their original fields were never stored.
+
+### Verification
+
+- 129 non-socket Rust tests passed, including golden RPC fixtures, CLI subprocesses, concurrency, dispatcher and watcher tests.
+- `cargo test --offline --workspace` failed on all eight tests in `crates/salah-cli/tests/daemon.rs`. Unix socket bind returned EPERM in the sandbox. Seven tests timed out waiting for the listener, and the stale-socket test failed at its own bind. A full rerun with `--no-fail-fast` confirmed this was the only failing target.
+- `cargo clippy --offline --all-targets -- -D warnings`, `cargo fmt --check` and `git diff --check` passed.
+
+### Checkpoint files
+
+- `crates/salah-cli/src/daemon.rs`, `crates/salah-cli/src/daemon/events.rs`, `crates/salah-cli/tests/concurrency.rs`
+- `crates/salah-core/src/config.rs`, `crates/salah-core/src/day/snapshot.rs`, `crates/salah-core/src/day/view.rs`, `crates/salah-core/src/items.rs`, `crates/salah-core/src/location.rs`, `crates/salah-core/src/marks.rs`, `crates/salah-core/src/sessions.rs`, `crates/salah-core/src/stats.rs`, `crates/salah-core/src/status.rs`
+- `crates/salah-domain/src/day.rs`, `crates/salah-domain/src/tracking.rs`, `crates/salah-prayer/src/schedule.rs`
+- `crates/salah-protocol/src/dispatcher.rs`, `crates/salah-protocol/src/message.rs`, `crates/salah-protocol/src/writes.rs`, `crates/salah-protocol/tests/dispatch.rs`
+- `crates/salah-store/src/codec.rs`, `crates/salah-store/src/history.sql`, `crates/salah-store/src/lib.rs`, `crates/salah-store/src/read.rs`, `crates/salah-store/src/write.rs`
+- `docs/work/tracking-ui/c1-progress.md`
+
+CHECKPOINT 1: Preserve tracking history and harden session validation, stats, replay and notifications

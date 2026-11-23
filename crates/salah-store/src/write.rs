@@ -10,7 +10,9 @@ use rusqlite::{OptionalExtension, params};
 use salah_domain::{
     error::Error,
     item::PrayerMark,
-    tracking::{DayBlock, DayPlanLine, Item, Metric, Project, ProjectMetric, Session, Tag},
+    tracking::{
+        DayBlock, DayClock, DayPlanLine, Item, Metric, Project, ProjectMetric, Session, Tag,
+    },
 };
 use std::{
     cell::{Cell, RefCell},
@@ -184,6 +186,27 @@ impl WriteTx<'_> {
         self.log_change("metric", &metric.id, op, version)
     }
 
+    /// Stores the settings needed to reconstruct unread past days.
+    pub fn record_config_change(&self, today: NaiveDate, previous: &str) -> Result<(), Error> {
+        self.execute(
+            "INSERT INTO config_history (until_day, config_json) VALUES (?1, ?2)
+            ON CONFLICT (until_day) DO NOTHING",
+            params![codec::day(today), previous],
+        )?;
+        let revision = self.revision_for_write()?;
+        self.log_change("config", "config", "update", revision)?;
+        Ok(())
+    }
+
+    pub fn preserve_item(&self, item: &Item, today: NaiveDate) -> Result<(), Error> {
+        let body = serde_json::to_string(item).map_err(|e| Error::Internal(e.to_string()))?;
+        self.execute(
+            "INSERT INTO item_history (item_id, until_day, item_json) VALUES (?1, ?2, ?3)
+             ON CONFLICT (item_id, until_day) DO NOTHING",
+            params![item.id, codec::day(today), body],
+        )
+    }
+
     pub fn put_item(&self, item: &Item) -> Result<i64, Error> {
         let (version, op) = self.next_version("items", &item.id, item.deleted_at)?;
         self.execute(
@@ -301,6 +324,7 @@ impl WriteTx<'_> {
     pub fn write_day(
         &self,
         day: NaiveDate,
+        clock: &DayClock,
         blocks: &[DayBlock],
         plan: &[DayPlanLine],
     ) -> Result<(), Error> {
@@ -333,6 +357,14 @@ impl WriteTx<'_> {
         self.execute(
             "INSERT INTO days_written (day, written_at) VALUES (?1, ?2)",
             params![codec::day(day), codec::timestamp(Utc::now())],
+        )?;
+        self.put_day_clock(day, clock)
+    }
+
+    pub fn put_day_clock(&self, day: NaiveDate, clock: &DayClock) -> Result<(), Error> {
+        self.execute(
+            "INSERT INTO day_clocks (day, offset_seconds, sunrise_minutes, sleep_at) VALUES (?1, ?2, ?3, ?4)",
+            params![codec::day(day), clock.offset_seconds, clock.sunrise_minutes, codec::timestamp(clock.sleep_at)],
         )
     }
 

@@ -122,6 +122,7 @@ impl ChangeScope {
             "tag" => Self::Tags,
             "metric" => Self::Metrics,
             "prayer_mark" => Self::Marks,
+            "config" => Self::Config,
             _ => return None,
         })
     }

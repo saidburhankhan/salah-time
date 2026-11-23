@@ -97,6 +97,11 @@ impl Store {
             SCHEMA_VERSION => Ok(()),
             other => Err(Error::Storage(format!("store: unsupported schema {other}"))),
         };
+        // These additive tables also install on existing tracking-v1 databases.
+        let created = created.and_then(|()| {
+            conn.execute_batch(include_str!("history.sql"))
+                .map_err(storage_error)
+        });
         match created {
             Ok(()) => conn.execute_batch("COMMIT").map_err(storage_error)?,
             Err(error) => {
@@ -164,9 +169,11 @@ impl Store {
     ) -> Result<T, Error> {
         let mut attempt = 0;
         loop {
-            self.conn
-                .execute_batch("BEGIN IMMEDIATE")
-                .map_err(storage_error)?;
+            let transaction = rusqlite::Transaction::new_unchecked(
+                &self.conn,
+                rusqlite::TransactionBehavior::Immediate,
+            )
+            .map_err(storage_error)?;
             let tx = WriteTx {
                 store: self,
                 revision: Cell::new(None),
@@ -174,11 +181,11 @@ impl Store {
             };
             match work(&tx) {
                 Ok(value) => {
-                    self.conn.execute_batch("COMMIT").map_err(storage_error)?;
+                    transaction.commit().map_err(storage_error)?;
                     return Ok(value);
                 }
                 Err(error) => {
-                    let _ = self.conn.execute_batch("ROLLBACK");
+                    transaction.rollback().map_err(storage_error)?;
                     attempt += 1;
                     if !matches!(error, Error::Busy(_)) || attempt == WRITE_ATTEMPTS {
                         return Err(error);
@@ -199,16 +206,15 @@ fn user_version(conn: &Connection) -> Result<i64, Error> {
 /// unreleased tracking draft without the `days_written` table.
 fn is_old_schema(path: &Path) -> Result<bool, Error> {
     let conn = Connection::open(path).map_err(storage_error)?;
-    let current: bool = conn
-        .query_row(
-            "SELECT EXISTS (
-                 SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'days_written'
-             )",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(storage_error)?;
-    Ok(user_version(&conn)? > 0 && !current)
+    // Both facts must describe the same SQLite snapshot during first open.
+    conn.query_row(
+        "SELECT user_version > 0 AND NOT EXISTS (
+            SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'days_written'
+        ) FROM pragma_user_version",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(storage_error)
 }
 
 fn set_aside(path: &Path) -> Result<(), Error> {
@@ -374,6 +380,54 @@ mod tests {
                 (2, "session".into(), "delete".into(), None),
             ]
         );
+    }
+
+    #[test]
+    fn failed_commit_rolls_back_before_the_next_request() {
+        let path =
+            std::env::temp_dir().join(format!("salah-commit-busy-{}.db", std::process::id()));
+        let mut store = Store::open(&path).unwrap();
+        let reader = Connection::open(&path).unwrap();
+        reader.execute_batch("BEGIN; SELECT * FROM meta").unwrap();
+        store.conn.busy_timeout(Duration::ZERO).unwrap();
+        let failed = store.write(|tx| tx.put_project(&p()));
+        assert!(matches!(failed, Err(Error::Busy(_))));
+        reader.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(store.revision().unwrap(), 0);
+        assert!(store.project("p").unwrap().is_none());
+        assert_eq!(store.write(|tx| tx.put_project(&p())).unwrap(), 1);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn tracking_v1_gets_history_tables_without_losing_applied_ops_or_snapshots() {
+        let path = std::env::temp_dir().join(format!("salah-upgrade-{}.db", std::process::id()));
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(
+            "PRAGMA user_version=1;
+            INSERT INTO days_written VALUES ('2031-05-14','2031-05-15T00:00:00Z');
+            INSERT INTO applied_ops VALUES ('op','session.start',0,'{}','2031-05-14T00:00:00Z')",
+        )
+        .unwrap();
+        drop(conn);
+        let mut store = Store::open(&path).unwrap();
+        assert_eq!(
+            store.applied_op("op").unwrap().unwrap().method,
+            "session.start"
+        );
+        assert!(store.day_written(d()).unwrap());
+        assert!(store.day_clock(d()).unwrap().is_none());
+        store
+            .write(|tx| {
+                tx.put_project(&p())?;
+                tx.put_item(&i())?;
+                tx.preserve_item(&i(), d())
+            })
+            .unwrap();
+        assert_eq!(store.items_on(d()).unwrap(), [i()]);
+        drop(store);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

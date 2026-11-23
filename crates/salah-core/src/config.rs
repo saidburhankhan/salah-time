@@ -85,6 +85,18 @@ pub fn save(config: &Config) -> Result<(), Error> {
     save_to(config, &path())
 }
 
+/// Records which settings apply to days that ended before this change.
+pub fn record_change(
+    tx: &crate::WriteTx<'_>,
+    now: chrono::DateTime<chrono::Utc>,
+    old: &Config,
+    new: &Config,
+) -> Result<(), Error> {
+    let day = crate::day::current(old, now)?.max(crate::day::current(new, now)?);
+    let body = serde_json::to_string(old).map_err(|e| Error::Internal(e.to_string()))?;
+    tx.record_config_change(day, &body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

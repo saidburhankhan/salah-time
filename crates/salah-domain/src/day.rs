@@ -221,11 +221,14 @@ pub fn timeline(
     let sleep_offset = evening_sleep_offset(sleep_minutes, fajr_minutes);
     let mut candidates: Vec<Boundary> = today
         .iter()
+        .filter(|prayer| sleep_offset == 1 || prayer.minutes < sleep_minutes)
         .filter_map(|prayer| prayer_boundary(prayer, 0))
         .collect();
     // Yesterday's Isha starts the block that a post-midnight bedtime ends.
     // Today's Isha is a close approximation of yesterday's.
-    if let Some(isha) = today.iter().find(|prayer| prayer.id == "isha") {
+    if sleep_offset == 1
+        && let Some(isha) = today.iter().find(|prayer| prayer.id == "isha")
+    {
         candidates.extend(prayer_boundary(isha, -1));
     }
     candidates.push(sleep_boundary(sleep_minutes, -1, sleep_offset));
