@@ -109,6 +109,13 @@ ColumnLayout {
     signal edited()
     spacing: 14
 
+    Connections {
+        target: backend
+        function onTagsLoaded() {
+            if (bar.tagId && bar.tagId !== "none" && !backend.tags.some(tag => tag.id === bar.tagId))
+                bar.setFilter("tag", "")
+        }
+    }
     function validDate(text) {
         return /^\d{4}-\d{2}-\d{2}$/.test(text) && !isNaN(Date.parse(text))
             && new Date(Date.parse(text)).toISOString().slice(0, 10) === text

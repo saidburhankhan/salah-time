@@ -78,6 +78,12 @@ void CoreClient::configureTransport(const QString &path) {
         startNext();
     });
     connect(m_transport, &SocketTransport::reconnected, this, &CoreClient::reconnected);
+    connect(m_transport, &SocketTransport::clockBoundary, this, [this, lastDay = QString()](const QString &day) mutable {
+        if (day == lastDay || !QDate::fromString(day, Qt::ISODate).isValid()) return;
+        lastDay = day;
+        ++m_readGeneration;
+        emit trackingDayChanged(day);
+    });
     connect(m_transport, &SocketTransport::changed, this, [this](qint64 revision, const QStringList &scopes) {
         ++m_readGeneration;
         emit changed(revision, scopes);
@@ -340,10 +346,35 @@ void CoreClient::statsTable(const QJsonObject &params, Callback callback) {
             std::move(callback), true, false, Dto::decodeJson, Dto::decodeJson);
 }
 
+void CoreClient::goalsList(Callback callback) {
+    enqueue({"goal", "list", "--json"}, {}, QStringLiteral("goals.list"), std::move(callback),
+            true, false, Dto::decodeJson, Dto::decodeJson);
+}
+
+void CoreClient::goalsHistory(const QString &id, const QString &from, const QString &to, Callback callback) {
+    enqueue({"goal", "history", id, "--from", from, "--to", to, "--json"},
+            {{"id", id}, {"from", from}, {"to", to}}, QStringLiteral("goals.history"), std::move(callback),
+            true, false, Dto::decodeJson, Dto::decodeJson);
+}
+
 void CoreClient::rpcRead(const QString &method, const QJsonObject &params, Callback callback) {
     enqueue({QStringLiteral("rpc"), method}, params, method, std::move(callback), true, false,
             Dto::decodeJson, nullptr, {}, true);
 }
+void CoreClient::routineSessions(const QDate &from, const QDate &to, const QString &before, Callback callback) {
+    QJsonObject params{{"from", from.toString(Qt::ISODate)}, {"to", to.toString(Qt::ISODate)},
+                       {"with_note", false}, {"limit", 500}};
+    auto args = reportArguments(params, {"sessions", "list"});
+    args << "--all" << "--limit" << "500";
+    if (!before.isEmpty()) {
+        params.insert("before", before);
+        args << "--before" << before;
+    }
+    args << "--json";
+    enqueue(args, params, QStringLiteral("sessions.list"), std::move(callback), true, false,
+            Dto::decodeJson, Dto::decodeJson);
+}
+
 void CoreClient::itemsList(Callback callback) {
     enqueue({"item", "list", "--json"}, {}, QStringLiteral("items.list"), std::move(callback), true, false,
             Dto::decodeJson, Dto::decodeJson);
@@ -519,8 +550,8 @@ void CoreClient::listEntities(const QString &method, Callback callback) {
     enqueue({QStringLiteral("rpc"), method}, QJsonObject{}, method, std::move(callback), true, false,
             Dto::decodeJson, nullptr, {}, true);
 }
-void CoreClient::mutateEntity(const QString &method, QJsonObject params, Callback callback) {
-    const QString opId = makeOpId();
+void CoreClient::mutateEntity(const QString &method, QJsonObject params, Callback callback, const QString &operation) {
+    const QString opId = operation.isEmpty() ? makeOpId() : operation;
     params.insert(QStringLiteral("op_id"), opId);
     writeRpc(method, params, std::move(callback));
 }

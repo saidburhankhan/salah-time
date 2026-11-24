@@ -15,6 +15,7 @@
         <file alias="qml/resources/ResourceTime.js">qml/resources/ResourceTime.js</file>
         <file alias="qml/resources/ResourceChip.qml">qml/resources/ResourceChip.qml</file>
         <file alias="qml/resources/ResourceRow.qml">qml/resources/ResourceRow.qml</file>
+        <file alias="qml/resources/NewTaskResources.qml">qml/resources/NewTaskResources.qml</file>
         <file alias="qml/resources/ResourceForm.qml">qml/resources/ResourceForm.qml</file>
         <file alias="qml/pages/GoalsPage.qml">qml/pages/GoalsPage.qml</file>
         <file alias="qml/goals/GoalText.js">qml/goals/GoalText.js</file>

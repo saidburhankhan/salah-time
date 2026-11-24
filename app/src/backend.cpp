@@ -123,6 +123,18 @@ Backend::Backend(QObject *parent, const QString &program, int timeoutMs, const Q
     connect(&m_client, &CoreClient::busyChanged, this, &Backend::busyChanged);
     connect(&m_client, &CoreClient::offlineChanged, this, [this](bool) { emit offlineChanged(); });
     connect(&m_client, &CoreClient::reconnected, this, [this] { reload(); });
+    connect(&m_client, &CoreClient::trackingDayChanged, this, [this](const QString &isoDay) {
+        const QDate day = QDate::fromString(isoDay, Qt::ISODate);
+        if (m_today == day) return;
+        const bool followingToday = !m_selected.isValid() || m_selected == m_today;
+        m_today = day;
+        if (followingToday) {
+            m_selected = day;
+            emit selectedDayChanged();
+        }
+        emit todayDayChanged();
+        reload();
+    });
     connect(&m_client, &CoreClient::changed, this, &Backend::reloadFromNotification);
     connect(&m_client, &CoreClient::requestFinished, this, [this](const QStringList &args, bool success) {
         emit requestFinished(args, success);
@@ -185,12 +197,12 @@ CoreClient::Callback Backend::mutationResponse(const QString &pendingId, const Q
 }
 
 void Backend::reload() {
-    m_client.day(m_selected, readResponse([this](const CoreClient::Result &result) {
+    const quint64 request = ++m_dayRequest;
+    m_client.day(m_selected, readResponse([this, request](const CoreClient::Result &result) {
+        if (request != m_dayRequest) return;
         if (const auto *plan = std::get_if<Dto::DayPlan>(&result.value)) applyDayPlan(*plan);
     }));
-    m_client.statsDays(14, readResponse([this](const CoreClient::Result &result) {
-        if (const auto *stats = std::get_if<Dto::Stats>(&result.value)) applyRoutines(*stats);
-    }));
+    loadTrackingItems();
     m_client.configShow(readResponse([this](const CoreClient::Result &result) {
         if (const auto *config = std::get_if<Dto::Config>(&result.value)) applyConfig(*config);
     }));
@@ -249,7 +261,7 @@ void Backend::reloadFromNotification(qint64 revision, const QStringList &scopes)
     // tags, or metrics; the lists are cheap.
     loadSettings();
     if (scopes.isEmpty() || scopes.contains("reviews") || scopes.contains("sessions") || scopes.contains("goals")
-        || scopes.contains("items"))
+        || scopes.contains("items") || scopes.contains("projects") || scopes.contains("epics"))
         emit reviewsInvalidated();
     if (scopes.isEmpty() || scopes.contains("sessions") || scopes.contains("items")
         || scopes.contains("projects") || scopes.contains("epics") || scopes.contains("tags")
@@ -289,11 +301,6 @@ void Backend::applyStats(const Dto::Stats &stats) {
     m_statsItems.setItems(m_stats.items, StatsItemsModel::Sort::MinutesDescending);
     m_ticks.setTicks(m_stats.time_ticks);
     m_statsDaily.setStats(m_stats, todayDay(), m_selectedStatsItem);
-}
-
-void Backend::applyRoutines(const Dto::Stats &stats) {
-    m_routinesStats = stats;
-    m_routines.setStats(m_routinesStats);
 }
 
 void Backend::applyConfig(const Dto::Config &config) {
@@ -518,9 +525,12 @@ void Backend::loadTrackingItems() {
     m_client.itemsList(readResponse([this](const CoreClient::Result &result) {
         if (const auto *json = std::get_if<Dto::Json>(&result.value)) {
             const QVariantList items = json->value.toArray().toVariantList();
-            if (m_trackingItems == items) return;
-            m_trackingItems = items;
-            emit trackingItemsChanged();
+            if (m_trackingItems != items) {
+                m_trackingItems = items;
+                m_routines.setItems(items);
+                emit trackingItemsChanged();
+            }
+            if (m_routinesOpen && m_routines.count()) loadRoutineHistory(m_today);
         }
     }));
 }
@@ -623,6 +633,23 @@ void Backend::saveItem(const QVariantMap &item) {
     fields.plannedMinutes = item.value(QStringLiteral("planned_minutes")).toInt();
     fields.hasPlannedMinutes = fields.plannedMinutes > 0;
     if (id.isEmpty()) {
+        fields.opId = item.value("creation_op_id").toString();
+        if (!fields.opId.isEmpty()) {
+            const auto operation = fields.opId;
+            if (!fields.backlog && fields.repeat == "none" && item.contains("creation_date"))
+                fields.date = QDate::fromString(item.value("creation_date").toString(), Qt::ISODate);
+            m_client.itemAdd(fields, [this, operation](const CoreClient::Result &result) {
+                QString id;
+                if (const auto *mutation = std::get_if<Dto::MutationResult>(&result.value)) {
+                    const auto rows = mutation->json.value("changed").toObject().value("items").toArray();
+                    if (!rows.isEmpty()) id = rows.first().toObject().value("id").toString();
+                }
+                if (result.ok) m_refreshPending = true;
+                emit taskCreateFinished(operation, id, result.ok && id.isEmpty()
+                    ? tr("The response did not include the new task ID.") : result.error.message);
+            });
+            return;
+        }
         if (fields.backlog) {
             m_client.itemAdd(fields, mutationResponse());
             return;
@@ -643,13 +670,14 @@ void Backend::saveItem(const QVariantMap &item) {
     } else {
         setItemPending(id, true);
         m_client.itemEdit(id, fields, mutationResponse(id),
-                          fields.backlog ? backlogVersionFor(id) : versionFor(id));
+                          item.value("expected_version", fields.backlog ? backlogVersionFor(id) : versionFor(id)).toLongLong());
     }
 }
 
-void Backend::removeItem(const QString &id) {
+void Backend::removeItem(const QString &id, qint64 expectedVersion) {
     setItemPending(id, true);
-    m_client.itemRemove(id, mutationResponse(id), m_backlogOpen ? backlogVersionFor(id) : versionFor(id));
+    if (expectedVersion < 0) expectedVersion = m_backlogOpen ? backlogVersionFor(id) : versionFor(id);
+    m_client.itemRemove(id, mutationResponse(id), expectedVersion);
 }
 
 void Backend::optimisticMove(const QString &id, const QString &block, const QString &afterId,
@@ -856,6 +884,7 @@ void Backend::loadSettings() {
             if (const auto *json = std::get_if<Dto::Json>(&result.value)) {
                 *target = json->value.toArray().toVariantList();
                 emit settingsChanged();
+                if (target == &m_tags) emit tagsLoaded();
                 refreshRunning();
             }
         }));
@@ -911,6 +940,16 @@ void Backend::setSelectedStatsItem(const QString &id) {
 }
 
 ItemDraft *Backend::itemForId(const QString &id) {
+    if (m_routinesOpen) {
+        for (const QVariant &item : std::as_const(m_trackingItems)) {
+            const QVariantMap row = item.toMap();
+            if (row.value("id").toString() == id) {
+                m_editItem->update(QJsonObject::fromVariantMap(row));
+                emit editItemChanged();
+                return m_editItem;
+            }
+        }
+    }
     if (m_backlogOpen) {
         const QVariantMap row = backlogItem(id);
         if (!row.isEmpty()) {
@@ -944,14 +983,6 @@ ItemDraft *Backend::itemForId(const QString &id) {
             row[QStringLiteral("weekdays")] = days;
             m_editItem->update(row);
             found = true;
-        }
-    }
-    if (!found) {
-        for (const Dto::StatsItem &item : m_routinesStats.items) {
-            if (item.id != id) continue;
-            m_editItem->update(item.json);
-            found = true;
-            break;
         }
     }
     if (!found) {

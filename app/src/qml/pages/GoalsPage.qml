@@ -20,7 +20,12 @@ ScrollView {
 
     function open() {
         backend.loadSettings()
+        if (backend.offlineMode) backend.loadGoals()
         backend.loadTrackingItems()
+    }
+    Connections {
+        target: backend
+        function onTodayDayChanged() { if (goalsPage.visible) backend.loadGoals() }
     }
     function scopeText(goal) {
         if (goal.scope_label) return String(goal.scope_label)

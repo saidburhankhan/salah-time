@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
 import "../goals"
+import "../resources"
 
 Popup {
     id: entryPopup
@@ -46,6 +47,13 @@ Popup {
         }
         return list
     }
+    property var pendingTask: null
+    property string createdId: ""
+    property var remaining: []
+    property bool saving: false
+    property bool addAnother: false
+    property string saveError: ""
+    readonly property bool canSubmit: !saving && !attachments.composing && weeklyValid && !!entryFields.titleText.trim()
     property bool confirming: false
     readonly property bool weeklyValid: repeat !== "weekly" || days.length > 0
     readonly property var preview: backend.preview
@@ -59,7 +67,9 @@ Popup {
     closePolicy: Popup.NoAutoClose
     Overlay.modal: Rectangle { color: "#d9000000" }
     background: null
+    property double openedVersion: -1
     onOpened: {
+        openedVersion = item.version ?? -1
         block = item.block || "fajr"
         repeat = item.repeat || "none"
         days = item.weekdays || []
@@ -69,6 +79,7 @@ Popup {
         metricIdsEdited = false
         tagOverrides = null
         confirming = false
+        resetAttachments()
         backend.loadSettings()
         if (item.id && item.tagIds == null)
             backend.loadTrackingItems()
@@ -101,6 +112,8 @@ Popup {
             repeat: repeat,
             weekdays: repeat === "weekly" ? days : []
         }
+        if (item.id && openedVersion >= 0)
+            result.expected_version = openedVersion
         if (backlog)
             result.backlog = true
         else
@@ -155,12 +168,61 @@ Popup {
         metricIds = null
         metricIdsEdited = true
     }
+    function resetAttachments() {
+        pendingTask = null
+        createdId = ""
+        remaining = []
+        saveError = ""
+        saving = false
+        attachments.reset()
+    }
+    function saveNext() {
+        saving = true
+        saveError = ""
+        if (!createdId)
+            backend.saveItem(pendingTask)
+        else
+            backend.attachTaskResource(createdId, remaining[0].fields, remaining[0].operation)
+    }
+    Connections {
+        target: backend
+        function onTaskCreateFinished(operation, id, error) {
+            if (!entryPopup.pendingTask || entryPopup.pendingTask.creation_op_id !== operation) return
+            if (error) { entryPopup.saving = false; entryPopup.saveError = error; return }
+            entryPopup.createdId = id
+            entryPopup.saveNext()
+        }
+        function onAttachmentFinished(operation, error) {
+            if (!entryPopup.remaining.length || entryPopup.remaining[0].operation !== operation) return
+            if (error) {
+                entryPopup.saving = false
+                entryPopup.saveError = qsTr("Task saved. Could not attach resource: %1").arg(error)
+                return
+            }
+            entryPopup.remaining = entryPopup.remaining.slice(1)
+            if (entryPopup.remaining.length) entryPopup.saveNext()
+            else entryPopup.finishSave(entryPopup.addAnother)
+        }
+    }
     function submitTitle(keepOpen) {
-        if (!entryFields.titleText.trim() || !weeklyValid) return
+        if (!canSubmit) return
+        if (pendingTask) { saveNext(); return }
         var d = draft()
-        if (!backlog)
-            win.maybeToast(d)
+        if (!item.id && attachments.entries.length) {
+            d.creation_op_id = backend.newOperationId()
+            d.creation_date = backend.selectedDay
+            pendingTask = d
+            remaining = attachments.entries.map(fields => ({fields: fields, operation: backend.newOperationId()}))
+            addAnother = keepOpen
+            saveNext()
+            return
+        }
+        if (!backlog) win.maybeToast(d)
         backend.saveItem(d)
+        finishSave(keepOpen)
+    }
+    function finishSave(keepOpen) {
+        resetAttachments()
         if (keepOpen) {
             win.editItem = backlog ? ({ backlog: true }) : ({})
             metricIds = null
@@ -207,7 +269,8 @@ Popup {
             Layout.leftMargin: 22
             Layout.rightMargin: 22
             Label {
-                text: entryPopup.backlog
+                text: entryPopup.win.page === 1 ? (entryPopup.item.id ? qsTr("Edit routine") : qsTr("New routine"))
+                    : entryPopup.backlog
                     ? (entryPopup.item.id ? qsTr("Edit backlog task") : qsTr("New backlog task"))
                     : (entryPopup.item.id ? qsTr("Edit entry") : qsTr("New entry"))
                 color: entryPopup.win.text
@@ -221,7 +284,7 @@ Popup {
                 text: entryPopup.confirming ? qsTr("Confirm delete") : qsTr("Delete")
                 onClicked: {
                     if (entryPopup.confirming) {
-                        backend.removeItem(entryPopup.item.id)
+                        backend.removeItem(entryPopup.item.id, entryPopup.openedVersion)
                         entryPopup.win.entryVisible = false
                     } else {
                         entryPopup.confirming = true
@@ -230,20 +293,22 @@ Popup {
             }
             AppButton {
                 win: entryPopup.win
-                text: qsTr("Cancel")
+                enabled: !entryPopup.saving
+                text: entryPopup.createdId ? qsTr("Close") : qsTr("Cancel")
                 onClicked: entryPopup.win.entryVisible = false
             }
             AppButton {
                 win: entryPopup.win
+                visible: !entryPopup.pendingTask
                 text: qsTr("Save & add another")
-                enabled: entryFields.titleText.trim() !== "" && entryPopup.weeklyValid
+                enabled: entryPopup.canSubmit
                 onClicked: entryPopup.submitTitle(true)
             }
             AppButton {
                 win: entryPopup.win
-                text: qsTr("Save  ↵")
+                text: entryPopup.saving ? qsTr("Saving…") : entryPopup.saveError ? qsTr("Retry") : qsTr("Save  ↵")
                 primary: true
-                enabled: entryFields.titleText.trim() !== "" && entryPopup.weeklyValid
+                enabled: entryPopup.canSubmit
                 onClicked: entryPopup.submitTitle(false)
             }
         }
@@ -258,12 +323,12 @@ Popup {
             Layout.margins: 22
             spacing: 26
             EntryFields {
+                enabled: !entryPopup.pendingTask
                 id: entryFields
                 win: entryPopup.win
                 form: entryPopup
             }
             ColumnLayout {
-                visible: !entryPopup.backlog || !!entryPopup.item.id
                 Layout.preferredWidth: 340
                 Layout.minimumWidth: 280
                 Layout.maximumWidth: 360
@@ -371,6 +436,13 @@ Popup {
                         }
                     }
                 }
+                AppButton {
+                    objectName: "routineResources"
+                    visible: entryPopup.win.page === 1 && !!entryPopup.item.id
+                    win: entryPopup.win
+                    text: qsTr("Notes, links & reminders")
+                    onClicked: entryPopup.win.openResources("item", entryPopup.item.id, entryPopup.item.title)
+                }
                 // Goals for an existing task; a new task has no id to scope one to.
                 ScrollView {
                     visible: !!entryPopup.item.id
@@ -383,12 +455,31 @@ Popup {
                         width: parent.width
                         win: entryPopup.win
                         scopeKind: "item"
+                        taskMetrics: entryPopup.item.metrics ?? null
                         scopeId: entryPopup.item.id ? String(entryPopup.item.id) : ""
                     }
                 }
-                Item {
+                ScrollView {
+                    id: newResourcesScroll
                     visible: !entryPopup.item.id
+                    Layout.fillWidth: true
                     Layout.fillHeight: true
+                    contentWidth: availableWidth
+                    clip: true
+                    NewTaskResources {
+                        id: attachments
+                        width: newResourcesScroll.availableWidth
+                        win: entryPopup.win
+                        enabled: !entryPopup.pendingTask
+                    }
+                }
+                Label {
+                    visible: !!entryPopup.saveError
+                    Layout.fillWidth: true
+                    text: entryPopup.saveError
+                    textFormat: Text.PlainText
+                    color: entryPopup.win.text
+                    wrapMode: Text.Wrap
                 }
             }
         }

@@ -11,6 +11,7 @@ Rectangle {
     required property var win
     // Empty for a new resource, else the row being edited (its kind is fixed).
     property var resource: null
+    property string submitLabel: qsTr("Save")
     property string kind: "note"
     property string serverError: ""
     property bool waiting: false
@@ -38,7 +39,7 @@ Rectangle {
         if (!valid || waiting) return
         var fields = {}
         if (kind === "note") fields = { body: bodyField.text }
-        else if (kind === "link") fields = { url: urlField.text.trim(), title: titleField.text }
+        else if (kind === "link") fields = { url: Time.normalizedWebUrl(urlField.text), title: titleField.text }
         else fields = { title: titleField.text, remind_at: instant }
         if (!editing) fields.kind = kind
         serverError = ""
@@ -104,8 +105,8 @@ Rectangle {
             onAccepted: form.submit()
         }
         Label {
-            visible: form.kind === "link" && urlField.text.trim() !== "" && !Time.validUrl(urlField.text)
-            text: qsTr("Use a full http or https address.")
+            visible: form.kind === "link" && !form.valid
+            text: qsTr("Enter a web address, e.g. example.com")
             color: form.win.muted
             font.pixelSize: 12
         }
@@ -201,7 +202,7 @@ Rectangle {
             AppButton {
                 objectName: "resourceSave"
                 win: form.win
-                text: qsTr("Save")
+                text: form.submitLabel
                 primary: true
                 implicitHeight: 34
                 enabled: form.valid && !form.waiting

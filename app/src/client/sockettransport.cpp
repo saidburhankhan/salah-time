@@ -241,7 +241,10 @@ void SocketTransport::handleHandshake(const QJsonObject &object, qint64 id) {
         }
         m_state = State::Subscribe;
         m_handshakeId = m_nextId++;
-        QJsonObject params{{"topics", QJsonArray{QStringLiteral("changes")}}};
+        QJsonArray topics{QStringLiteral("changes")};
+        if (result.value("capabilities").toArray().contains(QStringLiteral("clock.v1")))
+            topics.append(QStringLiteral("clock"));
+        QJsonObject params{{"topics", topics}};
         if (m_lastRevision > 0) params.insert(QStringLiteral("after_revision"), m_lastRevision);
         writeRequest(m_handshakeId, QStringLiteral("subscribe"), params);
         m_handshakeTimer.start(m_timeoutMs);
@@ -284,6 +287,8 @@ void SocketTransport::onReadyRead() {
                                             .toVariant().toLongLong();
                 m_lastRevision = qMax(m_lastRevision, revision);
                 emit changed(revision, object.value("params").toObject().value("scopes").toVariant().toStringList());
+            } else if (object.value("method").toString() == QStringLiteral("clock.boundary")) {
+                emit clockBoundary(object.value("params").toObject().value("day").toString());
             }
             continue;
         }

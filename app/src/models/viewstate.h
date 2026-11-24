@@ -190,6 +190,7 @@ private:
 
 class ItemDraft : public QObject {
     Q_OBJECT
+    Q_PROPERTY(qint64 version READ version NOTIFY changed)
     Q_PROPERTY(bool backlog READ backlog NOTIFY changed)
     Q_PROPERTY(QString id READ id NOTIFY changed)
     Q_PROPERTY(QString title READ title NOTIFY changed)
@@ -201,12 +202,14 @@ class ItemDraft : public QObject {
     Q_PROPERTY(QString projectId READ projectId NOTIFY changed)
     Q_PROPERTY(QString epicId READ epicId NOTIFY changed)
     Q_PROPERTY(QVariant metricIds READ metricIds NOTIFY changed)
+    Q_PROPERTY(QVariant metrics READ metrics NOTIFY changed)
     Q_PROPERTY(QVariant tagIds READ tagIds NOTIFY changed)
     Q_PROPERTY(int plannedMinutes READ plannedMinutes NOTIFY changed)
 public:
     explicit ItemDraft(QObject *parent = nullptr);
 
     QString id() const { return m_id; }
+    qint64 version() const { return m_version; }
     bool backlog() const { return m_backlog; }
     QString title() const { return m_title; }
     QString block() const { return m_block; }
@@ -217,6 +220,7 @@ public:
     QString projectId() const { return m_projectId; }
     QString epicId() const { return m_epicId; }
     QVariant metricIds() const { return m_metricIds; }
+    QVariant metrics() const { return m_metrics; }
     QVariant tagIds() const { return m_tagIds; }
     int plannedMinutes() const { return m_plannedMinutes; }
 
@@ -229,12 +233,14 @@ signals:
 
 private:
     QString m_id, m_title, m_block = QStringLiteral("fajr"), m_repeat = QStringLiteral("none");
+    qint64 m_version = -1;
     bool m_backlog = false;
     QStringList m_weekdays;
     QString m_measure = QStringLiteral("check");
     int m_target = 0;
     QString m_projectId, m_epicId;
     QVariant m_metricIds;
+    QVariant m_metrics;
     QVariant m_tagIds;
     int m_plannedMinutes = 0;
 };

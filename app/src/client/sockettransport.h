@@ -48,6 +48,7 @@ signals:
     void readyChanged(bool ready);
     void fellBackToCli();
     void reconnected();
+    void clockBoundary(const QString &day);
     void changed(qint64 revision, const QStringList &scopes);
 
 private:

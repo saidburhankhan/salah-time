@@ -1,8 +1,4 @@
-// Backend reads and writes for goals, kept apart from backend.cpp. The list
-// (goals.list: active goals with progress for today) is daemon-only and is
-// refreshed with the Settings lists, so it follows every `changed`
-// notification (sessions move progress, `goals` moves the rows). Writes use
-// the shared socket-or-stdio path and reload the list when they finish.
+// Active goals and history share the same socket and CLI read paths.
 #include "backend.h"
 
 #include <QJsonArray>
@@ -13,11 +9,18 @@ QString text(const QVariantMap &fields, const char *key) { return fields.value(Q
 }
 
 void Backend::loadGoals() {
-    if (m_client.offline()) return;
     const quint64 request = ++m_goalsRequest;
-    m_client.rpcRead(QStringLiteral("goals.list"), QJsonObject{}, [this, request](const CoreClient::Result &result) {
+    m_client.goalsList([this, request](const CoreClient::Result &result) {
         if (request != m_goalsRequest) return;
         if (const auto *data = std::get_if<Dto::Json>(&result.value)) {
+            // A new goal gets a unique position. Every target edit inherits it,
+            // even when intermediate versions were removed during their first period.
+            QVariant selectedPosition;
+            for (const QVariant &entry : m_goals) {
+                const QVariantMap row = entry.toMap();
+                if (row.value("id").toString() == m_goalHistoryId)
+                    selectedPosition = row.value("position");
+            }
             m_goals = data->value.toArray().toVariantList();
             emit goalsChanged();
             // An open history follows the goal's edit chain, so refresh it too.
@@ -26,14 +29,15 @@ void Backend::loadGoals() {
                 for (const QVariant &entry : m_goals) {
                     const QVariantMap goal = entry.toMap();
                     const QString id = goal.value("id").toString();
-                    if (id == m_goalHistoryId || goal.value("replaces_id").toString() == m_goalHistoryId) {
+                    if (id == m_goalHistoryId || goal.value("replaces_id").toString() == m_goalHistoryId
+                        || (selectedPosition.isValid() && goal.value("position") == selectedPosition)) {
                         activeId = id;
                         break;
                     }
                 }
                 loadGoalHistory(activeId);
             }
-        } else if (!result.ok && !m_client.offline()) {
+        } else if (!result.ok) {
             fail(result.error.message);
         }
     });
@@ -43,21 +47,18 @@ void Backend::loadGoalHistory(const QString &id) {
     const bool changedId = m_goalHistoryId != id;
     m_goalHistoryId = id;
     const quint64 request = ++m_goalHistoryRequest;
-    if (changedId || id.isEmpty() || m_client.offline()) {
+    if (changedId || id.isEmpty()) {
         m_goalHistory.clear();
         emit goalHistoryChanged();
     }
-    if (id.isEmpty() || m_client.offline()) return;
+    if (id.isEmpty()) return;
     // The longest span the daemon serves (730 days), ending today.
-    const QJsonObject params{{QStringLiteral("id"), id},
-                             {QStringLiteral("from"), m_today.addDays(-729).toString(Qt::ISODate)},
-                             {QStringLiteral("to"), m_today.toString(Qt::ISODate)}};
-    m_client.rpcRead(QStringLiteral("goals.history"), params, [this, request, id](const CoreClient::Result &result) {
+    m_client.goalsHistory(id, m_today.addDays(-729).toString(Qt::ISODate), todayDay(), [this, request, id](const CoreClient::Result &result) {
         if (request != m_goalHistoryRequest || id != m_goalHistoryId) return;
         if (const auto *data = std::get_if<Dto::Json>(&result.value)) {
             m_goalHistory = data->value.toArray().toVariantList();
             emit goalHistoryChanged();
-        } else if (!result.ok && !m_client.offline()) {
+        } else if (!result.ok) {
             fail(result.error.message);
         }
     });

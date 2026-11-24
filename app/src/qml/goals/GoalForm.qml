@@ -19,6 +19,9 @@ ColumnLayout {
     property string period: "day"
     property string metricId: ""
     property string direction: "at_least"
+    property string chosenName: ""
+    readonly property bool metricAvailable: metricId === "" || metricChoices.some(metric => String(metric.id) === metricId)
+    readonly property bool canSubmit: metricAvailable && Number.isFinite(targetValue()) && targetValue() > 0
     signal added()
     spacing: 8
 
@@ -31,7 +34,7 @@ ColumnLayout {
     function targetValue() { return Number(String(targetField.text).replace(",", ".")) }
     function submit() {
         var value = targetValue()
-        if (!(value > 0))
+        if (!canSubmit)
             return
         var fields = { period: period, target: value }
         if (itemId !== "") fields.item_id = itemId
@@ -45,13 +48,6 @@ ColumnLayout {
         reset()
         added()
     }
-    onMetricChoicesChanged: {
-        for (var i = 0; i < metricChoices.length; i++)
-            if (String(metricChoices[i].id) === metricId)
-                return
-        metricId = ""
-    }
-
     Flow {
         Layout.fillWidth: true
         spacing: 8
@@ -92,9 +88,20 @@ ColumnLayout {
                 implicitHeight: 34
                 text: String(modelData.name || "")
                 selected: form.metricId === String(modelData.id)
-                onClicked: form.metricId = String(modelData.id)
+                onClicked: {
+                    form.chosenName = String(modelData.name || modelData.id)
+                    form.metricId = String(modelData.id)
+                }
             }
         }
+    }
+    Label {
+        visible: !form.metricAvailable
+        Layout.fillWidth: true
+        text: qsTr("%1 is unavailable. Choose another metric or Minutes.").arg(form.chosenName || form.metricId)
+        textFormat: Text.PlainText
+        wrapMode: Text.WordWrap
+        color: form.win.muted
     }
     Flow {
         visible: form.metricId !== ""
@@ -133,7 +140,7 @@ ColumnLayout {
             win: form.win
             primary: true
             text: qsTr("Add goal")
-            enabled: form.targetValue() > 0
+            enabled: form.canSubmit
             onClicked: form.submit()
         }
     }

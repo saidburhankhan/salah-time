@@ -19,7 +19,7 @@ Rectangle {
     signal historyToggled()
     readonly property var progress: goal.progress || {}
     readonly property bool met: !!progress.met
-    readonly property bool canRemove: !goal.replaces_id && String(goal.starts_on) === String(progress.from)
+    readonly property bool canRemove: !!goal.starts_on && !goal.ends_on && String(goal.starts_on) === String(progress.from)
     property bool editing: false
     property bool confirming: false
     objectName: "goalRow_" + String(goal.id)
@@ -31,16 +31,17 @@ Rectangle {
 
     function startEdit() {
         confirming = false
-        targetField.text = win.numberText(goal.target)
+        targetField.text = String(goal.target)
         editing = true
         targetField.forceActiveFocus()
     }
+    readonly property real editTarget: Number(String(targetField.text).replace(",", "."))
+    readonly property bool validTarget: Number.isFinite(editTarget) && editTarget > 0
     function commitEdit() {
-        var value = Number(String(targetField.text).replace(",", "."))
-        if (!(value > 0))
+        if (!validTarget)
             return
         editing = false
-        backend.editGoal(String(goal.id), value)
+        if (editTarget !== Number(goal.target)) backend.editGoal(String(goal.id), editTarget)
     }
 
     ColumnLayout {
@@ -141,7 +142,7 @@ Rectangle {
                 implicitHeight: 34
                 primary: true
                 text: qsTr("Save")
-                enabled: Number(String(targetField.text).replace(",", ".")) > 0
+                enabled: row.validTarget
                 onClicked: row.commitEdit()
             }
             AppButton {

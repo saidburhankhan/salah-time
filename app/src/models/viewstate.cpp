@@ -129,6 +129,7 @@ void PreviewState::clear() {
 ItemDraft::ItemDraft(QObject *parent) : QObject(parent) {}
 
 void ItemDraft::update(const QJsonObject &row) {
+    m_version = row.value("version").toInteger(-1);
     m_backlog = row.value(QStringLiteral("backlog")).toBool();
     m_id = row.value(QStringLiteral("id")).toString();
     m_title = row.value(QStringLiteral("title")).toString();
@@ -149,6 +150,7 @@ void ItemDraft::update(const QJsonObject &row) {
         m_projectId = row.value(QStringLiteral("project")).toObject().value(QStringLiteral("id")).toString();
     m_epicId = row.value(QStringLiteral("epic_id")).toString();
     m_metricIds = row.value(QStringLiteral("metric_ids")).toVariant();
+    m_metrics = row.value(QStringLiteral("metrics")).toVariant();
     m_tagIds = row.value(QStringLiteral("tag_ids")).toVariant();
     m_plannedMinutes = row.value(QStringLiteral("planned_minutes")).toInt();
     emit changed();
@@ -159,6 +161,7 @@ void ItemDraft::update(const Dto::ParseDraft &draft) {
 }
 
 void ItemDraft::clear() {
+    m_version = -1;
     m_backlog = false;
     m_id.clear();
     m_title.clear();
@@ -170,6 +173,7 @@ void ItemDraft::clear() {
     m_projectId.clear();
     m_epicId.clear();
     m_metricIds.clear();
+    m_metrics.clear();
     m_tagIds.clear();
     m_plannedMinutes = 0;
     emit changed();

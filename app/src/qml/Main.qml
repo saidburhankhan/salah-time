@@ -140,7 +140,9 @@ ApplicationWindow {
         backend.previewItem(item || ({}))
     }
     function closeTopOverlay() {
+        if (resourceDrawer.opened) { resourceDrawer.close(); return true }
         if (sessionPromptVisible) { sessionPromptVisible = false; return true }
+        if (entryVisible && entryPopup.saving) return true
         if (entryVisible && entryPopup.confirming) { entryPopup.confirming = false; return true }
         if (helpVisible) { helpVisible = false; return true }
         if (entryVisible) { entryVisible = false; return true }

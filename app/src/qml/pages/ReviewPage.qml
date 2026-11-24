@@ -13,25 +13,66 @@ ScrollView {
     required property var win
     readonly property var review: backend.review
     readonly property var summary: review.summary || null
-    readonly property bool hasReview: !backend.offlineMode && summary !== null
-    readonly property string currentWeek: backend.reviewWeekStart("", 0)
-    // The last full week until the user picks another.
-    property string week: backend.reviewWeekStart("", -1)
-    readonly property bool dirty: noteField.text !== String(review.note || "")
+    readonly property bool hasReview: !backend.offlineMode && review.week === week && summary !== null
+    readonly property string currentWeek: backend.reviewWeekStart(backend.todayDay, 0)
+    readonly property string lastFullWeek: backend.reviewWeekStart(backend.todayDay, -1)
+    property string pickedWeek: ""
+    readonly property string week: pickedWeek || lastFullWeek
+    property var reflections: ({})
+    property bool settingText: false
+    readonly property var reflection: stateFor(week)
+    readonly property bool dirty: reflection.text !== reflection.saved
     readonly property var goalsMet: (summary && summary.goals_met) || []
     readonly property var noted: (summary && summary.sessions_with_notes) || []
+    readonly property int notedCount: summary ? (summary.sessions_with_notes_count ?? noted.length) : 0
+    readonly property bool notesArePreview: notedCount > noted.length || noted.some(row => row.notes_more === true)
+    readonly property string noteQuery: notesSearch.text.trim().toLowerCase()
+    readonly property var matchingNotes: noted.filter(function(session) {
+        return !noteQuery || String(session.note || "").toLowerCase().includes(noteQuery)
+            || (session.notes || []).some(entry => String(entry.text || "").toLowerCase().includes(noteQuery))
+    })
     clip: true
     contentWidth: availableWidth
 
-    function open() {
-        if (!week) week = backend.reviewWeekStart("", -1)
-        backend.loadReview(week)
+    function stateFor(key) {
+        return reflections[key] || { saved: "", text: "", pending: null }
     }
+    function updateState(key, saved, text, pending) {
+        var states = Object.assign({}, reflections)
+        states[key] = { saved: saved, text: text, pending: pending }
+        reflections = states
+        if (key === week) showDraft()
+    }
+    function showDraft() {
+        if (!noteField) return
+        settingText = true
+        var text = stateFor(week).text
+        if (noteField.text !== text) {
+            if (savedFade) savedFade.stop()
+            if (savedLabel) savedLabel.opacity = 0
+            noteField.text = text
+        }
+        settingText = false
+    }
+    function acceptReview() {
+        if (!review.week || !review.summary) return
+        var state = stateFor(review.week)
+        var saved = String(review.note || "")
+        var keepDraft = state.text !== state.saved || state.pending !== null
+        updateState(review.week, saved, keepDraft ? state.text : saved, state.pending)
+    }
+    function saveDraft() {
+        var state = stateFor(week)
+        if (!dirty || state.pending !== null) return
+        updateState(week, state.saved, state.text, state.text)
+        backend.saveReview(week, state.text)
+    }
+    function open() { if (week) backend.loadReview(week) }
     function shift(weeks) { setWeek(backend.reviewWeekStart(week, weeks)) }
     function setWeek(value) {
         if (!value || value > currentWeek) return
-        week = value
-        backend.loadReview(week)
+        pickedWeek = value
+        open()
     }
     function weekText(start) {
         if (!start) return ""
@@ -46,14 +87,25 @@ ScrollView {
         target: backend
         function onReviewsInvalidated() { if (page.visible) page.open() }
         function onOfflineChanged() { if (page.visible) page.open() }
-        function onReviewSaveFinished(ok, message) {
-            if (!ok) return
-            savedLabel.opacity = 1
-            savedFade.restart()
+        function onTodayDayChanged() { if (page.visible) Qt.callLater(page.open) }
+        function onReviewSaveFinished(ok, message, key, submitted) {
+            var state = page.stateFor(key)
+            if (state.pending !== submitted) return
+            var saved = ok ? (submitted.trim() ? submitted : "") : state.saved
+            var matches = state.text === submitted
+            page.updateState(key, saved, ok && matches ? saved : state.text, null)
+            if (ok && key === page.week && matches) savedFade.restart()
         }
     }
     onVisibleChanged: if (visible) open()
-    onReviewChanged: noteField.text = String(review.note || "")
+    onReviewChanged: acceptReview()
+    onWeekChanged: {
+        showDraft()
+        if (notesSearch) notesSearch.clear()
+        if (savedFade) savedFade.stop()
+        if (savedLabel) savedLabel.opacity = 0
+    }
+    Component.onCompleted: { acceptReview(); showDraft() }
 
     component SectionTitle: Label {
         color: page.win.text
@@ -166,8 +218,8 @@ ScrollView {
                 objectName: "reviewLastWeek"
                 win: page.win
                 text: qsTr("Last week")
-                selected: page.week === backend.reviewWeekStart("", -1)
-                onClicked: page.setWeek(backend.reviewWeekStart("", -1))
+                selected: page.week === page.lastFullWeek
+                onClicked: page.setWeek(page.lastFullWeek)
             }
             ChoiceChip {
                 objectName: "reviewThisWeek"
@@ -309,10 +361,21 @@ ScrollView {
 
             SectionTitle {
                 objectName: "reviewNotesTitle"
-                text: qsTr("Sessions with notes") + "  ·  " + page.noted.length
+                text: qsTr("Sessions with notes") + "  ·  " + (page.noteQuery
+                    ? qsTr("%1 of %2 shown").arg(page.matchingNotes.length).arg(page.noted.length)
+                    : page.notedCount > page.noted.length
+                        ? qsTr("%1 of %2").arg(page.noted.length).arg(page.notedCount) : page.noted.length)
+            }
+            TextField {
+                id: notesSearch
+                objectName: "reviewNotesSearch"
+                Layout.fillWidth: true
+                visible: page.noted.length > 0
+                placeholderText: page.notesArePreview ? qsTr("Search notes shown here") : qsTr("Search notes")
+                Accessible.name: placeholderText
             }
             Repeater {
-                model: page.noted
+                model: page.matchingNotes
                 NoteRow {
                     required property var modelData
                     objectName: "reviewSession_" + modelData.id
@@ -322,8 +385,9 @@ ScrollView {
                 }
             }
             Label {
-                visible: page.noted.length === 0
-                text: qsTr("No sessions with notes this week.")
+                visible: page.matchingNotes.length === 0
+                text: page.noteQuery ? qsTr("No matching notes.")
+                    : page.notedCount > 0 ? qsTr("No session previews available.") : qsTr("No sessions with notes this week.")
                 color: page.win.muted
                 font.pixelSize: 13
             }
@@ -347,6 +411,13 @@ ScrollView {
                         Layout.preferredHeight: 120
                         wrapMode: TextEdit.Wrap
                         textFormat: TextEdit.PlainText
+                        onTextChanged: {
+                            if (page.settingText || !page.week) return
+                            savedFade.stop()
+                            savedLabel.opacity = 0
+                            var state = page.stateFor(page.week)
+                            page.updateState(page.week, state.saved, text, state.pending)
+                        }
                     }
                     RowLayout {
                         spacing: 12
@@ -355,11 +426,12 @@ ScrollView {
                             win: page.win
                             primary: true
                             text: qsTr("Save")
-                            enabled: page.dirty
-                            onClicked: backend.saveReview(page.week, noteField.text)
+                            enabled: page.dirty && page.reflection.pending === null
+                            onClicked: page.saveDraft()
                         }
                         Label {
                             id: savedLabel
+                            objectName: "reviewSaved"
                             text: qsTr("Saved")
                             opacity: 0
                             color: page.win.muted

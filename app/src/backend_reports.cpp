@@ -64,6 +64,42 @@ QJsonObject Backend::filterParams(const QVariantMap &filter, bool allowAnyDays) 
     return params;
 }
 
+void Backend::setRoutinesOpen(bool open) {
+    m_routinesOpen = open;
+    ++m_routineRequest;
+    if (open) loadTrackingItems();
+}
+
+void Backend::loadRoutineHistory(const QDate &through, const QString &before) {
+    if (before.isEmpty()) {
+        ++m_routineRequest;
+        m_pendingRoutineHistory.clear();
+    }
+    const quint64 request = m_routineRequest;
+    const QDate from = through.addDays(1 - RoutinesModel::HistoryDays);
+    m_client.routineSessions(from, through, before, [this, request, from, through, before](const CoreClient::Result &result) {
+        if (request != m_routineRequest) return;
+        const auto *data = std::get_if<Dto::Json>(&result.value);
+        if (!result.ok || !data || !data->json.value("rows").isArray()) {
+            m_routines.setHistory({}, {});
+            fail(result.ok ? tr("Could not read routine activity.") : result.error.message);
+            return;
+        }
+        for (const auto &entry : data->json.value("rows").toArray()) {
+            const auto session = entry.toObject();
+            const QString id = session.value("item_id").toString();
+            const QDate day = QDate::fromString(session.value("day").toString(), Qt::ISODate);
+            if (id.isEmpty() || day < from || day > through) continue;
+            auto &activity = m_pendingRoutineHistory[id];
+            if (session.value("minutes").isNull()) activity.done.insert(day);
+            else activity.minutes += session.value("minutes").toInt();
+        }
+        const QString next = data->json.value("next").toString();
+        if (!next.isEmpty() && next != before) loadRoutineHistory(through, next);
+        else m_routines.setHistory(through, std::move(m_pendingRoutineHistory));
+    });
+}
+
 void Backend::loadInsights(const QVariantMap &filter) {
     const quint64 request = ++m_insightsRequest;
     QJsonObject params = filterParams(filter, false);

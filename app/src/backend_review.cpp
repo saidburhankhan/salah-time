@@ -51,14 +51,14 @@ void Backend::saveReview(const QString &week, const QString &note) {
     const QString text = note.trimmed().isEmpty() ? QString() : note;
     m_client.mutateEntity(QStringLiteral("review.save"),
                           QJsonObject{{QStringLiteral("week"), monday}, {QStringLiteral("note"), text}},
-                          [this, monday](const CoreClient::Result &result) {
+                          [this, monday, note](const CoreClient::Result &result) {
         if (!result.ok) {
             fail(result.error.message);
-            emit reviewSaveFinished(false, result.error.message);
+            emit reviewSaveFinished(false, result.error.message, monday, note);
             return;
         }
         clearError();
-        emit reviewSaveFinished(true, QString());
+        emit reviewSaveFinished(true, QString(), monday, note);
         if (monday == m_reviewWeek) loadReview(monday);
     });
 }

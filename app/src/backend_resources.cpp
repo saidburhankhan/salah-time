@@ -74,6 +74,15 @@ void Backend::addResource(const QVariantMap &fields) {
                           [this](const CoreClient::Result &result) { applyResourceWrite(result); });
 }
 
+void Backend::attachTaskResource(const QString &id, const QVariantMap &fields, const QString &operation) {
+    QJsonObject params = QJsonObject::fromVariantMap(fields);
+    params.insert("item_id", id);
+    m_client.mutateEntity("resource.add", params, [this, operation](const CoreClient::Result &result) {
+        if (result.ok) m_refreshPending = true;
+        emit attachmentFinished(operation, result.ok ? QString() : result.error.message);
+    }, operation);
+}
+
 void Backend::editResource(const QString &id, const QVariantMap &fields) {
     if (id.isEmpty()) return;
     QJsonObject params{{QStringLiteral("id"), id}};

@@ -13,6 +13,7 @@ ColumnLayout {
     // "project", "epic" or "item"; scopeId is that row's id.
     property string scopeKind: "project"
     property string scopeId: ""
+    property var taskMetrics: null
     property bool formOpen: false
     readonly property var rows: (backend.goals || []).filter(function(goal) {
         var owner = scopeKind === "item" ? goal.item_id : scopeKind === "epic" ? goal.epic_id : goal.project_id
@@ -30,6 +31,12 @@ ColumnLayout {
             projectId = epic ? String(epic.project_id || "") : ""
         } else {
             var task = (backend.trackingItems || []).find(function(entry) { return String(entry.id) === scopeId })
+            var effective = task && task.metrics != null ? task.metrics : taskMetrics
+            if (effective != null) {
+                return effective.map(function(link) {
+                    return win.metricById(link.metric_id) || Object.assign({}, link, {id: link.metric_id})
+                }).filter(function(metric) { return !metric.archived })
+            }
             projectId = task ? String(task.project_id || "") : ""
             asked = task && task.metric_ids ? task.metric_ids : null
         }

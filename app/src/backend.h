@@ -168,6 +168,7 @@ public:
     Q_INVOKABLE QVariant uiSetting(const QString &key, const QVariant &fallback = {}) const;
     Q_INVOKABLE void setUiSetting(const QString &key, const QVariant &value);
     Q_INVOKABLE void loadTrackingItems();
+    Q_INVOKABLE void setRoutinesOpen(bool open);
     Q_INVOKABLE void loadBacklog(const QString &tagId, const QString &projectId);
     Q_INVOKABLE void closeBacklog();
     Q_INVOKABLE void moveBacklogItem(const QString &id, const QString &anchorId, bool before);
@@ -181,7 +182,7 @@ public:
     Q_INVOKABLE void previewItem(const QVariantMap &item);
     Q_INVOKABLE void addQuick(const QString &text, const QString &block = {});
     Q_INVOKABLE void saveItem(const QVariantMap &item);
-    Q_INVOKABLE void removeItem(const QString &id);
+    Q_INVOKABLE void removeItem(const QString &id, qint64 expectedVersion = -1);
     Q_INVOKABLE void moveItem(const QString &id, const QString &block,
                               const QString &afterId = {}, const QString &beforeId = {});
     // Done is an explicit tick: an item with a tick today is unticked (its
@@ -221,6 +222,7 @@ public:
     Q_INVOKABLE void closeResources();
     // `fields`: kind (add only), title, body, url, remind_at; an empty optional
     // string clears it on edit. Edit also takes `done`.
+    Q_INVOKABLE void attachTaskResource(const QString &id, const QVariantMap &fields, const QString &operation);
     Q_INVOKABLE void addResource(const QVariantMap &fields);
     Q_INVOKABLE void editResource(const QString &id, const QVariantMap &fields);
     Q_INVOKABLE void removeResource(const QString &id);
@@ -253,6 +255,7 @@ signals:
     void requestFinished(QStringList arguments, bool success);
     void fulfilmentChanged();
     void settingsChanged();
+    void tagsLoaded();
     void statsDataChanged();
     void trackingItemsChanged();
     void backlogChanged();
@@ -269,7 +272,7 @@ signals:
     void trendsChanged();
     void insightsChanged();
     void reviewChanged();
-    void reviewSaveFinished(bool ok, const QString &message);
+    void reviewSaveFinished(bool ok, const QString &message, const QString &week, const QString &submitted);
     void reviewsInvalidated();
     void statsTableChanged();
     void sessionsListChanged();
@@ -281,6 +284,8 @@ signals:
     // A goal add/edit/end/remove finished; `message` is the server error on failure.
     void goalWriteFinished(bool ok, const QString &message);
     // A resource add/edit/remove finished; `message` is the server error on failure.
+    void taskCreateFinished(const QString &operation, const QString &id, const QString &error);
+    void attachmentFinished(const QString &operation, const QString &error);
     void resourceWriteFinished(bool ok, const QString &message);
 
 private:
@@ -314,7 +319,7 @@ private:
     QDate writeDate() const;
     void applyDayPlan(const Dto::DayPlan &plan);
     void applyStats(const Dto::Stats &stats);
-    void applyRoutines(const Dto::Stats &stats);
+    void loadRoutineHistory(const QDate &through, const QString &before = {});
     void applyConfig(const Dto::Config &config);
     void applyMutation(const Dto::MutationResult &mutation);
     void rebuildTimeline();
@@ -338,9 +343,12 @@ private:
     CoreClient m_client;
     QDate m_today = QDate::currentDate();
     QDate m_selected;
+    quint64 m_dayRequest = 0;
     Dto::DayPlan m_dayPlan;
     Dto::Stats m_stats;
-    Dto::Stats m_routinesStats;
+    bool m_routinesOpen = false;
+    quint64 m_routineRequest = 0;
+    RoutinesModel::History m_pendingRoutineHistory;
     Dto::Config m_config;
     Dto::ParseDraft m_parse;
     qint64 m_dayPlanFetchedAt = 0;

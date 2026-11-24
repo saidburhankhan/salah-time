@@ -1,14 +1,28 @@
 #pragma once
 
-#include "statsitemsmodel.h"
+#include "typedlistmodel.h"
 
-// The routines view is the repeating subset of the 14-day stats projection.
-// Keeping it as a model (rather than a QML filter over a map list) lets the
-// route survive refetches by id.
-class RoutinesModel : public StatsItemsModel {
+#include <QDate>
+#include <QSet>
+
+class RoutinesModel : public TypedListModel {
     Q_OBJECT
 public:
-    explicit RoutinesModel(QObject *parent = nullptr);
+    enum Role { RoutineRole = Qt::UserRole + 1, DoneStripRole, DoneDaysRole, MinutesRole };
+    static constexpr int HistoryDays = 14;
+    struct Activity {
+        QSet<QDate> done;
+        int minutes = 0;
+    };
+    using History = QHash<QString, Activity>;
 
-    void setStats(const Dto::Stats &stats);
+    explicit RoutinesModel(QObject *parent = nullptr);
+    void setItems(const QVariantList &items);
+    void setHistory(const QDate &through, History history);
+
+private:
+    void rebuild();
+    QVariantList m_items;
+    QDate m_through;
+    History m_history;
 };

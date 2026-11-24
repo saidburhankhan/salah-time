@@ -37,5 +37,31 @@ function display(instant) {
     return dateText(d) + "  " + timeText(d)
 }
 
-// A link needs an absolute http or https URL.
-function validUrl(text) { return /^https?:\/\/[^\s\/?#]+[^\s]*$/i.test(String(text).trim()) }
+function webUrl(value) {
+  if (typeof value !== "string") return ""
+  var url = value.trim()
+  if (!/^https?:\/\/[^/?#]+/i.test(url) || /[\s\\\x00-\x1f\x7f-\x9f]/.test(url)) return ""
+  try {
+    var parsed = new URL(url)
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.hostname ? url : ""
+  } catch (error) {
+    return ""
+  }
+}
+
+function normalizedWebUrl(value) {
+  if (typeof value !== "string") return ""
+  var input = value.trim()
+  if (/^https?:\/\//i.test(input)) return webUrl(input)
+  // An omitted scheme is only unambiguous for a domain (or IPv4 address).
+  // Keep relative paths, credentials and other schemes out of this path.
+  var authority = /^([^:/?#@]+)(?::[0-9]+)?(?:[/?#]|$)/.exec(input)
+  if (!authority) return ""
+  var labels = authority[1].replace(/\.$/, "").split(".")
+  if (labels.length < 2 || !labels.every(function(label) {
+    return /^[a-z0-9\u00a1-\uffff](?:[a-z0-9\u00a1-\uffff-]*[a-z0-9\u00a1-\uffff])?$/i.test(label)
+  })) return ""
+  return webUrl("https://" + input)
+}
+
+function validUrl(text) { return normalizedWebUrl(text) !== "" }

@@ -68,7 +68,10 @@ public:
     void statsSeries(const QJsonObject &params, Callback callback);
     // A daemon-only read (stats.table, sessions.list). Reads are coalesced by
     // method plus parameters.
+    void goalsList(Callback callback);
+    void goalsHistory(const QString &id, const QString &from, const QString &to, Callback callback);
     void rpcRead(const QString &method, const QJsonObject &params, Callback callback);
+    void routineSessions(const QDate &from, const QDate &to, const QString &before, Callback callback);
     void itemsList(Callback callback);
     void itemAdd(const ItemFields &fields, Callback callback = {});
     void itemEdit(const QString &id, const ItemFields &fields, Callback callback = {}, qint64 expectedVersion = -1);
@@ -98,7 +101,7 @@ public:
     void configShow(Callback callback);
     void configSetSleepTime(const QString &time, Callback callback = {});
     void listEntities(const QString &method, Callback callback);
-    void mutateEntity(const QString &method, QJsonObject params, Callback callback = {});
+    void mutateEntity(const QString &method, QJsonObject params, Callback callback = {}, const QString &operation = {});
 
     static QString makeOpId();
     QString socketPath() const { return m_socketPath; }
@@ -108,6 +111,7 @@ signals:
     void requestFinished(QStringList arguments, bool success);
     void offlineChanged(bool offline);
     void reconnected();
+    void trackingDayChanged(const QString &day);
     void changed(qint64 revision, const QStringList &scopes);
 
 private:
