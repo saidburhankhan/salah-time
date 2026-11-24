@@ -209,3 +209,8 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - 08:5x USER: "try to use less claude and do it with codex". From now on no Claude subagents inherit at
   a Codex cap; work waits for the next window (13:14, 18:14, 23:14) or the reset at a 100% weekly cap.
   Claude only verifies, commits, installs and makes one-line fixes. R4 review and its fixes run on Codex.
+- 09:0x USER feedback → plan.md "Addendum: user feedback 2026-11-24": (1) epic/project resolve at
+  read time (Bayyinah: 1 task, 10 sessions, 0 counted), (2) Routines page display-only, (3) link Save
+  disabled without http(s)://, (4) resources while creating a task (app + widget), (5) Statistics by
+  epic = 0. Queue at 13:14, Codex only: C8 (Astra) item 1; C9 (Astra) items 2, 3, 4, 5 app; C10 (Sol)
+  items 3, 4 widget. R4 review after (next window).

@@ -489,3 +489,33 @@ task with no project), so a tag on a whole project cannot say "these tasks". Tag
   empty set. Fixtures: `item_add_tags.json`, `stats_table_tag_items.json`.
 - **Workers:** C8 adds `item_tags` to 005 (task 0) and the rules (task 0c, before goals);
   the app part goes to C9 before Insights; the widget part to C10 first (or C6 if free sooner).
+
+### Addendum: user feedback 2026-11-24 ~09:00 (after the phase 4 install)
+Fix in this order; these come before the R4 review.
+1. **Epic/project of a session resolve at read time (C8, Astra).** The user created epic "Bayyinah",
+   moved an existing task into it, and Statistics filtered by the epic showed zero: its 10 sessions
+   carry `epic_id NULL` because epic/project are copied at write. New rule (replaces "project/epic
+   stay copied at write" for reads): a session with an item belongs to the item's **current**
+   project and epic; a session without an item keeps its stored project/epic. Same rule as tags.
+   Apply it everywhere sessions are grouped or filtered: `stats.get/table/series` (filters and
+   project/epic groups), `sessions.list`, `insights.get`, `review.get`, goal progress, `epics.list`
+   and epic page totals, backlog/epic task totals. Stored columns stay (history, item-less logs).
+   Tests: epic created after the sessions, task moved between projects, item-less epic log, "none".
+   Note in protocol-v1.md. Live effect: Bayyinah gets its 10 sessions; the 6 early sessions move
+   from "No project" to their task's project (consistent with tags).
+2. **Routines page (C9).** Today it is a display-only list (no create, no click, no edit). Make it
+   a working page: a header line saying what a routine is; "+ New routine" opening the entry form
+   with a repeat schedule preselected; clicking a routine opens its editor (title, block, schedule,
+   project/epic/tags, asks, resources); per-row actions Edit, Pause/End (if the protocol has it,
+   else Remove with confirm); an empty state that explains and offers "+ New routine"; the done-days
+   strip gets a caption (last N days) so the bars mean something.
+3. **Link Save looks dead (C9 + C10).** `ResourceTime.validUrl` requires http(s)://, so Save stays
+   disabled (dark) for "youtube.com/…" with no explanation. Accept a bare domain/path and save it as
+   https://…; when the field is not a URL, show a one-line hint under it ("Enter a web address, e.g.
+   example.com"); never a silent disabled Save. Same rule in the widget's ItemResources.
+4. **Resources while creating a task (C9, C10).** The app entry form (Today and Backlog "Add") and
+   the widget creation sheet get an optional "Notes & links" section: add notes, links and
+   reminders before saving; they are created right after item.add succeeds (resource.add with the
+   new item id, op_ids reused on retry); a failed resource write shows an error and keeps the task.
+5. **Statistics with an epic selected** must show the epic's work (fixed by 1); add an app test that
+   picking an epic whose sessions predate it shows non-zero totals with the 1 fixture.
