@@ -250,3 +250,10 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - R4 26 (medium) → C10: emptying the title in the creation sheet resets attachments and tag choices; keep the draft until dismissal or successful creation.
 - R4 28 (medium) → C8: Insights on-plan table omits item-less (bare project/epic) work; emit an Unplanned row with its minutes.
 - R4 29 (low) → C9: Review "Saved" indicator must match the acknowledged week and text.
+- 18:2x Codex 5h cap ("try again at 11:18 PM"; weekly 93% → reset NOT used). Committed 8e77cf2
+  (C8 6: R4 backend fixes; 248 tests; review_get distractions 2→22 is the intended fix) and cafe07d
+  (widget R4 20). INSTALLED at ~18:32 with C9 WIP stashed: 248 cargo tests ok, BUT app test
+  reviewPageScreens failed at HEAD (expects "2", fixture now 22 — stale expectation, app shows the
+  backend value; C9's WIP already reads it from the fixture). ORCHESTRATOR MISTAKE: the install ran
+  although scripts/test exited 1 — always gate install on `scripts/test && app/bin/test`.
+  Live log clean; bar "Sleep 2h 56m". C9 WIP restored (18 paths). Queue at 23:18 in the 23:20 cron.
