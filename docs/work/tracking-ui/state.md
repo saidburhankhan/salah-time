@@ -246,3 +246,4 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - R4 22 → C8: goals.list `at` a past date shows an ended goal depending on today (record when it
   stopped being active; membership by the requested date only). R4 23 (low) → C9: goal history
   selection should follow the whole successor chain.
+- R4 25 (medium) → C9: GoalForm must not silently turn a metric draft into a minutes goal when the metric disappears; block Add until the user re-chooses.
