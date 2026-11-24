@@ -97,13 +97,28 @@ ApplicationWindow {
         quickVisible = true
         quickPopup.reset()
     }
+    property int entryRequest: 0
+    onPageChanged: ++entryRequest
     function openEntry(item) {
-        if (typeof item === "string") editItem = backend.itemForId(item)
-        else if (item && item.id) editItem = backend.itemForId(item.id)
-        else editItem = item || ({})
+        ++entryRequest
+        var id = typeof item === "string" ? item : (item && item.id)
+        if (id && backend.loadHistoricalTaskForEdit(id, entryRequest)) return
+        editItem = id ? backend.itemForId(id) : (item || ({}))
         entryVisible = true
     }
-    function openEntryFromParse(title) { editItem = backend.itemFromParse(title || ""); entryVisible = true }
+    function openEntryFromParse(title) {
+        ++entryRequest
+        editItem = backend.itemFromParse(title || "")
+        entryVisible = true
+    }
+    Connections {
+        target: backend
+        function onHistoricalTaskForEdit(request, row) {
+            if (request !== win.entryRequest || !row.id) return
+            win.editItem = backend.itemFromCurrentView(row)
+            win.entryVisible = true
+        }
+    }
     function openBacklogEntry() { openEntry({ backlog: true }) }
     function openSchedule(item) { scheduleDialog.show(item) }
     // kind is "item" or "epic". Opening it again for the same target closes it.

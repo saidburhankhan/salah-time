@@ -183,6 +183,14 @@ public:
     QString date = "2031-05-19";
     QString trackingDate() const { return date; }
     QStringList reads;
+    struct NoteSearch { int request; QString week; QString query; QString after; };
+    QList<NoteSearch> noteSearches;
+    bool hasRemoteNoteSearch = false;
+    Q_INVOKABLE void searchReviewNotes(int request, const QString &week, const QString &query, const QString &after) {
+        noteSearches.append({request, week, query, after});
+        if (!hasRemoteNoteSearch)
+            emit reviewNotesLoaded(request, {}, QStringLiteral("method not found"), true);
+    }
     QString submittedWeek, submittedNote;
     Q_INVOKABLE void loadReview(const QString &week) { reads.append(week); }
     Q_INVOKABLE void saveReview(const QString &week, const QString &note) { submittedWeek = week; submittedNote = note; }
@@ -206,7 +214,7 @@ class SalahAppTests : public QObject {
                "  printf '%s\\n' \"$request\" | jq -c 'if .params.id == \"conflicting-edit\" then "
                "{jsonrpc,id,error:{code:-32004,message:\"Session was changed\",data:{kind:\"conflict\"}}} else "
                "{jsonrpc,id,result:{revision:1,op_id:.params.op_id,"
-               "changed:{items:[],sessions:[],projects:[],tags:[],metrics:[],marks:[],deleted:[]}}} end'\n"
+               "changed:{items:(if .method==\"item.add\" then [{id:\"new-item\"}] else [] end),sessions:[],projects:[],tags:[],metrics:[],marks:[],deleted:[]}}} end'\n"
                "  exit 0\nfi\n";
     }
     static QList<QJsonObject> offlineRequests(const QTemporaryDir &dir) {
@@ -593,7 +601,9 @@ esac
             else if (method == "item.preview") server->respond(socket, request, fixture("item_preview"));
             else if (params.contains("op_id")) {
                 QJsonObject changed = emptyChanged();
-                if (method == "project.add" || method == "project.edit")
+                if (method == "item.add")
+                    changed["items"] = QJsonArray{QJsonObject{{"id", "new-item"}}};
+                else if (method == "project.add" || method == "project.edit")
                     changed["projects"] = QJsonArray{QJsonObject{{"id", params.value("id").toString("new-project")},
                                                                  {"name", params.value("name")}}};
                 else if (method == "epic.add" || method == "epic.edit")
@@ -853,6 +863,82 @@ private slots:
         QVERIFY(second.ok);
         QCOMPARE(daemon.hellos, 2); QCOMPARE(daemon.subscribes, 2);
     }
+    void openReportsRefreshOnSameDayReconnect() {
+        QTemporaryDir dir;
+        FakeDaemon daemon(daemon_path(dir));
+        if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        auto state = goalsState();
+        auto review = fixture("review_get");
+        auto insights = fixture("insights");
+        const auto tracking = trackingHandler(state);
+        daemon.setHandler([&](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            const auto method = request.value("method").toString();
+            if (method == "review.get") {
+                auto row = review;
+                row["week"] = request.value("params").toObject().value("week");
+                server->respond(socket, request, row);
+            } else if (method == "insights.get") {
+                server->respond(socket, request, insights);
+            } else {
+                tracking(request, socket, server);
+            }
+        });
+        Backend backend(nullptr, fake(dir), 3000, daemon_path(dir));
+        backend.reload();
+        waitForBackendIdle(backend);
+        const auto today = backend.todayDay();
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        window->resize(1280, 1400);
+        window->setProperty("page", 8);
+        QTRY_VERIFY(firstShown(window, "reviewNote"));
+        firstShown(window, "reviewNote")->setProperty("text", "Unsaved draft");
+        waitForBackendIdle(backend);
+        const QStringList catalogues{"items.list", "projects.list", "epics.list", "tags.list", "metrics.list", "goals.list"};
+        QMap<QString, int> reads;
+        for (const auto &method : catalogues) reads[method] = requestCount(daemon, method);
+        review["note"] = "Written during disconnect";
+        daemon.helloResult["revision"] = 201;
+        daemon.dropClients();
+        QTRY_COMPARE(backend.review().value("note").toString(), QString("Written during disconnect"));
+        QCOMPARE(firstShown(window, "reviewNote")->property("text").toString(), QString("Unsaved draft"));
+        for (const auto &method : catalogues) QTRY_VERIFY(requestCount(daemon, method) > reads.value(method));
+        QCOMPARE(backend.todayDay(), today);
+
+        window->setProperty("page", 7);
+        QTRY_VERIFY(!backend.insights().isEmpty());
+        waitForBackendIdle(backend);
+        const int reports = requestCount(daemon, "insights.get");
+        insights["by_hour"] = QJsonArray{};
+        daemon.helloResult["revision"] = 202;
+        daemon.dropClients();
+        QTRY_VERIFY(requestCount(daemon, "insights.get") > reports);
+        QTRY_VERIFY(backend.insights().value("by_hour").toList().isEmpty());
+        QCOMPARE(backend.todayDay(), today);
+
+        window->setProperty("page", 6);
+        QTRY_VERIFY(firstShown(window, "goalRow_g1"));
+        backend.loadGoalHistory("g1");
+        QTRY_COMPARE(backend.goalHistory().size(), 2);
+        auto firstGoal = state->goals.first().toObject();
+        firstGoal["target"] = 77.0;
+        state->goals[0] = firstGoal;
+        state->goalHistory.removeLast();
+        daemon.helloResult["revision"] = 203;
+        daemon.dropClients();
+        QTRY_COMPARE(backend.goals().first().toMap().value("target").toDouble(), 77.0);
+        QTRY_COMPARE(backend.goalHistory().size(), 1);
+        QCOMPARE(backend.goalHistoryId(), QString("g1"));
+        QCOMPARE(backend.todayDay(), today);
+        QCOMPARE(daemon.hellos, 4);
+    }
+
     void socketConflictReloadsAndShowsServerMessage() {
         QTemporaryDir dir; FakeDaemon daemon(dir.filePath("salah.sock")); if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
         QJsonObject day = fixture("day");
@@ -1606,6 +1692,20 @@ esac
         QTRY_VERIFY(hasVisualText(window, "2 days done  ·  35 min"));
         QVERIFY(hasVisualText(window, "Done days · last 14 days"));
         QCOMPARE(backend.routines()->rowCount(), 2);
+        QSignalSpy calls(&backend, &Backend::requestFinished);
+        backend.loadTrackingItems();
+        const auto hasPage = [&calls](bool older) {
+            for (const auto &call : calls) {
+                const auto args = call.at(0).toStringList();
+                if (!call.at(1).toBool() || args.value(0) != "sessions" || args.value(1) != "list") continue;
+                const int limit = args.indexOf("--limit");
+                if (limit >= 0 && args.value(limit + 1) == "12" && args.contains("--all")
+                    && args.contains("--before") == older) return true;
+            }
+            return false;
+        };
+        QTRY_VERIFY(hasPage(false));
+        QTRY_VERIFY(hasPage(true));
         shotWindow(window, "routines.png");
         auto *row = qobject_cast<QQuickItem *>(firstShown(window, "routineRow_weekly"));
         QVERIFY(row);
@@ -1662,6 +1762,85 @@ esac
         QCOMPARE(add.value("method").toString(), QString("item.add"));
         QCOMPARE(add.value("params").toObject().value("repeat").toString(), QString("daily"));
         QCOMPARE(add.value("params").toObject().value("title").toString(), QString("Read after Fajr"));
+    }
+
+    void historicalEditorReadsLiveTaskBeforeOpening() {
+        QTemporaryDir dir;
+        fake(dir);
+        const QString program = dir.filePath("historical-cli");
+        write(program, R"SH(#!/bin/sh
+cd "$(dirname "$0")"
+case "$1 $2 $3" in
+  "item list --json") cat items.json; exit 0 ;;
+esac
+for arg in "$@"; do
+    if [ "$1" = day ] && [ "$arg" = "2031-05-13" ]; then cat yesterday.json; exit 0; fi
+done
+exec ./salah "$@"
+)SH");
+        QFile::setPermissions(program, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        auto day = fixture("day_tracking");
+        day["day"] = "2031-05-13";
+        day["is_today"] = false;
+        write(dir.filePath("yesterday.json"), QJsonDocument(day).toJson());
+        const auto canonical = rpcFixture("items_list").value("result").toArray();
+        write(dir.filePath("items.json"), QJsonDocument(canonical).toJson());
+        TrackingUiPreviewBackend backend(program, daemon_path(dir), canonical, {});
+        backend.reload();
+        waitForBackendIdle(backend);
+        backend.selectDay("2031-05-13");
+        waitForBackendIdle(backend);
+        QCOMPARE(backend.selectedDay(), QString("2031-05-13"));
+        QCOMPARE(backend.todayDay(), QString("2031-05-14"));
+
+        auto live = canonical.first().toObject();
+        QCOMPARE(live.value("id").toString(), QString("<id:4>"));
+        live["title"] = "Live routine";
+        live["version"] = 19;
+        live["block"] = "asr";
+        live["project_id"] = "study";
+        live["epic_id"] = "e-grammar";
+        live["metric_ids"] = QJsonArray{"focus"};
+        live["tag_ids"] = QJsonArray{"learning"};
+        write(dir.filePath("items.json"), QJsonDocument(QJsonArray{live}).toJson());
+
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        window->resize(1280, 920);
+        auto *form = findByName(window, "entryPopup");
+        QVERIFY(QMetaObject::invokeMethod(window, "openEntry", Q_ARG(QVariant, "<id:4>")));
+        QVERIFY(!window->property("entryVisible").toBool());
+        QTRY_VERIFY(form->property("opened").toBool());
+        auto *title = firstShown(window, "entryTitleField");
+        QCOMPARE(title->property("text").toString(), QString("Live routine"));
+        QCOMPARE(form->property("block").toString(), QString("asr"));
+        QCOMPARE(form->property("projectId").toString(), QString("study"));
+        QCOMPARE(form->property("epicId").toString(), QString("e-grammar"));
+        QCOMPARE(form->property("openedVersion").toInt(), 19);
+        QCOMPARE(form->property("tagIds").toStringList(), QStringList{"learning"});
+        QCOMPARE(form->property("metricIds").toStringList(), QStringList{"focus"});
+        shotWindow(window, "historical-current-task-editor.png");
+        title->setProperty("text", "Rename the live routine");
+        QVERIFY(QMetaObject::invokeMethod(form, "submitTitle", Q_ARG(QVariant, false)));
+        QTRY_COMPARE(offlineRequests(dir).size(), 1);
+        const auto params = offlineRequests(dir).first().value("params").toObject();
+        QCOMPARE(params.value("expected_version").toInt(), 19);
+        QCOMPARE(params.value("project_id"), live.value("project_id"));
+        QCOMPARE(params.value("epic_id"), live.value("epic_id"));
+        QCOMPARE(params.value("block"), live.value("block"));
+        QVERIFY(!params.contains("tag_ids"));
+        QVERIFY(!params.contains("metric_ids"));
+        QTRY_VERIFY(!form->property("opened").toBool());
+        write(dir.filePath("items.json"), "[]");
+        QVERIFY(QMetaObject::invokeMethod(window, "openEntry", Q_ARG(QVariant, "<id:4>")));
+        QTRY_VERIFY(backend.error().contains("no longer"));
+        QVERIFY(!window->property("entryVisible").toBool());
     }
 
     void resourcesAtTaskCreation() {
@@ -1740,6 +1919,110 @@ printf '%s\n' "$request" | jq -c '{jsonrpc,id,result:{op_id:.params.op_id,revisi
             if (!backlog) QCOMPARE(writes[2].value("params"), writes[3].value("params"));
             QCOMPARE(writes.last().value("params").toObject().value("kind").toString(), QString("reminder"));
         }
+    }
+
+    void taskCreationRejectionsAllowCorrectionAndSkipping() {
+        QTemporaryDir dir;
+        fake(dir);
+        const QString program = dir.filePath("rejections-cli");
+        write(program, R"SH(#!/bin/sh
+cd "$(dirname "$0")"
+if [ "$1" != rpc ]; then exec ./salah "$@"; fi
+read -r hello && read -r request || exit 2
+printf '%s\n' "$request" >> frames
+reject() {
+    printf '%s\n' "$request" | jq -c --arg kind "$1" --arg msg "$2" '{jsonrpc,id,error:{code:-32000,message:$msg,data:{kind:$kind}}}'
+    exit 0
+}
+case "$request" in
+  *'"title":"Original task"'*) reject not_found 'Chosen tag was removed' ;;
+  *'"title":"Corrected task"'*) if [ ! -f dropped ]; then touch dropped; exit 0; fi ;;
+  *'"body":"Correct this note"'*) reject validation 'Note was rejected' ;;
+  *'"url":"https://example.org/obsolete"'*) reject not_found 'Link was rejected' ;;
+esac
+printf '%s\n' "$request" | jq -c '{jsonrpc,id,result:{op_id:.params.op_id,revision:1,changed:{items:(if .method=="item.add" then [{id:"task-one"}] else [] end),sessions:[],projects:[],tags:[],metrics:[],marks:[],deleted:[]}}}'
+)SH");
+        QFile::setPermissions(program, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        TrackingUiPreviewBackend backend(program, daemon_path(dir), {}, {});
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        window->resize(1440, 1020);
+        const auto click = [window](const QString &name) {
+            auto *control = firstShown(window, name);
+            return control && QMetaObject::invokeMethod(control, "clicked");
+        };
+        QVERIFY(QMetaObject::invokeMethod(window, "openEntry", Q_ARG(QVariant, QVariantMap{})));
+        auto *form = findByName(window, "entryPopup");
+        QTRY_VERIFY(form->property("opened").toBool());
+        const auto submit = [form] { return QMetaObject::invokeMethod(form, "submitTitle", Q_ARG(QVariant, false)); };
+        auto *title = firstShown(window, "entryTitleField");
+        title->setProperty("text", "Original task");
+        QVERIFY(click("entryTag_learning"));
+        QVERIFY(click("composeAttachment"));
+        auto *body = firstShown(window, "resourceBody");
+        body->setProperty("text", " \n  ");
+        QVERIFY(!firstShown(window, "resourceSave")->property("enabled").toBool());
+        QVERIFY(click("resourceSave"));
+        QVERIFY(firstShown(window, "resourceBody"));
+        shotWindow(window, "new-task-blank-note.png");
+        body->setProperty("text", "Correct this note");
+        QVERIFY(click("resourceSave"));
+        QVERIFY(click("composeAttachment"));
+        QVERIFY(click("resourceKind_link"));
+        firstShown(window, "resourceUrl")->setProperty("text", "example.org/obsolete");
+        QVERIFY(click("resourceSave"));
+        QVERIFY(click("composeAttachment"));
+        QVERIFY(click("resourceKind_reminder"));
+        firstShown(window, "resourceTitle")->setProperty("text", "Keep this reminder");
+        QVERIFY(click("resourceSave"));
+        QVERIFY(submit());
+        QTRY_COMPARE(form->property("saveError").toString(), QString("Chosen tag was removed"));
+        QVERIFY(title->property("enabled").toBool());
+        QVERIFY(hasVisualText(window, "Correct this note"));
+        QVERIFY(hasVisualText(window, "Keep this reminder"));
+        backend.tagCatalog.clear();
+        emit backend.tagsLoaded();
+        QVERIFY(form->property("tagIds").toStringList().isEmpty());
+        shotWindow(window, "new-task-rejected-unlocked.png");
+
+        title->setProperty("text", "Corrected task");
+        QVERIFY(submit());
+        QTRY_VERIFY(form->property("saveError").toString().contains("matching RPC response"));
+        QVERIFY(!title->property("enabled").toBool());
+        QVERIFY(submit());
+        QTRY_VERIFY(firstShown(window, "rejectedAttachment"));
+        QCOMPARE(form->property("createdId").toString(), QString("task-one"));
+        QCOMPARE(firstShown(window, "resourceBody")->property("text").toString(), QString("Correct this note"));
+        shotWindow(window, "new-task-correct-attachment.png");
+        firstShown(window, "resourceBody")->setProperty("text", "Corrected note");
+        QVERIFY(click("resourceSave"));
+        QTRY_VERIFY(firstShown(window, "resourceUrl"));
+        QCOMPARE(firstShown(window, "resourceUrl")->property("text").toString(), QString("https://example.org/obsolete"));
+        QVERIFY(click("resourceCancel"));
+        QTRY_VERIFY(!form->property("opened").toBool());
+
+        const auto frames = offlineRequests(dir);
+        QCOMPARE(frames.size(), 7);
+        const auto first = frames.at(0).value("params").toObject();
+        const auto corrected = frames.at(1).value("params").toObject();
+        QVERIFY(first.value("op_id") != corrected.value("op_id"));
+        QCOMPARE(corrected.value("tag_ids"), QJsonValue(QJsonArray{}));
+        QCOMPARE(corrected, frames.at(2).value("params").toObject());
+        const auto note = frames.at(3).value("params").toObject();
+        const auto correctedNote = frames.at(4).value("params").toObject();
+        QVERIFY(note.value("op_id") != correctedNote.value("op_id"));
+        QCOMPARE(correctedNote.value("body").toString(), QString("Corrected note"));
+        QCOMPARE(correctedNote.value("kind").toString(), QString("note"));
+        QCOMPARE(frames.at(5).value("params").toObject().value("kind").toString(), QString("link"));
+        QCOMPARE(frames.at(6).value("params").toObject().value("title").toString(), QString("Keep this reminder"));
+        for (const auto &request : frames.mid(3))
+            QCOMPARE(request.value("params").toObject().value("item_id").toString(), QString("task-one"));
     }
 
     void statisticsIncludesSessionsBeforeEpicAssignment() {
@@ -3777,7 +4060,7 @@ fi
         params = offlineRequests(dir).last().value("params").toObject();
         QCOMPARE(params.value("tag_ids"), QJsonValue(QJsonArray{}));
         QVERIFY(params.value("backlog").toBool());
-        QVERIFY(selected("faith"));
+        QTRY_VERIFY(selected("faith"));
         QVERIFY(click("noProjectChip"));
         QVERIFY(click("entryTag_learning") && selected("learning"));
         title->setProperty("text", "Read without a project");
@@ -4494,11 +4777,13 @@ fi
         shotWindow(window, "resource-drawer.png");
         QVERIFY(!visualNamed(window, "resourceEdit_r3").isEmpty());
 
-        // Add a note: the form takes any text; nothing is required.
+        // Add a note: a blank note means nothing (the server rejects it), so Save waits for text.
         QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "resourceAdd").value(0), "clicked"));
         QObject *form = findByName(root.data(), "resourceForm"); QVERIFY(form);
         QTRY_VERIFY_WITH_TIMEOUT(form->property("visible").toBool(), 2000);
-        QVERIFY(visualNamed(window, "resourceSave").value(0)->property("enabled").toBool());
+        QVERIFY(!visualNamed(window, "resourceSave").value(0)->property("enabled").toBool());
+        visualNamed(window, "resourceBody").value(0)->setProperty("text", "Read slowly");
+        QTRY_VERIFY(visualNamed(window, "resourceSave").value(0)->property("enabled").toBool());
         shotWindow(window, "resource-add-form.png");
         QVERIFY(QMetaObject::invokeMethod(visualNamed(window, "resourceKind_link").value(0), "clicked"));
         QObject *save = visualNamed(window, "resourceSave").value(0);
@@ -4826,13 +5111,13 @@ fi
         QVERIFY(note && search && confirmation);
         const QString week = review.value("week").toString();
         search->setProperty("text", " SHOP ");
-        QVERIFY(hasVisualText(window, "Sessions with notes  ·  1 of 2 shown"));
+        QTRY_VERIFY(hasVisualText(window, "Sessions with notes  ·  1 of 2 shown"));
         QCOMPARE(page->property("matchingNotes").toList().first().toMap().value("id"),
                  review.value("summary").toObject().value("sessions_with_notes").toArray().first().toObject().value("id").toVariant());
         search->setProperty("text", "mOnDaY");
         QCOMPARE(page->property("matchingNotes").toList().size(), 1);
         search->setProperty("text", "missing");
-        QVERIFY(hasVisualText(window, "No matching notes."));
+        QTRY_VERIFY(hasVisualText(window, "No matching notes."));
         search->setProperty("text", "shop");
         note->setProperty("text", "My draft");
         backend.reviewData["note"] = "Changed from another client";
@@ -4885,11 +5170,14 @@ fi
         QTRY_VERIFY(confirmation->property("opacity").toReal() > 0);
         QVERIFY(!save->property("enabled").toBool());
         auto preview = backend.reviewData.value("summary").toMap();
+        preview["goals_met_count"] = 81;
         preview["sessions_with_notes_count"] = 48;
         preview["sessions_with_notes_more"] = true;
         backend.reviewData["summary"] = preview;
         emit backend.previewChanged();
         QVERIFY(hasVisualText(window, "Sessions with notes  ·  2 of 48"));
+        QVERIFY(hasVisualText(window, "Goals met  ·  81  ·  3 shown"));
+        shotWindow(window, "review-truncated-goals.png");
         QCOMPARE(search->property("placeholderText").toString(), QString("Search notes shown here"));
         // A week with nothing: counts are zeros, never hidden.
         QVariantMap empty = backend.reviewData;
@@ -4897,6 +5185,7 @@ fi
         summary["by_project"] = QVariantList{};
         summary["by_epic"] = QVariantList{};
         summary["goals_met"] = QVariantList{};
+        summary["goals_met_count"] = 0;
         summary["sessions_with_notes"] = QVariantList{};
         summary["sessions_with_notes_count"] = 0;
         summary["sessions_with_notes_more"] = false;
@@ -4913,6 +5202,98 @@ fi
         shotWindow(window, "review-empty.png");
     }
 
+    void reviewSearchPaginatesEntriesBeyondThePreview() {
+        QTemporaryDir dir;
+        ReportsPreviewBackend backend(fake(dir), daemon_path(dir), {}, {});
+        backend.hasRemoteNoteSearch = true;
+        backend.reviewData = fixture("review_get").toVariantMap();
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        window->resize(1280, 1400);
+        window->setProperty("page", 8);
+        auto *search = firstShown(window, "reviewNotesSearch");
+        QVERIFY(search);
+        search->setProperty("text", "stale");
+        QTRY_COMPARE(backend.noteSearches.size(), 1);
+        const auto stale = backend.noteSearches.last();
+        search->setProperty("text", "  ÅNGSTRÖM  ");
+        QTRY_COMPARE(backend.noteSearches.size(), 2);
+        const auto first = backend.noteSearches.last();
+        QCOMPARE(first.week, QString("2031-05-12"));
+        QCOMPARE(first.query, QString("ÅNGSTRÖM"));
+        QVERIFY(first.after.isEmpty());
+        auto session = fixture("review_get").value("summary").toObject().value("sessions_with_notes").toArray().first().toObject().toVariantMap();
+        session["notes"] = QVariantList{QVariantMap{{"id", "found-first"}, {"text", "Newest Ångström match"}, {"at", "2031-05-14T04:31:00Z"}}};
+        emit backend.reviewNotesLoaded(stale.request, {{"rows", QVariantList{session}}}, {}, false);
+        QVERIFY(!hasVisualText(window, "Newest Ångström match"));
+        emit backend.reviewNotesLoaded(first.request, {{"rows", QVariantList{session}}, {"next", "more"}}, {}, false);
+        auto *page = firstShown(window, "reviewPage");
+        auto *more = firstShown(window, "reviewMoreNotes");
+        QVERIFY(more);
+        QVERIFY(QMetaObject::invokeMethod(more, "clicked"));
+        QCOMPARE(backend.noteSearches.size(), 3);
+        const auto second = backend.noteSearches.last();
+        QCOMPARE(second.week, first.week);
+        QCOMPARE(second.query, first.query);
+        QCOMPARE(second.after, QString("more"));
+        session["notes"] = QVariantList{QVariantMap{{"id", "found-second"}, {"text", "Oldest Ångström match"}, {"at", "2031-05-14T04:21:00Z"}}};
+        emit backend.reviewNotesLoaded(second.request, {{"rows", QVariantList{session}}}, {}, false);
+        const auto matches = page->property("matchingNotes").toList();
+        QCOMPARE(matches.size(), 1);
+        const auto notes = matches.first().toMap().value("notes").toList();
+        QCOMPARE(notes.size(), 2);
+        QCOMPARE(notes.first().toMap().value("text").toString(), QString("Oldest Ångström match"));
+        QVERIFY(hasVisualText(window, "Sessions with notes  ·  1 matching shown"));
+        QVERIFY(!firstShown(window, "reviewMoreNotes"));
+        shotWindow(window, "review-search-all-notes.png");
+        firstShown(window, "reviewNote")->setProperty("text", "Kept across searches");
+        QVERIFY(QMetaObject::invokeMethod(firstShown(window, "reviewPrevWeek"), "clicked"));
+        QCOMPARE(search->property("text").toString(), QString());
+        QVERIFY(QMetaObject::invokeMethod(firstShown(window, "reviewNextWeek"), "clicked"));
+        QCOMPARE(firstShown(window, "reviewNote")->property("text").toString(), QString("Kept across searches"));
+    }
+
+    void reviewSaveReplaysLostAcknowledgement() {
+        QTemporaryDir dir;
+        const QString program = dir.filePath("review-rpc");
+        write(program, R"SH(#!/bin/sh
+cd "$(dirname "$0")"
+read -r hello && read -r request || exit 2
+printf '%s\n' "$request" >> frames
+op=$(printf '%s\n' "$request" | jq -r .params.op_id)
+if [ ! -f operation ]; then
+    printf '%s' "$op" > operation
+    printf '%s' 'Draft A' > saved
+    exit 0
+fi
+if [ "$op" != "$(cat operation)" ]; then printf '%s' 'Draft A' > saved; fi
+printf '%s\n' "$request" | jq -c '{jsonrpc,id,result:{revision:1,op_id:.params.op_id,changed:{items:[],sessions:[],projects:[],tags:[],metrics:[],marks:[],deleted:[]}}}'
+)SH");
+        QFile::setPermissions(program, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        Backend backend(nullptr, program, 3000, daemon_path(dir));
+        QSignalSpy saves(&backend, &Backend::reviewSaveFinished);
+        backend.saveReview("2031-05-14", "Draft A");
+        QTRY_COMPARE(saves.size(), 1);
+        QVERIFY(!saves.first().at(0).toBool());
+        // Another client writes B after the original operation committed.
+        write(dir.filePath("saved"), "Draft B");
+        backend.saveReview("2031-05-12", "Draft A");
+        QTRY_COMPARE(saves.size(), 2);
+        QVERIFY(saves.last().at(0).toBool());
+        const auto frames = offlineRequests(dir);
+        QCOMPARE(frames.size(), 2);
+        QCOMPARE(frames.first().value("params"), frames.last().value("params"));
+        QFile saved(dir.filePath("saved"));
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        QCOMPARE(saved.readAll(), QByteArray("Draft B"));
+    }
+
     void reviewRequestsAndSaves() {
         QTemporaryDir dir;
         FakeDaemon daemon(daemon_path(dir));
@@ -4923,6 +5304,8 @@ fi
         daemon.setHandler([&](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
             const QString method = request.value("method").toString();
             if (method == "review.get") server->respond(socket, request, review);
+            else if (method == "review.notes") server->respond(socket, request, QJsonObject{
+                {"rows", review.value("summary").toObject().value("sessions_with_notes")}, {"next", "opaque"}});
             else if (method == "review.save") server->respond(socket, request, saved);
             else tracking(request, socket, server);
         });
@@ -4945,6 +5328,13 @@ fi
         backend.saveReview("2031-05-12", "  \n ");
         QTRY_COMPARE(requestCount(daemon, "review.save"), 2);
         QCOMPARE(lastRequest(daemon, "review.save").value("params").toObject().value("note").toString(), QString());
+        QSignalSpy notePages(&backend, &Backend::reviewNotesLoaded);
+        backend.searchReviewNotes(7, "2031-05-12", "shop", "opaque");
+        QTRY_COMPARE(notePages.size(), 1);
+        QCOMPARE(notePages.first().at(0).toInt(), 7);
+        QCOMPARE(notePages.first().at(1).toMap().value("next").toString(), QString("opaque"));
+        QCOMPARE(lastRequest(daemon, "review.notes").value("params").toObject(),
+                 (QJsonObject{{"week", "2031-05-12"}, {"query", "shop"}, {"after", "opaque"}}));
         // Another surface saving the reflection reloads the open week.
         const int before = requestCount(daemon, "review.get");
         QSignalSpy spy(&backend, &Backend::reviewsInvalidated);
@@ -5080,8 +5470,18 @@ esac
         goal["target"] = 4.25;
         goal["starts_on"] = goal.value("progress").toObject().value("from");
         goal["replaces_id"] = "previous";
+        auto progress = goal.value("progress").toObject();
+        progress["error"] = "sum_overflow";
+        progress["value"] = QJsonValue::Null;
+        progress["met"] = false;
+        goal["progress"] = progress;
         write(dir.filePath("goals.json"), QJsonDocument(QJsonArray{goal}).toJson());
-        write(dir.filePath("history.json"), QJsonDocument(rpcFixture("goals_history").value("result").toArray()).toJson());
+        auto history = rpcFixture("goals_history").value("result").toArray();
+        auto overflow = history.first().toObject();
+        overflow["error"] = "sum_overflow";
+        overflow["value"] = QJsonValue::Null;
+        history[0] = overflow;
+        write(dir.filePath("history.json"), QJsonDocument(history).toJson());
 
         Backend backend(nullptr, program, 3000, daemon_path(dir));
         backend.reload();
@@ -5101,6 +5501,7 @@ esac
         window->setProperty("page", 6);
         QTRY_COMPARE(backend.goals().size(), 1);
         QTRY_VERIFY(firstShown(window, "goalRow_g5"));
+        QCOMPARE(firstShown(window, "goalValue")->property("text").toString(), QString("Sum too large"));
         QVERIFY(firstShown(window, "goalRemoveButton"));
         QVERIFY(QMetaObject::invokeMethod(firstShown(window, "goalEditButton"), "clicked"));
         QCOMPARE(firstShown(window, "goalTargetField")->property("text").toString(), QString("4.25"));
@@ -5111,6 +5512,9 @@ esac
 
         QVERIFY(QMetaObject::invokeMethod(firstShown(window, "goalHistoryButton"), "clicked"));
         QTRY_COMPARE(backend.goalHistory().size(), 2);
+        auto *overflowRow = qobject_cast<QQuickItem *>(firstShown(window, "goalHistoryRow_0"));
+        QVERIFY(overflowRow);
+        QCOMPARE(findItemByName(overflowRow, "goalHistoryValue")->property("text").toString(), QString("Sum too large"));
         // The removed intermediate version is missing from goals.list.
         goal["id"] = "latest";
         goal["replaces_id"] = "intermediate";

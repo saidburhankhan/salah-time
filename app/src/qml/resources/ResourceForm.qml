@@ -5,20 +5,27 @@ import "../controls"
 import "ResourceTime.js" as Time
 
 // Add or edit one resource. Everything is optional except what a kind needs
-// to mean anything: a link needs a valid URL, a reminder a date and time.
+// to mean anything: note text, a link URL, or reminder date and time.
 Rectangle {
     id: form
     required property var win
     // Empty for a new resource, else the row being edited (its kind is fixed).
     property var resource: null
     property string submitLabel: qsTr("Save")
+    property string cancelLabel: qsTr("Cancel")
     property string kind: "note"
     property string serverError: ""
     property bool waiting: false
     readonly property bool editing: resource !== null
     readonly property string instant: Time.toInstant(dateField.text, timeField.text)
-    readonly property bool valid: kind === "link" ? Time.validUrl(urlField.text)
-        : kind === "reminder" ? instant !== "" : true
+    readonly property string noteText: bodyField.text.trim()
+    readonly property string url: Time.normalizedWebUrl(urlField.text)
+    readonly property bool validNote: !!noteText && Array.from(noteText).length <= 5000
+        && !/[\x00-\x08\x0b-\x1f\x7f-\x9f]/.test(noteText)
+    readonly property bool validUrl: !!url && Array.from(url).length <= 2000
+    readonly property bool validTitle: Array.from(titleField.text.trim()).length <= 200
+    readonly property bool valid: kind === "note" ? validNote
+        : validTitle && (kind === "link" ? validUrl : instant !== "")
     signal submitted(var fields)
     signal cancelled()
 
@@ -38,8 +45,8 @@ Rectangle {
     function submit() {
         if (!valid || waiting) return
         var fields = {}
-        if (kind === "note") fields = { body: bodyField.text }
-        else if (kind === "link") fields = { url: Time.normalizedWebUrl(urlField.text), title: titleField.text }
+        if (kind === "note") fields = { body: noteText }
+        else if (kind === "link") fields = { url: url, title: titleField.text }
         else fields = { title: titleField.text, remind_at: instant }
         if (!editing) fields.kind = kind
         serverError = ""
@@ -95,6 +102,12 @@ Rectangle {
             wrapMode: TextEdit.Wrap
             textFormat: TextEdit.PlainText
         }
+        Label {
+            visible: form.kind === "note" && !form.validNote
+            text: form.noteText ? qsTr("Enter up to 5,000 characters of note text.") : qsTr("Enter a note to attach it.")
+            color: form.win.muted
+            font.pixelSize: 12
+        }
         TextField {
             id: urlField
             objectName: "resourceUrl"
@@ -105,8 +118,8 @@ Rectangle {
             onAccepted: form.submit()
         }
         Label {
-            visible: form.kind === "link" && !form.valid
-            text: qsTr("Enter a web address, e.g. example.com")
+            visible: form.kind === "link" && !form.validUrl
+            text: form.url ? qsTr("The web address must be at most 2,000 characters.") : qsTr("Enter a web address, e.g. example.com")
             color: form.win.muted
             font.pixelSize: 12
         }
@@ -117,6 +130,12 @@ Rectangle {
             Layout.fillWidth: true
             placeholderText: form.kind === "link" ? qsTr("Title (optional)") : qsTr("Reminder text (optional)")
             onAccepted: form.submit()
+        }
+        Label {
+            visible: form.kind !== "note" && !form.validTitle
+            text: qsTr("Use at most 200 characters.")
+            color: form.win.muted
+            font.pixelSize: 12
         }
         ColumnLayout {
             visible: form.kind === "reminder"
@@ -195,7 +214,7 @@ Rectangle {
             AppButton {
                 objectName: "resourceCancel"
                 win: form.win
-                text: qsTr("Cancel")
+                text: form.cancelLabel
                 implicitHeight: 34
                 onClicked: form.cancelled()
             }

@@ -26,6 +26,12 @@ function amount(win, goal, value) {
     return win.numberText(value) + unit
 }
 
+function progressAmount(win, goal, progress) {
+    if (progress.error === "sum_overflow")
+        return qsTr("Sum too large")
+    return amount(win, goal, progress.value)
+}
+
 function periodText(goal, day, week) { return goal.period === "week" ? week : day }
 
 function directionText(goal, atLeast, atMost) { return goal.direction === "at_most" ? atMost : atLeast }

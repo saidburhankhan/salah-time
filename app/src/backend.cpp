@@ -122,7 +122,7 @@ Backend::Backend(QObject *parent, const QString &program, int timeoutMs, const Q
 
     connect(&m_client, &CoreClient::busyChanged, this, &Backend::busyChanged);
     connect(&m_client, &CoreClient::offlineChanged, this, [this](bool) { emit offlineChanged(); });
-    connect(&m_client, &CoreClient::reconnected, this, [this] { reload(); });
+    connect(&m_client, &CoreClient::reconnected, this, [this] { reloadChangedScopes({}); });
     connect(&m_client, &CoreClient::trackingDayChanged, this, [this](const QString &isoDay) {
         const QDate day = QDate::fromString(isoDay, Qt::ISODate);
         if (m_today == day) return;
@@ -255,6 +255,10 @@ void Backend::refreshRunning() {
 void Backend::reloadFromNotification(qint64 revision, const QStringList &scopes) {
     if (revision <= m_lastNotificationRevision) return;
     m_lastNotificationRevision = revision;
+    reloadChangedScopes(scopes);
+}
+
+void Backend::reloadChangedScopes(const QStringList &scopes) {
     reload();
     if (scopes.isEmpty() || scopes.contains("resources")) refreshResources();
     // Another surface (the bar widget, the CLI) may have changed projects,
@@ -646,7 +650,8 @@ void Backend::saveItem(const QVariantMap &item) {
                 }
                 if (result.ok) m_refreshPending = true;
                 emit taskCreateFinished(operation, id, result.ok && id.isEmpty()
-                    ? tr("The response did not include the new task ID.") : result.error.message);
+                    ? tr("The response did not include the new task ID.") : result.error.message,
+                    !result.ok && result.error.definitiveRejection());
             });
             return;
         }
@@ -937,6 +942,37 @@ void Backend::setSelectedStatsItem(const QString &id) {
     m_selectedStatsItem = id;
     m_statsDaily.setStats(m_stats, todayDay(), m_selectedStatsItem);
     emit selectedStatsItemChanged();
+}
+
+bool Backend::loadHistoricalTaskForEdit(const QString &id, int request) {
+    if (m_backlogOpen || m_routinesOpen || !m_selected.isValid() || m_selected >= m_today)
+        return false;
+    // Day rows preserve the old plan. The live catalogue gives us both
+    // the current task fields and their version in a single response.
+    m_client.itemsList([this, id, request](const CoreClient::Result &result) {
+        if (!result.ok) {
+            fail(result.error.message);
+        } else if (const auto *data = std::get_if<Dto::Json>(&result.value); data && data->value.isArray()) {
+            for (const auto &entry : data->value.toArray()) {
+                const auto row = entry.toObject();
+                if (row.value("id").toString() == id && row.value("deleted_at").isNull()) {
+                    emit historicalTaskForEdit(request, row.toVariantMap());
+                    return;
+                }
+            }
+            fail(tr("This task is no longer in the current task list."));
+        } else {
+            fail(tr("Could not read the current task list."));
+        }
+        emit historicalTaskForEdit(request, {});
+    });
+    return true;
+}
+
+ItemDraft *Backend::itemFromCurrentView(const QVariantMap &row) {
+    m_editItem->update(QJsonObject::fromVariantMap(row));
+    emit editItemChanged();
+    return m_editItem;
 }
 
 ItemDraft *Backend::itemForId(const QString &id) {

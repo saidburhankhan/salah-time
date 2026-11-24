@@ -89,7 +89,7 @@ Rectangle {
             }
             Label {
                 objectName: "goalValue"
-                text: GoalText.amount(row.win, row.goal, row.progress.value)
+                text: GoalText.progressAmount(row.win, row.goal, row.progress)
                 textFormat: Text.PlainText
                 color: row.win.text
                 font.family: row.win.mono

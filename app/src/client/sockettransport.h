@@ -23,6 +23,7 @@ public:
         QString kind;
         QString message;
         QJsonValue value;
+        int code = 0;
     };
     using Handler = std::function<void(const Reply &)>;
 

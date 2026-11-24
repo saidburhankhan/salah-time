@@ -44,14 +44,38 @@ void Backend::loadReview(const QString &week) {
     });
 }
 
+void Backend::searchReviewNotes(int request, const QString &week, const QString &query, const QString &after) {
+    QJsonObject params{{"week", week}, {"query", query}};
+    if (!after.isEmpty()) params.insert("after", after);
+    m_client.rpcRead(QStringLiteral("review.notes"), params, [this, request](const CoreClient::Result &result) {
+        if (const auto *data = std::get_if<Dto::Json>(&result.value); result.ok && data && data->json.value("rows").isArray()) {
+            emit reviewNotesLoaded(request, data->json.toVariantMap(), {}, false);
+        } else {
+            emit reviewNotesLoaded(request, {}, result.ok ? tr("Could not read matching notes.") : result.error.message,
+                                   result.error.rpcCode == -32601);
+        }
+    });
+}
+
 void Backend::saveReview(const QString &week, const QString &note) {
     const QString monday = mondayOf(week).toString(Qt::ISODate);
     if (monday.isEmpty()) return;
     // An empty note removes the reflection.
     const QString text = note.trimmed().isEmpty() ? QString() : note;
+    auto &operations = m_reviewSaveOperations[monday];
+    QString &pending = operations[text];
+    if (pending.isEmpty()) pending = CoreClient::makeOpId();
+    const QString operation = pending;
     m_client.mutateEntity(QStringLiteral("review.save"),
                           QJsonObject{{QStringLiteral("week"), monday}, {QStringLiteral("note"), text}},
-                          [this, monday, note](const CoreClient::Result &result) {
+                          [this, monday, note, text, operation](const CoreClient::Result &result) {
+        if (result.ok || result.error.definitiveRejection()) {
+            auto week = m_reviewSaveOperations.find(monday);
+            if (week != m_reviewSaveOperations.end() && week->value(text) == operation) {
+                week->remove(text);
+                if (week->isEmpty()) m_reviewSaveOperations.erase(week);
+            }
+        }
         if (!result.ok) {
             fail(result.error.message);
             emit reviewSaveFinished(false, result.error.message, monday, note);
@@ -60,5 +84,5 @@ void Backend::saveReview(const QString &week, const QString &note) {
         clearError();
         emit reviewSaveFinished(true, QString(), monday, note);
         if (monday == m_reviewWeek) loadReview(monday);
-    });
+    }, operation);
 }

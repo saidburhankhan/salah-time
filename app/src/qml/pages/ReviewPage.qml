@@ -23,14 +23,26 @@ ScrollView {
     readonly property var reflection: stateFor(week)
     readonly property bool dirty: reflection.text !== reflection.saved
     readonly property var goalsMet: (summary && summary.goals_met) || []
+    readonly property int goalsMetCount: summary ? (summary.goals_met_count ?? goalsMet.length) : 0
     readonly property var noted: (summary && summary.sessions_with_notes) || []
     readonly property int notedCount: summary ? (summary.sessions_with_notes_count ?? noted.length) : 0
     readonly property bool notesArePreview: notedCount > noted.length || noted.some(row => row.notes_more === true)
-    readonly property string noteQuery: notesSearch.text.trim().toLowerCase()
-    readonly property var matchingNotes: noted.filter(function(session) {
-        return !noteQuery || String(session.note || "").toLowerCase().includes(noteQuery)
-            || (session.notes || []).some(entry => String(entry.text || "").toLowerCase().includes(noteQuery))
-    })
+    readonly property string noteQuery: notesSearch.text.trim()
+    property int notesRequest: 0
+    property var searchRows: []
+    property string notesNext: ""
+    property bool searchingNotes: false
+    property bool previewSearch: false
+    property string notesError: ""
+    readonly property var matchingNotes: {
+        if (!noteQuery) return noted
+        if (!previewSearch) return searchRows
+        var query = noteQuery.toLowerCase()
+        return noted.filter(function(session) {
+            return String(session.note || "").toLowerCase().includes(query)
+                || (session.notes || []).some(entry => String(entry.text || "").toLowerCase().includes(query))
+        })
+    }
     clip: true
     contentWidth: availableWidth
 
@@ -67,6 +79,39 @@ ScrollView {
         updateState(week, state.saved, state.text, state.text)
         backend.saveReview(week, state.text)
     }
+    function resetSearch() {
+        ++notesRequest
+        searchRows = []
+        notesNext = ""
+        notesError = ""
+        searchingNotes = !!noteQuery && hasReview
+        if (searchingNotes) noteSearchDelay.restart()
+        else noteSearchDelay.stop()
+    }
+    function requestNotes(after) {
+        searchingNotes = true
+        notesError = ""
+        backend.searchReviewNotes(++notesRequest, week, noteQuery, after)
+    }
+    function appendNotes(rows) {
+        var merged = searchRows.slice()
+        for (var row of rows) {
+            var index = merged.findIndex(session => session.id === row.id)
+            if (index < 0) {
+                merged.push(row)
+                continue
+            }
+            // A session's matching entries can span multiple pages.
+            var entries = (merged[index].notes || []).slice()
+            for (var note of row.notes || []) {
+                if (!entries.some(entry => entry.id === note.id))
+                    entries.push(note)
+            }
+            entries.sort((left, right) => String(left.at).localeCompare(String(right.at)))
+            merged[index] = Object.assign({}, row, {notes: entries})
+        }
+        searchRows = merged
+    }
     function open() { if (week) backend.loadReview(week) }
     function shift(weeks) { setWeek(backend.reviewWeekStart(week, weeks)) }
     function setWeek(value) {
@@ -83,8 +128,23 @@ ScrollView {
     function count(n, one, many) { return n === 1 ? one : many.arg(n) }
     function perHour(value) { return value === null || value === undefined ? "—" : win.numberText(value) }
 
+    Timer {
+        id: noteSearchDelay
+        interval: 220
+        onTriggered: page.requestNotes("")
+    }
     Connections {
         target: backend
+        function onReviewNotesLoaded(request, result, error, methodUnavailable) {
+            if (request !== page.notesRequest) return
+            page.searchingNotes = false
+            page.previewSearch = methodUnavailable
+            if (methodUnavailable) return
+            page.notesError = error
+            if (error) return
+            page.appendNotes(result.rows || [])
+            page.notesNext = String(result.next || "")
+        }
         function onReviewsInvalidated() { if (page.visible) page.open() }
         function onOfflineChanged() { if (page.visible) page.open() }
         function onTodayDayChanged() { if (page.visible) Qt.callLater(page.open) }
@@ -98,7 +158,8 @@ ScrollView {
         }
     }
     onVisibleChanged: if (visible) open()
-    onReviewChanged: acceptReview()
+    onReviewChanged: { acceptReview(); resetSearch() }
+    onNoteQueryChanged: resetSearch()
     onWeekChanged: {
         showDraft()
         if (notesSearch) notesSearch.clear()
@@ -315,7 +376,9 @@ ScrollView {
                     spacing: 8
                     SectionTitle {
                         objectName: "reviewGoalsTitle"
-                        text: qsTr("Goals met") + "  ·  " + page.goalsMet.length
+                        text: qsTr("Goals met") + "  ·  " + page.goalsMetCount
+                            + (page.goalsMet.length < page.goalsMetCount
+                                ? "  ·  " + qsTr("%1 shown").arg(page.goalsMet.length) : "")
                     }
                     Repeater {
                         model: page.goalsMet
@@ -352,7 +415,7 @@ ScrollView {
                     }
                     Label {
                         visible: page.goalsMet.length === 0
-                        text: qsTr("No goals met this week.")
+                        text: page.goalsMetCount ? qsTr("No goal details available.") : qsTr("No goals met this week.")
                         color: page.win.muted
                         font.pixelSize: 13
                     }
@@ -362,7 +425,8 @@ ScrollView {
             SectionTitle {
                 objectName: "reviewNotesTitle"
                 text: qsTr("Sessions with notes") + "  ·  " + (page.noteQuery
-                    ? qsTr("%1 of %2 shown").arg(page.matchingNotes.length).arg(page.noted.length)
+                    ? (page.previewSearch ? qsTr("%1 of %2 shown").arg(page.matchingNotes.length).arg(page.noted.length)
+                        : qsTr("%1 matching shown").arg(page.matchingNotes.length))
                     : page.notedCount > page.noted.length
                         ? qsTr("%1 of %2").arg(page.noted.length).arg(page.notedCount) : page.noted.length)
             }
@@ -370,8 +434,8 @@ ScrollView {
                 id: notesSearch
                 objectName: "reviewNotesSearch"
                 Layout.fillWidth: true
-                visible: page.noted.length > 0
-                placeholderText: page.notesArePreview ? qsTr("Search notes shown here") : qsTr("Search notes")
+                visible: page.notedCount > 0
+                placeholderText: page.previewSearch && page.notesArePreview ? qsTr("Search notes shown here") : qsTr("Search notes")
                 Accessible.name: placeholderText
             }
             Repeater {
@@ -385,11 +449,23 @@ ScrollView {
                 }
             }
             Label {
-                visible: page.matchingNotes.length === 0
-                text: page.noteQuery ? qsTr("No matching notes.")
-                    : page.notedCount > 0 ? qsTr("No session previews available.") : qsTr("No sessions with notes this week.")
+                visible: page.searchingNotes || !!page.notesError || page.matchingNotes.length === 0
+                Layout.fillWidth: true
+                text: page.searchingNotes ? qsTr("Searching notes…") : page.notesError || (page.noteQuery
+                    ? qsTr("No matching notes.") : page.notedCount > 0
+                        ? qsTr("No session previews available.") : qsTr("No sessions with notes this week."))
+                textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
                 color: page.win.muted
                 font.pixelSize: 13
+            }
+            AppButton {
+                objectName: "reviewMoreNotes"
+                win: page.win
+                visible: !!page.notesNext || !!page.notesError
+                enabled: !page.searchingNotes
+                text: page.notesError ? qsTr("Retry search") : qsTr("Load more matches")
+                onClicked: page.requestNotes(page.notesNext)
             }
 
             Pane {

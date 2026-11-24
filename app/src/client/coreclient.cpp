@@ -77,7 +77,10 @@ void CoreClient::configureTransport(const QString &path) {
         }
         startNext();
     });
-    connect(m_transport, &SocketTransport::reconnected, this, &CoreClient::reconnected);
+    connect(m_transport, &SocketTransport::reconnected, this, [this] {
+        ++m_readGeneration;
+        emit reconnected();
+    });
     connect(m_transport, &SocketTransport::clockBoundary, this, [this, lastDay = QString()](const QString &day) mutable {
         if (day == lastDay || !QDate::fromString(day, Qt::ISODate).isValid()) return;
         lastDay = day;
@@ -182,7 +185,7 @@ void CoreClient::completeRpc(const SocketTransport::Reply &reply) {
         if (reply.kind == QStringLiteral("timeout")) kind = ErrorKind::Timeout;
         else if (reply.kind == QStringLiteral("conflict")) kind = ErrorKind::Conflict;
         else if (reply.kind == QStringLiteral("connection_lost") || reply.kind == QStringLiteral("not_ready")) kind = ErrorKind::Process;
-        result.error = {kind, reply.message, reply.value.toObject()};
+        result.error = {kind, reply.message, reply.value.toObject(), reply.code};
     } else if (request.mutation && !request.decoder) {
         result.ok = true;
     } else {
@@ -362,10 +365,13 @@ void CoreClient::rpcRead(const QString &method, const QJsonObject &params, Callb
             Dto::decodeJson, nullptr, {}, true);
 }
 void CoreClient::routineSessions(const QDate &from, const QDate &to, const QString &before, Callback callback) {
+    // The fallback reads full sessions, so page conservatively even though
+    // we retain only the task, tracking day, and minutes.
+    constexpr int pageSize = 12;
     QJsonObject params{{"from", from.toString(Qt::ISODate)}, {"to", to.toString(Qt::ISODate)},
-                       {"with_note", false}, {"limit", 500}};
+                       {"with_note", false}, {"limit", pageSize}};
     auto args = reportArguments(params, {"sessions", "list"});
-    args << "--all" << "--limit" << "500";
+    args << "--all" << "--limit" << QString::number(pageSize);
     if (!before.isEmpty()) {
         params.insert("before", before);
         args << "--before" << before;

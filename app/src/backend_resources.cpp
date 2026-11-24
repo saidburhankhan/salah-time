@@ -79,7 +79,8 @@ void Backend::attachTaskResource(const QString &id, const QVariantMap &fields, c
     params.insert("item_id", id);
     m_client.mutateEntity("resource.add", params, [this, operation](const CoreClient::Result &result) {
         if (result.ok) m_refreshPending = true;
-        emit attachmentFinished(operation, result.ok ? QString() : result.error.message);
+        emit attachmentFinished(operation, result.ok ? QString() : result.error.message,
+                                !result.ok && result.error.definitiveRejection());
     }, operation);
 }
 

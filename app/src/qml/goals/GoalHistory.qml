@@ -65,7 +65,8 @@ ColumnLayout {
             Label {
                 Layout.preferredWidth: 96
                 horizontalAlignment: Text.AlignRight
-                text: GoalText.amount(history.win, history.goal, modelData.value)
+                objectName: "goalHistoryValue"
+                text: GoalText.progressAmount(history.win, history.goal, modelData)
                 textFormat: Text.PlainText
                 color: history.win.text
                 font.family: history.win.mono

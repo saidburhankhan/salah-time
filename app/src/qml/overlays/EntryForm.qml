@@ -53,7 +53,9 @@ Popup {
     property bool saving: false
     property bool addAnother: false
     property string saveError: ""
-    readonly property bool canSubmit: !saving && !attachments.composing && weeklyValid && !!entryFields.titleText.trim()
+    property bool resourceRejected: false
+    readonly property bool canSubmit: !saving && !resourceRejected && !attachments.composing
+        && weeklyValid && !!entryFields.titleText.trim()
     property bool confirming: false
     readonly property bool weeklyValid: repeat !== "weekly" || days.length > 0
     readonly property var preview: backend.preview
@@ -172,6 +174,7 @@ Popup {
         pendingTask = null
         createdId = ""
         remaining = []
+        resourceRejected = false
         saveError = ""
         saving = false
         attachments.reset()
@@ -184,31 +187,57 @@ Popup {
         else
             backend.attachTaskResource(createdId, remaining[0].fields, remaining[0].operation)
     }
+    function advanceAttachments() {
+        resourceRejected = false
+        remaining = remaining.slice(1)
+        if (remaining.length) saveNext()
+        else finishSave(addAnother)
+    }
+    function correctAttachment(fields) {
+        fields.kind = remaining[0].fields.kind
+        remaining = [{ fields: fields, operation: backend.newOperationId() }].concat(remaining.slice(1))
+        resourceRejected = false
+        saveNext()
+    }
     Connections {
         target: backend
-        function onTaskCreateFinished(operation, id, error) {
-            if (!entryPopup.pendingTask || entryPopup.pendingTask.creation_op_id !== operation) return
-            if (error) { entryPopup.saving = false; entryPopup.saveError = error; return }
-            entryPopup.createdId = id
-            entryPopup.saveNext()
+        function onTagsLoaded() {
+            if (entryPopup.pendingTask || !entryPopup.saveError || entryPopup.tagOverrides === null) return
+            entryPopup.tagOverrides = entryPopup.tagOverrides.filter(id => backend.tags.some(tag => tag.id === id))
         }
-        function onAttachmentFinished(operation, error) {
+        function onTaskCreateFinished(operation, id, error, rejected) {
+            if (!entryPopup.pendingTask || entryPopup.pendingTask.creation_op_id !== operation) return
+            if (error) {
+                entryPopup.saving = false
+                entryPopup.saveError = error
+                if (rejected) {
+                    entryPopup.pendingTask = null
+                    entryPopup.remaining = []
+                    backend.loadSettings()
+                }
+                return
+            }
+            entryPopup.createdId = id
+            if (!entryPopup.backlog) entryPopup.win.maybeToast(entryPopup.pendingTask)
+            if (entryPopup.remaining.length) entryPopup.saveNext()
+            else entryPopup.finishSave(entryPopup.addAnother)
+        }
+        function onAttachmentFinished(operation, error, rejected) {
             if (!entryPopup.remaining.length || entryPopup.remaining[0].operation !== operation) return
             if (error) {
                 entryPopup.saving = false
                 entryPopup.saveError = qsTr("Task saved. Could not attach resource: %1").arg(error)
+                entryPopup.resourceRejected = rejected
                 return
             }
-            entryPopup.remaining = entryPopup.remaining.slice(1)
-            if (entryPopup.remaining.length) entryPopup.saveNext()
-            else entryPopup.finishSave(entryPopup.addAnother)
+            entryPopup.advanceAttachments()
         }
     }
     function submitTitle(keepOpen) {
         if (!canSubmit) return
         if (pendingTask) { saveNext(); return }
         var d = draft()
-        if (!item.id && attachments.entries.length) {
+        if (!item.id) {
             d.creation_op_id = backend.newOperationId()
             d.creation_date = backend.selectedDay
             pendingTask = d
@@ -306,7 +335,8 @@ Popup {
             }
             AppButton {
                 win: entryPopup.win
-                text: entryPopup.saving ? qsTr("Saving…") : entryPopup.saveError ? qsTr("Retry") : qsTr("Save  ↵")
+                visible: !entryPopup.resourceRejected
+                text: entryPopup.saving ? qsTr("Saving…") : entryPopup.pendingTask && entryPopup.saveError ? qsTr("Retry") : qsTr("Save  ↵")
                 primary: true
                 enabled: entryPopup.canSubmit
                 onClicked: entryPopup.submitTitle(false)
@@ -466,15 +496,36 @@ Popup {
                     Layout.fillHeight: true
                     contentWidth: availableWidth
                     clip: true
-                    NewTaskResources {
-                        id: attachments
+                    ColumnLayout {
                         width: newResourcesScroll.availableWidth
-                        win: entryPopup.win
-                        enabled: !entryPopup.pendingTask
+                        NewTaskResources {
+                            id: attachments
+                            Layout.fillWidth: true
+                            win: entryPopup.win
+                            visible: !entryPopup.resourceRejected
+                            enabled: !entryPopup.pendingTask
+                        }
+                        Loader {
+                            Layout.fillWidth: true
+                            active: entryPopup.resourceRejected
+                            visible: active
+                            sourceComponent: ResourceForm {
+                                objectName: "rejectedAttachment"
+                                win: entryPopup.win
+                                submitLabel: qsTr("Save attachment")
+                                cancelLabel: qsTr("Skip attachment")
+                                Component.onCompleted: {
+                                    load(entryPopup.remaining[0].fields)
+                                    serverError = entryPopup.saveError
+                                }
+                                onSubmitted: fields => entryPopup.correctAttachment(fields)
+                                onCancelled: entryPopup.advanceAttachments()
+                            }
+                        }
                     }
                 }
                 Label {
-                    visible: !!entryPopup.saveError
+                    visible: !!entryPopup.saveError && !entryPopup.resourceRejected
                     Layout.fillWidth: true
                     text: entryPopup.saveError
                     textFormat: Text.PlainText

@@ -21,6 +21,11 @@ public:
         QString message;
         // `error.data` of a JSON-RPC error, e.g. {"kind":"validation","missing":[...]}.
         QJsonObject data = {};
+        int rpcCode = 0;
+        bool definitiveRejection() const {
+            const auto reason = data.value(QStringLiteral("kind")).toString();
+            return reason == QLatin1String("validation") || reason == QLatin1String("not_found");
+        }
     };
     struct Result {
         Dto::Value value;

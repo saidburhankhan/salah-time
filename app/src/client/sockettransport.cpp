@@ -320,9 +320,10 @@ SocketTransport::Reply SocketTransport::decodeReply(const QJsonObject &object) {
     if (object.contains(QStringLiteral("error"))) {
         const QJsonObject error = object.value(QStringLiteral("error")).toObject();
         const QJsonObject data = error.value(QStringLiteral("data")).toObject();
+        reply.code = error.value(QStringLiteral("code")).toInt();
         reply.kind = data.value(QStringLiteral("kind")).toString();
         if (reply.kind.isEmpty()) {
-            reply.kind = error.value(QStringLiteral("code")).toInt() == -32004
+            reply.kind = reply.code == -32004
                              ? QStringLiteral("conflict")
                              : QStringLiteral("rpc");
         }

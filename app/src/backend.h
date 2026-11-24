@@ -154,6 +154,7 @@ public:
     Q_INVOKABLE void loadInsights(const QVariantMap &filter);
     // Weekly review (backend_review.cpp). Weeks are Monday dates; an empty note removes the reflection.
     Q_INVOKABLE void loadReview(const QString &week);
+    Q_INVOKABLE void searchReviewNotes(int request, const QString &week, const QString &query, const QString &after);
     Q_INVOKABLE void saveReview(const QString &week, const QString &note);
     Q_INVOKABLE QString reviewWeekStart(const QString &day, int offsetWeeks = 0) const;
     Q_INVOKABLE void loadStatsQuery(const QVariantMap &filter);
@@ -238,6 +239,8 @@ public:
     Q_INVOKABLE void editGoal(const QString &id, double target);
     Q_INVOKABLE void endGoal(const QString &id);
     Q_INVOKABLE void removeGoal(const QString &id);
+    Q_INVOKABLE bool loadHistoricalTaskForEdit(const QString &id, int request);
+    Q_INVOKABLE ItemDraft *itemFromCurrentView(const QVariantMap &row);
     Q_INVOKABLE ItemDraft *itemForId(const QString &id);
     Q_INVOKABLE ItemDraft *itemFromParse(const QString &fallbackTitle = {});
     Q_INVOKABLE QString hijriHeader(const QString &isoDate) const;
@@ -249,6 +252,7 @@ signals:
     void selectedStatsItemChanged();
     void statsDailyNewestCountChanged();
     void editItemChanged();
+    void historicalTaskForEdit(int request, const QVariantMap &row);
     void errorChanged();
     void busyChanged();
     void offlineChanged();
@@ -274,6 +278,7 @@ signals:
     void reviewChanged();
     void reviewSaveFinished(bool ok, const QString &message, const QString &week, const QString &submitted);
     void reviewsInvalidated();
+    void reviewNotesLoaded(int request, const QVariantMap &page, const QString &error, bool methodUnavailable);
     void statsTableChanged();
     void sessionsListChanged();
     void sessionsLoadingChanged();
@@ -284,8 +289,8 @@ signals:
     // A goal add/edit/end/remove finished; `message` is the server error on failure.
     void goalWriteFinished(bool ok, const QString &message);
     // A resource add/edit/remove finished; `message` is the server error on failure.
-    void taskCreateFinished(const QString &operation, const QString &id, const QString &error);
-    void attachmentFinished(const QString &operation, const QString &error);
+    void taskCreateFinished(const QString &operation, const QString &id, const QString &error, bool rejected);
+    void attachmentFinished(const QString &operation, const QString &error, bool rejected);
     void resourceWriteFinished(bool ok, const QString &message);
 
 private:
@@ -332,6 +337,7 @@ private:
                         const QString &beforeId);
     qint64 versionFor(const QString &id) const;
     void reloadFromNotification(qint64 revision, const QStringList &scopes);
+    void reloadChangedScopes(const QStringList &scopes);
     bool dayContains(const QString &id) const;
     void refreshBacklog();
     void refreshResources();
@@ -404,6 +410,7 @@ private:
     quint64 m_insightsRequest = 0;
     QVariantMap m_review;
     QString m_reviewWeek;
+    QHash<QString, QHash<QString, QString>> m_reviewSaveOperations;
     quint64 m_reviewRequest = 0;
     QVariantMap m_statsTable;
     quint64 m_statsTableRequest = 0;
