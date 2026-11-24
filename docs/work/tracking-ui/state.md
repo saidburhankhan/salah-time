@@ -206,3 +206,6 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   dot with one week of data; Insights bars use the accent yellow (check against the muted rule).
   NEXT (13:14 window): independent review R4 (Codex Astra, read-only → r4-findings.md) over phase 4 +
   tags + scope_label in crates/app/plugin; route confirmed findings; fix; reinstall with live checks.
+- 08:5x USER: "try to use less claude and do it with codex". From now on no Claude subagents inherit at
+  a Codex cap; work waits for the next window (13:14, 18:14, 23:14) or the reset at a 100% weekly cap.
+  Claude only verifies, commits, installs and makes one-line fixes. R4 review and its fixes run on Codex.
