@@ -280,3 +280,10 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   way to stop a routine. → plan.md "Addendum: ending a routine keeps its history". Queue at 23:58:
   C8 (Astra) migration 006 end_day + conversion fix + routines.activity WIP (finish first);
   then C9 (Sol) Routines activity switch + End routine UI; C10 (Sol) widget check.
+- 00:0x–00:2x (25 Nov) committed e3d6beb (C8 10 routines.activity), e3c38ac (C9 6), 5c01623 (C8 11:
+  migration 006 end_day, conversion keeps history; live-copy gate: data tables unchanged, past days
+  identical, convert+end on the copy kept 23–24 Nov), 2c1e4ab (C10 6 note), b769fe4 (C9 7 End
+  routine UI). INSTALLED 00:26 via gated chain (263 cargo + 99 app); live DB v5→v6 with
+  bak-v5 kept; integrity/FK ok; 23 Nov 3 items/14 sessions, 24 Nov 4/9 as on the copy; live shell
+  log clean; bar screenshot impossible (display off, DPMS) — check the bar when the user is back.
+  QUEUE EMPTY for tracking-ui. Ask the user what next (quota: weekly ~20%, windows until 25 Nov night).
