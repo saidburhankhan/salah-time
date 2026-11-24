@@ -214,3 +214,5 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   disabled without http(s)://, (4) resources while creating a task (app + widget), (5) Statistics by
   epic = 0. Queue at 13:14, Codex only: C8 (Astra) item 1; C9 (Astra) items 2, 3, 4, 5 app; C10 (Sol)
   items 3, 4 widget. R4 review after (next window).
+- 13:16 new 5h window (weekly 63%). Codex only. Dispatched C8 (Astra) addendum 1 → CHECKPOINT 5;
+  C9 (Astra) addendum 2–5; C10 (Sol) addendum 3–4. R4 next window. Reset unused.
