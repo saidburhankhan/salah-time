@@ -68,6 +68,28 @@ test("other schemes, missing hosts and malformed or ambiguous URLs are blocked",
   for (const url of rejected) assert.equal(logic.webUrl(url), "", String(url))
 })
 
+test("link drafts upgrade bare domains to HTTPS and keep explicit web schemes", () => {
+  const examples = [
+    ["  youtube.com/watch?v=abc#start  ", "https://youtube.com/watch?v=abc#start"],
+    ["example.com", "https://example.com"],
+    ["example.com:8443/docs", "https://example.com:8443/docs"],
+    ["bücher.example", "https://bücher.example"],
+    ["http://example.com/docs", "http://example.com/docs"]
+  ]
+  for (const [value, expected] of examples) assert.equal(logic.normalizedWebUrl(value), expected)
+})
+
+test("link drafts reject relative paths, bare credentials, malformed domains and schemes", () => {
+  for (const input of ["some text", "localhost", "docs/readme", "/example.org", "../example.org",
+    "//example.org", "you@example.org", "example.org@other.org", "example.org:65536",
+    "ftp://example.org", "mailto:you@example.org", "javascript:alert(1)", "https:example.org",
+    "example..org", "-example.org", "example.org/a b", "example.org\\p",
+    "example.org/a\nb", "example.org/\u0000", "http:///example.org"]) {
+    assert.equal(logic.normalizedWebUrl(input), "", input)
+  }
+  assert.equal(logic.resourceDraft("link", "example.org/" + "a".repeat(2000)), null)
+})
+
 test("quick add sends the body or validated URL to the expanded item", () => {
   function same(actual, expected) {
     assert.deepEqual(JSON.parse(JSON.stringify(actual)), expected)
@@ -76,7 +98,28 @@ test("quick add sends the body or validated URL to the expanded item", () => {
     { item_id: "item", kind: "note", body: "<b>Read</b>" })
   same(logic.quickResourceParams("item", "link", "  https://example.org/ "),
     { item_id: "item", kind: "link", url: "https://example.org/" })
+  same(logic.quickResourceParams("item", "link", "example.org/video"),
+    { item_id: "item", kind: "link", url: "https://example.org/video" })
   assert.equal(logic.quickResourceParams("item", "note", " "), null)
   assert.equal(logic.quickResourceParams("item", "link", "file:///tmp/example"), null)
   assert.equal(logic.quickResourceParams("item", "reminder", "tomorrow"), null)
+})
+
+test("task creation drafts are normalized without an item ID", () => {
+  const note = logic.resourceDraft("note", "  Read\nnext chapter  ")
+  const link = logic.resourceDraft("link", "example.org/guide")
+  assert.deepEqual({ ...note }, { kind: "note", body: "Read\nnext chapter" })
+  assert.deepEqual({ ...link }, { kind: "link", url: "https://example.org/guide" })
+})
+
+test("a reminder draft uses a local time and an optional title", () => {
+  const expected = new Date(2028, 1, 29, 9, 15).toISOString()
+  assert.deepEqual({ ...logic.resourceDraft("reminder", "  Plan March  ", "2028-02-29", "09:15") },
+    { kind: "reminder", title: "Plan March", remind_at: expected })
+  assert.deepEqual({ ...logic.resourceDraft("reminder", " ", "2028-02-29", "09:15") },
+    { kind: "reminder", remind_at: expected })
+  for (const [day, time] of [["2027-02-29", "09:15"], ["2028-02-30", "09:15"],
+    ["2028-02-29", "24:00"], ["2028-02-29", ""], ["2028-02-29", "09:15Z"]]) {
+    assert.equal(logic.resourceDraft("reminder", "Plan March", day, time), null)
+  }
 })

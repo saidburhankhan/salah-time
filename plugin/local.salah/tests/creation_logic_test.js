@@ -156,3 +156,35 @@ test("addedItem reads the socket envelope and the CLI fallback raw text", () => 
   assert.equal(logic.addedItem({ changed: { items: [] } }), null)
   assert.equal(logic.addedItem(null), null)
 })
+
+test("retrying the same task write preserves the op ID, while changed task fields start a new attempt", () => {
+  let nextId = 0
+  const newOpId = () => "op-" + ++nextId
+  const params = { title: "Read", backlog: true, tag_ids: [] }
+  const first = logic.itemAttempt(null, params, newOpId)
+  assert.equal(first.id, "op-1")
+  assert.equal(logic.itemAttempt(first, { ...params }, newOpId), first)
+  assert.equal(logic.itemAttempt(first, { ...params, title: "Write" }, newOpId).id, "op-2")
+})
+
+test("resource writes use the confirmed item ID and only failed writes are retried with their original IDs", () => {
+  let nextId = 0
+  const newOpId = () => "op-" + ++nextId
+  const drafts = [
+    { kind: "note", body: "Notes" },
+    { kind: "link", url: "https://example.org" },
+    { kind: "reminder", remind_at: "2031-05-15T07:00:00Z" }
+  ]
+  const started = logic.resourceBatch("new-item", drafts, newOpId)
+  same(started.pending.map(write => write.params), drafts.map(draft => ({ item_id: "new-item", ...draft })))
+  assert.equal(drafts[0].item_id, undefined)
+
+  const noteSaved = logic.advanceResourceBatch(started, null)
+  const linkFailed = logic.advanceResourceBatch(noteSaved, "disconnected")
+  same(linkFailed.pending.map(write => write.id), ["op-3"])
+  const reminderSaved = logic.advanceResourceBatch(linkFailed, null)
+  const retry = logic.retryResourceBatch(reminderSaved)
+  same(retry.pending, [{ ...started.pending[1], params: { ...started.pending[1].params }, error: "disconnected" }])
+  same(logic.advanceResourceBatch(retry, null), { pending: [], failed: [] })
+  assert.equal(nextId, 3)
+})

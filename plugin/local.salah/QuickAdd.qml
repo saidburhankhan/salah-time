@@ -3,8 +3,8 @@ import qs.Commons
 import qs.Ui
 import "CreationLogic.js" as CreationLogic
 
-// Enter submits the quick line directly. The inline sheet uses the core parse
-// for the same line and retains explicit chip choices while the user types.
+// Enter submits a bare quick line directly. The sheet uses the parsed line
+// and preserves its choices when it has attachments.
 Column {
   id: root
 
@@ -19,6 +19,7 @@ Column {
   property alias quickField: quickField
 
   readonly property bool expanded: quickField.text.trim() !== ""
+  readonly property bool textFocus: quickField.activeFocus || resourceDrafts.textFocus
   property var parsed: null
   property string parseError: ""
   property var minutesChoice: null
@@ -28,6 +29,10 @@ Column {
   property string projectId: ""
   property string epicId: ""
   property string submitting: ""
+  property var itemAttempt: null
+  property var resourceBatch: null
+  property bool awaitingItemId: false
+  readonly property bool taskAdded: awaitingItemId || resourceBatch !== null
   readonly property var planning: host.planner ? host.planner.planning_block : null
   readonly property string today: planning ? planning.day : (host.planner ? host.planner.day : "")
   readonly property var schedule: CreationLogic.schedule(parsed, whenChoice, today)
@@ -49,18 +54,56 @@ Column {
   }
 
   function dismiss() {
-    submitting = ""
+    if (submitting) return
+    resourceBatch = null
+    awaitingItemId = false
     root.host.clearQuickAddPreset()
     quickField.clear()
     quickField.focus = false
   }
 
   function submit(backlog) {
-    if (submitting || !parsed || (schedule.when === "tomorrow" && !schedule.date && !backlog)) return
+    if (submitting || taskAdded || !parsed || (schedule.when === "tomorrow" && !schedule.date && !backlog)) return
     var params = CreationLogic.addParams(parsed, fields, projectId, backlog, schedule.date, epicId, tagIds)
-    if (!params) return
-    submitting = host.beginOp("add", "")
-    transport.rpcMutation(submitting, "item.add", params, "add")
+    if (!params || !resourceDrafts.commitDraft()) return
+    itemAttempt = CreationLogic.itemAttempt(itemAttempt, params, transport.newOpId)
+    writeItem()
+  }
+
+  function writeItem() {
+    submitting = host.beginOp("add", "", "", itemAttempt.id)
+    transport.rpcMutation(submitting, "item.add", Object.assign({}, itemAttempt.params), "add")
+  }
+
+  function completeItem(result) {
+    if (!resourceDrafts.entries.length) {
+      dismiss()
+      return
+    }
+    var item = CreationLogic.addedItem(result)
+    awaitingItemId = !item || !item.id
+    if (awaitingItemId) return
+    resourceBatch = CreationLogic.resourceBatch(item.id, resourceDrafts.entries, transport.newOpId)
+    writeNextResource()
+  }
+
+  function writeNextResource() {
+    var write = resourceBatch.pending[0]
+    if (write) {
+      submitting = write.id
+      transport.rpcMutation(write.id, "resource.add", Object.assign({}, write.params), "creationResource")
+    } else if (resourceBatch.failed.length === 0) {
+      dismiss()
+    }
+  }
+
+  function retryResources() {
+    if (submitting) return
+    if (awaitingItemId) writeItem()
+    else {
+      resourceBatch = CreationLogic.retryResourceBatch(resourceBatch)
+      writeNextResource()
+    }
   }
 
   onProjectsChanged: {
@@ -98,10 +141,22 @@ Column {
       }
     }
     function onMutationSucceeded(opId, kind, result) {
-      if (opId === root.submitting) root.dismiss()
+      if (opId !== root.submitting) return
+      root.submitting = ""
+      if (kind === "add") root.completeItem(result)
+      else if (kind === "creationResource") {
+        root.resourceBatch = CreationLogic.advanceResourceBatch(root.resourceBatch, null)
+        root.writeNextResource()
+      }
     }
     function onMutationFailed(opId, kind, message, data) {
-      if (opId === root.submitting) root.submitting = ""
+      if (opId !== root.submitting) return
+      root.submitting = ""
+      if (kind === "creationResource") {
+        var detail = String(message || "").trim().replace(/[\r\n]+/g, " ").slice(0, 240)
+        root.resourceBatch = CreationLogic.advanceResourceBatch(root.resourceBatch, detail)
+        root.writeNextResource()
+      }
     }
   }
 
@@ -116,7 +171,7 @@ Column {
     font.family: root.fontFamily
     maximumLength: 200
 
-    readOnly: !!root.submitting
+    readOnly: !!root.submitting || root.taskAdded
     onTextChanged: {
       root.parsed = null
       root.parseError = ""
@@ -124,12 +179,18 @@ Column {
       else {
         parseTimer.stop()
         root.resetChoices()
+        root.itemAttempt = null
+        resourceDrafts.reset()
       }
     }
     onAccepted: {
-      if (root.submitting) return
-      root.host.addItem(text)
-      text = ""
+      if (root.submitting || root.taskAdded) return
+      if (root.itemAttempt || resourceDrafts.entries.length || resourceDrafts.hasInput) {
+        root.submit(root.schedule.when === "backlog")
+      } else {
+        root.host.addItem(text)
+        text = ""
+      }
     }
 
     Keys.onEscapePressed: function(event) {
@@ -145,8 +206,17 @@ Column {
     fontFamily: root.fontFamily
   }
 
+  component SheetButton: Button {
+    foreground: root.foreground
+    bordered: true
+    fontFamily: root.fontFamily
+    fontSize: Style.font.bodySmall
+    verticalPadding: Style.space(2)
+    opacity: enabled ? 1 : 0.45
+  }
+
   Column {
-    visible: root.expanded
+    visible: root.expanded && !root.taskAdded
     enabled: !root.submitting
     width: parent.width
     spacing: Style.space(3)
@@ -204,32 +274,67 @@ Column {
       onPicked: value => root.blockChoice = value
     }
 
+    CreationResources {
+      id: resourceDrafts
+      width: parent.width
+      host: root.host
+      fontFamily: root.fontFamily
+    }
+
     Row {
       anchors.right: parent.right
       spacing: Style.space(5)
 
-      Button {
+      SheetButton {
         enabled: !!root.parsed
         text: root.strings.t("creation.add")
-        foreground: root.foreground
-        bordered: true
-        fontFamily: root.fontFamily
-        fontSize: Style.font.bodySmall
-        verticalPadding: Style.space(2)
-        opacity: enabled ? 1 : 0.45
         onClicked: root.submit(root.schedule.when === "backlog")
       }
 
-      Button {
+      SheetButton {
         enabled: root.backlogAllowed
         text: root.strings.t("creation.toBacklog")
-        foreground: root.foreground
-        bordered: true
-        fontFamily: root.fontFamily
-        fontSize: Style.font.bodySmall
-        verticalPadding: Style.space(2)
-        opacity: enabled ? 1 : 0.45
         onClicked: root.submit(true)
+      }
+    }
+  }
+
+  Column {
+    visible: root.taskAdded
+    width: parent.width
+    spacing: Style.space(3)
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      text: {
+        if (root.submitting) return root.strings.t("creation.savingResources")
+        if (root.awaitingItemId) return root.strings.t("creation.itemConfirmationFailed")
+        var failed = root.resourceBatch && root.resourceBatch.failed[0]
+        if (!failed) return ""
+        var summary = root.strings.t("creation.resourceSaveFailed")
+        return failed.error ? summary + " " + failed.error : summary
+      }
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+      wrapMode: Text.Wrap
+      maximumLineCount: 3
+      elide: Text.ElideRight
+    }
+
+    Row {
+      visible: !root.submitting
+      spacing: Style.space(5)
+
+      SheetButton {
+        text: root.strings.t("creation.retryResources")
+        onClicked: root.retryResources()
+      }
+
+      SheetButton {
+        text: root.strings.t("creation.dismiss")
+        onClicked: root.dismiss()
       }
     }
   }

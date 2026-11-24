@@ -12,6 +12,7 @@ Column {
   required property string fontFamily
   readonly property var transport: host.resourceClient
   readonly property bool textFocus: draft.activeFocus
+  readonly property var draftParams: ResourceLogic.quickResourceParams(itemId, addingKind, draft.text)
   property var rows: []
   property string requestId: ""
   property string loadError: ""
@@ -39,12 +40,8 @@ Column {
   }
 
   function save() {
-    if (addOp || !addingKind || !draft.text.trim()) return
-    var params = ResourceLogic.quickResourceParams(itemId, addingKind, draft.text)
-    if (!params) {
-      actionError = host.tr.t("resource.invalidUrl")
-      return
-    }
+    if (addOp || !draftParams) return
+    var params = Object.assign({}, draftParams)
     var key = JSON.stringify(params)
     if (!addAttempt || addAttempt.key !== key)
       addAttempt = { id: transport.newOpId(), key: key }
@@ -173,7 +170,7 @@ Column {
     Button {
       id: saveButton
       height: draft.height
-      enabled: !section.addOp && draft.text.trim() !== ""
+      enabled: !section.addOp && !!section.draftParams
       opacity: enabled ? 1 : 0.45
       text: section.host.tr.t("session.save")
       bordered: true
@@ -183,6 +180,17 @@ Column {
       verticalPadding: 0
       onClicked: section.save()
     }
+  }
+
+  Text {
+    visible: section.addingKind === "link" && !section.draftParams
+    width: parent.width
+    textFormat: Text.PlainText
+    text: section.host.tr.t("resource.invalidUrl")
+    color: section.host.mutedForeground
+    font.family: section.fontFamily
+    font.pixelSize: Style.font.caption
+    elide: Text.ElideRight
   }
 
   Flickable {

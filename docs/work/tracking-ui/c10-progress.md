@@ -78,3 +78,30 @@ actual Wayland panel, socket transport and app launch need integration
 verification once the backend and launcher are available.
 
 CHECKPOINT 2: Add weekly review footer logic and verify server goal labels — files: plugin/local.salah/BarWidget.qml, plugin/local.salah/ReviewLogic.js, plugin/local.salah/SalahClient.qml, plugin/local.salah/i18n/en.json, plugin/local.salah/tests/goal_logic_test.js, plugin/local.salah/tests/review_logic_test.js, docs/work/tracking-ui/c10-progress.md
+
+## Feedback items 3 and 4 — resource drafts and link validation
+
+In an expanded task, a bare domain with an optional path saves as HTTPS.
+An invalid link shows the web-address hint under the field while Save is
+disabled. Explicit HTTP(S) links keep their scheme.
+
+The creation sheet has a collapsible Notes & links section for notes, links
+and reminders. A reminder date and time use the desktop's local time zone.
+Add and To backlog include a valid draft even if Attach was skipped. An
+invalid draft remains editable and blocks submission with its inline hint.
+Enter still quick-adds a bare task line and uses the sheet when resources
+are present.
+
+After `item.add` confirms the task ID, the sheet attempts each resource
+in order. A write failure keeps the task and shows an inline error with a
+retry action. Retry sends only failed writes with their original op IDs.
+Retrying an unchanged task submission also reuses its op ID.
+
+All 144 Node checks, Omarchy plugin validation, QML syntax checks, JSON
+parsing and `git diff --check` passed. Offscreen Quickshell with an
+Items-only panel stand-in and stub stdio RPC verified the inline hint,
+HTTPS request, note and local-time reminder payloads, scheduled and
+backlog task creation, and an identical link retry with no second task
+write. Wayland and Unix-socket verification remain with the orchestrator.
+
+CHECKPOINT 3: Normalize widget link drafts and attach retryable resources to new tasks — files: plugin/local.salah/BarWidget.qml, plugin/local.salah/CreationLogic.js, plugin/local.salah/CreationResources.qml, plugin/local.salah/ItemResources.qml, plugin/local.salah/QuickAdd.qml, plugin/local.salah/ResourceLogic.js, plugin/local.salah/i18n/en.json, plugin/local.salah/tests/creation_logic_test.js, plugin/local.salah/tests/resource_logic_test.js, docs/work/tracking-ui/c10-progress.md

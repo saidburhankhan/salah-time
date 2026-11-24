@@ -558,7 +558,7 @@ BarWidget {
         && "item:" + content.expandedItemId === pending.rowKey) {
       rowErrorKey = pending.rowKey
       rowErrorText = detail
-    } else {
+    } else if (kind !== "creationResource") {
       actionError = detail
     }
     client.refreshStatus()
@@ -814,7 +814,7 @@ BarWidget {
       anchors.fill: parent
       readonly property real maxContentHeight: Math.max(Style.space(240), panel.availableCardHeight - panel.padding * 2)
       implicitHeight: Math.min(dayColumn.implicitHeight, maxContentHeight)
-      blocked: quickField.activeFocus || editingKey !== "" || sessionEditor.textFocus || runningCard.noteFocus
+      blocked: quickAdd.textFocus || editingKey !== "" || sessionEditor.textFocus || runningCard.noteFocus
       function revealSessionEditor() {
         if (root.sessionPanelMode === "pause")
           dayScroll.contentY = Math.max(0, Math.min(sessionEditor.y, dayScroll.contentHeight - dayScroll.height))

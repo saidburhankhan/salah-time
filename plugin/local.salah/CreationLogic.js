@@ -105,3 +105,27 @@ function addedItem(result) {
   var items = result && result.changed && result.changed.items
   return items && items.length ? items[0] : null
 }
+
+function itemAttempt(previous, params, newOpId) {
+  var key = JSON.stringify(params)
+  return previous && previous.key === key ? previous : { id: newOpId(), key: key, params: params }
+}
+
+function resourceBatch(itemId, drafts, newOpId) {
+  return {
+    pending: drafts.map(function(draft) {
+      return { id: newOpId(), params: Object.assign({ item_id: itemId }, draft) }
+    }),
+    failed: []
+  }
+}
+
+function advanceResourceBatch(batch, error) {
+  var failed = batch.failed
+  if (error !== null) failed = failed.concat(Object.assign({}, batch.pending[0], { error: error }))
+  return { pending: batch.pending.slice(1), failed: failed }
+}
+
+function retryResourceBatch(batch) {
+  return { pending: batch.failed, failed: [] }
+}
