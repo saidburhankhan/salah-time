@@ -43,8 +43,9 @@ BarWidget {
   property var dueReminders: []
   property var pendingReminders: ({})
   property string reminderError: ""
-  // Set to the fixed salah open argv once the Review page accepts a launch argument.
-  readonly property var weeklyReviewCommand: null
+  // Opens the app on its Review page (salah-app --page review), like the
+  // bar's app launcher below.
+  readonly property var weeklyReviewCommand: ["salah-app", "--page", "review"]
   property int reviewRequestId: 0
   property var weeklyReview: null
   readonly property string reviewWeek: opened && !!weeklyReviewCommand && errorMessage === ""
