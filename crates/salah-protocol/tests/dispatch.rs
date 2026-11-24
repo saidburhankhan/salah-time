@@ -489,7 +489,7 @@ fn project_filters_keep_plan_line_sessions_distinct_from_unplanned_minutes() {
     );
     let stats = f.ok("stats.get", json!({"days":1,"project_id":a}));
     let day = &stats["days"][0];
-    assert_eq!(day["minutes"], 15);
+    assert_eq!(day["minutes"], 5);
     assert_eq!(day["planned_minutes"], 0);
     assert!(day["fulfilment_ratio"].is_null());
     assert_eq!(day["unplanned_minutes"], 5);

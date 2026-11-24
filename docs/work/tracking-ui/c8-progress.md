@@ -195,3 +195,15 @@ Review refinement finished: `open_backlog_count` counts live backlog tasks with 
 Tests: 4 new `tracking_cli.rs` tests (goals lifecycle, insights, review default week/save/clear, open rejection), unit tests for `last_full_week` and `app_args`. 242 workspace tests passed, 0 failed (socket tests included). fmt, clippy -D warnings and `git diff --check` clean.
 
 CHECKPOINT 4: CLI goal, insights and review commands, review open-backlog refinement, `salah open --page` — files: crates/salah-cli/src/main.rs, crates/salah-cli/src/render.rs, crates/salah-cli/src/reports.rs, crates/salah-cli/src/goals.rs, crates/salah-cli/src/reviews.rs, crates/salah-cli/tests/tracking_cli.rs, crates/salah-cli/tests/rpc/reviews.rs, crates/salah-cli/tests/fixtures/rpc/review_get.json, crates/salah-cli/tests/fixtures/rpc/review_save.json, crates/salah-store/src/reviews.rs, docs/work/tracking-ui/c8-progress.md
+
+## 5 — a session follows its task's current project and epic
+
+One store query resolves task assignments for session reports, goal samples, epic totals and the epic removal check. The same query supplies IDs for running timers, mutations and sessions embedded in day views. Item-less logs keep their recorded project and epic. Backlog membership and epic task counts already use the current item, and completion ticks are tied to the item ID.
+
+The new RPC fixture `stats_epic_reassigned.json` shows Bayyinah with 10 sessions and 30 minutes, all logged before the epic existed. The test starts six sessions' worth of work without a project and logs the other four in a different project. Both sets follow the task. Item-less project and epic logs stay in their original groups. The regression compares stored session rows before and after the moves.
+
+Existing JSON fixtures retained all their values. Three older test expectations changed with the rule. Removing a task's assignment makes its open timer's project null. The previous project's filtered minutes drop from 15 to 5 after a task moves, leaving just the bare project log. A historical epic retains its frozen 30 planned minutes, while its 25 worked minutes and two session rows follow the task out of that epic.
+
+235 workspace tests passed. The eight Unix-socket tests named under checkpoint 0b were filtered out. Strict Clippy, formatting and diff checks passed.
+
+CHECKPOINT 5: Resolve session project and epic through the current task across reports, goals and session views — files: crates/salah-store/src/{reports,goals,epics}.rs, crates/salah-core/src/{sessions,sessions/list,stats/table,status}.rs, crates/salah-protocol/tests/dispatch.rs, crates/salah-cli/tests/{rpc,rpc/assignments,rpc/epics,rpc/goals,rpc/phase2}.rs, crates/salah-cli/tests/fixtures/rpc/stats_epic_reassigned.json, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md

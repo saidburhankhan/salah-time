@@ -203,7 +203,7 @@ fn epic_lifecycle_keeps_versions_history_and_replays() {
 }
 
 #[test]
-fn epic_reports_use_recorded_ownership_and_include_unassigned_work() {
+fn epic_reports_follow_task_moves_and_keep_frozen_plans() {
     let h = Harness::new();
     let mut rpc = Session::open(&h, NOW);
     let mut fixtures = Fixtures::default();
@@ -359,7 +359,7 @@ fn epic_reports_use_recorded_ownership_and_include_unassigned_work() {
         json!({"from":DATE,"to":DATE,"epic_id":e}),
     );
     assert_eq!(old["days"][0]["planned_minutes"], 30);
-    assert_eq!(old["totals"]["minutes"], 25);
+    assert_eq!(old["totals"]["minutes"], 0);
     let today = good(&mut next, "stats.get", json!({"days":1,"epic_id":e}));
     assert_eq!(today["days"][0]["planned_minutes"], 0);
     let sessions = good(
@@ -367,16 +367,51 @@ fn epic_reports_use_recorded_ownership_and_include_unassigned_work() {
         "sessions.list",
         json!({"days":2,"epic_id":e,"with_note":false}),
     );
-    assert_eq!(sessions["rows"].as_array().unwrap().len(), 2);
+    assert_eq!(sessions["rows"], json!([]));
+    let moved = good(
+        &mut next,
+        "sessions.list",
+        json!({"days":2,"item_id":item,"project_id":"none","epic_id":"none","with_note":false}),
+    );
+    let rows = moved["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|s| {
+        ["epic", "epic_id", "project", "project_id"]
+            .iter()
+            .all(|k| s[k].is_null())
+    }));
+    let historical = good(&mut next, "day.get", json!({"date":DATE}));
+    let planned = historical["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|b| b["items"].as_array().unwrap())
+        .find(|i| i["id"] == item)
+        .unwrap();
+    assert_eq!(planned["epic_id"], e);
+    assert_eq!(planned["project"]["id"], p);
     assert!(
-        sessions["rows"]
+        planned["sessions"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|s| s["epic_id"] == e
-                && s["project_id"] == p
-                && s["epic"] == json!({"id": e, "name": "Reading"}))
+            .all(|s| s["project_id"].is_null() && s["epic_id"].is_null())
     );
+    let id = rows[0]["id"].as_str().unwrap();
+    let edited = good(
+        &mut next,
+        "session.edit",
+        json!({"op_id":"annotate","id":id,"note":"Reviewed"}),
+    );
+    let view = &edited["changed"]["sessions"][0];
+    assert!(view["project_id"].is_null() && view["epic_id"].is_null());
+    let raw = salah_store::Store::open(&h.data)
+        .unwrap()
+        .session(id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(raw.project_id, Some(p));
+    assert_eq!(raw.epic_id.as_deref(), Some(e.as_str()));
     bad(
         &mut next,
         "session.log",

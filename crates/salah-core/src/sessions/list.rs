@@ -77,7 +77,7 @@ pub struct SessionList {
     pub next: Option<String>,
 }
 
-/// A session with the current labels of its recorded project and task.
+/// A session with its current task, project and epic labels.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ListRow {
     #[serde(flatten)]

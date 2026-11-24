@@ -455,7 +455,7 @@ pub(super) fn epic_key(s: &ReportSession) -> Key {
     }
 }
 
-/// Each live tag of the session's project, or the "No tag" row.
+/// Each live tag of the task (or its project for item-less work), or the "No tag" row.
 pub(super) fn tag_keys(s: &ReportSession, tags: &salah_store::ReportTags) -> Vec<Key> {
     let keys: Vec<Key> = tags
         .for_owner(

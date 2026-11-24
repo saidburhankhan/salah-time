@@ -178,10 +178,11 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   day's Sleep cut-off, at least 1. It appears in `status.get`, day rows and mutation
   results. Finished sessions omit it, as do running sessions whose Sleep instant
   cannot be resolved.
-  An item session copies its project and epic at creation. A session logged or started
-  against an epic alone takes its project from the epic. Later item edits preserve both
-  recorded IDs. Save & Done copies the item’s current project and live epic onto a
-  new tick. A removed epic yields a null `epic_id`. Timestamped notes are
+  Every newly built session view exposes the task's current project and epic, including
+  null when the task loses an assignment. This also applies to running timers, ticks
+  and sessions of soft-deleted tasks. An item-less session uses its recorded IDs.
+  Starting or logging work directly against an epic records that epic and its project.
+  Timestamped notes are
   ordered oldest first and `at` is a UTC instant.
 - `ItemView` and day rows expose nullable `epic_id`. An assigned epic must belong
   to the item’s project. Changing projects clears the old epic. The same edit can
@@ -270,8 +271,8 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   stored label, including after the scope is removed. A `day` period is the tracking day (the Sleep
   boundary, the same `day` sessions carry); a `week` runs Monday to Sunday.
   Progress is computed at read time from finished live sessions (the `stats.*`
-  set; running timers do not count) whose recorded `item_id`, `epic_id` or
-  `project_id` matches the scope; work without a project counts only toward
+  set; running timers do not count) whose item or resolved epic or project
+  matches the scope; work without a project counts only toward
   all-work goals. Minutes goals sum `minutes` (a tick adds 0, `value` is 0 with no
   work). Metric goals use the metric's rollup over the sessions that recorded it:
   `sum`, or the minutes-weighted mean `stats.*` uses (a tick weighs 1); `value`
@@ -292,9 +293,15 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   period's target. Dates are strict `YYYY-MM-DD`. Fixtures are `goals_list.json`,
   `goal_add.json`, `goal_edit_successor.json`, `goals_history.json` and
   `status_goals.json`.
-- All session reports resolve tags at read time using the task's current tags,
-  or the recorded project's current defaults for sessions without a task.
-  Re-tagging a task therefore updates its historical reports.
+- All session filters and groups resolve project, epic and tags at read time. Moving
+  a task into an epic brings its earlier sessions into that epic, including sessions
+  recorded before the epic existed. Moving or clearing the project works the same
+  way. For item-less work, reports use the session's recorded project and epic and the
+  project's current tags. The rule covers stats, sessions, insights, weekly reviews,
+  goal progress and history, epic totals and the epic removal check. A task move
+  leaves stored session rows and frozen plan lines intact. A subsequent report applies
+  the current assignment to work and the frozen assignment to historical planned
+  minutes. See `stats_epic_reassigned.json`.
 - `stats.table` is the general statistics table. It reads finished live sessions only
   (ticks included) and never writes. Filters intersect; `"none"` selects unassigned
   work: no project, no live session tag, or no task. A named id must exist (a removed
@@ -365,7 +372,7 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   first, then the newest end instant (creation for manual logs and ticks), then id.
   Each row is a `SessionView` (with its timestamped `notes`) plus `project:
   {id,name,color}|null`, `epic: {id,name}|null` and `item: {id,title}|null`, the
-  session's recorded project, epic and task with their current labels. `with_note` keeps sessions with a main note or
+  session's resolved project, epic and task with their current labels. `with_note` keeps sessions with a main note or
   a live timestamped entry. `q` is trimmed and matches either case-insensitively
   (Unicode lowercase, literal text). `minutes_min`/`minutes_max` are inclusive and
   never match a tick. Each `values` entry needs the session to have that value within

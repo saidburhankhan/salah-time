@@ -1,4 +1,4 @@
-use crate::{Store, codec};
+use crate::{Store, codec, reports::ASSIGNED_SESSIONS};
 use chrono::NaiveDate;
 use rusqlite::params;
 use salah_domain::{
@@ -24,7 +24,10 @@ impl Store {
     pub fn epic_has_sessions(&self, id: &str) -> Result<bool, Error> {
         self.conn
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sessions WHERE epic_id=?1 AND deleted_at IS NULL)",
+                &format!(
+                    "SELECT EXISTS(SELECT 1 FROM {ASSIGNED_SESSIONS}
+                        WHERE epic_id=?1 AND deleted_at IS NULL)"
+                ),
                 [id],
                 |row| row.get(0),
             )
@@ -38,13 +41,14 @@ impl Store {
         today: NaiveDate,
     ) -> Result<Vec<EpicView>, Error> {
         self.all(
-            "WITH selected AS (
+            &format!(
+                "WITH selected AS (
                  SELECT * FROM epics WHERE deleted_at IS NULL AND (?1 IS NULL OR project_id=?1)
                      AND (?2 IS NULL OR status=?2)
              ), work AS (
                  SELECT s.epic_id, SUM(s.minutes) AS minutes, COUNT(*) AS sessions,
                         COUNT(DISTINCT s.day) AS days, MAX(s.day) AS last_day
-                 FROM sessions s JOIN selected e ON e.id=s.epic_id
+                 FROM {ASSIGNED_SESSIONS} s JOIN selected e ON e.id=s.epic_id
                  WHERE s.deleted_at IS NULL AND (s.started_at IS NULL OR s.ended_at IS NOT NULL)
                  GROUP BY s.epic_id
              ), tasks AS (
@@ -59,7 +63,8 @@ impl Store {
                     COALESCE(w.days,0) AS days_worked, w.last_day,
                     COALESCE(t.total-t.done,0) AS open_tasks, COALESCE(t.done,0) AS done_tasks
              FROM selected e LEFT JOIN work w ON e.id=w.epic_id LEFT JOIN tasks t ON e.id=t.epic_id
-             ORDER BY e.project_id,e.position,e.id",
+             ORDER BY e.project_id,e.position,e.id"
+            ),
             params![project, status.map(|s| codec::name(&s)), codec::day(today)],
             |row| {
                 Ok(EpicView {

@@ -1,4 +1,4 @@
-use crate::{Store, WriteTx, codec};
+use crate::{Store, WriteTx, codec, reports::ASSIGNED_SESSIONS};
 use chrono::NaiveDate;
 use rusqlite::{Row, params};
 use salah_domain::{
@@ -114,7 +114,7 @@ impl Store {
             ("", "COALESCE(s.minutes,0)")
         };
         let sql = format!(
-            "SELECT s.day, {value}, MAX(COALESCE(s.minutes, 1), 1) FROM sessions s {source}
+            "SELECT s.day, {value}, MAX(COALESCE(s.minutes, 1), 1) FROM {ASSIGNED_SESSIONS} s {source}
             WHERE s.day BETWEEN ?1 AND ?2 AND {column} IS ?3 AND s.deleted_at IS NULL
             AND (s.started_at IS NULL OR s.ended_at IS NOT NULL) ORDER BY s.day,s.created_at,s.id"
         );

@@ -116,7 +116,7 @@ impl Status {
                 .flatten();
             let prompt = match item {
                 Some(item) => crate::items::effective_metrics(store, &item)?,
-                None => sessions::prompt(store, session.project_id.as_deref())?,
+                None => sessions::prompt(store, view.project_id.as_deref())?,
             };
             Ok((Some(view), prompt))
         });

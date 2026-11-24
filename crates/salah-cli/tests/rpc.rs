@@ -602,3 +602,6 @@ mod insights;
 
 #[path = "rpc/reviews.rs"]
 mod reviews;
+
+#[path = "rpc/assignments.rs"]
+mod assignments;

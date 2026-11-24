@@ -27,7 +27,7 @@ pub struct SessionScope<'a> {
     pub to: NaiveDate,
     pub project: Option<Choice<'a>>,
     pub epic: Option<Choice<'a>>,
-    /// `Unassigned`: the session's project has no live tag (or there is no project).
+    /// `Unassigned`: the session has no live tag.
     pub tag: Option<Choice<'a>>,
     pub item: Option<Choice<'a>>,
     /// Duration and metric bounds on the sessions themselves.
@@ -63,7 +63,7 @@ pub struct SessionPage<'a> {
     pub fetch: usize,
 }
 
-/// A finished session with the labels of its recorded project and item.
+/// A finished session with resolved assignment IDs and their current labels.
 #[derive(Clone, Debug)]
 pub struct ReportSession {
     pub session: Session,
@@ -102,6 +102,18 @@ const SORT_AT: &str = "strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(s.ended_at, s.cre
 /// session logged later for an earlier day sorts under that day.
 const PAGE_ORDER: &str = "s.day DESC, strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(s.ended_at, s.created_at)) DESC, s.id DESC";
 
+/// Read-side session rows. A task can move to *no* project or epic, so a
+/// null task assignment must not fall back to the link recorded at creation.
+/// Include soft-deleted tasks and ignore dangling assignments to removed epics
+/// on legacy task tombstones. Writers always load the original sessions row.
+pub(crate) const ASSIGNED_SESSIONS: &str = "(SELECT s.id, s.item_id, i.title AS item_title,
+    CASE WHEN s.item_id IS NULL THEN s.project_id ELSE i.project_id END AS project_id,
+    CASE WHEN s.item_id IS NULL THEN s.epic_id ELSE e.id END AS epic_id,
+    s.day, s.block, s.started_at, s.ended_at, s.minutes, s.note,
+    s.created_at, s.updated_at, s.deleted_at, s.version
+    FROM sessions s LEFT JOIN items i ON i.id = s.item_id
+    LEFT JOIN epics e ON e.id = i.epic_id AND e.deleted_at IS NULL)";
+
 /// A task's labels take precedence even when its set is empty. Without a task,
 /// the project's current defaults label the session.
 const SESSION_TAGS: &str = "SELECT it.tag_id FROM item_tags it WHERE it.item_id = s.item_id
@@ -118,10 +130,11 @@ struct Query {
 impl Query {
     fn scoped(scope: &SessionScope<'_>) -> Self {
         let mut query = Self {
-            sql: "SELECT s.* FROM sessions s WHERE s.deleted_at IS NULL
+            sql: format!(
+                "SELECT s.* FROM {ASSIGNED_SESSIONS} s WHERE s.deleted_at IS NULL
                 AND (s.started_at IS NULL OR s.ended_at IS NOT NULL)
                 AND s.day BETWEEN ? AND ?"
-                .into(),
+            ),
             args: vec![codec::day(scope.from).into(), codec::day(scope.to).into()],
         };
         match scope.project {
@@ -224,6 +237,17 @@ pub struct GroupMeasures {
 }
 
 impl Store {
+    /// Resolve a session for a single-session view (day, status or mutation).
+    pub fn session_assignment(&self, id: &str) -> Result<(Option<String>, Option<String>), Error> {
+        self.conn
+            .query_row(
+                &format!("SELECT project_id, epic_id FROM {ASSIGNED_SESSIONS} WHERE id=?1"),
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(storage_error)
+    }
+
     pub fn calendar_groups(
         &self,
         scope: &SessionScope<'_>,
@@ -280,8 +304,8 @@ impl Store {
         };
         let sql = format!(
             "WITH matched AS ({}) SELECT s.*, p.name AS project_name, p.color AS project_color,
-             e.name AS epic_name, i.title AS item_title, v.metric_id, v.value FROM matched s
-             LEFT JOIN projects p ON p.id = s.project_id LEFT JOIN items i ON i.id = s.item_id
+             e.name AS epic_name, v.metric_id, v.value FROM matched s
+             LEFT JOIN projects p ON p.id = s.project_id
              LEFT JOIN epics e ON e.id = s.epic_id
              LEFT JOIN session_values v ON v.session_id = s.id ORDER BY {order}, v.metric_id",
             query.sql

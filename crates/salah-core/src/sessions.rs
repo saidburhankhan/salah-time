@@ -129,11 +129,11 @@ impl SessionView {
         session: &Session,
         past_sleep: Option<bool>,
     ) -> Result<Self, Error> {
-        Ok(Self::with_notes(
-            session,
-            store.session_notes(&session.id)?,
-            past_sleep,
-        ))
+        let mut view = Self::with_notes(session, store.session_notes(&session.id)?, past_sleep);
+        if session.item_id.is_some() {
+            (view.project_id, view.epic_id) = store.session_assignment(&session.id)?;
+        }
+        Ok(view)
     }
 
     pub(crate) fn with_notes(

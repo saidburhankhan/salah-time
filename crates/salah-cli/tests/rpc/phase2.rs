@@ -390,7 +390,7 @@ fn effective_item_metrics_follow_project_order_and_cleanup_persists() {
     );
     assert_eq!(
         good(&mut rpc, "status.get", json!({}))["running"]["project_id"],
-        project
+        serde_json::Value::Null
     );
     assert_eq!(
         metric_ids(&good(&mut rpc, "status.get", json!({}))["prompt"]),

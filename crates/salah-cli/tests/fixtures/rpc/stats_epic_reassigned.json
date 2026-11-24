@@ -1,0 +1,156 @@
+{
+  "id": 24,
+  "jsonrpc": "2.0",
+  "result": {
+    "blocks": [
+      {
+        "avg_focus": null,
+        "block": "night",
+        "capacity_minutes": 252,
+        "minutes": 0
+      },
+      {
+        "avg_focus": 4.0,
+        "block": "fajr",
+        "capacity_minutes": 547,
+        "minutes": 30
+      },
+      {
+        "avg_focus": null,
+        "block": "dhuhr",
+        "capacity_minutes": 305,
+        "minutes": 0
+      },
+      {
+        "avg_focus": null,
+        "block": "asr",
+        "capacity_minutes": 129,
+        "minutes": 0
+      },
+      {
+        "avg_focus": null,
+        "block": "maghrib",
+        "capacity_minutes": 107,
+        "minutes": 0
+      },
+      {
+        "avg_focus": null,
+        "block": "isha",
+        "capacity_minutes": 100,
+        "minutes": 0
+      }
+    ],
+    "days": [
+      {
+        "capacity_minutes": 1188,
+        "day": "2031-05-14",
+        "fulfilment_ratio": null,
+        "minutes": 30,
+        "planned_minutes": 0,
+        "unplanned_minutes": 30
+      }
+    ],
+    "epics": [
+      {
+        "id": "<id:1>",
+        "metrics": {
+          "focus": 4.0
+        },
+        "minutes": 30,
+        "name": "Bayyinah",
+        "project_id": "<id:2>",
+        "sessions": 10
+      }
+    ],
+    "filter": {
+      "epic_id": "<id:1>",
+      "item_id": null,
+      "minutes_max": null,
+      "minutes_min": null,
+      "project_id": null,
+      "tag_id": null,
+      "values": {}
+    },
+    "projects": [
+      {
+        "color": "#4c8bf5",
+        "id": "<id:2>",
+        "metrics": {
+          "focus": 4.0
+        },
+        "minutes": 30,
+        "name": "Study",
+        "sessions": 10
+      }
+    ],
+    "range": {
+      "from": "2031-05-14",
+      "to": "2031-05-14"
+    },
+    "series": [
+      {
+        "metric_id": "minutes",
+        "name": "Minutes",
+        "points": [
+          {
+            "day": "2031-05-14",
+            "value": 30.0
+          }
+        ],
+        "rollup": "sum",
+        "unit": "min"
+      },
+      {
+        "metric_id": "focus",
+        "name": "Focus",
+        "points": [
+          {
+            "day": "2031-05-14",
+            "value": 4.0
+          }
+        ],
+        "rollup": "avg",
+        "unit": ""
+      },
+      {
+        "metric_id": "quality",
+        "name": "Quality",
+        "points": [
+          {
+            "day": "2031-05-14",
+            "value": null
+          }
+        ],
+        "rollup": "avg",
+        "unit": ""
+      },
+      {
+        "metric_id": "distractions",
+        "name": "Distractions",
+        "points": [
+          {
+            "day": "2031-05-14",
+            "value": null
+          }
+        ],
+        "rollup": "sum",
+        "unit": "times"
+      }
+    ],
+    "tags": [
+      {
+        "color": null,
+        "id": "none",
+        "minutes": 30,
+        "name": "No tag"
+      }
+    ],
+    "totals": {
+      "active_days": 1,
+      "avg_focus": 4.0,
+      "avg_quality": null,
+      "minutes": 30,
+      "sessions": 10
+    }
+  }
+}

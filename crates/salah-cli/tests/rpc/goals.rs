@@ -20,7 +20,7 @@ fn goal<'a>(list: &'a Value, id: &str) -> &'a Value {
 }
 
 #[test]
-fn goal_progress_uses_recorded_scope_and_stats_weights() {
+fn goal_progress_uses_session_scope_and_stats_weights() {
     let h = Harness::new();
     let mut rpc = Session::open(&h, NOW);
     let project = added(
