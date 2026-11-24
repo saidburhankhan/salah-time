@@ -160,14 +160,54 @@ test("addedItem reads the socket envelope and the CLI fallback raw text", () => 
   assert.equal(logic.addedItem(null), null)
 })
 
-test("retrying the same task write preserves the op ID, while changed task fields start a new attempt", () => {
+test("clearing a title stops parsing but keeps an open draft until dismissal", () => {
+  same(logic.titleEdit("", false), { expanded: false, needsParse: false })
+  const initial = logic.titleEdit("Read", false)
+  const empty = logic.titleEdit("  ", initial.expanded)
+  same(initial, { expanded: true, needsParse: true })
+  same(empty, { expanded: true, needsParse: false })
+  same(logic.titleEdit("Read another chapter", empty.expanded), { expanded: true, needsParse: true })
+  same(logic.titleEdit("", false), { expanded: false, needsParse: false })
+})
+
+test("an ambiguous task failure replays its first payload after the planner crosses Sleep", () => {
+  let nextId = 0
+  let built = 0
+  let today = "2031-05-14"
+  const tags = ["faith"]
+  const newOpId = () => "op-" + ++nextId
+  const buildParams = () => {
+    built++
+    const schedule = logic.schedule(once, "today", today)
+    return logic.addParams(once, { block: "isha", minutes: 20 }, "project", false, schedule.date, "", tags)
+  }
+  const first = logic.itemAttempt(null, buildParams, newOpId)
+  assert.equal(first.id, "op-1")
+
+  today = "2031-05-15"
+  tags.push("new-tag")
+  const uncertain = logic.itemAttemptAfterFailure(first, {})
+  const retry = logic.itemAttempt(uncertain, buildParams, newOpId)
+  assert.equal(retry, first)
+  assert.equal(built, 1)
+  assert.equal(retry.params.date, "2031-05-14")
+  same(retry.params.tag_ids, ["faith"])
+
+  const item = logic.addedItem({ changed: { items: [{ id: "original-item" }] } })
+  const batch = logic.resourceBatch(item.id, [{ kind: "note", body: "Read again" }], newOpId)
+  same(batch.pending[0], { id: "op-2", params: { item_id: "original-item", kind: "note", body: "Read again" } })
+})
+
+test("a definite task rejection allows a corrected submission with a new operation ID", () => {
   let nextId = 0
   const newOpId = () => "op-" + ++nextId
-  const params = { title: "Read", backlog: true, tag_ids: [] }
-  const first = logic.itemAttempt(null, params, newOpId)
-  assert.equal(first.id, "op-1")
-  assert.equal(logic.itemAttempt(first, { ...params }, newOpId), first)
-  assert.equal(logic.itemAttempt(first, { ...params, title: "Write" }, newOpId).id, "op-2")
+  const first = logic.itemAttempt(null, () => ({ title: "Read", date: "2031-05-14" }), newOpId)
+  assert.equal(logic.itemAttemptAfterFailure(first, { kind: "storage" }), first)
+  assert.equal(logic.itemAttemptAfterFailure(first, { kind: "busy" }), first)
+  const rejected = logic.itemAttemptAfterFailure(first, { kind: "validation", field: "date" })
+  assert.equal(rejected, null)
+  const corrected = logic.itemAttempt(rejected, () => ({ title: "Read", date: "2031-05-15" }), newOpId)
+  same(corrected, { id: "op-2", params: { title: "Read", date: "2031-05-15" } })
 })
 
 test("resource writes use the confirmed item ID and only failed writes are retried with their original IDs", () => {

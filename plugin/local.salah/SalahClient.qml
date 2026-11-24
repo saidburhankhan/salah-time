@@ -691,6 +691,7 @@ Item {
       client.activeFallback = null
       if (active) {
         var failure = String(actionStderr.text || "").trim().replace(/[\r\n]+/g, " ")
+        var failureData = {}
         var result = null
         if (exitCode === 0 && active.rpcInput) {
           try {
@@ -700,6 +701,7 @@ Item {
             if (reply.id !== 2 || !result) {
               exitCode = 1
               failure = client.errorDetail(reply.error)
+              if (reply.id === 2 && reply.error) failureData = reply.error.data || {}
             }
           } catch (error) {
             exitCode = 1
@@ -727,7 +729,7 @@ Item {
             "fallback": true, "raw": String(actionStdout.text || "")
           })
         } else {
-          client.mutationFailed(active.opId, active.kind, failure, {})
+          client.mutationFailed(active.opId, active.kind, failure, failureData)
         }
         if (!active.readMeta) client.statusAfterFallback = true
       }

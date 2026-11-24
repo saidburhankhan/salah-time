@@ -105,3 +105,27 @@ backlog task creation, and an identical link retry with no second task
 write. Wayland and Unix-socket verification remain with the orchestrator.
 
 CHECKPOINT 3: Normalize widget link drafts and attach retryable resources to new tasks — files: plugin/local.salah/BarWidget.qml, plugin/local.salah/CreationLogic.js, plugin/local.salah/CreationResources.qml, plugin/local.salah/ItemResources.qml, plugin/local.salah/QuickAdd.qml, plugin/local.salah/ResourceLogic.js, plugin/local.salah/i18n/en.json, plugin/local.salah/tests/creation_logic_test.js, plugin/local.salah/tests/resource_logic_test.js, docs/work/tracking-ui/c10-progress.md
+
+## R4 — replay unconfirmed task creation and preserve drafts during title edits
+
+The creation sheet snapshots the operation ID and payload before sending
+`item.add`. Retry replays that snapshot across Sleep or catalogue refreshes.
+Attachments use the item ID from the confirmed response. A definite
+rejection reopens editing, including in stdio mode where the client now
+passes through the server's structured error data.
+
+Clearing the title stops parsing and leaves the sheet open with its tag
+choices, queued attachments and the resource being edited. Dismissal or
+successful completion resets the draft. Enter on a bare line still uses
+quick add, while explicit sheet choices use the parsed submission.
+
+All 147 Node checks, Omarchy plugin validation, QML syntax checks, JSON
+parsing and `git diff --check` passed. An offscreen run with the Items-only
+panel stand-in and stub stdio RPC kept a chosen tag, queued note and
+unfinished link through title replacement. After a simulated lost reply and
+tracking-day rollover, the recorded retry matched the original payload
+and operation ID, and both resources targeted the original item. A matched
+validation error unlocked editing. Live Wayland and socket verification
+remain with the orchestrator.
+
+CHECKPOINT 4: Replay unconfirmed widget task creation and preserve drafts through title edits — files: plugin/local.salah/CreationLogic.js, plugin/local.salah/QuickAdd.qml, plugin/local.salah/SalahClient.qml, plugin/local.salah/i18n/en.json, plugin/local.salah/tests/creation_logic_test.js, docs/work/tracking-ui/c10-progress.md

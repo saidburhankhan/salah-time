@@ -109,9 +109,24 @@ function addedItem(result) {
   return items && items.length ? items[0] : null
 }
 
-function itemAttempt(previous, params, newOpId) {
-  var key = JSON.stringify(params)
-  return previous && previous.key === key ? previous : { id: newOpId(), key: key, params: params }
+function titleEdit(title, alreadyExpanded) {
+  var hasTitle = title.trim() !== ""
+  return { expanded: alreadyExpanded || hasTitle, needsParse: hasTitle }
+}
+
+function itemAttempt(previous, buildParams, newOpId) {
+  // A replay uses the first submitted schedule and choices, even if the
+  // planner or catalogues have refreshed since then.
+  if (previous) return previous
+  var params = buildParams()
+  return params ? { id: newOpId(), params: JSON.parse(JSON.stringify(params)) } : null
+}
+
+function itemAttemptAfterFailure(attempt, data) {
+  // Only a definite rejection unlocks editing. A lost reply or a storage
+  // error can leave a committed item whose acknowledgement we still need.
+  var kind = data && data.kind
+  return kind === "validation" || kind === "not_found" || kind === "conflict" ? null : attempt
 }
 
 function resourceBatch(itemId, drafts, newOpId) {
