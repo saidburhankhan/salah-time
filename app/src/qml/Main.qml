@@ -24,8 +24,20 @@ ApplicationWindow {
     Material.accent: theme.accent
     Material.roundedScale: theme.radius
 
-    // 0 Today, 1 Routines, 2 Statistics, 3 Settings, 4 an Epic, 5 Backlog, 6 Goals.
+    // 0 Today, 1 Routines, 2 Statistics, 3 Settings, 4 an Epic, 5 Backlog, 6 Goals, 7 Insights, 8 Review.
     property int page: 0
+    readonly property var pageByName: ({today: 0, backlog: 5, routines: 1, statistics: 2, insights: 7,
+                                        goals: 6, review: 8, settings: 3})
+    // `salah-app --page <name>`; an unknown name leaves Today open.
+    function showPage(name) {
+        var index = pageByName[String(name)]
+        if (index === undefined)
+            return false
+        page = index
+        if (name === "statistics")
+            loadStatistics()
+        return true
+    }
     property string epicId: ""
     // The task or epic whose resource drawer is open ("" for none).
     property string resourceTargetId: ""
@@ -374,6 +386,25 @@ ApplicationWindow {
             return "—"
         return String(Math.round(Number(value) * 10) / 10)
     }
+    function editReportSession(session) {
+        var project = session.project || null
+        var item = session.item || null
+        openSessionPrompt({
+            mode: "edit",
+            tick: session.minutes === null || session.minutes === undefined,
+            version: session.version,
+            sessionId: String(session.id),
+            itemId: String(session.item_id || ""),
+            projectId: String(session.project_id || ""),
+            title: item ? String(item.title || "") : (project ? String(project.name || "") : qsTr("Session")),
+            color: project ? String(project.color || "") : "",
+            minutes: session.minutes || 0,
+            values: session.values || {},
+            notes: session.notes || [],
+            note: String(session.note || "")
+        })
+    }
+
     function openSessionPrompt(options) {
         sessionPrompt.show(options)
     }
@@ -510,6 +541,21 @@ ApplicationWindow {
                     Layout.margins: 26
                     win: win
                 }
+                Loader {
+                    id: insightsLoader
+                    readonly property var appWindow: win
+                    active: false
+                    visible: win.page === 7
+                    onVisibleChanged: {
+                        if (visible && item) item.open()
+                        else if (visible) active = true
+                    }
+                    onLoaded: item.open()
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.margins: 26
+                    sourceComponent: InsightsPage { win: insightsLoader.appWindow }
+                }
                 GoalsPage {
                     id: goalsPage
                     visible: win.page === 6
@@ -518,6 +564,14 @@ ApplicationWindow {
                     Layout.margins: 26
                     win: win
                     onVisibleChanged: if (visible) open()
+                }
+                ReviewPage {
+                    id: reviewPage
+                    visible: win.page === 8
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.margins: 26
+                    win: win
                 }
                 SettingsPage {
                     id: settingsPage

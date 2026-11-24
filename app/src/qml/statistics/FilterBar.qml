@@ -12,6 +12,7 @@ ColumnLayout {
     id: bar
     property var win
     // 7, 28 or 90 days, or 0 for the custom from/to range.
+    property bool showMetrics: true
     property int range: 28
     property string customFrom: ""
     property string customTo: ""
@@ -320,48 +321,61 @@ ColumnLayout {
         RowTitle {
             text: qsTr("RANGE")
         }
-        Repeater {
-            model: [7, 28, 90]
-            ChoiceChip {
-                required property int modelData
-                win: bar.win
-                text: qsTr("%1 days").arg(modelData)
-                selected: bar.range === modelData
-                onClicked: bar.setRange(modelData)
-            }
-        }
-        ChoiceChip {
-            objectName: "statsCustomChip"
-            win: bar.win
-            text: qsTr("Custom")
-            selected: bar.range === 0
-            onClicked: bar.startCustom()
-        }
-        TextField {
-            visible: bar.range === 0
-            Layout.preferredWidth: 130
-            id: fromField
-            text: bar.customFrom
-            placeholderText: "YYYY-MM-DD"
-            font.family: bar.win.mono
-            onEditingFinished: if (text !== bar.customFrom || bar.rangeError) bar.setCustom(fromField.text, toField.text)
-        }
-        Label {
-            visible: bar.range === 0
-            text: "–"
-            color: bar.win.muted
-        }
-        TextField {
-            visible: bar.range === 0
-            Layout.preferredWidth: 130
-            id: toField
-            text: bar.customTo
-            placeholderText: "YYYY-MM-DD"
-            font.family: bar.win.mono
-            onEditingFinished: if (text !== bar.customTo || bar.rangeError) bar.setCustom(fromField.text, toField.text)
-        }
-        Item {
+        Flow {
             Layout.fillWidth: true
+            spacing: 8
+            Row {
+                spacing: 8
+                height: bar.range === 0 ? customDates.implicitHeight : implicitHeight
+                Repeater {
+                    model: [7, 28, 90]
+                    ChoiceChip {
+                        required property int modelData
+                        anchors.verticalCenter: parent.verticalCenter
+                        win: bar.win
+                        text: qsTr("%1 days").arg(modelData)
+                        selected: bar.range === modelData
+                        onClicked: bar.setRange(modelData)
+                    }
+                }
+                ChoiceChip {
+                    objectName: "statsCustomChip"
+                    anchors.verticalCenter: parent.verticalCenter
+                    win: bar.win
+                    text: qsTr("Custom")
+                    selected: bar.range === 0
+                    onClicked: bar.startCustom()
+                }
+            }
+            Row {
+                id: customDates
+                visible: bar.range === 0
+                spacing: 8
+                TextField {
+                    id: fromField
+                    width: 130
+                    text: bar.customFrom
+                    placeholderText: "YYYY-MM-DD"
+                    Accessible.name: qsTr("Start date")
+                    font.family: bar.win.mono
+                    onEditingFinished: if (text !== bar.customFrom || bar.rangeError) bar.setCustom(text, toField.text)
+                }
+                Label {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "–"
+                    color: bar.win.muted
+                }
+                TextField {
+                    id: toField
+                    objectName: "filterEndDate"
+                    width: 130
+                    text: bar.customTo
+                    placeholderText: "YYYY-MM-DD"
+                    Accessible.name: qsTr("End date")
+                    font.family: bar.win.mono
+                    onEditingFinished: if (text !== bar.customTo || bar.rangeError) bar.setCustom(fromField.text, text)
+                }
+            }
         }
     }
 
@@ -553,6 +567,7 @@ ColumnLayout {
     }
 
     RowLayout {
+        visible: bar.showMetrics
         Layout.fillWidth: true
         spacing: 8
         RowTitle {
@@ -598,7 +613,7 @@ ColumnLayout {
     // The range editor: pick Duration or a metric, then its min and max.
     Rectangle {
         objectName: "metricEditor"
-        visible: bar.editing !== ""
+        visible: bar.showMetrics && bar.editing !== ""
         Layout.fillWidth: true
         Layout.leftMargin: 84
         implicitHeight: editor.implicitHeight + 28

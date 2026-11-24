@@ -33,24 +33,8 @@ ColumnLayout {
         search = text
         reload()
     }
-    function openSession(session) {
-        var project = session.project || null
-        var item = session.item || null
-        win.openSessionPrompt({
-            mode: "edit",
-            tick: session.minutes === null || session.minutes === undefined,
-            version: session.version,
-            sessionId: String(session.id),
-            itemId: String(session.item_id || ""),
-            projectId: String(session.project_id || ""),
-            title: item ? String(item.title || "") : (project ? String(project.name || "") : qsTr("Session")),
-            color: project ? String(project.color || "") : "",
-            minutes: session.minutes || 0,
-            values: session.values || {},
-            notes: session.notes || [],
-            note: String(session.note || "")
-        })
-    }
+
+    function openSession(session) { win.editReportSession(session) }
 
     Timer {
         id: searchDelay

@@ -31,6 +31,7 @@ Rectangle {
             sum += Number(present[i].value)
         return sum
     }
+    property bool weekly: false
     property bool tableMode: false
     // Draw a sum as a line over the days instead of a column per day.
     property bool asLine: false
@@ -81,18 +82,19 @@ Rectangle {
         anchors.topMargin: 46
         anchors.bottomMargin: 10
         win: chart.win
-        columns: [qsTr("DAY"), String(chart.series.name || "").toUpperCase()]
+        columns: [chart.weekly ? qsTr("WEEK OF") : qsTr("DAY"), String(chart.series.name || "").toUpperCase()]
         rows: chart.tableRows
     }
     Label {
         anchors.right: parent.right
         anchors.rightMargin: 18
         y: 15
-        text: chart.summary == null && chart.present.length > 0 ? "—"
+        text: chart.weekly ? qsTr("%1 of %2 weeks with values").arg(chart.present.length).arg(chart.points.length)
+            : chart.summary == null && chart.present.length > 0 ? "—"
             : chart.present.length === 0 ? qsTr("no values")
             : (chart.series.rollup === "avg" ? qsTr("avg %1") : qsTr("total %1")).arg(chart.format(chart.summary))
         textFormat: Text.PlainText
-        color: chart.present.length === 0 ? chart.win.muted : theme.accent
+        color: chart.weekly || chart.present.length === 0 ? chart.win.muted : theme.accent
         font.family: chart.win.mono
         font.pixelSize: 13
     }
@@ -102,6 +104,7 @@ Rectangle {
         y: 44
         width: 30
         horizontalAlignment: Text.AlignRight
+        textFormat: Text.PlainText
         text: chart.format(chart.yTop).split(" ")[0]
         color: chart.win.muted
         font.family: chart.win.mono
@@ -118,6 +121,27 @@ Rectangle {
         color: chart.win.muted
         font.family: chart.win.mono
         font.pixelSize: 10
+    }
+    Row {
+        visible: chart.weekly && !chart.tableMode && chart.points.length > 0
+        anchors.left: canvas.left
+        anchors.right: canvas.right
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 5
+        Repeater {
+            model: !chart.weekly ? [] : chart.points.length <= 1 ? chart.points : [chart.points[0], chart.points[chart.points.length - 1]]
+            Label {
+                required property var modelData
+                required property int index
+                width: parent.width / Math.min(2, chart.points.length)
+                text: chart.win.shortDate(modelData.day)
+                textFormat: Text.PlainText
+                color: chart.win.muted
+                horizontalAlignment: chart.points.length === 1 ? Text.AlignHCenter : index ? Text.AlignRight : Text.AlignLeft
+                font.family: chart.win.mono
+                font.pixelSize: 11
+            }
+        }
     }
     Canvas {
         id: canvas
@@ -142,7 +166,7 @@ Rectangle {
                 ctx.lineTo(width, gy)
                 ctx.stroke()
             }
-            function xAt(i) { return n === 1 ? width / 2 : i * width / (n - 1) }
+            function xAt(i) { return n === 1 ? width / 2 : 3 + i * (width - 6) / (n - 1) }
             function yAt(v) { return height - 3 - (height - 6) * Math.min(1, Number(v) / chart.yTop) }
             if (chart.series.rollup !== "avg" && !chart.asLine) {
                 var slot = width / n

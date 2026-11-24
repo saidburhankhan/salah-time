@@ -61,6 +61,8 @@ class Backend : public QObject {
     Q_PROPERTY(QString runningTitle READ runningTitle NOTIFY runningChanged)
     Q_PROPERTY(QString runningColor READ runningColor NOTIFY runningChanged)
     Q_PROPERTY(QVariantMap trends READ trends NOTIFY trendsChanged)
+    Q_PROPERTY(QVariantMap insights READ insights NOTIFY insightsChanged)
+    Q_PROPERTY(QVariantMap review READ review NOTIFY reviewChanged)
     Q_PROPERTY(QVariantMap statsTable READ statsTable NOTIFY statsTableChanged)
     Q_PROPERTY(QVariantList sessionsList READ sessionsList NOTIFY sessionsListChanged)
     Q_PROPERTY(bool sessionsHasMore READ sessionsHasMore NOTIFY sessionsListChanged)
@@ -133,6 +135,8 @@ public:
     QString runningTitle() const { return m_runningTitle; }
     QString runningColor() const { return m_runningColor; }
     QVariantMap trends() const { return m_trends; }
+    QVariantMap insights() const { return m_insights; }
+    QVariantMap review() const { return m_review; }
     QVariantMap statsTable() const { return m_statsTable; }
     QVariantList sessionsList() const { return m_sessionsList; }
     bool sessionsHasMore() const { return !m_sessionsNext.isEmpty(); }
@@ -147,6 +151,11 @@ public:
     // Reports (backend_reports.cpp). `filter` is the shared Statistics/Notes
     // filter: days or from/to, tag_id, project_id, item_id, minutes_min,
     // minutes_max, values {metric_id: {min?, max?}}; unknown keys are dropped.
+    Q_INVOKABLE void loadInsights(const QVariantMap &filter);
+    // Weekly review (backend_review.cpp). Weeks are Monday dates; an empty note removes the reflection.
+    Q_INVOKABLE void loadReview(const QString &week);
+    Q_INVOKABLE void saveReview(const QString &week, const QString &note);
+    Q_INVOKABLE QString reviewWeekStart(const QString &day, int offsetWeeks = 0) const;
     Q_INVOKABLE void loadStatsQuery(const QVariantMap &filter);
     Q_INVOKABLE void loadTrends(const QVariantMap &filter, const QStringList &measures,
                                 const QString &interval, const QString &split);
@@ -258,6 +267,10 @@ signals:
     void runningNoteFinished(const QString &sessionId, bool ok);
     void runningChanged();
     void trendsChanged();
+    void insightsChanged();
+    void reviewChanged();
+    void reviewSaveFinished(bool ok, const QString &message);
+    void reviewsInvalidated();
     void statsTableChanged();
     void sessionsListChanged();
     void sessionsLoadingChanged();
@@ -378,6 +391,12 @@ private:
     QString m_runningTitle, m_runningColor;
     QVariantMap m_trends;
     quint64 m_trendsRequest = 0;
+    QVariantMap m_insights;
+    QJsonObject m_insightsParams;
+    quint64 m_insightsRequest = 0;
+    QVariantMap m_review;
+    QString m_reviewWeek;
+    quint64 m_reviewRequest = 0;
     QVariantMap m_statsTable;
     quint64 m_statsTableRequest = 0;
     QVariantList m_sessionsList;

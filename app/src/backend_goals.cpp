@@ -21,7 +21,18 @@ void Backend::loadGoals() {
             m_goals = data->value.toArray().toVariantList();
             emit goalsChanged();
             // An open history follows the goal's edit chain, so refresh it too.
-            if (!m_goalHistoryId.isEmpty()) loadGoalHistory(m_goalHistoryId);
+            if (!m_goalHistoryId.isEmpty()) {
+                QString activeId;
+                for (const QVariant &entry : m_goals) {
+                    const QVariantMap goal = entry.toMap();
+                    const QString id = goal.value("id").toString();
+                    if (id == m_goalHistoryId || goal.value("replaces_id").toString() == m_goalHistoryId) {
+                        activeId = id;
+                        break;
+                    }
+                }
+                loadGoalHistory(activeId);
+            }
         } else if (!result.ok && !m_client.offline()) {
             fail(result.error.message);
         }
@@ -29,13 +40,14 @@ void Backend::loadGoals() {
 }
 
 void Backend::loadGoalHistory(const QString &id) {
+    const bool changedId = m_goalHistoryId != id;
     m_goalHistoryId = id;
     const quint64 request = ++m_goalHistoryRequest;
-    if (id.isEmpty() || m_client.offline()) {
+    if (changedId || id.isEmpty() || m_client.offline()) {
         m_goalHistory.clear();
         emit goalHistoryChanged();
-        return;
     }
+    if (id.isEmpty() || m_client.offline()) return;
     // The longest span the daemon serves (730 days), ending today.
     const QJsonObject params{{QStringLiteral("id"), id},
                              {QStringLiteral("from"), m_today.addDays(-729).toString(Qt::ISODate)},

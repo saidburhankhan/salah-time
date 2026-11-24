@@ -64,6 +64,39 @@ QJsonObject Backend::filterParams(const QVariantMap &filter, bool allowAnyDays) 
     return params;
 }
 
+void Backend::loadInsights(const QVariantMap &filter) {
+    const quint64 request = ++m_insightsRequest;
+    QJsonObject params = filterParams(filter, false);
+    if (params.isEmpty() || m_client.offline()) {
+        m_insights.clear();
+        emit insightsChanged();
+        return;
+    }
+    if (params.contains("days")) {
+        const int days = params.take("days").toInt();
+        params.insert("from", m_today.addDays(1 - days).toString(Qt::ISODate));
+        params.insert("to", todayDay());
+    }
+    params.remove("minutes_min");
+    params.remove("minutes_max");
+    params.remove("values");
+    if (params != m_insightsParams) {
+        m_insightsParams = params;
+        m_insights.clear();
+        emit insightsChanged();
+    }
+    m_client.rpcRead(QStringLiteral("insights.get"), params, [this, request](const CoreClient::Result &result) {
+        if (request != m_insightsRequest) return;
+        if (result.ok) {
+            m_insights = std::get<Dto::Json>(result.value).json.toVariantMap();
+        } else {
+            m_insights.clear();
+            if (!m_client.offline()) fail(result.error.message);
+        }
+        emit insightsChanged();
+    });
+}
+
 void Backend::loadStatsQuery(const QVariantMap &filter) {
     const QJsonObject params = filterParams(filter, true);
     if (params.isEmpty()) return;

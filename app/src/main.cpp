@@ -5,6 +5,8 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include "backend.h"
+#include "launch.h"
+#include <QTextStream>
 #include "theme.h"
 #include "translator.h"
 
@@ -24,5 +26,9 @@ int main(int argc, char *argv[]) {
     engine.load(QUrl("qrc:/qml/Main.qml"));
     if (engine.rootObjects().isEmpty()) return 1;
     backend.reload();
+    QString warning;
+    const QString page = launch::startPage(app.arguments(), &warning);
+    if (!warning.isEmpty()) QTextStream(stderr) << warning << Qt::endl;
+    QMetaObject::invokeMethod(engine.rootObjects().first(), "showPage", Q_ARG(QVariant, page));
     return app.exec();
 }

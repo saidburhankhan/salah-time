@@ -248,6 +248,9 @@ void Backend::reloadFromNotification(qint64 revision, const QStringList &scopes)
     // Another surface (the bar widget, the CLI) may have changed projects,
     // tags, or metrics; the lists are cheap.
     loadSettings();
+    if (scopes.isEmpty() || scopes.contains("reviews") || scopes.contains("sessions") || scopes.contains("goals")
+        || scopes.contains("items"))
+        emit reviewsInvalidated();
     if (scopes.isEmpty() || scopes.contains("sessions") || scopes.contains("items")
         || scopes.contains("projects") || scopes.contains("epics") || scopes.contains("tags")
         || scopes.contains("metrics") || scopes.contains("config") || scopes.contains("marks"))

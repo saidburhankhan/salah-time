@@ -11,7 +11,7 @@ ScrollView {
     id: goalsPage
     objectName: "goalsPage"
     property var win
-    property string historyId: ""
+    readonly property string historyId: backend.goalHistoryId
     readonly property var dayGoals: (backend.goals || []).filter(function(goal) { return goal.period === "day" })
     readonly property var weekGoals: (backend.goals || []).filter(function(goal) { return goal.period === "week" })
     readonly property var allMetrics: (backend.metrics || []).filter(function(m) { return m.builtin && !m.archived })
@@ -23,6 +23,7 @@ ScrollView {
         backend.loadTrackingItems()
     }
     function scopeText(goal) {
+        if (goal.scope_label) return String(goal.scope_label)
         if (goal.item_id) {
             var task = (backend.trackingItems || []).find(function(entry) { return String(entry.id) === String(goal.item_id) })
             return task ? String(task.title || "") : qsTr("Task")
@@ -37,26 +38,9 @@ ScrollView {
         return qsTr("All work")
     }
     function toggleHistory(goal) {
-        historyId = historyId === String(goal.id) ? "" : String(goal.id)
-        backend.loadGoalHistory(historyId)
+        backend.loadGoalHistory(historyId === String(goal.id) ? "" : String(goal.id))
     }
-    onVisibleChanged: {
-        if (!visible) {
-            historyId = ""
-            backend.loadGoalHistory("")
-        }
-    }
-
-    Connections {
-        target: backend
-        function onGoalWriteFinished(ok, message) {
-            // An edit replaces the goal with a successor id; close the table.
-            if (ok && goalsPage.historyId !== "") {
-                goalsPage.historyId = ""
-                backend.loadGoalHistory("")
-            }
-        }
-    }
+    onVisibleChanged: if (!visible && historyId !== "") backend.loadGoalHistory("")
 
     ColumnLayout {
         width: goalsPage.availableWidth

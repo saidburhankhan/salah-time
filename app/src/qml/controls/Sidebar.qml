@@ -75,11 +75,25 @@ Rectangle {
             }
         }
         SidebarItem {
+            objectName: "insightsSidebarItem"
+            appWindow: sidebar.win
+            pageIndex: 7
+            label: qsTr("Insights")
+            iconKind: "insights"
+        }
+        SidebarItem {
             objectName: "goalsSidebarItem"
             appWindow: sidebar.win
             pageIndex: 6
             label: qsTr("Goals")
             iconKind: "goals"
+        }
+        SidebarItem {
+            objectName: "reviewSidebarItem"
+            appWindow: sidebar.win
+            pageIndex: 8
+            label: qsTr("Review")
+            iconKind: "review"
         }
         Rectangle {
             Layout.fillWidth: true

@@ -28,6 +28,7 @@
 #include "client/coreclient.h"
 #include "client/dto.h"
 #include "models/statsseriesmodel.h"
+#include "launch.h"
 #include "theme.h"
 #include "translator.h"
 #include "tracking_fixture.h"
@@ -162,6 +163,23 @@ private:
     const QVariantList m_previewBacklog;
     const QVariantMap m_previewStatsTable;
 };
+
+class ReportsPreviewBackend : public TrackingUiPreviewBackend {
+    Q_OBJECT
+    Q_PROPERTY(QVariantMap insights MEMBER report NOTIFY previewChanged)
+    Q_PROPERTY(QVariantMap review MEMBER reviewData NOTIFY previewChanged)
+    Q_PROPERTY(QVariantList goals MEMBER goalRows CONSTANT)
+    Q_PROPERTY(QString goalHistoryId MEMBER historyId CONSTANT)
+    Q_PROPERTY(QVariantList goalHistory MEMBER history CONSTANT)
+public:
+    using TrackingUiPreviewBackend::TrackingUiPreviewBackend;
+    QVariantMap report, reviewData;
+    QVariantList goalRows, history;
+    QString historyId;
+signals:
+    void previewChanged();
+};
+
 }
 
 class SalahAppTests : public QObject {
@@ -583,7 +601,19 @@ esac
                 }
                 else if (method == "resource.remove")
                     changed["deleted"] = QJsonArray{params.value("id")};
-                else if (method == "goal.add" || method == "goal.edit" || method == "goal.end")
+                else if (method == "goal.edit") {
+                    for (int i = 0; i < state->goals.size(); ++i) {
+                        auto row = state->goals.at(i).toObject();
+                        if (row.value("id") != params.value("id")) continue;
+                        row["replaces_id"] = row.value("id");
+                        row["id"] = row.value("id").toString() + "-successor";
+                        row["target"] = params.value("target");
+                        state->goals[i] = row;
+                        changed["goals"] = QJsonArray{row};
+                        break;
+                    }
+                }
+                else if (method == "goal.add" || method == "goal.end")
                     changed["goals"] = QJsonArray{QJsonObject{{"id", params.value("id").toString("new-goal")}}};
                 else if (method == "goal.remove")
                     changed["deleted"] = QJsonArray{params.value("id")};
@@ -4277,6 +4307,309 @@ fi
         state->goalHistory = rpcFixture("goals_history").value("result").toArray();
         return state;
     }
+    void insightsScreensAndSessionEditor() {
+        QTemporaryDir dir;
+        ReportsPreviewBackend backend(fake(dir), daemon_path(dir), backlogRows(), backlogRows());
+        const QJsonObject report = fixture("insights");
+        backend.report = report.toVariantMap();
+        backend.goalRows = goalRows().toVariantList();
+        const auto successor = fixture("goal_edit_successor").value("changed").toObject().value("goals").toArray().first().toObject();
+        backend.goalRows = {backend.goalRows.at(1), successor.toVariantMap()};
+        backend.historyId = successor.value("id").toString();
+        backend.history = rpcFixture("goals_history").value("result").toArray().toVariantList();
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        window->resize(1280, 880);
+        window->show();
+        auto *link = qobject_cast<QQuickItem *>(findByName(window, "insightsSidebarItem"));
+        QVERIFY(link);
+        QTest::mouseClick(window, Qt::LeftButton, {}, link->mapToScene(QPointF(link->width()/2, link->height()/2)).toPoint());
+        QCOMPARE(root->property("page").toInt(), 7);
+        auto click = [&](const QString &name) {
+            QObject *item = firstShown(window, name);
+            return item && QMetaObject::invokeMethod(item, "clicked");
+        };
+        auto *page = firstShown(window, "insightsPage");
+        QVERIFY(page);
+        auto *bar = page->property("filterBar").value<QQuickItem *>();
+        QVERIFY(bar);
+        QVERIFY(QMetaObject::invokeMethod(bar, "setCustom", Q_ARG(QVariant, QVariant("2031-05-11")),
+                                         Q_ARG(QVariant, QVariant("2031-05-14"))));
+        QVERIFY(firstShown(window, "insightGroupRow_sleep"));
+        QVERIFY(hasVisualText(window, "3.4"));
+        QVERIFY(hasVisualText(window, "2.4"));
+        QVERIFY(hasVisualText(window, "1 of 2 weeks with values"));
+        QVERIFY(hasVisualText(window, "Distractions/h"));
+        QVERIFY(hasVisualText(window, "Avg focus"));
+        QVERIFY(hasVisualText(window, "Sessions"));
+        shotWindow(window, "insights-blocks.png");
+        QVERIFY(click("insightsFilters"));
+        QVERIFY(firstShown(window, "statsTaskSearch"));
+        QVERIFY(!firstShown(window, "metricAddChip"));
+        window->resize(960, 1280);
+        shotWindow(window, "insights-filters.png");
+        auto *endDate = qobject_cast<QQuickItem *>(firstShown(window, "filterEndDate"));
+        QVERIFY(endDate);
+        QVERIFY(endDate->mapToItem(bar, QPointF(endDate->width(), 0)).x() <= bar->width());
+        QVERIFY(bar->width() <= page->property("availableWidth").toReal());
+        window->resize(1280, 880);
+        QVERIFY(click("insightsFilters"));
+        QVERIFY(click("insightGroup_hour"));
+        QVERIFY(hasVisualText(window, "Timed sessions, grouped by local start time"));
+        window->resize(1280, 1180);
+        shotWindow(window, "insights-hours.png");
+        window->resize(1280, 880);
+        {
+            auto *flick = page->property("contentItem").value<QQuickItem *>();
+            QVERIFY(flick);
+            flick->setProperty("contentY", flick->property("contentHeight").toReal());
+            shotWindow(window, "insights-scrolled.png");
+            flick->setProperty("contentY", 0);
+        }
+        QVERIFY(click("insightGroup_weekday"));
+        QVERIFY(hasVisualText(window, "Monday"));
+        shotWindow(window, "insights-weekdays.png");
+        auto *weekly = firstShown(window, "insightsWeekly");
+        QVERIFY(weekly);
+        QCOMPARE(weekly->property("points").toList().size(), report.value("distractions_by_week").toArray().size());
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(weekly, "chartTableButton"), "clicked"));
+        QVERIFY(hasVisualText(window, "WEEK OF"));
+        const auto weeklyRows = weekly->property("tableRows").toList();
+        QCOMPARE(weeklyRows.size(), 2);
+        QCOMPARE(weeklyRows.first().toList().last().toString(), QString("3"));
+        QCOMPARE(weeklyRows.last().toList().last().toString(), QString("—"));
+        shotWindow(window, "insights-weekly-table.png");
+        QVERIFY(click("insightsTab_plan"));
+        QVERIFY(hasVisualText(window, "Unplanned"));
+        const auto plans = report.value("on_plan").toArray();
+        for (const auto &entry : plans) {
+            const auto row = entry.toObject();
+            auto *rate = firstShown(window, "onPlanRate_" + row.value("item_id").toString());
+            QVERIFY(rate);
+            if (!row.value("planned_block").isNull()) {
+                const double percent = row.value("on_plan_minutes").toDouble() * 100 / row.value("minutes").toDouble();
+                QCOMPARE(rate->property("text").toString(), QString::number(qRound(percent * 10) / 10.) + "%");
+            }
+        }
+        QCOMPARE(firstShown(window, "matrix_fajr_dhuhr")->property("minutes").toInt(), 15);
+        QCOMPARE(firstShown(window, "matrix_unplanned_dhuhr")->property("minutes").toInt(), 10);
+        window->resize(960, 640);
+        shotWindow(window, "insights-plan.png");
+        window->resize(1280, 880);
+        QVERIFY(click("insightsTab_sessions"));
+        QVERIFY(hasVisualText(window, "Chapter 1"));
+        for (const QString key : {"best", "hardest"}) {
+            const auto ranking = report.value(key).toArray();
+            QVERIFY(!ranking.isEmpty());
+            const auto session = ranking.first().toObject();
+            auto *row = firstShown(window, "insightSession_" + key + "_" + session.value("id").toString());
+            QVERIFY(row);
+            QVERIFY(QMetaObject::invokeMethod(row, "open", Q_ARG(QVariant, session.toVariantMap())));
+            auto *prompt = findByName(window, "sessionPrompt");
+            QVERIFY(prompt && window->property("sessionPromptVisible").toBool());
+            QCOMPARE(prompt->property("sessionId").toString(), session.value("id").toString());
+            QCOMPARE(prompt->property("editVersion").toInt(), session.value("version").toInt());
+            QCOMPARE(prompt->property("notes").toList(), session.value("notes").toArray().toVariantList());
+            if (key == "best") shotWindow(window, "insights-session-editor.png");
+            window->setProperty("sessionPromptVisible", false);
+        }
+        shotWindow(window, "insights-sessions.png");
+        backend.report["best"] = QVariantList{};
+        backend.report["hardest"] = QVariantList{};
+        emit backend.previewChanged();
+        QVERIFY(hasVisualText(window, "Best sessions  ·  0 sessions"));
+        window->setProperty("page", 6);
+        QVERIFY(hasVisualText(window, "Study"));
+        QVERIFY(hasVisualText(window, "Met in 1 of 2 periods"));
+        shotWindow(window, "goals-stored-scope-history.png");
+    }
+
+    void insightsDateRangeAndScope() {
+        QTemporaryDir dir;
+        FakeDaemon daemon(daemon_path(dir));
+        if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        const auto report = fixture("insights");
+        auto tracking = trackingHandler(trackingState());
+        daemon.setHandler([&](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            if (request.value("method") == "insights.get") server->respond(socket, request, report);
+            else tracking(request, socket, server);
+        });
+        Backend backend(nullptr, fake(dir), 3000, daemon_path(dir));
+        backend.reload();
+        waitForBackendIdle(backend);
+        backend.loadInsights({{"days", 7}});
+        QTRY_COMPARE(backend.insights(), report.toVariantMap());
+        auto params = lastRequest(daemon, "insights.get").value("params").toObject();
+        const QDate today = QDate::fromString(backend.todayDay(), Qt::ISODate);
+        QCOMPARE(params, (QJsonObject{{"from", today.addDays(-6).toString(Qt::ISODate)}, {"to", backend.todayDay()}}));
+        const QJsonObject scoped{{"from", "2031-05-01"}, {"to", "2031-05-14"}, {"tag_id", "none"},
+                                 {"project_id", "none"}, {"epic_id", "none"}, {"item_id", "read"}};
+        backend.loadInsights(scoped.toVariantMap());
+        QTRY_COMPARE(lastRequest(daemon, "insights.get").value("params").toObject(), scoped);
+        backend.loadInsights({{"from", "2031-05-14"}, {"to", "2031-05-01"}});
+        QVERIFY(backend.insights().isEmpty());
+        QCOMPARE(requestCount(daemon, "insights.get"), 2);
+    }
+
+    void launchPageArgument() {
+        QString warning;
+        QCOMPARE(launch::startPage({"salah-app"}, &warning), QString("today"));
+        QVERIFY(warning.isEmpty());
+        for (const QString &name : launch::pageNames()) {
+            QCOMPARE(launch::startPage({"salah-app", "--page", name}, &warning), name);
+            QCOMPARE(launch::startPage({"salah-app", "--page=" + name}, &warning), name);
+            QVERIFY(warning.isEmpty());
+        }
+        QCOMPARE(launch::startPage({"salah-app", "--page", "Review"}, &warning), QString("review"));
+        QCOMPARE(launch::startPage({"salah-app", "--page", "nowhere"}, &warning), QString("today"));
+        QVERIFY(warning.contains("nowhere"));
+        warning.clear();
+        QCOMPARE(launch::startPage({"salah-app", "--page"}, &warning), QString("today"));
+        QVERIFY(!warning.isEmpty());
+
+        QTemporaryDir dir;
+        TrackingUiPreviewBackend backend(fake(dir), daemon_path(dir), backlogRows(), backlogRows());
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        const QList<QPair<QString, int>> pages{{"today", 0}, {"routines", 1}, {"statistics", 2}, {"settings", 3},
+                                               {"backlog", 5}, {"goals", 6}, {"insights", 7}, {"review", 8}};
+        for (const auto &entry : pages) {
+            QVariant ok;
+            QVERIFY(QMetaObject::invokeMethod(root.data(), "showPage", Q_RETURN_ARG(QVariant, ok), Q_ARG(QVariant, entry.first)));
+            QVERIFY(ok.toBool());
+            QCOMPARE(root->property("page").toInt(), entry.second);
+        }
+        QVariant ok;
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "showPage", Q_RETURN_ARG(QVariant, ok), Q_ARG(QVariant, "nowhere")));
+        QVERIFY(!ok.toBool());
+    }
+
+    void reviewPageScreens() {
+        QTemporaryDir dir;
+        ReportsPreviewBackend backend(fake(dir), daemon_path(dir), backlogRows(), backlogRows());
+        const QJsonObject review = fixture("review_get");
+        backend.reviewData = review.toVariantMap();
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        window->resize(1280, 1500);
+        window->show();
+        auto *link = qobject_cast<QQuickItem *>(findByName(window, "reviewSidebarItem"));
+        QVERIFY(link);
+        QTest::mouseClick(window, Qt::LeftButton, {}, link->mapToScene(QPointF(link->width()/2, link->height()/2)).toPoint());
+        QCOMPARE(root->property("page").toInt(), 8);
+        auto *page = firstShown(window, "reviewPage");
+        QVERIFY(page);
+        // Default: the last full week, a Monday, one before the current week.
+        const QString current = page->property("currentWeek").toString();
+        const QDate last = QDate::fromString(page->property("week").toString(), Qt::ISODate);
+        QVERIFY(last.isValid());
+        QCOMPARE(last.dayOfWeek(), 1);
+        QCOMPARE(last.addDays(7).toString(Qt::ISODate), current);
+        QVERIFY(!firstShown(window, "reviewNextWeek")->property("enabled").toBool() == false);
+        QVERIFY(QMetaObject::invokeMethod(firstShown(window, "reviewNextWeek"), "clicked"));
+        QCOMPARE(page->property("week").toString(), current);
+        QVERIFY(!firstShown(window, "reviewNextWeek")->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(firstShown(window, "reviewNextWeek"), "clicked"));
+        QCOMPARE(page->property("week").toString(), current);
+        QVERIFY(QMetaObject::invokeMethod(firstShown(window, "reviewPrevWeek"), "clicked"));
+        QCOMPARE(page->property("week").toString(), last.toString(Qt::ISODate));
+        // The fixture is for 2031-05-12 whatever week is picked.
+        emit backend.previewChanged();
+        QVERIFY(hasVisualText(window, "Minutes by project"));
+        QVERIFY(hasVisualText(window, "No project"));
+        QVERIFY(hasVisualText(window, "No epic"));
+        QVERIFY(hasVisualText(window, "Study"));
+        QVERIFY(hasVisualText(window, "Chapter"));
+        QVERIFY(hasVisualText(window, "Goals met  ·  3"));
+        QVERIFY(hasVisualText(window, "Sessions with notes  ·  2"));
+        QCOMPARE(firstShown(window, "reviewBacklogCount")->property("text").toString(), QString("0"));
+        QCOMPARE(firstShown(window, "reviewDistractions")->property("text").toString(), QString("2"));
+        QCOMPARE(firstShown(window, "reviewPreviousDistractions")->property("text").toString(), QString("6"));
+        QCOMPARE(firstShown(window, "reviewNote")->property("text").toString(), QString("Keep reading.\nTry mornings."));
+        QVERIFY(firstShown(window, "reviewSession_" + review.value("summary").toObject().value("sessions_with_notes").toArray().first().toObject().value("id").toString()));
+        QVERIFY(!firstShown(window, "reviewSave")->property("enabled").toBool());
+        firstShown(window, "reviewNote")->setProperty("text", "Keep reading.\nTry mornings.\nMore.");
+        QVERIFY(firstShown(window, "reviewSave")->property("enabled").toBool());
+        shotWindow(window, "review-page.png");
+        // A week with nothing: counts are zeros, never hidden.
+        QVariantMap empty = backend.reviewData;
+        QVariantMap summary = empty.value("summary").toMap();
+        summary["by_project"] = QVariantList{};
+        summary["by_epic"] = QVariantList{};
+        summary["goals_met"] = QVariantList{};
+        summary["sessions_with_notes"] = QVariantList{};
+        summary["distractions_per_hour"] = QVariant();
+        summary["previous_distractions_per_hour"] = QVariant();
+        empty["summary"] = summary;
+        empty["note"] = QVariant();
+        backend.reviewData = empty;
+        emit backend.previewChanged();
+        QVERIFY(hasVisualText(window, "Goals met  ·  0"));
+        QVERIFY(hasVisualText(window, "No tracked minutes this week."));
+        QVERIFY(hasVisualText(window, "No sessions with notes this week."));
+        QCOMPARE(firstShown(window, "reviewDistractions")->property("text").toString(), QString("—"));
+        shotWindow(window, "review-empty.png");
+    }
+
+    void reviewRequestsAndSaves() {
+        QTemporaryDir dir;
+        FakeDaemon daemon(daemon_path(dir));
+        if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        const auto review = fixture("review_get");
+        const auto saved = rpcFixture("review_save").value("result").toObject();
+        auto tracking = trackingHandler(trackingState());
+        daemon.setHandler([&](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            const QString method = request.value("method").toString();
+            if (method == "review.get") server->respond(socket, request, review);
+            else if (method == "review.save") server->respond(socket, request, saved);
+            else tracking(request, socket, server);
+        });
+        Backend backend(nullptr, fake(dir), 3000, daemon_path(dir));
+        backend.reload();
+        waitForBackendIdle(backend);
+        QCOMPARE(backend.reviewWeekStart("2031-05-14"), QString("2031-05-12"));
+        QCOMPARE(backend.reviewWeekStart("2031-05-18", -1), QString("2031-05-05"));
+        // A mid-week day is normalised to its Monday.
+        backend.loadReview("2031-05-14");
+        QTRY_COMPARE(backend.review(), review.toVariantMap());
+        QCOMPARE(lastRequest(daemon, "review.get").value("params").toObject(), (QJsonObject{{"week", "2031-05-12"}}));
+        backend.saveReview("2031-05-12", "Keep reading.\nTry mornings.");
+        QTRY_COMPARE(requestCount(daemon, "review.save"), 1);
+        auto params = lastRequest(daemon, "review.save").value("params").toObject();
+        QCOMPARE(params.value("week").toString(), QString("2031-05-12"));
+        QCOMPARE(params.value("note").toString(), QString("Keep reading.\nTry mornings."));
+        QVERIFY(!params.value("op_id").toString().isEmpty());
+        // An empty note removes the reflection.
+        backend.saveReview("2031-05-12", "  \n ");
+        QTRY_COMPARE(requestCount(daemon, "review.save"), 2);
+        QCOMPARE(lastRequest(daemon, "review.save").value("params").toObject().value("note").toString(), QString());
+        // Another surface saving the reflection reloads the open week.
+        const int before = requestCount(daemon, "review.get");
+        QSignalSpy spy(&backend, &Backend::reviewsInvalidated);
+        daemon.notifyChanged(500, {"reviews"});
+        QTRY_VERIFY_WITH_TIMEOUT(spy.count() >= 1, 3000);
+        Q_UNUSED(before);
+    }
+
     void goalFixturesDecode() {
         for (const char *name : {"goal_add", "goal_edit_successor"})
             QVERIFY2(Dto::decode<Dto::MutationResult>(fixture(name)), name);
@@ -4350,14 +4683,14 @@ fi
         QTRY_VERIFY_WITH_TIMEOUT(requestCount(daemon, "goals.list") > listsBefore, 3000);
 
         // History: the chain of any goal, ending today, at most 730 days.
-        backend.loadGoalHistory("g1");
+        backend.loadGoalHistory("g1-successor");
         QTRY_COMPARE_WITH_TIMEOUT(backend.goalHistory().size(), 2, 3000);
         params = lastRequest(daemon, "goals.history").value("params").toObject();
-        QCOMPARE(params.value("id").toString(), QString("g1"));
+        QCOMPARE(params.value("id").toString(), QString("g1-successor"));
         const QDate from = QDate::fromString(params.value("from").toString(), Qt::ISODate);
         const QDate to = QDate::fromString(params.value("to").toString(), Qt::ISODate);
         QVERIFY(from.isValid() && to.isValid() && from.daysTo(to) < 730 && from.daysTo(to) > 700);
-        QCOMPARE(backend.goalHistoryId(), QString("g1"));
+        QCOMPARE(backend.goalHistoryId(), QString("g1-successor"));
         QCOMPARE(backend.goalHistory().first().toMap().value("target").toDouble(), 50.0);
         backend.loadGoalHistory("");
         QVERIFY(backend.goalHistory().isEmpty());
@@ -4416,8 +4749,9 @@ fi
             return findItemByName(visualNamed(window, "goalRow_" + id).value(0), "goalSubtitle")->property("text").toString();
         };
         QCOMPARE(titleOf("g1"), QString("All work"));
-        QCOMPARE(titleOf("g2"), QString("Quran"));
-        QCOMPARE(titleOf("g3"), QString("Memorise Juz 30  ·  Quran"));
+        QCOMPARE(titleOf("g2"), QString("Study"));
+        QCOMPARE(titleOf("g3"), QString("Book"));
+        QCOMPARE(titleOf("g4"), QString("Read"));
         QCOMPARE(subtitleOf("g1"), QString("Minutes  ·  Day  ·  at least 1h 00m"));
         QCOMPARE(subtitleOf("g6"), QString("Distractions  ·  Week  ·  at most 3 times"));
         auto valueOf = [&](const QString &id) {
@@ -4437,6 +4771,7 @@ fi
         shotWindow(window, "goals-page.png");
 
         // Edit the target inline; the row sends the edit with its version.
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(visualNamed(window, "goalRow_g2").value(0), "goalHistoryButton"), "clicked"));
         QVERIFY(QMetaObject::invokeMethod(findItemByName(visualNamed(window, "goalRow_g2").value(0), "goalEditButton"), "clicked"));
         QObject *field = findItemByName(visualNamed(window, "goalRow_g2").value(0), "goalTargetField"); QVERIFY(field);
         QCOMPARE(field->property("text").toString(), QString("50"));
@@ -4446,6 +4781,10 @@ fi
         QJsonObject params = lastRequest(daemon, "goal.edit").value("params").toObject();
         QCOMPARE(params.value("id").toString(), QString("g2"));
         QCOMPARE(params.value("target").toDouble(), 55.0);
+        QTRY_COMPARE(backend.goalHistoryId(), QString("g2-successor"));
+        QTRY_COMPARE(lastRequest(daemon, "goals.history").value("params").toObject().value("id").toString(),
+                     QString("g2-successor"));
+        QTRY_VERIFY(firstShown(window, "goalHistoryRow_1"));
         // Ending asks first.
         QVERIFY(QMetaObject::invokeMethod(findItemByName(visualNamed(window, "goalRow_g3").value(0), "goalEndButton"), "clicked"));
         QCOMPARE(requestCount(daemon, "goal.end"), 0);
@@ -4482,7 +4821,7 @@ fi
                 if (qobject_cast<QQuickItem *>(object)->isVisible()) ++count;
             return count;
         };
-        QTRY_COMPARE_WITH_TIMEOUT(shown("goalRow_g2"), 1, 3000);
+        QTRY_COMPARE_WITH_TIMEOUT(shown("goalRow_g2-successor"), 1, 3000);
         QCOMPARE(shown("goalRow_g6"), 1);   // Quran's distractions limit
         QCOMPARE(shown("goalRow_g1"), 0);   // all-work goals are not a project's
         QObject *toggle = firstShown(window, "goalAddToggle"); QVERIFY(toggle);
