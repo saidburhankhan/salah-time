@@ -216,3 +216,21 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   items 3, 4 widget. R4 review after (next window).
 - 13:16 new 5h window (weekly 63%). Codex only. Dispatched C8 (Astra) addendum 1 → CHECKPOINT 5;
   C9 (Astra) addendum 2–5; C10 (Sol) addendum 3–4. R4 next window. Reset unused.
+- 13:27 Codex 5h cap (window 13:16–13:27 with four Astra workers; weekly 63→79%). Next 18:16.
+  Committed fa314e8 (C8 5: sessions follow the task's current project/epic; 243 tests; live copy
+  Bayyinah 0→283 min/11 sessions, total 378 unchanged), 0f51d23 (C10 3: link leniency + notes while
+  creating), 68367a4 (R4 widget fix: goal chips match metrics by id). R4 cut off after 16 findings
+  (r4-findings.md, no DONE). INSTALLED at 13:31 (C9 WIP stashed and restored): scripts/test 243,
+  app 87, live log clean, bar "Asr 1h 43m", live stats.get epic Bayyinah = 283 min / 11 sessions.
+  QUEUE 18:16 (Codex only):
+  C9 (Astra): finish addendum 2–5 (WIP in app/: routinesmodel, RoutinesPage, EntryForm, …), then R4 app
+    findings: [high] ReviewPage draft overwritten by refresh; [high] task edit must send the version
+    captured when the editor opened (tag set clobber); review invalidation on project/epic change;
+    review picker from backend.todayDay; GoalRow target rounding + skip unchanged edit; Remove after
+    edit in first period; GoalsSection metrics from the edited task; Goals refresh on tracking-day
+    rollover; FilterBar drops a removed tag id; Review notes filter.
+  C8 (Astra): R4 backend: review distractions include tick values (numerator) — match stats.table;
+    goals met comparison numerically stable (numerator vs target×weight); review.get size (cap/
+    paginate noted sessions under the 1 MiB transport limit); metric goal query driven by
+    period/scope sessions (perf); CLI render timestamped notes. Then the polish leftovers.
+  R4 resume (Astra, read-only) to finish its pass and write DONE, if quota allows.
