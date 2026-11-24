@@ -172,6 +172,7 @@ pub(crate) fn item(row: &Row) -> rusqlite::Result<Item> {
         repeat: get_name(row, "repeat")?,
         weekdays: row.get::<_, Option<u8>>("weekdays")?.map(Weekdays),
         day: get_optional_day(row, "start_day")?,
+        end_day: get_optional_day(row, "end_day")?,
         planned_minutes: row.get("planned_minutes")?,
         position: row.get("position")?,
         created_at: get_timestamp(row, "created_at")?,

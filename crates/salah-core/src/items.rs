@@ -1,6 +1,8 @@
 //! Items: work planned into a prayer block, once or on a repeat rule. A
 //! one-time item may instead wait in the backlog (see [`crate::backlog`]).
 
+mod recurrence;
+
 use crate::config::Config;
 use crate::guard::{ensure_version, minutes, not_found, nullable};
 use crate::sessions::{self, PromptMetric};
@@ -44,6 +46,11 @@ pub struct NewItem {
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct ItemChanges {
+    /// One-time date when converting a routine. Defaults to the tracking day.
+    pub date: Option<String>,
+    /// Omitted keeps the last day, null resumes the routine.
+    #[serde(default, deserialize_with = "nullable")]
+    pub end_day: Option<Option<String>>,
     #[serde(default)]
     pub title: Option<String>,
     pub tag_ids: Option<Vec<String>>,
@@ -77,6 +84,7 @@ pub enum MovePosition {
 /// A stored item with its display recurrence.
 #[derive(Clone, Debug, Serialize)]
 pub struct ItemView {
+    pub ended: bool,
     #[serde(flatten)]
     pub item: Item,
     pub tag_ids: Vec<String>,
@@ -96,6 +104,7 @@ impl ItemView {
             schedule_text: item.schedule_text(),
             next_occurrence: item.next_occurrence(from),
             backlog: item.is_backlog(),
+            ended: item.ended(from),
             item,
         })
     }
@@ -211,6 +220,7 @@ pub fn add(
         repeat,
         weekdays: new.weekdays,
         day,
+        end_day: None,
         planned_minutes: new
             .planned_minutes
             .map(|m| minutes("planned_minutes", m))
@@ -251,21 +261,7 @@ pub fn edit(
         item.block = Some(validate_block(block)?);
         item.position = next_position(tx, item.block)?;
     }
-    if let Some(repeat) = changes.repeat
-        && repeat != item.repeat
-    {
-        if item.is_backlog() {
-            one_time(repeat)?;
-        }
-        item.repeat = repeat;
-        if repeat != Repeat::Weekly {
-            item.weekdays = None;
-        }
-    }
-    if changes.weekdays.is_some() {
-        item.weekdays = changes.weekdays;
-    }
-    validate_repeat(item.repeat, item.weekdays)?;
+    recurrence::edit(tx, &mut item, &changes, today)?;
     let previous_project = item.project_id.clone();
     let project_given = changes.project_id.is_some();
     if let Some(project_id) = changes.project_id {

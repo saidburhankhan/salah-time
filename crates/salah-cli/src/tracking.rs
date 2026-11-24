@@ -18,8 +18,14 @@ pub struct Output {
 pub enum ItemCommand {
     /// Add an item
     Add(ItemAddArgs),
-    /// List every item
-    List(Output),
+    /// List live items
+    List {
+        /// Also list routines past their last tracking day
+        #[arg(long)]
+        include_ended: bool,
+        #[command(flatten)]
+        output: Output,
+    },
     /// Show how quick-add text is understood, without saving
     Parse(ItemParseArgs),
     /// Preview a draft's recurrence, without saving
@@ -162,6 +168,15 @@ pub struct ItemPreviewArgs {
 
 #[derive(Args)]
 pub struct ItemEditArgs {
+    /// One-time date when converting a routine (defaults to today)
+    #[arg(long, value_name = "YYYY-MM-DD")]
+    date: Option<String>,
+    /// Last tracking day of a routine, inclusive
+    #[arg(long, value_name = "YYYY-MM-DD", conflicts_with = "resume")]
+    end_day: Option<String>,
+    /// Clear the routine's end day
+    #[arg(long)]
+    resume: bool,
     /// Task tag id, repeatable. Pass --tag alone for an empty set.
     #[arg(long = "tag", value_name = "ID", num_args = 0..=1)]
     tags: Option<Vec<String>>,
@@ -506,8 +521,11 @@ pub fn item(local: &mut Local<'_>, command: ItemCommand) -> Result<(), String> {
             let result = local.mutate("item.add", repeat(params, a.repeat, a.days).done())?;
             print(&a.output, &result, render::mutation)
         }
-        ItemCommand::List(output) => {
-            let result = local.call("items.list", Value::Null)?;
+        ItemCommand::List {
+            include_ended,
+            output,
+        } => {
+            let result = local.call("items.list", json!({"include_ended":include_ended}))?;
             print(&output, &result, render::items)
         }
         ItemCommand::Parse(a) => {
@@ -530,9 +548,14 @@ pub fn item(local: &mut Local<'_>, command: ItemCommand) -> Result<(), String> {
                 .set("id", local.item_id(&a.id)?)
                 .opt("tag_ids", a.tags)
                 .opt("title", a.title)
+                .opt("date", a.date)
+                .opt("end_day", a.end_day)
                 .opt("block", a.block)
                 .opt("project_id", a.project)
                 .opt("planned_minutes", a.planned_minutes);
+            if a.resume {
+                params = params.set("end_day", Value::Null);
+            }
             if a.no_project {
                 params = params.set("project_id", Value::Null);
             }

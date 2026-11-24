@@ -241,6 +241,7 @@ mod tests {
             repeat: Repeat::Daily,
             weekdays: None,
             day: Some(d()),
+            end_day: None,
             planned_minutes: Some(30),
             position: 0,
             created_at: t(1),

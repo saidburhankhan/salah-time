@@ -5,6 +5,7 @@ use std::{fs, path::PathBuf};
 
 mod phase3;
 mod phase4;
+mod routine_end;
 
 struct Database {
     root: PathBuf,
@@ -32,7 +33,7 @@ impl Database {
             conn.execute_batch(STEPS[1].sql).unwrap();
             let item = conn
                 .query_row(
-                    "SELECT *, 0 AS metrics_custom, NULL AS epic_id FROM items WHERE id='daily'",
+                    "SELECT *, 0 AS metrics_custom, NULL AS epic_id, NULL AS end_day FROM items WHERE id='daily'",
                     [],
                     crate::codec::item,
                 )
@@ -40,6 +41,7 @@ impl Database {
             let mut legacy = serde_json::to_value(item).unwrap();
             legacy.as_object_mut().unwrap().remove("metric_ids");
             legacy.as_object_mut().unwrap().remove("epic_id");
+            legacy.as_object_mut().unwrap().remove("end_day");
             conn.execute(
                 "INSERT INTO item_history VALUES ('daily','2031-05-13',?1)",
                 [legacy.to_string()],
@@ -177,7 +179,7 @@ fn fresh_database_runs_all_steps_and_skips_the_empty_version_zero_backup() {
         .iter()
         .map(|path| user_version(&Connection::open(path).unwrap()).unwrap())
         .collect();
-    assert_eq!(versions, [2, 3, 4]);
+    assert_eq!(versions, [3, 4, 5]);
     drop(Store::open(&db.path).unwrap());
     assert_eq!(db.backups(), paths);
 }
@@ -216,9 +218,11 @@ fn tracking_ui_step_preserves_wal_data_and_adds_only_the_specified_rows() {
     .unwrap();
     assert!(db.path.with_extension("db-wal").metadata().unwrap().len() > 0);
     let before = original_rows(&seed);
+    let mut migrator = Connection::open(&db.path).unwrap();
+    super::run(&mut migrator, Some(&db.path), &STEPS[..3]).unwrap();
+    assert_preserved(&db.backup(2), &before);
     let store = Store::open(&db.path).unwrap();
     assert_eq!(store.version().unwrap(), crate::schema_version());
-    assert_preserved(&db.backup(2), &before);
     let conn = &store.conn;
     assert_preserved(conn, &before);
     assert_eq!(store.metrics().unwrap().len(), 4);

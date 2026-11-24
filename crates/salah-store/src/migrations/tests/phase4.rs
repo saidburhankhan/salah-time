@@ -4,7 +4,7 @@ use crate::{Store, user_version};
 use rusqlite::{Connection, ErrorCode, types::Value};
 
 /// A realistic v4 file without any backup copies yet.
-fn populated_v4(db: &Database) -> Connection {
+pub(super) fn populated_v4(db: &Database) -> Connection {
     let mut conn = populated_v3(db);
     crate::migrations::run(&mut conn, None, &STEPS[..4]).unwrap();
     conn.execute_batch(include_str!("tracking_v4.sql")).unwrap();
@@ -101,13 +101,11 @@ fn v5_preserves_every_v4_row_and_gives_each_task_its_project_tags() {
     let v4_counts = counts(&seed, &v4_tables);
     let v4_session_tags = session_tags(&seed, PROJECT_RULE);
     let v4_totals = tag_totals(&seed, PROJECT_RULE);
-    drop(seed);
-
-    let store = Store::open(&db.path).unwrap();
-    let conn = &store.conn;
-    assert_eq!(store.version().unwrap(), 5);
-    assert_eq!(crate::schema_version(), 5);
-    assert!(store.foreign_keys_enabled().unwrap());
+    let mut conn = seed;
+    crate::migrations::run(&mut conn, Some(&db.path), &STEPS[..5]).unwrap();
+    let conn = &conn;
+    assert_eq!(user_version(conn).unwrap(), 5);
+    assert_eq!(rows(conn, "PRAGMA foreign_keys"), [[Value::Integer(1)]]);
     assert_eq!(db.backups().len(), 1);
     let backup = db.backup(4);
     assert_preserved(&backup, &before);
@@ -341,10 +339,9 @@ fn v5_constraints_reject_bad_goals_reviews_and_task_tags() {
 #[test]
 fn v5_is_a_no_op_when_the_runner_meets_it_again() {
     let db = Database::new("phase4-rerun");
-    drop(populated_v4(&db));
-    let mut store = Store::open(&db.path).unwrap();
-    store
-        .conn
+    let mut conn = populated_v4(&db);
+    crate::migrations::run(&mut conn, Some(&db.path), &STEPS[..5]).unwrap();
+    conn
         .execute_batch(
             "INSERT INTO goals (id, period, target, starts_on, position, created_at, updated_at, version)
                  VALUES ('g', 'week', 300, '2031-05-12', 0, '2031-05-12', '2031-05-12', 1);
@@ -353,20 +350,17 @@ fn v5_is_a_no_op_when_the_runner_meets_it_again() {
              DELETE FROM item_tags WHERE item_id='daily';",
         )
         .unwrap();
-    let after = original_rows(&store.conn);
+    let after = original_rows(&conn);
     let backups = db.backups();
     assert_eq!(backups.len(), 1);
+    drop(conn);
 
-    // The runner, a reopen, and the step list cut at 005 all leave the file alone:
-    // no second copy of project tags (the 'daily' row stays deleted), no new backup.
-    crate::migrations::apply(&mut store.conn, Some(&db.path)).unwrap();
-    crate::migrations::run(&mut store.conn, Some(&db.path), &STEPS[..5]).unwrap();
-    drop(store);
-    let store = Store::open(&db.path).unwrap();
-    assert_eq!(store.version().unwrap(), 5);
-    assert_preserved(&store.conn, &after);
+    let mut conn = Connection::open(&db.path).unwrap();
+    crate::migrations::run(&mut conn, Some(&db.path), &STEPS[..5]).unwrap();
+    assert_eq!(user_version(&conn).unwrap(), 5);
+    assert_preserved(&conn, &after);
     assert_eq!(db.backups(), backups);
-    assert!(rows(&store.conn, "SELECT * FROM item_tags WHERE item_id='daily'").is_empty());
+    assert!(rows(&conn, "SELECT * FROM item_tags WHERE item_id='daily'").is_empty());
 }
 
 #[test]
@@ -383,7 +377,7 @@ fn v5_failure_rolls_back_and_discards_only_its_own_backup() {
     let before = original_rows(&conn);
     let older = db.backups();
 
-    let error = crate::migrations::apply(&mut conn, Some(&db.path)).unwrap_err();
+    let error = crate::migrations::run(&mut conn, Some(&db.path), &STEPS[..5]).unwrap_err();
     assert!(
         error
             .to_string()
@@ -400,7 +394,7 @@ fn v5_failure_rolls_back_and_discards_only_its_own_backup() {
 
     conn.execute_batch("DROP INDEX item_tags_by_tag").unwrap();
     let repaired = original_rows(&conn);
-    crate::migrations::apply(&mut conn, Some(&db.path)).unwrap();
+    crate::migrations::run(&mut conn, Some(&db.path), &STEPS[..5]).unwrap();
     assert_eq!(user_version(&conn).unwrap(), 5);
     assert_preserved(&conn, &repaired);
     // Keep three: the oldest v3 copy rotates out for the new v4 one.
@@ -421,8 +415,8 @@ fn full_upgrade_from_v1_keeps_exactly_the_v2_v3_and_v4_backups() {
     }
     let before = original_rows(&seed);
 
-    crate::migrations::apply(&mut seed, Some(&db.path)).unwrap();
-    assert_eq!(user_version(&seed).unwrap(), crate::schema_version());
+    crate::migrations::run(&mut seed, Some(&db.path), &STEPS[..5]).unwrap();
+    assert_eq!(user_version(&seed).unwrap(), 5);
     assert_preserved(&seed, &before);
     for path in &older {
         assert!(!path.exists(), "{} was not rotated out", path.display());

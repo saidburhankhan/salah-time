@@ -35,10 +35,17 @@ pub(crate) fn day(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcErr
     to_value(day::day_plan(ctx.store, &config, now, params.date)?)
 }
 
-pub(crate) fn items(_: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+pub(crate) fn items(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    #[derive(serde::Deserialize)]
+    struct Params {
+        #[serde(default)]
+        include_ended: bool,
+    }
+    let params: Params = parse(call.params)?;
     let today = day::current(&ctx.config.load()?, ctx.now())?;
     let rows: Vec<ItemView> = items::list(ctx.store)?
         .into_iter()
+        .filter(|item| params.include_ended || !item.ended(today))
         .map(|item| ItemView::new(ctx.store, item, today))
         .collect::<Result<_, _>>()?;
     to_value(rows)

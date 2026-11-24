@@ -244,8 +244,8 @@ impl WriteTx<'_> {
         self.execute(
             "INSERT INTO items
                  (id, title, project_id, block, repeat, weekdays, start_day, planned_minutes,
-                  position, created_at, updated_at, deleted_at, version, metrics_custom, epic_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                  position, created_at, updated_at, deleted_at, version, metrics_custom, epic_id, end_day)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
              ON CONFLICT (id) DO UPDATE SET
                  title = excluded.title,
                  project_id = excluded.project_id,
@@ -259,7 +259,8 @@ impl WriteTx<'_> {
                  deleted_at = excluded.deleted_at,
                  version = excluded.version,
                  metrics_custom = excluded.metrics_custom,
-                 epic_id = excluded.epic_id",
+                 epic_id = excluded.epic_id,
+                 end_day = excluded.end_day",
             params![
                 item.id,
                 item.title,
@@ -276,6 +277,7 @@ impl WriteTx<'_> {
                 version,
                 item.metric_ids.is_some(),
                 item.epic_id,
+                item.end_day.map(codec::day),
             ],
         )?;
         self.execute("DELETE FROM item_metrics WHERE item_id = ?1", [&item.id])?;

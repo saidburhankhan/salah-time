@@ -218,6 +218,9 @@ fn migrated_v4_tag_totals_through_rpc() {
         }
         assert_eq!(table["totals"]["minutes"], 187);
         assert_eq!(table["totals"]["sessions"], 9);
-        assert_eq!(sqlite(&h, "PRAGMA user_version").trim(), "5");
+        assert_eq!(
+            sqlite(&h, "PRAGMA user_version").trim(),
+            salah_store::schema_version().to_string()
+        );
     }
 }

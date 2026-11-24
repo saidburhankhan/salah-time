@@ -97,7 +97,7 @@ store-wide counter, never a precondition.
 | `hello` | `protocol[]`, `client`, `actor?` | `protocol`, `server`, `capabilities`, `revision` | protocol | — | — |
 | `status.get` | — | `Status`: prayer projection, `planner` (today's rows), `running: SessionView\|null`, `prompt: [PromptMetric]`, `goals: [GoalView]` (as `goals.list` for the current tracking day), `reminders: [DueReminder]` | config, source, storage | — | — |
 | `day.get` | `date?` | `DayPlan`: prayers, blocks with `capacity_minutes`/`planned_minutes`/`actual_minutes`/`unplanned_minutes` and rows, `open`, `fulfilment` | validation, source, storage | — | — |
-| `items.list` | — | `[ItemView]`, the backlog last | storage | — | — |
+| `items.list` | `include_ended?` (default false) | `[ItemView]`, the backlog last | storage | — | — |
 | `backlog.list` | `project_id?`, `tag_id?` (each also `"none"`) | `[ItemView + project: {id,name,color,tag_ids}\|null + resources: {notes,links,reminders}]` in backlog order | not_found, storage | — | — |
 | `resources.list` | Exactly one of `item_id` or `epic_id` | `[Resource]` in position order | validation, not_found, storage | — | — |
 | `resource.add` | `op_id`, exactly one of `item_id` or `epic_id`, `kind`, `title?`, `body?`, `url?`, `remind_at?` | mutation result (`changed.resources`) | validation, not_found, storage | yes | no |
@@ -111,7 +111,7 @@ store-wide counter, never a precondition.
 | `item.parse` | `text` | draft `{title, block, repeat, weekdays, planned_minutes, start_day}` | validation (and, only when the text names a day, config/source) | — | — |
 | `item.preview` | `block`, `repeat`, `weekdays?`, `planned_minutes?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
 | `item.add` | `op_id`, `title` or `quick_text`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `epic_id?`, `planned_minutes?`, `date?`, `metric_ids?`, `tag_ids?`, `backlog?` (one-time, then no `block`/`date`) | mutation result (`changed.items`) | validation, not_found, source, storage | yes | no |
-| `item.edit` | `op_id`, `id`, `expected_version?`, `title?`, `block?`, `repeat?`, `weekdays?`, `project_id?`, `epic_id?`, `planned_minutes?`, `tag_ids?`, `metric_ids?` (`null` clears the project, epic, planned minutes or metric selection) | mutation result | validation, not_found, conflict, storage | yes | yes |
+| `item.edit` | `op_id`, `id`, `expected_version?`, `title?`, `block?`, `repeat?`, `weekdays?`, `date?` (routine to one-time), `end_day?` (null resumes), `project_id?`, `epic_id?`, `planned_minutes?`, `tag_ids?`, `metric_ids?` (`null` clears the project, epic, planned minutes or metric selection) | mutation result | validation, not_found, conflict, storage | yes | yes |
 | `item.move` | `op_id`, `id`, `block` (required; `null` reorders the backlog), `after_id?` / `before_id?` / `index?`, `expected_version?` | mutation result (every renumbered item) | validation, not_found, conflict, storage | yes | yes |
 | `item.schedule` | `op_id`, `id`, `day`, `block`, `expected_version?` (one-time items only) | mutation result (`changed.items`) | validation, not_found, conflict, source, storage | yes | yes |
 | `item.backlog` | `op_id`, `id`, `expected_version?` (one-time items only) | mutation result (`changed.items`) | validation, not_found, conflict, source, storage | yes | yes |
@@ -188,6 +188,21 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   Starting or logging work directly against an epic records that epic and its project.
   Timestamped notes are
   ordered oldest first and `at` is a UTC instant.
+- `ItemView.end_day` is the last tracking day on which a daily or weekly
+  routine can occur. It is null for open-ended routines and one-time tasks.
+  `item.edit.end_day` takes a `YYYY-MM-DD` date on or after the first day.
+  Omitting it keeps the existing value, and null resumes the routine.
+  `ItemView.ended` becomes true when the current tracking day passes the end
+  day. Use `items.list {include_ended: true}` for the catalogue including ended
+  routines. Their recorded work remains available in `routines.activity`.
+- Converting a routine with `item.edit {repeat: "none"}` schedules one occurrence
+  on the current tracking day. An optional `date` selects an unfrozen date from
+  today onward. Conversion keeps the task ID and clears the routine's end day.
+  Ending, resuming and converting preserve the schedule in effect on each past
+  tracking day, including days first opened after the edit. Past sessions and
+  ticks remain attached to the same task. CLI equivalents are `salah item edit
+  ID --end-day DATE`, `--resume`, or `--repeat once [--date DATE]`, and
+  `salah item list --include-ended`.
 - `ItemView` and day rows expose nullable `epic_id`. An assigned epic must belong
   to the item’s project. Changing projects clears the old epic. The same edit can
   select an epic in the new project. Frozen day rows use the planned epic. An epic

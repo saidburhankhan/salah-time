@@ -117,6 +117,9 @@ pub struct Item {
     #[serde(default)]
     pub weekdays: Option<Weekdays>,
     pub day: Option<NaiveDate>,
+    /// Inclusive final tracking day of a routine. Older history has no end.
+    #[serde(default)]
+    pub end_day: Option<NaiveDate>,
     pub planned_minutes: Option<i64>,
     #[serde(default)]
     pub position: i64,
@@ -227,6 +230,10 @@ impl Item {
         self.deleted_at.is_none()
     }
 
+    pub fn ended(&self, today: NaiveDate) -> bool {
+        self.end_day.is_some_and(|end| end < today)
+    }
+
     /// A one-time item with no day and block, planned on no day.
     pub fn is_backlog(&self) -> bool {
         self.block.is_none()
@@ -243,6 +250,9 @@ impl Item {
         let Some(first) = self.day.filter(|_| self.block.is_some()) else {
             return false;
         };
+        if self.ended(day) {
+            return false;
+        }
         match self.repeat {
             Repeat::None => first == day,
             Repeat::Daily => first <= day,
@@ -262,6 +272,7 @@ impl Item {
             return None;
         }
         item::next_occurrence(self.repeat, self.weekdays, first.max(from))
+            .filter(|date| !self.ended(*date))
     }
 
     pub fn schedule_text(&self) -> String {
@@ -330,6 +341,7 @@ mod tests {
             repeat,
             weekdays,
             day: Some(day(20)),
+            end_day: None,
             planned_minutes: None,
             position: 0,
             created_at: now,
@@ -355,6 +367,11 @@ mod tests {
         let weekly = item(Repeat::Weekly, Some(Weekdays::parse_list("mon").unwrap()));
         assert!(weekly.applies_to(day(23)) && !weekly.applies_to(day(24)));
         assert_eq!(weekly.next_occurrence(day(1)), Some(day(23)));
+        let mut ending = weekly.clone();
+        ending.end_day = Some(day(24));
+        assert_eq!(ending.next_occurrence(day(23)), Some(day(23)));
+        assert_eq!(ending.next_occurrence(day(24)), None);
+        assert!(!ending.applies_to(day(30)));
         let mut removed = daily.clone();
         removed.deleted_at = Some(Utc::now());
         assert!(!removed.applies_to(day(25)));

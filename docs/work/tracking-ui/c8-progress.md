@@ -265,3 +265,15 @@ CHECKPOINT 9: Aggregate adherence per task, paginate notes, index assignment goa
 251 workspace tests passed. Strict Clippy, formatting, and diff checks passed. The eight Unix-socket tests listed under checkpoint 0b were filtered out.
 
 CHECKPOINT 10: Page daily routine minutes and completion ticks through RPC and CLI — files: crates/salah-cli/src/{main,reports}.rs, crates/salah-cli/tests/{daemon/methods,rpc,rpc/routines}.rs, crates/salah-cli/tests/fixtures/rpc/routines_activity.json, crates/salah-core/src/{lib,routines}.rs, crates/salah-domain/src/item.rs, crates/salah-protocol/src/{dispatcher,reads}.rs, crates/salah-store/src/reports.rs, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md
+
+## 11 — end, resume, or convert a routine
+
+Migration 006 adds the nullable inclusive `items.end_day`. The v5→v6 regression compares every original row and item rowid, checks the v5 backup and date constraints, and reopens v6 without another backup. Runner tests cover retention of the three newest backups and refusal of newer schemas.
+
+`item.edit` accepts `end_day` and null to resume. `items.list {include_ended: true}` includes ended routines. Conversion with `repeat: "none"` keeps the ID and schedules the one-time task on `date` or the current tracking day. The CLI supports `--end-day`, `--resume`, `--date` and `item list --include-ended`.
+
+Written days use their frozen plan. For an unwritten past day, `items_on` selects the first item history record whose edit day follows the requested day. An edit preserves the old schedule in that record, including its end day. The conversion regression reads three past days with sessions, one already frozen and two still unwritten after conversion. All three show their daily occurrence and original minutes, the completion tick stays on its day, and today shows the one-time task. The resume regression keeps the gap between ending and resuming. Thirteen existing fixtures gained only `end_day` and `ended`.
+
+255 workspace tests passed. The eight socket tests listed under checkpoint 0b were filtered out. Strict Clippy, formatting and diff checks passed. End, list, resume and dated conversion also passed through the CLI on a temporary database. The live-copy migration comparison remains the orchestrator's pre-install gate.
+
+CHECKPOINT 11: End and resume routines and preserve daily history on conversion to a dated one-time task — files: crates/salah-cli/src/tracking.rs, crates/salah-cli/tests/rpc/{item_tags,routines}.rs, crates/salah-cli/tests/fixtures/rpc/{backlog_list,item_add,item_add_backlog,item_add_quick,item_add_quick_tomorrow,item_add_tags,item_backlog,item_edit,item_edit_metrics,item_move,item_schedule,items_list,tag_remove}.json, crates/salah-core/src/{items,items/recurrence}.rs, crates/salah-domain/src/tracking.rs, crates/salah-protocol/src/reads.rs, crates/salah-store/src/{codec,lib,migrations,write}.rs, crates/salah-store/src/migrations/{006_routine_end_day.sql,tests.rs,tests/phase4.rs,tests/routine_end.rs}, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md
