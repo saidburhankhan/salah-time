@@ -76,7 +76,10 @@ function epicName(epics, epicId) {
 
 function addParams(parsed, fields, projectId, backlog, date, epicId, tagIds) {
   if (!parsed || !parsed.title || (backlog && parsed.repeat !== "none")) return null
-  var params = { title: parsed.title, tag_ids: tagIds }
+  var params = { title: parsed.title }
+  // Untouched tags are omitted so item.add copies the project's current
+  // defaults in its own transaction; an explicit array (even []) overrides.
+  if (tagIds != null) params.tag_ids = tagIds
   if (fields.minutes != null) params.planned_minutes = fields.minutes
   if (projectId) {
     params.project_id = projectId

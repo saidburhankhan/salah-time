@@ -64,7 +64,8 @@ Column {
 
   function submit(backlog) {
     if (submitting || taskAdded || !parsed || (schedule.when === "tomorrow" && !schedule.date && !backlog)) return
-    var params = CreationLogic.addParams(parsed, fields, projectId, backlog, schedule.date, epicId, tagIds)
+    var params = CreationLogic.addParams(parsed, fields, projectId, backlog, schedule.date, epicId,
+      tagChoice === null ? null : tagIds)
     if (!params || !resourceDrafts.commitDraft()) return
     itemAttempt = CreationLogic.itemAttempt(itemAttempt, params, transport.newOpId)
     writeItem()

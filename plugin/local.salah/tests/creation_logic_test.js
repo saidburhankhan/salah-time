@@ -61,6 +61,9 @@ test("task tags can clear all defaults or include tags from outside the chosen p
     { title: once.title, project_id: quran.id, tag_ids: [] })
   same(logic.addParams(once, {}, quran.id, false, "", "", selected),
     { title: once.title, project_id: quran.id, tag_ids: ["standalone"] })
+  // Untouched chips: no tag_ids, so the daemon applies the project's current defaults.
+  same(logic.addParams(once, {}, quran.id, false, "", "", null),
+    { title: once.title, project_id: quran.id })
 })
 
 test("the sheet sends the parsed title, recurrence and selected schedule", () => {
