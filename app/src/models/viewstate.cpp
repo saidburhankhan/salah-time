@@ -130,6 +130,8 @@ ItemDraft::ItemDraft(QObject *parent) : QObject(parent) {}
 
 void ItemDraft::update(const QJsonObject &row) {
     m_version = row.value("version").toInteger(-1);
+    m_startDay = row.value("day").toString();
+    m_endDay = row.value("end_day").toString();
     m_backlog = row.value(QStringLiteral("backlog")).toBool();
     m_id = row.value(QStringLiteral("id")).toString();
     m_title = row.value(QStringLiteral("title")).toString();
@@ -162,6 +164,8 @@ void ItemDraft::update(const Dto::ParseDraft &draft) {
 
 void ItemDraft::clear() {
     m_version = -1;
+    m_startDay.clear();
+    m_endDay.clear();
     m_backlog = false;
     m_id.clear();
     m_title.clear();

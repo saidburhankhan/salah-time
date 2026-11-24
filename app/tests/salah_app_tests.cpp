@@ -1676,6 +1676,8 @@ fi
         QTRY_COMPARE(model->data(index, RoutinesModel::MinutesRole).toLongLong(), 37);
         QCOMPARE(model->data(index, RoutinesModel::DoneDaysRole).toInt(), 2);
         QCOMPARE(requestCount(daemon, "sessions.list"), 0);
+        QCOMPARE(lastRequest(daemon, "items.list").value("params").toObject(),
+                 (QJsonObject{{"include_ended", true}}));
         QList<QJsonObject> pages;
         for (const auto &request : daemon.requests)
             if (request.value("method") == "routines.activity")
@@ -1784,12 +1786,13 @@ esac
         QTRY_VERIFY(form->property("opened").toBool());
         window->setProperty("entryVisible", false);
         QTRY_VERIFY(!form->property("opened").toBool());
-        QVERIFY(QMetaObject::invokeMethod(findItemByName(row, "routineRemove"), "clicked"));
-        QVERIFY(hasVisualText(window, "Confirm removal"));
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(row, "routineDelete"), "clicked"));
+        QVERIFY(hasVisualText(window, "Confirm delete"));
+        QVERIFY(hasVisualText(window, "Choose End routine to stop future occurrences and keep the routine in Ended."));
         QCOMPARE(offlineRequests(dir).size(), 1);
         shotWindow(window, "routine-remove.png");
         write(dir.filePath("catalog.json"), "[]");
-        QVERIFY(QMetaObject::invokeMethod(findItemByName(row, "routineRemove"), "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(row, "routineDelete"), "clicked"));
         QTRY_COMPARE(offlineRequests(dir).size(), 2);
         const auto remove = offlineRequests(dir).last();
         QCOMPARE(remove.value("method").toString(), QString("item.remove"));
@@ -1810,15 +1813,192 @@ esac
         QCOMPARE(add.value("params").toObject().value("title").toString(), QString("Read after Fajr"));
     }
 
+    void routinesEndResumeAndConvert() {
+        QTemporaryDir dir;
+        fake(dir);
+        const QString program = dir.filePath("routine-edit-cli");
+        write(program, R"SH(#!/bin/sh
+cd "$(dirname "$0")"
+case "$1 $2" in
+  "item list")
+    printf '%s\n' "$*" >> catalogue-args
+    if [ "$3" = "--include-ended" ]; then cat catalogue.json
+    else jq -c 'map(select(.ended == false))' catalogue.json; fi ;;
+  "routines activity") cat activity.json ;;
+  "rpc ")
+    read -r hello && read -r request || exit 2
+    printf '%s\n' "$request" >> frames
+    case "$request" in
+      *'"date":"2031-05-17"'*)
+        printf '%s\n' "$request" | jq -c '{jsonrpc,id,error:{code:-32602,message:"That date is already frozen",data:{kind:"validation"}}}'
+        exit 0 ;;
+    esac
+    jq --argjson request "$request" '
+        $request.params as $p | map(
+          if .id != $p.id then . else
+            .version += 1 |
+            if ($p | has("end_day")) then
+                .end_day = $p.end_day | .ended = (.end_day != null and .end_day < "2031-05-14")
+            elif ($p | has("date")) then
+                .repeat = $p.repeat | .day = $p.date | .end_day = null | .ended = false
+            else . end
+          end
+        )' catalogue.json > changed.json && mv changed.json catalogue.json
+    printf '%s\n' "$request" | jq -c '{jsonrpc,id,result:{op_id:.params.op_id,revision:1,changed:{items:[],sessions:[],projects:[],tags:[],metrics:[],marks:[],deleted:[]}}}' ;;
+  *) exec ./salah "$@" ;;
+esac
+)SH");
+        QFile::setPermissions(program, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        auto weekly = rpcFixture("items_list").value("result").toArray().first().toObject();
+        weekly["id"] = "weekly";
+        weekly["title"] = "Review grammar notes";
+        weekly["day"] = "2031-05-01";
+        weekly["repeat"] = "weekly";
+        weekly["weekdays"] = QJsonArray{"mon", "wed", "fri"};
+        weekly["schedule_text"] = "Mon, Wed, Fri";
+        weekly["version"] = 7;
+        write(dir.filePath("catalogue.json"), QJsonDocument(QJsonArray{weekly}).toJson());
+        auto activity = fixture("routines_activity");
+        auto rows = activity.value("rows").toArray();
+        for (qsizetype i = 0; i < rows.size(); ++i) {
+            auto row = rows[i].toObject();
+            row["item_id"] = "weekly";
+            rows[i] = row;
+        }
+        activity["rows"] = rows;
+        write(dir.filePath("activity.json"), QJsonDocument(activity).toJson());
+        TrackingUiPreviewBackend backend(program, daemon_path(dir), {}, {});
+        backend.reload();
+        waitForBackendIdle(backend);
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        window->resize(1200, 960);
+        window->setProperty("page", 1);
+        QTRY_VERIFY(hasVisualText(window, "2 days done  ·  37 min"));
+        QFile catalogueArgs(dir.filePath("catalogue-args"));
+        QVERIFY(catalogueArgs.open(QIODevice::ReadOnly));
+        QVERIFY(catalogueArgs.readAll().contains("item list --include-ended --json"));
+        const auto click = [window](const QString &name) {
+            auto *control = firstShown(window, name);
+            return control && QMetaObject::invokeMethod(control, "clicked");
+        };
+        auto *chooser = findByName(window, "routineEndDialog");
+        auto *form = findByName(window, "entryPopup");
+        QVERIFY(chooser && form);
+        QVERIFY(click("routineEnd"));
+        QTRY_VERIFY(chooser->property("opened").toBool());
+        QCOMPARE(chooser->property("endDay").toString(), QString("2031-05-14"));
+        shotWindow(window, "routine-end-today.png");
+        QVERIFY(click("routineEndConfirm"));
+        QTRY_VERIFY(!chooser->property("opened").toBool());
+        QTRY_VERIFY(hasVisualText(window, QString::fromUtf8("Last day · Wed 14 May")));
+        QCOMPARE(backend.endedRoutines()->rowCount(), 0);
+
+        QVERIFY(click("routineEnd"));
+        QTRY_VERIFY(chooser->property("opened").toBool());
+        QVERIFY(click("routineEndPickDate"));
+        auto *endField = firstShown(window, "routineEndDate");
+        QVERIFY(endField);
+        endField->setProperty("text", "2031-04-30");
+        QVERIFY(!firstShown(window, "routineEndConfirm")->property("enabled").toBool());
+        endField->setProperty("text", "2031-05-11");
+        QVERIFY(firstShown(window, "routineEndConfirm")->property("enabled").toBool());
+        shotWindow(window, "routine-end-date.png");
+        QVERIFY(click("routineEndConfirm"));
+        QTRY_COMPARE(backend.endedRoutines()->rowCount(), 1);
+        QCOMPARE(backend.routines()->rowCount(), 0);
+        QVERIFY(firstShown(window, "routineDelete"));
+        QTRY_VERIFY(hasVisualText(window, "Ended"));
+        QVERIFY(hasVisualText(window, "2 days done  ·  37 min"));
+        shotWindow(window, "routines-ended.png");
+
+        QVERIFY(click("routineResume"));
+        QTRY_COMPARE(backend.endedRoutines()->rowCount(), 0);
+        QCOMPARE(backend.routines()->rowCount(), 1);
+        QVERIFY(click("routineEdit"));
+        QTRY_VERIFY(form->property("opened").toBool());
+        QVERIFY(click("editorEndRoutine"));
+        QTRY_VERIFY(chooser->property("opened").toBool());
+        QVERIFY(click("routineEndConfirm"));
+        QTRY_VERIFY(!chooser->property("opened").toBool());
+        QCOMPARE(offlineRequests(dir).size(), 3);
+        QCOMPARE(form->property("endDay").toString(), QString("2031-05-14"));
+        shotWindow(window, "routine-editor-end.png");
+        const auto submit = [form] { return QMetaObject::invokeMethod(form, "submitTitle", Q_ARG(QVariant, false)); };
+        QVERIFY(submit());
+        QTRY_VERIFY(!form->property("opened").toBool());
+        QTRY_VERIFY(hasVisualText(window, QString::fromUtf8("Last day · Wed 14 May")));
+
+        QVERIFY(click("routineEdit"));
+        QTRY_VERIFY(form->property("opened").toBool());
+        QVERIFY(click("entryRepeat_none"));
+        auto *oneTimeDate = firstShown(window, "routineConversionDate");
+        QVERIFY(oneTimeDate);
+        QCOMPARE(oneTimeDate->property("text").toString(), QString("2031-05-14"));
+        QVERIFY(hasVisualText(window, "Ends the routine; past days keep it."));
+        oneTimeDate->setProperty("text", "2031-05-13");
+        QVERIFY(!form->property("canSubmit").toBool());
+        oneTimeDate->setProperty("text", "2031-05-17");
+        QVERIFY(form->property("canSubmit").toBool());
+        auto *dateItem = qobject_cast<QQuickItem *>(oneTimeDate);
+        auto *editor = form->property("contentItem").value<QQuickItem *>();
+        QVERIFY(dateItem && editor);
+        QTRY_VERIFY(dateItem->mapToItem(editor, QPointF(0, dateItem->height())).y() < editor->height() - 20);
+        shotWindow(window, "routine-convert-one-time.png");
+        QVERIFY(submit());
+        QTRY_COMPARE(form->property("saveError").toString(), QString("That date is already frozen"));
+        QVERIFY(form->property("opened").toBool());
+        oneTimeDate->setProperty("text", "2031-05-18");
+        QVERIFY(submit());
+        QTRY_VERIFY(!form->property("opened").toBool());
+        QTRY_COMPARE(backend.routines()->rowCount(), 0);
+        QCOMPARE(backend.endedRoutines()->rowCount(), 0);
+
+        const auto frames = offlineRequests(dir);
+        QCOMPARE(frames.size(), 6);
+        QList<QJsonObject> patches;
+        for (const auto &frame : frames) {
+            QCOMPARE(frame.value("method").toString(), QString("item.edit"));
+            const auto patch = frame.value("params").toObject();
+            QVERIFY(!patch.value("op_id").toString().isEmpty());
+            QCOMPARE(patch.value("id").toString(), QString("weekly"));
+            patches.append(patch);
+        }
+        QCOMPARE(patches[0].value("end_day").toString(), QString("2031-05-14"));
+        QCOMPARE(patches[0].value("expected_version").toInt(), 7);
+        QVERIFY(!patches[0].contains("title") && !patches[0].contains("repeat"));
+        QCOMPARE(patches[1].value("end_day").toString(), QString("2031-05-11"));
+        QCOMPARE(patches[1].value("expected_version").toInt(), 8);
+        QVERIFY(patches[2].value("end_day").isNull());
+        QCOMPARE(patches[2].value("expected_version").toInt(), 9);
+        QCOMPARE(patches[3].value("repeat").toString(), QString("weekly"));
+        QCOMPARE(patches[3].value("end_day").toString(), QString("2031-05-14"));
+        QCOMPARE(patches[3].value("expected_version").toInt(), 10);
+        QCOMPARE(patches[4].value("date").toString(), QString("2031-05-17"));
+        QCOMPARE(patches[5].value("date").toString(), QString("2031-05-18"));
+        QCOMPARE(patches[5].value("repeat").toString(), QString("none"));
+        QCOMPARE(patches[5].value("expected_version").toInt(), 11);
+        QVERIFY(!patches[5].contains("end_day"));
+    }
+
     void historicalEditorReadsLiveTaskBeforeOpening() {
         QTemporaryDir dir;
         fake(dir);
         const QString program = dir.filePath("historical-cli");
         write(program, R"SH(#!/bin/sh
 cd "$(dirname "$0")"
-case "$1 $2 $3" in
-  "item list --json") cat items.json; exit 0 ;;
-esac
+if [ "$1 $2" = "item list" ]; then
+    if [ "$3" = "--include-ended" ]; then cat items.json
+    else jq -c 'map(select(.ended == false))' items.json; fi
+    exit 0
+fi
 for arg in "$@"; do
     if [ "$1" = day ] && [ "$arg" = "2031-05-13" ]; then cat yesterday.json; exit 0; fi
 done
@@ -1843,6 +2023,9 @@ exec ./salah "$@"
         QCOMPARE(live.value("id").toString(), QString("<id:4>"));
         live["title"] = "Live routine";
         live["version"] = 19;
+        live["day"] = "2031-05-01";
+        live["end_day"] = "2031-05-13";
+        live["ended"] = true;
         live["block"] = "asr";
         live["project_id"] = "study";
         live["epic_id"] = "e-grammar";
@@ -1869,6 +2052,7 @@ exec ./salah "$@"
         QCOMPARE(form->property("projectId").toString(), QString("study"));
         QCOMPARE(form->property("epicId").toString(), QString("e-grammar"));
         QCOMPARE(form->property("openedVersion").toInt(), 19);
+        QCOMPARE(form->property("endDay").toString(), QString("2031-05-13"));
         QCOMPARE(form->property("tagIds").toStringList(), QStringList{"learning"});
         QCOMPARE(form->property("metricIds").toStringList(), QStringList{"focus"});
         shotWindow(window, "historical-current-task-editor.png");
@@ -1880,7 +2064,7 @@ exec ./salah "$@"
         QCOMPARE(params.value("project_id"), live.value("project_id"));
         QCOMPARE(params.value("epic_id"), live.value("epic_id"));
         QCOMPARE(params.value("block"), live.value("block"));
-        QVERIFY(!params.contains("tag_ids"));
+        QVERIFY(!params.contains("tag_ids") && !params.contains("end_day"));
         QVERIFY(!params.contains("metric_ids"));
         QTRY_VERIFY(!form->property("opened").toBool());
         write(dir.filePath("items.json"), "[]");

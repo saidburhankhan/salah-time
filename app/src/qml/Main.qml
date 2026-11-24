@@ -120,6 +120,7 @@ ApplicationWindow {
         }
     }
     function openBacklogEntry() { openEntry({ backlog: true }) }
+    function openRoutineEnd(item, stageDate) { routineEndDialog.show(item, stageDate) }
     function openSchedule(item) { scheduleDialog.show(item) }
     // kind is "item" or "epic". Opening it again for the same target closes it.
     function openResources(kind, id, title) {
@@ -155,6 +156,10 @@ ApplicationWindow {
         backend.previewItem(item || ({}))
     }
     function closeTopOverlay() {
+        if (routineEndDialog.opened) {
+            if (!routineEndDialog.waiting) routineEndDialog.close()
+            return true
+        }
         if (resourceDrawer.opened) { resourceDrawer.close(); return true }
         if (sessionPromptVisible) { sessionPromptVisible = false; return true }
         if (entryVisible && entryPopup.saving) return true
@@ -651,6 +656,10 @@ ApplicationWindow {
         id: entryPopup
         win: win
         item: win.editItem
+    }
+    RoutineEndDialog {
+        id: routineEndDialog
+        win: win
     }
     SessionPrompt {
         id: sessionPrompt

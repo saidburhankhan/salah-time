@@ -48,6 +48,8 @@ public:
         int plannedMinutes = 0;
         bool hasPlannedMinutes = false;
         QDate date;
+        // Undefined preserves the last day, null resumes the routine.
+        QJsonValue endDay = QJsonValue::Undefined;
         bool quick = false;
         bool backlog = false;
         // Optional caller-supplied idempotency key (used by the UI to map a
@@ -77,9 +79,10 @@ public:
     void goalsHistory(const QString &id, const QString &from, const QString &to, Callback callback);
     void rpcRead(const QString &method, const QJsonObject &params, Callback callback);
     void routineActivity(const QDate &from, const QDate &to, const QString &before, Callback callback);
-    void itemsList(Callback callback);
+    void itemsList(Callback callback, bool includeEnded = false);
     void itemAdd(const ItemFields &fields, Callback callback = {});
     void itemEdit(const QString &id, const ItemFields &fields, Callback callback = {}, qint64 expectedVersion = -1);
+    void setRoutineEndDay(const QString &id, const QString &day, Callback callback, qint64 expectedVersion);
     void itemRemove(const QString &id, Callback callback = {}, qint64 expectedVersion = -1);
     void itemMove(const QString &id, const QString &block, int index, Callback callback = {}, qint64 expectedVersion = -1,
                   const QString &afterId = {}, const QString &beforeId = {});

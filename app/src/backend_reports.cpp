@@ -82,6 +82,7 @@ void Backend::loadRoutineHistory(const QDate &through, const QString &before) {
         const auto *data = std::get_if<Dto::Json>(&result.value);
         if (!result.ok || !data || !data->json.value("rows").isArray()) {
             m_routines.setHistory({}, {});
+            m_endedRoutines.setHistory({}, {});
             fail(result.ok ? tr("Could not read routine activity.") : result.error.message);
             return;
         }
@@ -96,7 +97,10 @@ void Backend::loadRoutineHistory(const QDate &through, const QString &before) {
         }
         const QString next = data->json.value("next").toString();
         if (!next.isEmpty() && next != before) loadRoutineHistory(through, next);
-        else m_routines.setHistory(through, std::move(m_pendingRoutineHistory));
+        else {
+            m_endedRoutines.setHistory(through, m_pendingRoutineHistory);
+            m_routines.setHistory(through, std::move(m_pendingRoutineHistory));
+        }
     });
 }
 

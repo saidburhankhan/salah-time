@@ -13,6 +13,12 @@ Popup {
     readonly property bool backlog: !!item.backlog
     property string block: item.block || "fajr"
     property string repeat: item.repeat || "none"
+    readonly property bool existingRoutine: !!item.id && !backlog
+        && (item.repeat === "daily" || item.repeat === "weekly")
+    readonly property bool convertingRoutine: existingRoutine && repeat === "none"
+    property string endDay: ""
+    property bool endDayEdited: false
+    property string routineSaveId: ""
     property var days: item.weekdays || []
     property string projectId: ""
     // Optional, and always one of the chosen project's epics.
@@ -55,7 +61,7 @@ Popup {
     property string saveError: ""
     property bool resourceRejected: false
     readonly property bool canSubmit: !saving && !resourceRejected && !attachments.composing
-        && weeklyValid && !!entryFields.titleText.trim()
+        && weeklyValid && (!convertingRoutine || entryFields.conversionDateValid) && !!entryFields.titleText.trim()
     property bool confirming: false
     readonly property bool weeklyValid: repeat !== "weekly" || days.length > 0
     readonly property var preview: backend.preview
@@ -72,6 +78,10 @@ Popup {
     property double openedVersion: -1
     onOpened: {
         openedVersion = item.version ?? -1
+        endDay = item.endDay || ""
+        endDayEdited = false
+        routineSaveId = ""
+        entryFields.conversionDay = backend.todayDay
         block = item.block || "fajr"
         repeat = item.repeat || "none"
         days = item.weekdays || []
@@ -89,7 +99,7 @@ Popup {
         refreshPreview()
     }
     function refreshPreview() {
-        if (!visible || backlog || !weeklyValid) return
+        if (!visible || backlog || !weeklyValid || (convertingRoutine && !entryFields.conversionDateValid)) return
         backend.previewItem(draft())
     }
     onBlockChanged: previewTimer.restart()
@@ -103,6 +113,7 @@ Popup {
     Connections {
         target: entryFields
         function onGoalTextChanged() { previewTimer.restart() }
+        function onConversionDayChanged() { previewTimer.restart() }
     }
     function draft() {
         var goal = Number(entryFields.goalText)
@@ -116,6 +127,10 @@ Popup {
         }
         if (item.id && openedVersion >= 0)
             result.expected_version = openedVersion
+        if (convertingRoutine)
+            result.date = entryFields.conversionDay
+        else if (existingRoutine && endDayEdited)
+            result.end_day = endDay || null
         if (backlog)
             result.backlog = true
         else
@@ -201,6 +216,13 @@ Popup {
     }
     Connections {
         target: backend
+        function onRoutineEditFinished(id, ok, error) {
+            if (id !== entryPopup.routineSaveId) return
+            entryPopup.saving = false
+            entryPopup.routineSaveId = ""
+            if (ok) entryPopup.finishSave(entryPopup.addAnother)
+            else entryPopup.saveError = error
+        }
         function onTagsLoaded() {
             if (entryPopup.pendingTask || !entryPopup.saveError || entryPopup.tagOverrides === null) return
             entryPopup.tagOverrides = entryPopup.tagOverrides.filter(id => backend.tags.some(tag => tag.id === id))
@@ -246,6 +268,14 @@ Popup {
             saveNext()
             return
         }
+        if (convertingRoutine || (existingRoutine && endDayEdited)) {
+            saveError = ""
+            routineSaveId = item.id
+            addAnother = keepOpen
+            saving = true
+            backend.saveItem(d)
+            return
+        }
         if (!backlog) win.maybeToast(d)
         backend.saveItem(d)
         finishSave(keepOpen)
@@ -254,6 +284,8 @@ Popup {
         resetAttachments()
         if (keepOpen) {
             win.editItem = backlog ? ({ backlog: true }) : ({})
+            endDay = ""
+            endDayEdited = false
             metricIds = null
             metricIdsEdited = false
             tagOverrides = null
@@ -261,6 +293,10 @@ Popup {
         } else {
             win.entryVisible = false
         }
+    }
+    function setEndDay(day) {
+        endDay = day
+        endDayEdited = endDay !== (item.endDay || "")
     }
     function toggleDay(d) {
         var a = days.slice()
@@ -310,6 +346,7 @@ Popup {
             AppButton {
                 win: entryPopup.win
                 visible: !!entryPopup.item.id
+                enabled: !entryPopup.saving
                 text: entryPopup.confirming ? qsTr("Confirm delete") : qsTr("Delete")
                 onClicked: {
                     if (entryPopup.confirming) {
@@ -353,7 +390,7 @@ Popup {
             Layout.margins: 22
             spacing: 26
             EntryFields {
-                enabled: !entryPopup.pendingTask
+                enabled: !entryPopup.pendingTask && !entryPopup.saving
                 id: entryFields
                 win: entryPopup.win
                 form: entryPopup
@@ -465,6 +502,48 @@ Popup {
                             }
                         }
                     }
+                }
+                ColumnLayout {
+                    visible: entryPopup.existingRoutine && !entryPopup.convertingRoutine
+                    Layout.fillWidth: true
+                    enabled: !entryPopup.saving
+                    Label {
+                        visible: !!entryPopup.endDay || entryPopup.endDayEdited
+                        Layout.fillWidth: true
+                        text: entryPopup.endDay
+                            ? (entryPopup.endDayEdited ? qsTr("Last day after saving · %1") : qsTr("Last day · %1"))
+                                .arg(entryPopup.win.shortDate(entryPopup.endDay))
+                            : qsTr("The routine will resume when saved.")
+                        textFormat: Text.PlainText
+                        color: entryPopup.win.muted
+                        wrapMode: Text.WordWrap
+                    }
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        AppButton {
+                            objectName: "editorEndRoutine"
+                            win: entryPopup.win
+                            text: entryPopup.endDay ? qsTr("Change end date") : qsTr("End routine")
+                            onClicked: entryPopup.win.openRoutineEnd({
+                                id: entryPopup.item.id, title: entryFields.titleText,
+                                day: entryPopup.item.startDay, end_day: entryPopup.endDay
+                            }, day => entryPopup.setEndDay(day))
+                        }
+                        AppButton {
+                            visible: !!entryPopup.endDay
+                            win: entryPopup.win
+                            text: qsTr("Resume")
+                            onClicked: entryPopup.setEndDay("")
+                        }
+                    }
+                }
+                Label {
+                    visible: entryPopup.confirming && entryPopup.existingRoutine
+                    Layout.fillWidth: true
+                    text: qsTr("Choose End routine to stop future occurrences and keep the routine in Ended.")
+                    color: entryPopup.win.muted
+                    wrapMode: Text.WordWrap
                 }
                 AppButton {
                     objectName: "routineResources"

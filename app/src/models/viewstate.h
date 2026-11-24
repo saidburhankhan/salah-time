@@ -191,6 +191,8 @@ private:
 class ItemDraft : public QObject {
     Q_OBJECT
     Q_PROPERTY(qint64 version READ version NOTIFY changed)
+    Q_PROPERTY(QString startDay READ startDay NOTIFY changed)
+    Q_PROPERTY(QString endDay READ endDay NOTIFY changed)
     Q_PROPERTY(bool backlog READ backlog NOTIFY changed)
     Q_PROPERTY(QString id READ id NOTIFY changed)
     Q_PROPERTY(QString title READ title NOTIFY changed)
@@ -210,6 +212,8 @@ public:
 
     QString id() const { return m_id; }
     qint64 version() const { return m_version; }
+    QString startDay() const { return m_startDay; }
+    QString endDay() const { return m_endDay; }
     bool backlog() const { return m_backlog; }
     QString title() const { return m_title; }
     QString block() const { return m_block; }
@@ -234,6 +238,7 @@ signals:
 private:
     QString m_id, m_title, m_block = QStringLiteral("fajr"), m_repeat = QStringLiteral("none");
     qint64 m_version = -1;
+    QString m_startDay, m_endDay;
     bool m_backlog = false;
     QStringList m_weekdays;
     QString m_measure = QStringLiteral("check");

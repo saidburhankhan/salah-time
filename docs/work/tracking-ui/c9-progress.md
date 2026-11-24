@@ -78,3 +78,13 @@ Routines uses `routines.activity` over RPC and `salah routines activity --json` 
 `app/bin/build` and `git diff --check` passed. `SALAH_UI_SHOT_DIR=/tmp/c9-cp6 app/bin/test` passed 54 tests with zero failures and 44 AF_UNIX skips, including the new socket regression. Reviewed all 45 screenshots, with a closer review of the Routines list, editor, removal and empty state.
 
 CHECKPOINT 6: Load Routines history from paginated daily activity (app/src/backend_reports.cpp, app/src/client/coreclient.cpp, app/src/client/coreclient.h, app/src/models/routinesmodel.h, app/src/qml/pages/RoutinesPage.qml, app/tests/salah_app_tests.cpp, docs/work/tracking-ui/c9-progress.md)
+
+## End and resume routines
+
+Routines can end on the current tracking day or a picked last day. The active list shows the last day through that date. Ended routines retain the recent activity strip and offer Resume and Delete. Delete confirmation on active routines directs users to End when they want to keep the routine's history.
+
+The editor stages an end date with the other task fields and saves it using the version captured on open. Switching a routine to One time explains that past days retain the routine and preselects today's tracking date. The editor reveals the date field and retains changes when the server rejects a date. Historical task editors request the catalogue including ended routines so they can still load the current version.
+
+`app/bin/build` and `git diff --check` passed. `SALAH_UI_SHOT_DIR=/tmp/c9-cp7-final app/bin/test` passed 55 tests with zero failures and 44 AF_UNIX skips. Reviewed all 50 screenshots, including both end-date choices, the Ended section, the editor end date and one-time conversion.
+
+CHECKPOINT 7: End, resume and convert routines in the app while preserving their history (app/src/backend.cpp, app/src/backend.h, app/src/backend_reports.cpp, app/src/client/coreclient.cpp, app/src/client/coreclient.h, app/src/models/viewstate.cpp, app/src/models/viewstate.h, app/src/qml/Main.qml, app/src/qml/controls/TrackingDateField.qml, app/src/qml/overlays/EntryFields.qml, app/src/qml/overlays/EntryForm.qml, app/src/qml/overlays/RoutineEndDialog.qml, app/src/qml/pages/RoutinesPage.qml, app/src/resources.qrc, app/tests/salah_app_tests.cpp, docs/work/tracking-ui/c9-progress.md)

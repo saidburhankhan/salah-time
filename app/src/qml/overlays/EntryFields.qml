@@ -9,11 +9,25 @@ ScrollView {
     property var form
     property alias titleText: titleField.text
     property alias goalText: plannedField.text
+    property alias conversionDay: conversionDate.text
+    readonly property bool conversionDateValid: conversionDate.valid
     property bool creatingProject: false
     Layout.fillWidth: true
     Layout.fillHeight: true
     Layout.minimumWidth: 450
     clip: true
+    onContentHeightChanged: if (form.convertingRoutine) Qt.callLater(revealConversionDate)
+    function revealConversionDate() {
+        if (form.convertingRoutine)
+            contentItem.contentY = Math.max(0, contentItem.contentHeight - contentItem.height)
+    }
+    Connections {
+        target: entryFields.form
+        function onConvertingRoutineChanged() {
+            if (entryFields.form.convertingRoutine) Qt.callLater(entryFields.revealConversionDate)
+        }
+    }
+
     function initialize(title, target) {
         titleField.text = title
         plannedField.text = target
@@ -331,11 +345,12 @@ ScrollView {
         Rectangle {
             visible: !form.backlog
             width: parent.width
-            height: form.repeat === "weekly" ? 220 : 150
+            height: Math.max(form.repeat === "weekly" ? 220 : 150, recurrence.implicitHeight + 44)
             radius: theme.radius
             color: form.win.panel
             border.color: form.win.border
             ColumnLayout {
+                id: recurrence
                 anchors.fill: parent
                 anchors.margins: 22
                 spacing: 12
@@ -348,7 +363,7 @@ ScrollView {
                 RowLayout {
                     spacing: 8
                     Repeater {
-                        model: [{ id: "none", name: qsTr("Once") },
+                        model: [{ id: "none", name: qsTr("One time") },
                             { id: "daily", name: qsTr("Daily") },
                             { id: "weekdays", name: qsTr("Weekdays") },
                             { id: "weekly", name: qsTr("Weekly") }]
@@ -356,10 +371,40 @@ ScrollView {
                             required property var modelData
                             win: form.win
                             text: modelData.name
+                            objectName: "entryRepeat_" + modelData.id
                             selected: modelData.id !== "weekdays"
                                 && form.repeat === modelData.id
                             onClicked: form.selectRepeat(modelData.id)
                         }
+                    }
+                }
+                ColumnLayout {
+                    visible: form.convertingRoutine
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Ends the routine; past days keep it.")
+                        color: form.win.muted
+                        wrapMode: Text.WordWrap
+                    }
+                    Label {
+                        text: qsTr("One-time date")
+                        color: form.win.text
+                    }
+                    TrackingDateField {
+                        id: conversionDate
+                        objectName: "routineConversionDate"
+                        Layout.fillWidth: true
+                        minimumDay: backend.todayDay
+                        Accessible.name: qsTr("One-time date, YYYY-MM-DD")
+                    }
+                    Label {
+                        visible: !conversionDate.valid
+                        Layout.fillWidth: true
+                        text: qsTr("Choose a valid date from today on.")
+                        color: form.win.muted
+                        wrapMode: Text.WordWrap
                     }
                 }
                 RowLayout {

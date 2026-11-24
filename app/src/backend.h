@@ -27,6 +27,7 @@ class Backend : public QObject {
     Q_PROPERTY(DayTimelineModel *dayTimeline READ dayTimeline CONSTANT)
     Q_PROPERTY(PrayerModel *prayers READ prayers CONSTANT)
     Q_PROPERTY(RoutinesModel *routines READ routines CONSTANT)
+    Q_PROPERTY(RoutinesModel *endedRoutines READ endedRoutines CONSTANT)
     Q_PROPERTY(StatsItemsModel *statsItems READ statsItems CONSTANT)
     Q_PROPERTY(StatsDailyModel *statsDaily READ statsDaily CONSTANT)
     Q_PROPERTY(QSortFilterProxyModel *statsDailyNewest READ statsDailyNewest CONSTANT)
@@ -84,6 +85,7 @@ public:
     DayTimelineModel *dayTimeline() { return &m_timeline; }
     PrayerModel *prayers() { return &m_prayers; }
     RoutinesModel *routines() { return &m_routines; }
+    RoutinesModel *endedRoutines() { return &m_endedRoutines; }
     StatsItemsModel *statsItems() { return &m_statsItems; }
     StatsDailyModel *statsDaily() { return &m_statsDaily; }
     QSortFilterProxyModel *statsDailyNewest() { return &m_statsDailyNewest; }
@@ -183,6 +185,7 @@ public:
     Q_INVOKABLE void previewItem(const QVariantMap &item);
     Q_INVOKABLE void addQuick(const QString &text, const QString &block = {});
     Q_INVOKABLE void saveItem(const QVariantMap &item);
+    Q_INVOKABLE void setRoutineEndDay(const QString &id, const QString &day, qint64 expectedVersion);
     Q_INVOKABLE void removeItem(const QString &id, qint64 expectedVersion = -1);
     Q_INVOKABLE void moveItem(const QString &id, const QString &block,
                               const QString &afterId = {}, const QString &beforeId = {});
@@ -289,6 +292,7 @@ signals:
     // A goal add/edit/end/remove finished; `message` is the server error on failure.
     void goalWriteFinished(bool ok, const QString &message);
     // A resource add/edit/remove finished; `message` is the server error on failure.
+    void routineEditFinished(const QString &id, bool ok, const QString &error);
     void taskCreateFinished(const QString &operation, const QString &id, const QString &error, bool rejected);
     void attachmentFinished(const QString &operation, const QString &error, bool rejected);
     void resourceWriteFinished(bool ok, const QString &message);
@@ -309,6 +313,7 @@ private:
     void clearError();
     CoreClient::Callback readResponse(std::function<void(const CoreClient::Result &)> success,
                                       bool reloadAfter = false);
+    CoreClient::Callback routineEditResponse(const QString &id);
     CoreClient::Callback mutationResponse(const QString &pendingId = {}, const QString &pendingOpId = {});
     CoreClient::Callback entityResponse(const QString &kind);
     CoreClient::Callback goalResponse();
@@ -370,7 +375,7 @@ private:
 
     DayTimelineModel m_timeline;
     PrayerModel m_prayers;
-    RoutinesModel m_routines;
+    RoutinesModel m_routines, m_endedRoutines;
     StatsItemsModel m_statsItems;
     StatsDailyModel m_statsDaily;
     QSortFilterProxyModel m_statsDailyNewest;
@@ -393,7 +398,7 @@ private:
     quint64 m_goalsRequest = 0;
     quint64 m_goalHistoryRequest = 0;
     quint64 m_epicRequest = 0;
-    QVariantList m_trackingItems;
+    QVariantList m_trackingItems, m_endedItems;
     QVariantList m_backlogItems;
     QJsonObject m_backlogParams;
     quint64 m_backlogRequest = 0;

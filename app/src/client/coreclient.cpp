@@ -379,8 +379,15 @@ void CoreClient::routineActivity(const QDate &from, const QDate &to, const QStri
             Dto::decodeJson, Dto::decodeJson);
 }
 
-void CoreClient::itemsList(Callback callback) {
-    enqueue({"item", "list", "--json"}, {}, QStringLiteral("items.list"), std::move(callback), true, false,
+void CoreClient::itemsList(Callback callback, bool includeEnded) {
+    QStringList args{"item", "list"};
+    QJsonObject params;
+    if (includeEnded) {
+        args << "--include-ended";
+        params.insert("include_ended", true);
+    }
+    args << "--json";
+    enqueue(args, params, QStringLiteral("items.list"), std::move(callback), true, false,
             Dto::decodeJson, Dto::decodeJson);
 }
 void CoreClient::itemAdd(const ItemFields &f, Callback callback) {
@@ -420,9 +427,18 @@ void CoreClient::itemEdit(const QString &id, const ItemFields &f, Callback callb
     if (!f.metricIds.isUndefined()) params.insert(QStringLiteral("metric_ids"), f.metricIds);
     if (!f.tagIds.isUndefined()) params.insert(QStringLiteral("tag_ids"), f.tagIds);
     if (!f.epicId.isUndefined()) params.insert(QStringLiteral("epic_id"), f.epicId);
+    if (!f.endDay.isUndefined()) params.insert("end_day", f.endDay);
+    if (!f.backlog && f.repeat == "none" && f.date.isValid()) params.insert("date", f.date.toString(Qt::ISODate));
     if (expectedVersion >= 0) params.insert(QStringLiteral("expected_version"), expectedVersion);
     writeRpc(QStringLiteral("item.edit"), params, std::move(callback));
 }
+void CoreClient::setRoutineEndDay(const QString &id, const QString &day, Callback callback, qint64 expectedVersion) {
+    QJsonObject params{{"op_id", makeOpId()}, {"id", id},
+                       {"end_day", day.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(day)}};
+    if (expectedVersion >= 0) params.insert("expected_version", expectedVersion);
+    writeRpc(QStringLiteral("item.edit"), params, std::move(callback));
+}
+
 void CoreClient::itemRemove(const QString &id, Callback callback, qint64 expectedVersion) {
     const QString opId = makeOpId();
     QJsonObject params{{"op_id", opId}, {"id", id}};

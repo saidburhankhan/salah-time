@@ -526,17 +526,27 @@ CoreClient::Callback Backend::statsResponse() {
 }
 
 void Backend::loadTrackingItems() {
-    m_client.itemsList(readResponse([this](const CoreClient::Result &result) {
+    const bool includeEnded = m_routinesOpen;
+    m_client.itemsList(readResponse([this, includeEnded](const CoreClient::Result &result) {
         if (const auto *json = std::get_if<Dto::Json>(&result.value)) {
-            const QVariantList items = json->value.toArray().toVariantList();
-            if (m_trackingItems != items) {
-                m_trackingItems = items;
-                m_routines.setItems(items);
+            QVariantList active, ended;
+            for (const auto &entry : json->value.toArray()) {
+                auto &list = entry.toObject().value("ended").toBool() ? ended : active;
+                list.append(entry.toVariant());
+            }
+            if (m_trackingItems != active) {
+                m_trackingItems = active;
+                m_routines.setItems(active);
                 emit trackingItemsChanged();
             }
-            if (m_routinesOpen && m_routines.count()) loadRoutineHistory(m_today);
+            if (includeEnded && m_endedItems != ended) {
+                m_endedItems = ended;
+                m_endedRoutines.setItems(ended);
+            }
+            if (includeEnded && m_routinesOpen && (m_routines.count() || m_endedRoutines.count()))
+                loadRoutineHistory(m_today);
         }
-    }));
+    }), includeEnded);
 }
 
 void Backend::moveDay(int amount) {
@@ -590,7 +600,8 @@ void Backend::previewItem(const QVariantMap &item) {
     fields.projectId = item.value(QStringLiteral("project_id")).toString();
     fields.plannedMinutes = item.value(QStringLiteral("planned_minutes")).toInt();
     fields.hasPlannedMinutes = fields.plannedMinutes > 0;
-    fields.date = m_selected.isValid() ? m_selected : m_today;
+    fields.date = QDate::fromString(item.value("date").toString(), Qt::ISODate);
+    if (!fields.date.isValid()) fields.date = m_selected.isValid() ? m_selected : m_today;
     m_client.preview(fields, [this](const CoreClient::Result &result) {
         if (result.ok) {
             if (const auto *preview = std::get_if<Dto::Preview>(&result.value)) m_preview.update(*preview);
@@ -674,9 +685,27 @@ void Backend::saveItem(const QVariantMap &item) {
         m_client.itemAdd(fields, mutationResponse(pending.localId, fields.opId));
     } else {
         setItemPending(id, true);
-        m_client.itemEdit(id, fields, mutationResponse(id),
-                          item.value("expected_version", fields.backlog ? backlogVersionFor(id) : versionFor(id)).toLongLong());
+        fields.date = QDate::fromString(item.value("date").toString(), Qt::ISODate);
+        if (item.contains("end_day"))
+            fields.endDay = QJsonValue::fromVariant(item.value("end_day"));
+        const auto version = item.value("expected_version", fields.backlog ? backlogVersionFor(id) : versionFor(id)).toLongLong();
+        const bool changesRoutine = fields.date.isValid() || !fields.endDay.isUndefined();
+        m_client.itemEdit(id, fields, changesRoutine ? routineEditResponse(id) : mutationResponse(id), version);
     }
+}
+
+CoreClient::Callback Backend::routineEditResponse(const QString &id) {
+    return [this, id](const CoreClient::Result &result) {
+        if (result.ok) clearError();
+        mutationResponse(id)(result);
+        emit routineEditFinished(id, result.ok, result.ok ? QString() : result.error.message);
+    };
+}
+
+void Backend::setRoutineEndDay(const QString &id, const QString &day, qint64 expectedVersion) {
+    if (id.isEmpty()) return;
+    setItemPending(id, true);
+    m_client.setRoutineEndDay(id, day, routineEditResponse(id), expectedVersion);
 }
 
 void Backend::removeItem(const QString &id, qint64 expectedVersion) {
@@ -965,7 +994,7 @@ bool Backend::loadHistoricalTaskForEdit(const QString &id, int request) {
             fail(tr("Could not read the current task list."));
         }
         emit historicalTaskForEdit(request, {});
-    });
+    }, true);
     return true;
 }
 
@@ -977,14 +1006,11 @@ ItemDraft *Backend::itemFromCurrentView(const QVariantMap &row) {
 
 ItemDraft *Backend::itemForId(const QString &id) {
     if (m_routinesOpen) {
-        for (const QVariant &item : std::as_const(m_trackingItems)) {
-            const QVariantMap row = item.toMap();
-            if (row.value("id").toString() == id) {
-                m_editItem->update(QJsonObject::fromVariantMap(row));
-                emit editItemChanged();
-                return m_editItem;
+        for (const auto *items : {&m_trackingItems, &m_endedItems})
+            for (const auto &item : *items) {
+                const auto row = item.toMap();
+                if (row.value("id").toString() == id) return itemFromCurrentView(row);
             }
-        }
     }
     if (m_backlogOpen) {
         const QVariantMap row = backlogItem(id);
@@ -998,7 +1024,20 @@ ItemDraft *Backend::itemForId(const QString &id) {
     for (const Dto::DayBlock &block : m_dayPlan.blocks) {
         for (const Dto::DayItem &item : block.items) {
             if (item.id != id) continue;
-            m_editItem->update(item.json);
+            auto row = item.json;
+            if (item.repeat != "none") {
+                // Day rows omit the last day. Use catalogue fields only from
+                // the same version as the rest of the edit draft.
+                for (const auto &entry : std::as_const(m_trackingItems)) {
+                    const auto current = entry.toMap();
+                    if (current.value("id").toString() != id
+                        || QJsonValue::fromVariant(current.value("version")) != row.value("version")) continue;
+                    row.insert("day", QJsonValue::fromVariant(current.value("day")));
+                    row.insert("end_day", QJsonValue::fromVariant(current.value("end_day")));
+                    break;
+                }
+            }
+            m_editItem->update(row);
             found = true;
             break;
         }
