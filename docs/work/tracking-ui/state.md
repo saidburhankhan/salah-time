@@ -261,3 +261,9 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   and no 5 h idle. RESET REDEEMED at 18:57 (0 left). Windows now ≈ 18:57, 23:57, 04:57, 09:57,
   14:57, 19:57. USER: Astra only for complex tasks, Sol for simpler ones → C8/C9 restarted on Sol
   (R4 fixes are simple). C10 (Sol) CHECKPOINT 4 committed.
+- 19:0x committed 351818d (C8 7, R4 17/18/22/28; 252 tests), 94b3d56 (C8 8 deterministic averages),
+  f31c424 (C10 4, R4 21/26), f1c0e50 (C9 4a+4b: Routines page, resources at creation, link
+  leniency, all R4 app findings; 92 app tests). ALL R4 FINDINGS AND THE USER FEEDBACK ADDENDUM ARE
+  FIXED. INSTALLED 19:1x via `scripts/test && app/bin/test && ./scripts/install`; live log clean;
+  DB v5 ok; bar "Sleep 2h 16m". Next useful work: a short R5 review (Sol) of today's fixes;
+  open user decision: should archiving a project end its goals.
