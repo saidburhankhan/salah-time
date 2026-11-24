@@ -181,3 +181,7 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   (reproduces the failure). Installed, `omarchy restart shell` (reload kept the cached broken type);
   bar shows "Dhuhr 6h 13m". RULE: after every install, check
   `journalctl --user --since -2min | grep local.salah` for "failed" and look at the live bar.
+- 08:14 new 5h window (weekly 47%). Dispatched: C8 --resume (Astra) 1b scope_label → 2 insights →
+  3 review → 4 CLI; C9 --resume (Astra) task 1 Insights page against the plan contract, then
+  fixtures, + goal follow-ups (history follows successor id, scope_label); C10 --resume (Sol)
+  scope_label check + task 2 review link. Reset unused.
