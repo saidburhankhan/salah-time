@@ -191,3 +191,9 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   `salah-app --page <name>`; the app opens on that page (unknown name → Today, with a warning on
   stderr). Queue: C8 adds the CLI flag (after its task 4); C9 adds `--page` parsing in app/main
   (after Insights); then C10 sets weeklyReviewCommand = ["salah","open","--page","review"].
+- 08:37 Codex 5h cap (window 08:14–08:37; weekly 47→63%). Next window 13:14. Reset unused.
+  Committed 0a4d1a7 (C8 2 insights, 232 tests; live-copy blocks sum to 250) and 68b36cf (C8 3
+  review backend, 234 tests; live-copy summary ok). Claude Sonnet now holds: C9 (Insights page WIP →
+  finish, goal follow-ups, Review page, app --page) in app/; C8 (task 4 CLI WIP + salah open --page)
+  in crates/. C10 idle: at 13:14 set weeklyReviewCommand = ["salah","open","--page","review"].
+  Then: independent review R4 of phase 4 (backend + app + widget), fixes, install with live log check.
