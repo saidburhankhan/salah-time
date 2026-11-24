@@ -12,7 +12,7 @@ public:
     static constexpr int HistoryDays = 14;
     struct Activity {
         QSet<QDate> done;
-        int minutes = 0;
+        qint64 minutes = 0;
     };
     using History = QHash<QString, Activity>;
 

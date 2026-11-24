@@ -76,7 +76,7 @@ public:
     void goalsList(Callback callback);
     void goalsHistory(const QString &id, const QString &from, const QString &to, Callback callback);
     void rpcRead(const QString &method, const QJsonObject &params, Callback callback);
-    void routineSessions(const QDate &from, const QDate &to, const QString &before, Callback callback);
+    void routineActivity(const QDate &from, const QDate &to, const QString &before, Callback callback);
     void itemsList(Callback callback);
     void itemAdd(const ItemFields &fields, Callback callback = {});
     void itemEdit(const QString &id, const ItemFields &fields, Callback callback = {}, qint64 expectedVersion = -1);

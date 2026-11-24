@@ -364,20 +364,18 @@ void CoreClient::rpcRead(const QString &method, const QJsonObject &params, Callb
     enqueue({QStringLiteral("rpc"), method}, params, method, std::move(callback), true, false,
             Dto::decodeJson, nullptr, {}, true);
 }
-void CoreClient::routineSessions(const QDate &from, const QDate &to, const QString &before, Callback callback) {
-    // The fallback reads full sessions, so page conservatively even though
-    // we retain only the task, tracking day, and minutes.
-    constexpr int pageSize = 12;
+void CoreClient::routineActivity(const QDate &from, const QDate &to, const QString &before, Callback callback) {
+    constexpr int pageSize = 500;
     QJsonObject params{{"from", from.toString(Qt::ISODate)}, {"to", to.toString(Qt::ISODate)},
-                       {"with_note", false}, {"limit", pageSize}};
-    auto args = reportArguments(params, {"sessions", "list"});
-    args << "--all" << "--limit" << QString::number(pageSize);
+                       {"limit", pageSize}};
+    auto args = reportArguments(params, {"routines", "activity"});
+    args << "--limit" << QString::number(pageSize);
     if (!before.isEmpty()) {
         params.insert("before", before);
         args << "--before" << before;
     }
     args << "--json";
-    enqueue(args, params, QStringLiteral("sessions.list"), std::move(callback), true, false,
+    enqueue(args, params, QStringLiteral("routines.activity"), std::move(callback), true, false,
             Dto::decodeJson, Dto::decodeJson);
 }
 

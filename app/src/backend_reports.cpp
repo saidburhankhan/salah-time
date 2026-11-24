@@ -77,7 +77,7 @@ void Backend::loadRoutineHistory(const QDate &through, const QString &before) {
     }
     const quint64 request = m_routineRequest;
     const QDate from = through.addDays(1 - RoutinesModel::HistoryDays);
-    m_client.routineSessions(from, through, before, [this, request, from, through, before](const CoreClient::Result &result) {
+    m_client.routineActivity(from, through, before, [this, request, from, through, before](const CoreClient::Result &result) {
         if (request != m_routineRequest) return;
         const auto *data = std::get_if<Dto::Json>(&result.value);
         if (!result.ok || !data || !data->json.value("rows").isArray()) {
@@ -86,13 +86,13 @@ void Backend::loadRoutineHistory(const QDate &through, const QString &before) {
             return;
         }
         for (const auto &entry : data->json.value("rows").toArray()) {
-            const auto session = entry.toObject();
-            const QString id = session.value("item_id").toString();
-            const QDate day = QDate::fromString(session.value("day").toString(), Qt::ISODate);
+            const auto row = entry.toObject();
+            const QString id = row.value("item_id").toString();
+            const QDate day = QDate::fromString(row.value("day").toString(), Qt::ISODate);
             if (id.isEmpty() || day < from || day > through) continue;
             auto &activity = m_pendingRoutineHistory[id];
-            if (session.value("minutes").isNull()) activity.done.insert(day);
-            else activity.minutes += session.value("minutes").toInt();
+            if (row.value("done").toBool()) activity.done.insert(day);
+            activity.minutes += row.value("minutes").toInteger();
         }
         const QString next = data->json.value("next").toString();
         if (!next.isEmpty() && next != before) loadRoutineHistory(through, next);

@@ -70,3 +70,11 @@ The app needs `routines.activity` with params `{from, to, limit?, before?}`. The
 - `app/bin/build` and `git diff --check` passed. `SALAH_UI_SHOT_DIR=/tmp/c9-r5-final app/bin/test` passed 54 tests with zero failures and 43 AF_UNIX skips. Reviewed all 45 screenshots, including historical editing, task recovery, blank notes, attachment recovery, goal overflow, and Review counts and search.
 
 CHECKPOINT 5: Fix reconnect and historical edits, recover task and reflection writes, and paginate Review note search (app/src/backend.cpp, app/src/backend.h, app/src/backend_resources.cpp, app/src/backend_review.cpp, app/src/client/coreclient.cpp, app/src/client/coreclient.h, app/src/client/sockettransport.cpp, app/src/client/sockettransport.h, app/src/qml/Main.qml, app/src/qml/goals/GoalHistory.qml, app/src/qml/goals/GoalRow.qml, app/src/qml/goals/GoalText.js, app/src/qml/overlays/EntryForm.qml, app/src/qml/pages/ReviewPage.qml, app/src/qml/resources/ResourceForm.qml, app/tests/salah_app_tests.cpp, docs/work/tracking-ui/c9-progress.md)
+
+## Routines activity
+
+Routines uses `routines.activity` over RPC and `salah routines activity --json` in CLI fallback. It requests 14 tracking days with a limit of 500 grouped rows per page, follows the server's cursor, and publishes the complete history after the last page. Routines history no longer reads full sessions. Fixture-backed tests cover the exact arguments on both transports and show two done days and 37 minutes across two pages, including a tick-only day and a duration-only day.
+
+`app/bin/build` and `git diff --check` passed. `SALAH_UI_SHOT_DIR=/tmp/c9-cp6 app/bin/test` passed 54 tests with zero failures and 44 AF_UNIX skips, including the new socket regression. Reviewed all 45 screenshots, with a closer review of the Routines list, editor, removal and empty state.
+
+CHECKPOINT 6: Load Routines history from paginated daily activity (app/src/backend_reports.cpp, app/src/client/coreclient.cpp, app/src/client/coreclient.h, app/src/models/routinesmodel.h, app/src/qml/pages/RoutinesPage.qml, app/tests/salah_app_tests.cpp, docs/work/tracking-ui/c9-progress.md)

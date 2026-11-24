@@ -1635,6 +1635,57 @@ fi
         QVERIFY(QMetaObject::invokeMethod(root.data(),"loadStatistics")); QTRY_VERIFY_WITH_TIMEOUT(!backend.busy(),5000);
         QVERIFY2(backend.error().isEmpty(),qPrintable(backend.error())); QVERIFY(backend.statsItems()->rowCount() > 0);
     }
+    static QJsonObject routineActivityPage(bool older) {
+        QJsonArray rows = fixture("routines_activity").value("rows").toArray();
+        // Map the golden task ID to the weekly task used by the app tests.
+        for (qsizetype i = 0; i < rows.size(); ++i) {
+            auto row = rows.at(i).toObject();
+            row["item_id"] = "weekly";
+            rows[i] = row;
+        }
+        if (older) {
+            rows.removeFirst();
+            return {{"rows", rows}, {"next", QJsonValue::Null}};
+        }
+        return {{"rows", QJsonArray{rows.first()}}, {"next", QStringLiteral(R"(["2031-05-14","weekly"])")}};
+    }
+
+    void routineActivityUsesPagedRpc() {
+        QTemporaryDir dir;
+        FakeDaemon daemon(daemon_path(dir));
+        if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        auto weekly = rpcFixture("items_list").value("result").toArray().first().toObject();
+        weekly["id"] = "weekly";
+        weekly["repeat"] = "weekly";
+        const auto reads = readHandler(fixture("day"));
+        daemon.setHandler([weekly, reads](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            const QString method = request.value("method").toString();
+            if (method == "items.list")
+                server->respond(socket, request, QJsonArray{weekly});
+            else if (method == "routines.activity")
+                server->respond(socket, request, routineActivityPage(request.value("params").toObject().contains("before")));
+            else
+                reads(request, socket, server);
+        });
+        Backend backend(nullptr, fake(dir), 3000, daemon_path(dir));
+        backend.reload();
+        waitForBackendIdle(backend);
+        backend.setRoutinesOpen(true);
+        auto *model = backend.routines();
+        const auto index = model->index(0, 0);
+        QTRY_COMPARE(model->data(index, RoutinesModel::MinutesRole).toLongLong(), 37);
+        QCOMPARE(model->data(index, RoutinesModel::DoneDaysRole).toInt(), 2);
+        QCOMPARE(requestCount(daemon, "sessions.list"), 0);
+        QList<QJsonObject> pages;
+        for (const auto &request : daemon.requests)
+            if (request.value("method") == "routines.activity")
+                pages.append(request.value("params").toObject());
+        const QJsonObject range{{"from", "2031-05-01"}, {"to", "2031-05-14"}, {"limit", 500}};
+        auto continuation = range;
+        continuation["before"] = routineActivityPage(false).value("next");
+        QCOMPARE(pages, (QList<QJsonObject>{range, continuation}));
+    }
+
     void routinesCatalogActionsAndHistory() {
         QTemporaryDir dir;
         fake(dir);
@@ -1643,9 +1694,9 @@ fi
 cd "$(dirname "$0")"
 case "$1 $2" in
   "item list") cat catalog.json ;;
-  "sessions list")
+  "routines activity")
     case "$*" in
-      *"--before older"*) cat older.json ;;
+      *" --before "*) cat older.json ;;
       *) cat recent.json ;;
     esac ;;
   *) exec ./salah "$@" ;;
@@ -1668,14 +1719,8 @@ esac
         weekly["version"] = 7;
         catalog.append(weekly);
         write(dir.filePath("catalog.json"), QJsonDocument(catalog).toJson());
-        auto session = [](const QString &day, const QJsonValue &minutes, const QString &item) {
-            return QJsonObject{{"day", day}, {"minutes", minutes}, {"item_id", item}};
-        };
-        write(dir.filePath("recent.json"), QJsonDocument(QJsonObject{{"next", "older"}, {"rows", QJsonArray{
-            session("2031-05-14", 20, "weekly"), session("2031-05-12", QJsonValue::Null, "weekly"),
-            session("2031-05-12", QJsonValue::Null, "weekly"), session("2031-05-12", 30, "<id:4>")}}}).toJson());
-        write(dir.filePath("older.json"), QJsonDocument(QJsonObject{{"next", QJsonValue::Null}, {"rows", QJsonArray{
-            session("2031-05-09", QJsonValue::Null, "weekly"), session("2031-05-09", 15, "weekly")}}}).toJson());
+        write(dir.filePath("recent.json"), QJsonDocument(routineActivityPage(false)).toJson());
+        write(dir.filePath("older.json"), QJsonDocument(routineActivityPage(true)).toJson());
         TrackingUiPreviewBackend backend(program, daemon_path(dir), catalog, {});
         backend.reload();
         waitForBackendIdle(backend);
@@ -1688,30 +1733,31 @@ esac
         QVERIFY2(root, qPrintable(component.errorString()));
         auto *window = qobject_cast<QQuickWindow *>(root.data());
         window->resize(1080, 740);
+        QSignalSpy calls(&backend, &Backend::requestFinished);
         window->setProperty("page", 1);
-        QTRY_VERIFY(hasVisualText(window, "2 days done  ·  35 min"));
+        QTRY_VERIFY(hasVisualText(window, "2 days done  ·  37 min"));
         QVERIFY(hasVisualText(window, "Done days · last 14 days"));
         QCOMPARE(backend.routines()->rowCount(), 2);
-        QSignalSpy calls(&backend, &Backend::requestFinished);
-        backend.loadTrackingItems();
-        const auto hasPage = [&calls](bool older) {
-            for (const auto &call : calls) {
-                const auto args = call.at(0).toStringList();
-                if (!call.at(1).toBool() || args.value(0) != "sessions" || args.value(1) != "list") continue;
-                const int limit = args.indexOf("--limit");
-                if (limit >= 0 && args.value(limit + 1) == "12" && args.contains("--all")
-                    && args.contains("--before") == older) return true;
+        QList<QStringList> pages;
+        for (const auto &call : calls) {
+            const auto args = call.at(0).toStringList();
+            QVERIFY(args.value(0) != "sessions");
+            if (args.value(0) == "routines") {
+                QVERIFY(call.at(1).toBool());
+                pages.append(args);
             }
-            return false;
-        };
-        QTRY_VERIFY(hasPage(false));
-        QTRY_VERIFY(hasPage(true));
+        }
+        const QStringList command{"routines", "activity", "--from", "2031-05-01", "--to", "2031-05-14",
+                                  "--limit", "500"};
+        QCOMPARE(pages, (QList<QStringList>{
+            command + QStringList{"--json"},
+            command + QStringList{"--before", routineActivityPage(false).value("next").toString(), "--json"}}));
         shotWindow(window, "routines.png");
         auto *row = qobject_cast<QQuickItem *>(firstShown(window, "routineRow_weekly"));
         QVERIFY(row);
         const auto strip = row->property("doneStrip").toList();
         QCOMPARE(strip.size(), 14);
-        QVERIFY(strip[8].toBool() && strip[11].toBool() && !strip.last().toBool());
+        QVERIFY(!strip.at(11).toBool() && strip.at(12).toBool() && strip.at(13).toBool());
         QTest::mouseClick(window, Qt::LeftButton, {}, row->mapToScene(QPointF(40, 28)).toPoint());
         auto *form = findByName(window, "entryPopup");
         QTRY_VERIFY(form && form->property("opened").toBool());

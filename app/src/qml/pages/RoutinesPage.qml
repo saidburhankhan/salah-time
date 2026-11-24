@@ -73,7 +73,7 @@ ScrollView {
                 id: row
                 required property var routine
                 required property var doneStrip
-                required property int minutes
+                required property real minutes
                 required property int doneDays
                 readonly property bool confirming: page.confirmingId === routine.id
                 objectName: "routineRow_" + routine.id
