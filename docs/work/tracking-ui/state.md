@@ -185,3 +185,9 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   3 review → 4 CLI; C9 --resume (Astra) task 1 Insights page against the plan contract, then
   fixtures, + goal follow-ups (history follows successor id, scope_label); C10 --resume (Sol)
   scope_label check + task 2 review link. Reset unused.
+- 08:2x committed 97940a9 (C8 1b scope_label, 230 tests) and a870450 (C10 2: review footer logic,
+  hidden until a launcher exists; 138 node checks; render loads). DECISION (launcher):
+  `salah open [--page today|backlog|routines|statistics|insights|goals|review|settings]` runs
+  `salah-app --page <name>`; the app opens on that page (unknown name → Today, with a warning on
+  stderr). Queue: C8 adds the CLI flag (after its task 4); C9 adds `--page` parsing in app/main
+  (after Insights); then C10 sets weeklyReviewCommand = ["salah","open","--page","review"].
