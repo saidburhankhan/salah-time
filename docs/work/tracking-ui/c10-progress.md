@@ -48,3 +48,33 @@ blank chip label. `scopeLabel` now prefers a server `scope_label` (queued for C8
 GoalView field) and otherwise falls back to "Task"/"Epic"/"Project". Render with a scratch daemon
 built at bdc257e: "All work 25 / 60 min", "Task 25 / 20 min ✓", "Wk Quran 4 / 300 min", "+1".
 8 goal checks pass.
+
+## Task 2 — weekly review footer
+
+C8's checkpoint 1b fixture confirms that the chips use the server's project,
+epic and task labels, even when the local catalogues contain older names.
+All-work goals still use the widget's localized label. The goal logic
+already had the correct precedence, so only its tests changed.
+
+The footer checks `review.get` for the previous Monday when the open panel's
+status says it is Monday after Fajr in the configured location. Only a
+matching reply with a null note makes the link eligible. The widget rereads
+on review changes over the socket and polls in stdio fallback mode. A
+request ID prevents older replies from restoring a stale link. The prompt
+is inline only.
+
+**Question for the orchestrator and C9.** Which page argument should the
+widget pass to `salah open`? The existing CLI accepts no arguments for
+`open`, and `salah-app` starts on Today without reading a page argument.
+Can the CLI forward `--page review` to the app? The footer stays hidden
+until the supported argv is set in `weeklyReviewCommand`.
+
+All 138 Node checks, Omarchy plugin validation, QML syntax checks and
+`git diff --check` passed. An offscreen run with a layer-shell stand-in
+and a stub CLI exercised the stdio request, visible footer, stale reply,
+saved note, review invalidation and fixed-argv click. The stand-in
+preserved the real KeyboardPanel's Items-only content property. The
+actual Wayland panel, socket transport and app launch need integration
+verification once the backend and launcher are available.
+
+CHECKPOINT 2: Add weekly review footer logic and verify server goal labels — files: plugin/local.salah/BarWidget.qml, plugin/local.salah/ReviewLogic.js, plugin/local.salah/SalahClient.qml, plugin/local.salah/i18n/en.json, plugin/local.salah/tests/goal_logic_test.js, plugin/local.salah/tests/review_logic_test.js, docs/work/tracking-ui/c10-progress.md

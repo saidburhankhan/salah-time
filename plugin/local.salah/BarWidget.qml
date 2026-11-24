@@ -7,6 +7,7 @@ import qs.Ui
 import "CreationLogic.js" as CreationLogic
 import "DragLogic.js" as DragLogic
 import "ResourceLogic.js" as ResourceLogic
+import "ReviewLogic.js" as ReviewLogic
 import "SessionLogic.js" as SessionLogic
 
 BarWidget {
@@ -42,6 +43,17 @@ BarWidget {
   property var dueReminders: []
   property var pendingReminders: ({})
   property string reminderError: ""
+  // Set to the fixed salah open argv once the Review page accepts a launch argument.
+  readonly property var weeklyReviewCommand: null
+  property int reviewRequestId: 0
+  property var weeklyReview: null
+  readonly property string reviewWeek: opened && !!weeklyReviewCommand && errorMessage === ""
+    ? ReviewLogic.previousWeek(report) : ""
+  readonly property bool showWeeklyReview: ReviewLogic.hasNoNote(reviewWeek, weeklyReview)
+  onReviewWeekChanged: {
+    weeklyReview = null
+    refreshWeeklyReview()
+  }
   property var projects: []
   property var tags: []
   property var epics: []
@@ -160,6 +172,10 @@ BarWidget {
 
   function refresh() {
     client.refreshStatus()
+  }
+
+  function refreshWeeklyReview() {
+    if (reviewWeek) client.loadReview(reviewWeek, ++reviewRequestId)
   }
 
   function beginOp(kind, rowKey, tempKey, retryId) {
@@ -575,7 +591,11 @@ BarWidget {
     running: true
     repeat: true
     triggeredOnStart: false
-    onTriggered: root.refresh()
+    onTriggered: {
+      root.refresh()
+      // Stdio has no changed push, so also check for reflection edits.
+      if (!client.socketActive) root.refreshWeeklyReview()
+    }
   }
 
   Timer {
@@ -598,14 +618,23 @@ BarWidget {
     onTagsLoaded: function(rows) { root.tags = rows || [] }
     onEpicsLoaded: function(rows) { root.epics = rows || [] }
     onMetricsLoaded: function(rows) { root.metricCatalogue = rows || [] }
+    onReviewLoaded: function(requestId, review) {
+      if (root.reviewWeek && requestId === root.reviewRequestId) root.weeklyReview = review
+    }
     onEntitiesChanged: function(scopes) {
       if (scopes.indexOf("projects") >= 0 || scopes.indexOf("tags") >= 0
           || scopes.indexOf("metrics") >= 0) client.loadProjects()
       if (scopes.indexOf("metrics") >= 0) client.loadMetrics()
       if (scopes.indexOf("tags") >= 0) client.loadTags()
       if (scopes.indexOf("epics") >= 0 || scopes.indexOf("projects") >= 0) client.loadEpics()
+      if (scopes.indexOf("reviews") >= 0) {
+        root.weeklyReview = null
+        root.refreshWeeklyReview()
+      }
     }
     onTransportChanged: function(active) {
+      root.weeklyReview = null
+      root.refreshWeeklyReview()
       if (!active) root.refresh()
       else {
         client.loadProjects()
@@ -1447,7 +1476,7 @@ BarWidget {
             Text {
               id: locationLine
               anchors.left: parent.left
-              anchors.right: refreshButton.left
+              anchors.right: weeklyReviewLink.visible ? weeklyReviewLink.left : refreshButton.left
               anchors.rightMargin: Style.space(6)
               anchors.verticalCenter: parent.verticalCenter
               textFormat: Text.PlainText
@@ -1472,6 +1501,25 @@ BarWidget {
                 visible: root.autoLocation && locationHover.containsMouse
                 text: strings.t("panel.networkLocationNotice")
                 fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+              }
+            }
+
+            Button {
+              id: weeklyReviewLink
+              visible: root.showWeeklyReview
+              anchors.right: refreshButton.left
+              anchors.rightMargin: Style.space(5)
+              anchors.verticalCenter: parent.verticalCenter
+              text: strings.t("panel.weeklyReview")
+              foreground: root.mutedForeground
+              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+              fontSize: Style.font.caption
+              horizontalPadding: Style.space(5)
+              verticalPadding: Style.space(2)
+              focusable: true
+              onClicked: {
+                Quickshell.execDetached(root.weeklyReviewCommand)
+                root.close()
               }
             }
 

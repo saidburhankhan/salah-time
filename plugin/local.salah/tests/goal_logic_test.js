@@ -43,7 +43,7 @@ test("fixture: week goals, metric names, at_most unmet", () => {
   const out = logic.goalChips(status.goals, ctx, 10)
   assert.equal(out.more, 0)
   const byId = Object.fromEntries(out.chips.map(c => [c.id, c]))
-  assert.equal(byId["<id:5>"].label, "Thesis")
+  assert.equal(byId["<id:5>"].label, "Book")
   assert.equal(byId["<id:8>"].label, "All work · Focus")
   assert.equal(byId["<id:8>"].amount, "4.4 / 4")
   assert.equal(byId["<id:8>"].fraction, 1)
@@ -81,10 +81,21 @@ test("unknown periods are ignored", () => {
   assert.equal(logic.goalChips([goal({ period: "month" })], ctx).chips.length, 0)
 })
 
-test("an unresolved scope falls back to a generic label; scope_label wins", () => {
+test("an unresolved scope falls back to a generic label", () => {
   const empty = Object.assign({}, ctx, { items: [], epics: [], projects: [] })
   const labels = logic.goalChips([goal({ item_id: "x" }), goal({ epic_id: "y" }), goal({ project_id: "z" })], empty)
     .chips.map(chip => String(chip.label))
   assert.deepEqual([...labels], ["Task", "Epic", "Project"])
-  assert.equal(logic.goalChips([goal({ item_id: "x", scope_label: "Walk" })], empty).chips[0].label, "Walk")
+})
+
+test("fixture scope labels win over stale project, epic and task names", () => {
+  const stale = {
+    ...ctx,
+    projects: [{ id: "<id:3>", name: "Old project" }],
+    epics: [{ id: "<id:4>", name: "Old epic" }],
+    items: [{ id: "<id:7>", title: "Old task" }]
+  }
+  const { chips } = logic.goalChips(status.goals, stale, 10)
+  assert.deepEqual(Array.from(chips, chip => chip.label),
+    ["All work", "Study", "Read", "Book", "All work · Focus", "Study · Distractions"])
 })

@@ -32,6 +32,7 @@ Item {
   signal metricsLoaded(var metrics)
   signal epicsLoaded(var epics)
   signal resourcesLoaded(string requestId, var resources, string error)
+  signal reviewLoaded(int requestId, var review)
   // Entity scopes named by a `changed` notification (items, sessions,
   // projects, tags, metrics, marks), for lists the status does not carry.
   signal entitiesChanged(var scopes)
@@ -238,6 +239,7 @@ Item {
       if (meta.type === "status") client.handleStatusFailure(meta, detail)
       else if (meta.type === "parse") client.itemParsed(meta.text, null, detail)
       else if (meta.type === "resources") client.resourcesLoaded(meta.requestId, null, detail)
+      else if (meta.type === "review") client.reviewLoaded(meta.requestId, null)
       else if (meta.type === "projects" || meta.type === "metrics" || meta.type === "epics" || meta.type === "tags") {
         // The planner still works without these lists; the panels say so.
       }
@@ -269,6 +271,8 @@ Item {
       client.metricsLoaded(result || [])
     } else if (meta.type === "resources") {
       client.resourcesLoaded(meta.requestId, result, "")
+    } else if (meta.type === "review") {
+      client.reviewLoaded(meta.requestId, result)
     } else if (meta.type === "mutation") {
       delete client.activeOps[meta.opId]
       var revision = Number(result && result.revision) || 0
@@ -584,6 +588,10 @@ Item {
     client.read("resources.list", { "item_id": itemId }, { "type": "resources", "requestId": requestId })
   }
 
+  function loadReview(week, requestId) {
+    client.read("review.get", { "week": week }, { "type": "review", "requestId": requestId })
+  }
+
   Component.onCompleted: {
     initialStatusTimer.start()
     client.attemptConnect()
@@ -710,6 +718,8 @@ Item {
             client.epicsLoaded(result)
           else if (meta.type === "resources")
             client.resourcesLoaded(meta.requestId, exitCode === 0 ? result : null, exitCode === 0 ? "" : failure)
+          else if (meta.type === "review")
+            client.reviewLoaded(meta.requestId, exitCode === 0 ? result : null)
         } else if (exitCode === 0 && active.rpcInput) {
           client.mutationSucceeded(active.opId, active.kind, result)
         } else if (exitCode === 0) {
