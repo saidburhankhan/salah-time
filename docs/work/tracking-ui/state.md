@@ -174,3 +174,10 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   widget): scripts/test 230 passed, clippy clean, daemon restarted, DB still v5 (no migration),
   integrity ok, totals unchanged. C9 follow-up: after goal.edit, keep the history open on the
   successor id instead of closing it. Next Codex window 08:13 (see the 08:14 cron).
+- 06:00 USER: widget invisible. Live shell log: "Plugin widget local.salah failed: SalahKeyboardPanel
+  unavailable" (R3w put an Instantiator as a child of KeyboardPanel, whose default property is
+  contentItem, Items only). Since eb8bfb2 the widget never loaded live. Fixed in 36eb43d (Instantiator
+  in its own property); render-harness stub KeyboardPanel now has the same Items-only default property
+  (reproduces the failure). Installed, `omarchy restart shell` (reload kept the cached broken type);
+  bar shows "Dhuhr 6h 13m". RULE: after every install, check
+  `journalctl --user --since -2min | grep local.salah` for "failed" and look at the live bar.
