@@ -243,3 +243,6 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - 18:2x R4 20 (widget untouched tags → omit tag_ids) fixed by orchestrator in cafe07d. R4 21 (widget:
   creation retry after an ambiguous failure across Sleep gets a new op_id → duplicate task; keep the
   original op_id + payload until acknowledged) → C10 next window.
+- R4 22 → C8: goals.list `at` a past date shows an ended goal depending on today (record when it
+  stopped being active; membership by the requested date only). R4 23 (low) → C9: goal history
+  selection should follow the whole successor chain.
