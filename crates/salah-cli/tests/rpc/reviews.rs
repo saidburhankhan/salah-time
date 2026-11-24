@@ -67,6 +67,8 @@ fn review_summarizes_both_goal_periods_notes_unassigned_work_and_prior_rate() {
         "session.stop",
         json!({"op_id":"stop","minutes":20}),
     );
+    let open = good(&mut rpc, "review.get", json!({"week":WEEK}));
+    assert_eq!(open["summary"]["open_backlog_count"], 1);
     good(
         &mut rpc,
         "session.log",
@@ -101,7 +103,7 @@ fn review_summarizes_both_goal_periods_notes_unassigned_work_and_prior_rate() {
     assert_eq!(s["sessions_with_notes"][1]["note"], "Monday");
     assert_eq!(s["distractions_per_hour"], 2.);
     assert_eq!(s["previous_distractions_per_hour"], 6.);
-    assert_eq!(s["open_backlog_count"], 1);
+    assert_eq!(s["open_backlog_count"], 0);
     let updated = good(
         &mut rpc,
         "review.save",

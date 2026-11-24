@@ -28,7 +28,9 @@ impl Store {
     pub fn open_backlog_count(&self) -> Result<i64, Error> {
         self.conn
             .query_row(
-                "SELECT COUNT(*) FROM items WHERE deleted_at IS NULL AND block IS NULL",
+                "SELECT COUNT(*) FROM items i WHERE i.deleted_at IS NULL AND i.block IS NULL
+                 AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.item_id=i.id AND s.deleted_at IS NULL
+                     AND s.minutes IS NULL AND (s.started_at IS NULL OR s.ended_at IS NOT NULL))",
                 [],
                 |r| r.get(0),
             )

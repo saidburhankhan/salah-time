@@ -222,3 +222,17 @@ pub fn sessions(local: &mut Local<'_>, command: SessionsCommand) -> Result<(), S
     measures(&mut params, &args.measures)?;
     print(&local.call("sessions.list", Value::Object(params))?)
 }
+
+#[derive(Args)]
+pub struct InsightsArgs {
+    #[command(flatten)]
+    scope: ReportScope,
+    #[command(flatten)]
+    output: crate::tracking::Output,
+}
+
+pub fn insights(local: &mut Local<'_>, args: InsightsArgs) -> Result<(), String> {
+    let params = scope(local, args.scope)?;
+    let result = local.call("insights.get", Value::Object(params))?;
+    crate::tracking::print(&args.output, &result, crate::render::insights)
+}

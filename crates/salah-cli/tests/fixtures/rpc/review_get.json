@@ -1,5 +1,5 @@
 {
-  "id": 6,
+  "id": 7,
   "jsonrpc": "2.0",
   "result": {
     "note": "Keep reading.\nTry mornings.",
@@ -106,7 +106,7 @@
           "version": 1
         }
       ],
-      "open_backlog_count": 1,
+      "open_backlog_count": 0,
       "previous_distractions_per_hour": 6.0,
       "sessions_with_notes": [
         {

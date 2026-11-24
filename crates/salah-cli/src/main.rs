@@ -17,10 +17,12 @@ use tracking::{
 mod backlog;
 mod daemon;
 mod epics;
+mod goals;
 mod local;
 mod render;
 mod reports;
 mod resources;
+mod reviews;
 mod tracking;
 
 #[derive(Parser)]
@@ -99,6 +101,18 @@ enum Command {
         #[command(subcommand)]
         command: PrayerCommand,
     },
+    /// Track daily and weekly goals
+    Goal {
+        #[command(subcommand)]
+        command: goals::GoalCommand,
+    },
+    /// Explore time, focus, distractions and adherence to planned blocks
+    Insights(reports::InsightsArgs),
+    /// Review a week and save its reflection
+    Review {
+        #[command(subcommand)]
+        command: reviews::ReviewCommand,
+    },
     /// Show time and metric statistics
     Stats(StatsArgs),
     /// List finished sessions and their notes
@@ -113,7 +127,37 @@ enum Command {
     /// List the calculation methods
     Methods,
     /// Open the Salah desktop app
-    Open,
+    Open(OpenArgs),
+}
+
+#[derive(Args)]
+struct OpenArgs {
+    /// Page to show: today, backlog, routines, statistics, insights, goals, review or settings
+    #[arg(long, value_name = "PAGE")]
+    page: Option<String>,
+}
+
+const PAGES: [&str; 8] = [
+    "today",
+    "backlog",
+    "routines",
+    "statistics",
+    "insights",
+    "goals",
+    "review",
+    "settings",
+];
+
+/// The arguments `salah-app` receives: none, or `--page <name>`.
+fn app_args(page: Option<&str>) -> Result<Vec<String>, String> {
+    match page {
+        None => Ok(Vec::new()),
+        Some(page) if PAGES.contains(&page) => Ok(vec!["--page".into(), page.into()]),
+        Some(page) => Err(format!(
+            "unknown page {page:?}; use one of: {}",
+            PAGES.join(", ")
+        )),
+    }
 }
 
 #[derive(Args)]
@@ -263,6 +307,9 @@ fn run(cli: Cli) -> Result<(), String> {
         Some(Command::Metric { command }) => tracking::metric(&mut local()?, command),
         Some(Command::Day(args)) => tracking::day(&mut local()?, args),
         Some(Command::Prayer { command }) => tracking::prayer(&mut local()?, command),
+        Some(Command::Goal { command }) => goals::goal(&mut local()?, command),
+        Some(Command::Insights(args)) => reports::insights(&mut local()?, args),
+        Some(Command::Review { command }) => reviews::review(&mut local()?, command),
         Some(Command::Stats(mut args)) => match args.command.take() {
             Some(command) => reports::stats(&mut local()?, command),
             None => tracking::stats(&mut local()?, args),
@@ -275,7 +322,7 @@ fn run(cli: Cli) -> Result<(), String> {
         },
         Some(Command::Serve(args)) => daemon::serve(args.idle_minutes),
         Some(Command::Methods) => methods_command(),
-        Some(Command::Open) => open_command(),
+        Some(Command::Open(args)) => open_command(args.page.as_deref()),
     }
 }
 
@@ -295,13 +342,15 @@ fn clock_from_env() -> Result<Box<dyn Clock>, String> {
 
 /// Starts `salah-app` from beside this binary when installed there, else from
 /// PATH. The app runs detached so the terminal is free immediately.
-fn open_command() -> Result<(), String> {
+fn open_command(page: Option<&str>) -> Result<(), String> {
+    let args = app_args(page)?;
     let sibling = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join("salah-app")))
         .filter(|path| path.is_file());
     let program = sibling.unwrap_or_else(|| std::path::PathBuf::from("salah-app"));
     std::process::Command::new(&program)
+        .args(&args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -430,4 +479,27 @@ fn methods_command() -> Result<(), String> {
         println!("{}\t{}", method.id, method.name);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod open_tests {
+    use super::{PAGES, app_args};
+
+    #[test]
+    fn no_page_means_no_argument() {
+        assert!(app_args(None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn every_known_page_becomes_a_page_flag() {
+        for page in PAGES {
+            assert_eq!(app_args(Some(page)).unwrap(), ["--page", page]);
+        }
+    }
+
+    #[test]
+    fn unknown_pages_list_the_valid_ones() {
+        let error = app_args(Some("weather")).unwrap_err();
+        assert!(error.contains("weather") && error.contains("insights, goals, review"));
+    }
 }

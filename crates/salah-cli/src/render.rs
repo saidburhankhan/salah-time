@@ -25,6 +25,10 @@ pub fn pretty(value: &Value) -> String {
 pub fn mutation(result: &Value) -> String {
     let changed = &result["changed"];
     let mut lines = Vec::new();
+    lines.extend(rows(&changed["goals"]).iter().map(goal_line));
+    for review in rows(&changed["reviews"]) {
+        lines.push(format!("Saved review for {}", text(&review["week"])));
+    }
     for item in rows(&changed["items"]) {
         let when = if item["backlog"].as_bool() == Some(true) {
             "backlog".to_owned()
@@ -84,6 +88,180 @@ pub fn mutation(result: &Value) -> String {
     } else {
         lines.join("\n")
     }
+}
+
+pub fn goals(result: &Value) -> String {
+    rows(result)
+        .iter()
+        .map(goal_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn goal_line(row: &Value) -> String {
+    let scope = row["scope_label"].as_str().unwrap_or("All work");
+    let metric = row["metric_id"].as_str().unwrap_or("minutes");
+    let direction = if row["direction"] == "at_most" {
+        "at most"
+    } else {
+        "at least"
+    };
+    let value = row["progress"]["value"]
+        .as_f64()
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "—".into());
+    format!(
+        "{}  {}  {}  {} {} {}  ({} so far)",
+        text(&row["id"]),
+        scope,
+        text(&row["period"]),
+        direction,
+        row["target"],
+        metric,
+        value
+    )
+}
+
+pub fn goal_history(result: &Value) -> String {
+    rows(result)
+        .iter()
+        .map(|p| {
+            format!(
+                "{} to {}  target {}  value {}  {}",
+                text(&p["from"]),
+                text(&p["to"]),
+                p["target"],
+                p["value"],
+                if p["met"] == true { "met" } else { "not met" }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn rate(value: &Value) -> String {
+    value
+        .as_f64()
+        .map(|v| format!("{v:.1}/h"))
+        .unwrap_or_else(|| "—".into())
+}
+
+fn session_line(row: &Value) -> String {
+    let title = row["item"]["title"].as_str().unwrap_or("No task");
+    let mut line = format!(
+        "  {}  {}  {} min  {}",
+        text(&row["day"]),
+        text(&row["block"]),
+        row["minutes"].as_i64().unwrap_or(0),
+        title
+    );
+    if let Some(note) = row["note"].as_str().filter(|n| !n.is_empty()) {
+        line.push_str(&format!("  \"{note}\""));
+    }
+    line
+}
+
+fn minutes_lines(title: &str, groups: &Value, out: &mut Vec<String>) {
+    if rows(groups).is_empty() {
+        return;
+    }
+    out.push(format!("{title}:"));
+    for g in rows(groups) {
+        out.push(format!("  {}  {} min", text(&g["name"]), g["minutes"]));
+    }
+}
+
+/// The weekly review: summary lines, then the saved reflection.
+pub fn review(result: &Value) -> String {
+    let s = &result["summary"];
+    let mut out = vec![format!("Week of {}", text(&result["week"]))];
+    minutes_lines("By project", &s["by_project"], &mut out);
+    minutes_lines("By epic", &s["by_epic"], &mut out);
+    if !rows(&s["goals_met"]).is_empty() {
+        out.push("Goals met:".into());
+        out.extend(
+            rows(&s["goals_met"])
+                .iter()
+                .map(|g| format!("  {}", goal_line(g))),
+        );
+    }
+    out.push(format!(
+        "Distractions: {} (previous week {})",
+        rate(&s["distractions_per_hour"]),
+        rate(&s["previous_distractions_per_hour"])
+    ));
+    out.push(format!("Open backlog tasks: {}", s["open_backlog_count"]));
+    if !rows(&s["sessions_with_notes"]).is_empty() {
+        out.push("Sessions with notes:".into());
+        out.extend(rows(&s["sessions_with_notes"]).iter().map(session_line));
+    }
+    match result["note"].as_str().filter(|n| !n.is_empty()) {
+        Some(note) => out.push(format!("Reflection:\n{note}")),
+        None => out.push("No reflection saved.".into()),
+    }
+    out.join("\n")
+}
+
+/// Insights: minutes by block, weekday and hour, plus ranked sessions.
+pub fn insights(result: &Value) -> String {
+    let mut out = vec!["By block:".to_owned()];
+    for b in rows(&result["by_block"]) {
+        out.push(format!(
+            "  {}  {} min  {} sessions  focus {}  distractions {}",
+            text(&b["block"]),
+            b["minutes"],
+            b["sessions"],
+            b["focus_avg"]
+                .as_f64()
+                .map_or("—".into(), |v| format!("{v:.1}")),
+            rate(&b["distractions_per_hour"])
+        ));
+    }
+    const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    out.push("By weekday:".into());
+    for w in rows(&result["by_weekday"]) {
+        let day = w["weekday"]
+            .as_u64()
+            .and_then(|d| DAYS.get((d as usize + 6) % 7).copied())
+            .unwrap_or("?");
+        out.push(format!(
+            "  {day}  {} min  {} sessions  distractions {}",
+            w["minutes"],
+            w["sessions"],
+            rate(&w["distractions_per_hour"])
+        ));
+    }
+    out.push("By start hour:".into());
+    for h in rows(&result["by_hour"])
+        .iter()
+        .filter(|h| h["sessions"] != 0)
+    {
+        out.push(format!(
+            "  {:02}:00  {} min  {} sessions",
+            h["hour"].as_u64().unwrap_or(0),
+            h["minutes"],
+            h["sessions"]
+        ));
+    }
+    out.push("Distractions by week:".into());
+    for w in rows(&result["distractions_by_week"]) {
+        out.push(format!("  {}  {}", text(&w["week"]), rate(&w["per_hour"])));
+    }
+    out.push("Planned vs actual:".into());
+    for r in rows(&result["on_plan"]) {
+        out.push(format!(
+            "  {}  {} of {} min on plan ({})",
+            text(&r["name"]),
+            r["on_plan_minutes"],
+            r["minutes"],
+            text(&r["planned_block"])
+        ));
+    }
+    for (title, key) in [("Best sessions", "best"), ("Hardest sessions", "hardest")] {
+        out.push(format!("{title}:"));
+        out.extend(rows(&result[key]).iter().map(session_line));
+    }
+    out.join("\n")
 }
 
 pub fn resources(result: &Value) -> String {

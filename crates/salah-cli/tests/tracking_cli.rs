@@ -724,3 +724,137 @@ fn repeatable_task_tags_replace_and_clear_the_set() {
         serde_json::json!([])
     );
 }
+
+#[test]
+fn goals_are_added_listed_edited_ended_and_removed() {
+    let fixture = Fixture::new();
+    let goal = fixture.added(
+        "goals",
+        &["goal", "add", "--period", "day", "--target", "60", "--json"],
+    );
+    let plain = fixture.run(&["goal", "list"]);
+    let text = String::from_utf8_lossy(&plain.stdout).into_owned();
+    assert!(plain.status.success(), "{}", stderr(&plain));
+    assert!(
+        text.contains("All work") && text.contains("at least 60"),
+        "{text}"
+    );
+    let list = fixture.json(&["goal", "list", "--json"]);
+    assert_eq!(list.as_array().unwrap().len(), 1);
+
+    let edited = fixture.json(&["goal", "edit", &goal, "--target", "90", "--json"]);
+    assert!(!edited["changed"]["goals"].as_array().unwrap().is_empty());
+    let history = fixture.json(&[
+        "goal",
+        "history",
+        &goal,
+        "--from",
+        "2031-05-14",
+        "--to",
+        "2031-05-14",
+        "--json",
+    ]);
+    assert!(history.is_array());
+    let human = fixture.run(&[
+        "goal",
+        "history",
+        &goal,
+        "--from",
+        "2031-05-14",
+        "--to",
+        "2031-05-14",
+    ]);
+    assert!(human.status.success(), "{}", stderr(&human));
+
+    let removable = fixture.added(
+        "goals",
+        &["goal", "add", "--period", "week", "--target", "5", "--json"],
+    );
+    assert!(
+        fixture
+            .run(&["goal", "remove", &removable])
+            .status
+            .success()
+    );
+    let active = fixture.json(&["goal", "list", "--json"]);
+    let successor = active
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|g| g["target"] == 90.0)
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(fixture.run(&["goal", "end", &successor]).status.success());
+    assert!(
+        !fixture
+            .run(&["goal", "add", "--period", "month", "--target", "1"])
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn insights_prints_json_and_text() {
+    let fixture = Fixture::new();
+    let project = fixture.added("projects", &["project", "add", "Study", "--json"]);
+    fixture.json(&[
+        "session",
+        "log",
+        "--project",
+        &project,
+        "--minutes",
+        "20",
+        "--block",
+        "fajr",
+        "--json",
+    ]);
+    let json = fixture.json(&["insights", "--days", "7", "--json"]);
+    assert!(json["by_block"][0]["block"].is_string());
+    let human = fixture.run(&["insights", "--days", "7"]);
+    let text = String::from_utf8_lossy(&human.stdout).into_owned();
+    assert!(human.status.success(), "{}", stderr(&human));
+    assert!(
+        text.contains("By block:") && text.contains("Best sessions:"),
+        "{text}"
+    );
+    assert!(
+        !fixture
+            .run(&["insights", "--from", "2031-05-01"])
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn review_defaults_to_the_last_full_week_and_saves_or_clears_the_note() {
+    let fixture = Fixture::new();
+    let shown = fixture.json(&["review", "show", "--json"]);
+    assert_eq!(shown["week"], "2031-05-05");
+    let saved = fixture.json(&["review", "save", "Slow start, strong end", "--json"]);
+    assert_eq!(saved["changed"]["reviews"][0]["week"], "2031-05-05");
+    let human = fixture.run(&["review", "show", "--week", "2031-05-05"]);
+    let text = String::from_utf8_lossy(&human.stdout).into_owned();
+    assert!(
+        text.contains("Week of 2031-05-05") && text.contains("Slow start, strong end"),
+        "{text}"
+    );
+    fixture.json(&["review", "save", "", "--week", "2031-05-05", "--json"]);
+    let cleared = fixture.json(&["review", "show", "--week", "2031-05-05", "--json"]);
+    assert!(cleared["note"].is_null() || cleared["note"] == "");
+    let bad = fixture.run(&["review", "show", "--week", "2031-05-06"]);
+    assert!(!bad.status.success());
+}
+
+#[test]
+fn open_rejects_unknown_pages_before_starting_anything() {
+    let fixture = Fixture::new();
+    let output = fixture.run(&["open", "--page", "weather"]);
+    assert!(!output.status.success());
+    let error = stderr(&output);
+    assert!(
+        error.contains("weather") && error.contains("insights"),
+        "{error}"
+    );
+}
