@@ -59,6 +59,14 @@ fn method_success_and_error(client: &mut Client) {
     assert_eq!(client.bad("stats.series", json!({"days":7})), -32001);
     assert!(client.good("insights.get", json!({"days":1}))["by_block"].is_array());
     assert_eq!(client.bad("insights.get", json!({"days":731})), -32001);
+    assert!(client.good("routines.activity", json!({"from":DATE,"to":DATE}))["rows"].is_array());
+    assert_eq!(
+        client.bad(
+            "routines.activity",
+            json!({"from":DATE,"to":DATE,"limit":0})
+        ),
+        -32001
+    );
     assert!(client.good("sessions.list", json!({"days":7}))["rows"].is_array());
     assert_eq!(client.bad("sessions.list", json!({"limit":0})), -32001);
 

@@ -74,6 +74,7 @@ const METHODS: &[(&str, Kind, Handler)] = &[
     ("stats.table", Kind::Read, reads::stats_table),
     ("stats.series", Kind::Read, reads::stats_series),
     ("sessions.list", Kind::Read, reads::sessions_list),
+    ("routines.activity", Kind::Read, reads::routines_activity),
     ("session.notes", Kind::Read, reads::session_notes),
     ("item.parse", Kind::Read, reads::item_parse),
     ("item.preview", Kind::Read, reads::item_preview),

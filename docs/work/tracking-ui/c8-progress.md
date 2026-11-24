@@ -257,3 +257,11 @@ Stats, Review, and Insights use the same compensated sum and hourly rate for the
 249 workspace tests passed. Strict Clippy, formatting, and diff checks passed. The eight Unix-socket tests listed under checkpoint 0b were filtered out.
 
 CHECKPOINT 9: Aggregate adherence per task, paginate notes, index assignment goal reads, and share distraction rates — files: crates/salah-cli/src/render.rs, crates/salah-cli/tests/{daemon/methods,rpc/goals,rpc/insights,rpc/reviews}.rs, crates/salah-cli/tests/fixtures/rpc/insights.json, crates/salah-core/src/{insights,reviews,sessions,sessions/notes,stats/table}.rs, crates/salah-domain/src/{lib,reports}.rs, crates/salah-protocol/src/{dispatcher,reads,reviews}.rs, crates/salah-store/src/{goals,lib,note_queries,reports,reviews}.rs, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md
+
+## 10 — routine activity
+
+`routines.activity` groups finished duration logs and completion ticks by routine and tracking day in SQLite. The regression covers removed sessions and tasks, running timers, one-time and bare work, tick-only days, invalid ranges and limits, and a 502-row result paged through RPC and the CLI fallback. The new golden fixture is `routines_activity.json`.
+
+251 workspace tests passed. Strict Clippy, formatting, and diff checks passed. The eight Unix-socket tests listed under checkpoint 0b were filtered out.
+
+CHECKPOINT 10: Page daily routine minutes and completion ticks through RPC and CLI — files: crates/salah-cli/src/{main,reports}.rs, crates/salah-cli/tests/{daemon/methods,rpc,rpc/routines}.rs, crates/salah-cli/tests/fixtures/rpc/routines_activity.json, crates/salah-core/src/{lib,routines}.rs, crates/salah-domain/src/item.rs, crates/salah-protocol/src/{dispatcher,reads}.rs, crates/salah-store/src/reports.rs, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md

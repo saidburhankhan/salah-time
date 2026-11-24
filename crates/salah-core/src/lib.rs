@@ -19,6 +19,7 @@ pub mod projects;
 pub mod quick;
 pub mod resources;
 pub mod reviews;
+pub mod routines;
 pub mod sessions;
 pub mod stats;
 pub mod status;

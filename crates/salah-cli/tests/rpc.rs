@@ -586,3 +586,6 @@ mod reviews;
 
 #[path = "rpc/assignments.rs"]
 mod assignments;
+
+#[path = "rpc/routines.rs"]
+mod routines;

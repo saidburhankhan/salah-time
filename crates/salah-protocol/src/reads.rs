@@ -114,6 +114,24 @@ pub(crate) fn session_notes(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Val
     )?)
 }
 
+pub(crate) fn routines_activity(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    #[derive(serde::Deserialize)]
+    struct Params {
+        from: String,
+        to: String,
+        limit: Option<i64>,
+        before: Option<String>,
+    }
+    let p: Params = parse(call.params)?;
+    to_value(salah_core::routines::activity(
+        ctx.store,
+        &p.from,
+        &p.to,
+        p.limit,
+        p.before.as_deref(),
+    )?)
+}
+
 pub(crate) fn sessions_list(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let params: SessionsListParams = parse(call.params)?;
     let today = day::current(&ctx.config.load()?, ctx.now())?;

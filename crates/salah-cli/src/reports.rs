@@ -236,3 +236,36 @@ pub fn insights(local: &mut Local<'_>, args: InsightsArgs) -> Result<(), String>
     let result = local.call("insights.get", Value::Object(params))?;
     crate::tracking::print(&args.output, &result, crate::render::insights)
 }
+
+#[derive(Subcommand)]
+pub enum RoutinesCommand {
+    /// List minutes and completion ticks by routine and tracking day
+    Activity {
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        from: String,
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        to: String,
+        #[arg(long, value_name = "ROWS")]
+        limit: Option<i64>,
+        /// The next cursor returned by the previous page
+        #[arg(long, value_name = "CURSOR")]
+        before: Option<String>,
+        #[command(flatten)]
+        output: crate::tracking::Output,
+    },
+}
+
+pub fn routines(local: &mut Local<'_>, command: RoutinesCommand) -> Result<(), String> {
+    let RoutinesCommand::Activity {
+        from,
+        to,
+        limit,
+        before,
+        output,
+    } = command;
+    let result = local.call(
+        "routines.activity",
+        json!({"from":from,"to":to,"limit":limit,"before":before}),
+    )?;
+    crate::tracking::print(&output, &result, crate::render::pretty)
+}

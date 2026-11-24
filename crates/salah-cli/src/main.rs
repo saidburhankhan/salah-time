@@ -115,6 +115,11 @@ enum Command {
     },
     /// Show time and metric statistics
     Stats(StatsArgs),
+    /// Read routine activity
+    Routines {
+        #[command(subcommand)]
+        command: reports::RoutinesCommand,
+    },
     /// List finished sessions and their notes
     Sessions {
         #[command(subcommand)]
@@ -314,6 +319,7 @@ fn run(cli: Cli) -> Result<(), String> {
             Some(command) => reports::stats(&mut local()?, command),
             None => tracking::stats(&mut local()?, args),
         },
+        Some(Command::Routines { command }) => reports::routines(&mut local()?, command),
         Some(Command::Sessions { command }) => reports::sessions(&mut local()?, command),
         Some(Command::Rpc(args)) => match args.socket {
             Some(path) if path.is_empty() => daemon::bridge(None),

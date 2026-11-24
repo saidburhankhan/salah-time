@@ -9,11 +9,12 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::{
     Connection,
     functions::{Aggregate, Context, FunctionFlags},
-    params_from_iter,
+    params, params_from_iter,
     types::Value,
 };
 use salah_domain::{
     error::Error,
+    item::RoutineDay,
     reports::{DistractionTotal, distractions_per_hour},
     tracking::{ItemRef, ProjectRef, Session, SessionNote, SessionValue},
 };
@@ -275,6 +276,37 @@ pub enum AssignmentGroup {
 }
 
 impl Store {
+    /// Page grouped sessions without reading their metrics or note entries.
+    pub fn routine_activity(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+        before: Option<(NaiveDate, &str)>,
+        fetch: i64,
+    ) -> Result<Vec<RoutineDay>, Error> {
+        let (last_day, last_item) = before.map_or((to, None), |(day, id)| (day, Some(id)));
+        self.all(
+            "SELECT s.item_id, s.day, COALESCE(SUM(s.minutes),0) AS minutes,
+                    MAX(s.minutes IS NULL) AS done
+             FROM sessions s JOIN items i ON i.id = s.item_id
+             WHERE s.day BETWEEN ?1 AND ?2 AND (?3 IS NULL OR s.day < ?2 OR s.item_id > ?3)
+               AND i.deleted_at IS NULL AND i.repeat IN ('daily','weekly')
+               AND s.deleted_at IS NULL AND (s.started_at IS NULL OR s.ended_at IS NOT NULL)
+             GROUP BY s.day, s.item_id
+             ORDER BY s.day DESC, s.item_id ASC
+             LIMIT ?4",
+            params![codec::day(from), codec::day(last_day), last_item, fetch],
+            |row| {
+                Ok(RoutineDay {
+                    item_id: row.get("item_id")?,
+                    day: codec::get_day(row, "day")?,
+                    minutes: row.get("minutes")?,
+                    done: row.get("done")?,
+                })
+            },
+        )
+    }
+
     /// Resolve a session for a single-session view (day, status or mutation).
     pub fn session_assignment(&self, id: &str) -> Result<(Option<String>, Option<String>), Error> {
         self.conn

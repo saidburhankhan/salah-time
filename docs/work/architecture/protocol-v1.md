@@ -106,6 +106,7 @@ store-wide counter, never a precondition.
 | `stats.get` | `from,to` or `days?` (default 30, max 730), `tag_id?`, `project_id?`, `epic_id?`, `item_id?` (each also `"none"`), `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}` | `range`, `filter`, `days` (with `unplanned_minutes`, nullable `fulfilment_ratio`), `series` (minutes first), `projects`, `epics`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
 | `stats.table` | `stats.get`'s range and filter (including the session bounds), `group?` (`week` default, `day`, `block`, `project`, `epic`, `tag`, `item`) | `range`, `filter`, `group`, `columns`, `rows`, `totals` | validation, not_found, storage | — | — |
 | `stats.series` | `stats.get`'s range and filter (including the session bounds), `interval?` (`day` default, `week`), `split?` (`block`, `project`, `epic`, `tag`, `item`), `measures: [id]` (required, non-empty: `minutes`, `sessions`, a metric id or `distractions_per_hour`) | `range`, `filter`, `interval`, `split`, `periods`, `series` | validation (empty `measures`, range over 730 days), not_found (unknown measure), storage | — | — |
+| `routines.activity` | `from`, `to`, `limit?` (default 500, 1–500), `before?` | `{rows: [{item_id, day, minutes, done}], next: cursor\|null}` | validation, storage | — | — |
 | `sessions.list` | `stats.get`'s range and project, epic, tag and item filters, `with_note?` (default true), `q?`, `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}`, `limit?` (default 100, 1–500), `before?` (a previous `next`) | `rows: [SessionView + project + epic + item]`, `next: cursor\|null` | validation, not_found, storage | — | — |
 | `item.parse` | `text` | draft `{title, block, repeat, weekdays, planned_minutes, start_day}` | validation (and, only when the text names a day, config/source) | — | — |
 | `item.preview` | `block`, `repeat`, `weekdays?`, `planned_minutes?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
@@ -428,6 +429,14 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   beside `tag_id`, `project_id`, `epic_id` and `item_id`. `stats.get` also accepts `"none"` for
   the project, epic, tag and item filters, as `stats.table` does; under `item_id: "none"`
   or a project/epic/tag filter the plan lines narrow the same way.
+- `routines.activity` accepts an inclusive range of 1–14 tracking days in
+  `YYYY-MM-DD` format. Each row covers a currently live daily or weekly task
+  with finished activity on the stored session day. Minutes sum duration
+  sessions. A completion tick sets `done`, with zero minutes on a tick-only
+  day. Removed sessions and running timers are excluded. Rows sort by day
+  descending and item ID ascending. Pass the opaque `next` back as `before`
+  with the same range until `next` is null. The CLI equivalent is
+  `salah routines activity --from DATE --to DATE --limit 500 [--before CURSOR] --json`.
 - `sessions.list` is the Notes page query. Every predicate, the cursor, and the limit
   run in SQL. Rows are finished live sessions (ticks included): newest planning day
   first, then the newest end instant (creation for manual logs and ticks), then id.

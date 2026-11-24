@@ -20,6 +20,15 @@ pub enum Repeat {
     Weekly,
 }
 
+/// Finished work recorded for one routine on one tracking day.
+#[derive(Debug, Serialize)]
+pub struct RoutineDay {
+    pub item_id: String,
+    pub day: NaiveDate,
+    pub minutes: i64,
+    pub done: bool,
+}
+
 const WEEKDAY_NAMES: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 /// A set of weekdays, stored as a bitmask (Monday = bit 0) and written as a
