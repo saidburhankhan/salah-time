@@ -265,7 +265,9 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   period), `ends_on` (last day of its last period, `null` while active),
   `replaces_id` (the predecessor of an edited target), `position`, sync fields, and
   `progress: {from, to, value, met}` for the period containing the requested day
-  (clamped to the goal's own span). A `day` period is the tracking day (the Sleep
+  (clamped to the goal's own span). The `scope_label` field is the task title,
+  epic name or project name, or `null` for all work. Ended goals also read the
+  stored label, including after the scope is removed. A `day` period is the tracking day (the Sleep
   boundary, the same `day` sessions carry); a `week` runs Monday to Sunday.
   Progress is computed at read time from finished live sessions (the `stats.*`
   set; running timers do not count) whose recorded `item_id`, `epic_id` or

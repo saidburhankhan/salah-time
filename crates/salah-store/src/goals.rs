@@ -34,6 +34,20 @@ impl Store {
         self.one("SELECT * FROM goals WHERE id=?1", [id], goal)
     }
 
+    /// Use the stored name even after an item, epic or project is soft-deleted.
+    pub fn goal_scope_label(&self, scope: &Scope) -> Result<Option<String>, Error> {
+        let (sql, id) = if let Some(id) = &scope.item_id {
+            ("SELECT title FROM items WHERE id=?1", id)
+        } else if let Some(id) = &scope.epic_id {
+            ("SELECT name FROM epics WHERE id=?1", id)
+        } else if let Some(id) = &scope.project_id {
+            ("SELECT name FROM projects WHERE id=?1", id)
+        } else {
+            return Ok(None);
+        };
+        self.one(sql, [id], |row| row.get(0))
+    }
+
     pub fn goals_at(&self, at: NaiveDate, include_ended: bool) -> Result<Vec<Goal>, Error> {
         self.all(
             "SELECT * FROM goals WHERE deleted_at IS NULL AND starts_on<=?1

@@ -315,13 +315,21 @@ fn validates_goal_target_scope_and_calendar_and_ends_removed_scopes() {
     );
     drop(rpc);
     let mut rpc = Session::open(&h, "2031-05-23T09:00:00+05:00");
+    good(
+        &mut rpc,
+        "item.edit",
+        json!({"id":t,"op_id":"rename","title":"Read notes"}),
+    );
     let dropped = good(&mut rpc, "item.remove", json!({"id":t,"op_id":"drop-t"}));
     assert_eq!(dropped["changed"]["goals"][0]["id"], tg);
+    assert_eq!(dropped["changed"]["goals"][0]["scope_label"], "Read notes");
     assert_eq!(dropped["changed"]["deleted"], json!([t]));
     let dropped = good(&mut rpc, "epic.remove", json!({"id":e,"op_id":"drop-e"}));
     assert_eq!(dropped["changed"]["goals"][0]["ends_on"], "2031-05-18");
     assert_eq!(good(&mut rpc, "goals.list", json!({})), json!([]));
     let ended = good(&mut rpc, "goals.list", json!({"include_ended":true}));
+    assert_eq!(goal(&ended, &tg)["scope_label"], "Read notes");
+    assert_eq!(goal(&ended, &eg)["scope_label"], "Epic");
     assert_eq!(goal(&ended, &tg)["ends_on"], "2031-05-22");
     assert_eq!(goal(&ended, &eg)["ends_on"], "2031-05-18");
 }

@@ -117,6 +117,7 @@ pub fn view(store: &Store, g: Goal, at: NaiveDate) -> Result<GoalView, Error> {
         .pop()
         .ok_or_else(|| Error::Storage("goal has no valid period".into()))?;
     Ok(GoalView {
+        scope_label: store.goal_scope_label(&g.scope)?,
         goal: g,
         progress: p.progress,
     })

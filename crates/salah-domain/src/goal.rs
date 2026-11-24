@@ -85,6 +85,7 @@ pub struct Progress {
 pub struct GoalView {
     #[serde(flatten)]
     pub goal: Goal,
+    pub scope_label: Option<String>,
     pub progress: Progress,
 }
 

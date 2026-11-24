@@ -25,6 +25,7 @@
           },
           "project_id": null,
           "replaces_id": null,
+          "scope_label": null,
           "starts_on": "2031-05-14",
           "target": 60.0,
           "updated_at": "2031-05-14T04:30:00Z",
