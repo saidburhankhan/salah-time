@@ -234,3 +234,6 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
     paginate noted sessions under the 1 MiB transport limit); metric goal query driven by
     period/scope sessions (perf); CLI render timestamped notes. Then the polish leftovers.
   R4 resume (Astra, read-only) to finish its pass and write DONE, if quota allows.
+- 18:18 new window (newest session file: 5h 60%, weekly 73% — maybe another bucket; treat as <90%).
+  Dispatched C9 (Astra) addendum 2–5 → 4a, R4 app fixes → 4b; C8 (Astra) R4 backend fixes → 6;
+  R4 --resume (Astra) to finish with DONE. Reset unused (weekly < 100%).
