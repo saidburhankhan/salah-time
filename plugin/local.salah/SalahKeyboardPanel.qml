@@ -29,7 +29,9 @@ KeyboardPanel {
     return windows
   }
 
-  Instantiator {
+  // Not a child: KeyboardPanel's default property is `contentItem` (Items
+  // only), so a non-visual helper must live in its own property.
+  property Instantiator dismissalMasks: Instantiator {
     model: panel.open && panel.bar ? panel.dismissalWindows() : []
 
     delegate: QtObject {
