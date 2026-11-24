@@ -160,6 +160,7 @@
   "goal.epic": "Epic",
   "goal.project": "Project",
   "goal.none": "—︎",
+  "goal.sumOverflow": "Total too large",
   "goal.minuteUnit": "min",
   "goal.weekMark": "Wk",
   "goal.more": "+%1"

@@ -129,3 +129,13 @@ validation error unlocked editing. Live Wayland and socket verification
 remain with the orchestrator.
 
 CHECKPOINT 4: Replay unconfirmed widget task creation and preserve drafts through title edits — files: plugin/local.salah/CreationLogic.js, plugin/local.salah/QuickAdd.qml, plugin/local.salah/SalahClient.qml, plugin/local.salah/i18n/en.json, plugin/local.salah/tests/creation_logic_test.js, docs/work/tracking-ui/c10-progress.md
+
+## R5 — goal progress overflow
+
+Goal chips show “Total too large” beside the target when progress reports
+`sum_overflow`. A period with no samples still shows a dash. The Node
+regression checks both cases and confirms that overflow has no met check.
+All 148 Node checks, Omarchy plugin validation, QML syntax checks, JSON
+parsing and `git diff --check` passed.
+
+CHECKPOINT 5: Show goal sum overflow distinctly in widget chips — files: plugin/local.salah/GoalChips.qml, plugin/local.salah/GoalLogic.js, plugin/local.salah/i18n/en.json, plugin/local.salah/tests/goal_logic_test.js, docs/work/tracking-ui/c10-progress.md

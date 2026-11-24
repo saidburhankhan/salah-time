@@ -21,6 +21,7 @@ Item {
       epic: host.tr.t("goal.epic"),
       project: host.tr.t("goal.project"),
       none: host.tr.t("goal.none"),
+      sumOverflow: host.tr.t("goal.sumOverflow"),
       minuteUnit: host.tr.t("goal.minuteUnit")
     }
   })

@@ -76,7 +76,8 @@ function chipFor(goal, ctx) {
   var label = scopeLabel(goal, ctx)
   if (metric) label = label === "" ? metric.name : label + " · " + metric.name
   var targetText = target === null ? "" : (metric ? trimmed(target, 1) : String(Math.round(target)))
-  var valueText = value === null ? text(strings.none)
+  var valueText = progress.error === "sum_overflow" ? text(strings.sumOverflow)
+    : value === null ? text(strings.none)
     : (metric ? trimmed(value, 1) : String(Math.round(value)))
   var unit = metric ? metric.unit : text(strings.minuteUnit)
   var amount = valueText + " / " + (atMost ? "≤ " : "") + targetText + (unit === "" ? "" : " " + unit)
@@ -93,7 +94,8 @@ function chipFor(goal, ctx) {
 
 // Today's goals first, then this week's, keeping the server position order
 // within each group. `ctx`: {projects, epics, items, metrics, strings:{allWork,
-// task, epic, project, none, minuteUnit}}. Returns {chips: first MAX_CHIPS, more: count hidden}.
+// task, epic, project, none, sumOverflow, minuteUnit}}.
+// Returns {chips: first MAX_CHIPS, more: count hidden}.
 function goalChips(goals, ctx, max) {
   var limit = max === undefined ? MAX_CHIPS : max
   var rows = list(goals).filter(function(goal) {

@@ -11,7 +11,8 @@ const logic = {}
 const filename = path.join(__dirname, "..", "GoalLogic.js")
 vm.runInNewContext(fs.readFileSync(filename, "utf8").replace(/^\.pragma library\s*/, ""), logic, { filename })
 
-const strings = { allWork: "All work", task: "Task", epic: "Epic", project: "Project", none: "—", minuteUnit: "min" }
+const strings = { allWork: "All work", task: "Task", epic: "Epic", project: "Project",
+  none: "—", sumOverflow: "Total too large", minuteUnit: "min" }
 const status = JSON.parse(fs.readFileSync(path.join(__dirname,
   "../../../crates/salah-cli/tests/fixtures/rpc/status_goals.json"), "utf8")).result
 const ctx = {
@@ -64,6 +65,19 @@ test("null metric value shows the placeholder and an empty bar", () => {
   assert.equal(out.chips[0].amount, "— / 4")
   assert.equal(out.chips[0].fraction, 0)
   assert.equal(out.chips[0].met, false)
+})
+
+test("a sum overflow gives a distinct message and keeps the target visible", () => {
+  const limit = { metric_id: "distractions", direction: "at_most", target: 3 }
+  const empty = { value: null, met: false }
+  const out = logic.goalChips([
+    goal({ ...limit, progress: { ...empty, error: "sum_overflow" } }),
+    goal({ ...limit, progress: empty })
+  ], ctx)
+  assert.equal(out.chips[0].amount, "Total too large / ≤ 3 times")
+  assert.equal(out.chips[0].fraction, 0)
+  assert.equal(out.chips[0].met, false)
+  assert.equal(out.chips[1].amount, "— / ≤ 3 times")
 })
 
 test("unmet progress fraction and unknown scope", () => {
