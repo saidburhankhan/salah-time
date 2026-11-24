@@ -237,3 +237,6 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - 18:18 new window (newest session file: 5h 60%, weekly 73% — maybe another bucket; treat as <90%).
   Dispatched C9 (Astra) addendum 2–5 → 4a, R4 app fixes → 4b; C8 (Astra) R4 backend fixes → 6;
   R4 --resume (Astra) to finish with DONE. Reset unused (weekly < 100%).
+- 18:19 R4 added 3 findings (17–19): C8: CLI insights --item resolves removed tasks for reads;
+  goal sum overflow → explicit error not null+met. C9: Goals page offline (CLI fallback) never
+  reads goals back after a write. Route at each worker's next resume.
