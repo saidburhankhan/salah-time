@@ -250,3 +250,11 @@ Rules:
    migration tests against this file before any frontend builds on it.
 2. The orchestrator migrates a copy of the live database and diffs row counts per table before
    installing.
+
+## Source of truth for grouping (user decision 2026-11-24 ~09:10; supersedes "project/epic copied at write" for reads)
+A session belongs to its task; the **task** is the only source of truth for project, epic and tags.
+Every read that groups or filters sessions resolves them through the task (session → item →
+current project/epic/tags). `sessions.project_id`/`epic_id` are kept untouched for history but are
+read **only** for sessions without an item (bare project/epic logs), where they are the session's
+only link. Never copy grouping into a new denormalised column again; never "fix" history by
+rewriting stored sessions.
