@@ -290,16 +290,21 @@ pub fn insights(result: &Value) -> String {
     }
     out.push("Planned vs actual:".into());
     for r in rows(&result["on_plan"]) {
-        if r["planned_block"].is_null() {
+        let blocks = rows(&r["planned_blocks"]);
+        if r["planned_block"].is_null() && blocks.is_empty() {
             out.push(format!("  {}  {} min", text(&r["name"]), r["minutes"]));
             continue;
         }
+        let label = if blocks.is_empty() {
+            text(&r["planned_block"]).to_owned()
+        } else {
+            blocks.iter().map(text).collect::<Vec<_>>().join(", ")
+        };
         out.push(format!(
-            "  {}  {} of {} min on plan ({})",
+            "  {}  {} of {} min on plan ({label})",
             text(&r["name"]),
             r["on_plan_minutes"],
             r["minutes"],
-            text(&r["planned_block"])
         ));
     }
     for (title, key) in [("Best sessions", "best"), ("Hardest sessions", "hardest")] {

@@ -243,3 +243,17 @@ Exact fixture comparison replaces the nine-decimal rounding that masked the flak
 All 42 RPC tests, including the weekly stats fixture test, passed in ten consecutive runs. 244 workspace tests passed with the eight Unix-socket tests listed under checkpoint 0b filtered out. Strict Clippy, formatting, and diff checks passed.
 
 CHECKPOINT 8: Make report averages deterministic and compare RPC fixtures exactly — files: crates/salah-core/src/{stats,insights,goals}.rs, crates/salah-store/src/reports.rs, crates/salah-cli/tests/rpc.rs, crates/salah-cli/tests/fixtures/rpc/{stats_table_week,stats_table_project,stats_series_day,goals_list,status_goals}.json, docs/work/tracking-ui/c8-progress.md
+
+## 9 — adherence, note pagination, goal indexes, and distraction rates
+
+Insights combines each task's minutes into one adherence row and tests each session against its historical planned block. A move from Fajr to Asr produces one 30-of-60-minute row. The matrix retains both historical cells. Best and Hardest each have a 192 KiB preview budget and expose the latest 12 timestamped entries per session with `notes_count` and `notes_more`. The regression verifies 300 four-byte-character notes fit in both ranked previews and that `session.notes` can fetch every entry in three pages. The Insights fixture gains preview fields and `planned_blocks` only.
+
+Weekly `review.notes` searches all live main notes and timestamped entries in finished sessions. It returns matching session rows with matching entries and a cursor that can continue within a session. The search test retrieves entries omitted from the Review preview, excludes a deleted note and a note from the prior week, and checks Unicode matching and pagination. Desktop integration belongs to the app slice. The Review filter can call `review.notes` and the session editor can follow `session.notes` pages when `notes_more` is true.
+
+Project and epic goals use disjoint branches for assigned tasks and direct logs on the existing schema. EXPLAIN QUERY PLAN verifies searches using `items_by_project` and the `sessions_by_item_day`, `sessions_by_project_day`, and `sessions_by_epic_day` indexes, followed by composite metric lookups. The RPC regression checks that moved-task and direct work contribute once to each relevant goal.
+
+Stats, Review, and Insights use the same compensated sum and hourly rate for the same distraction samples. The fractional regression reports 9.75/hour across Stats, Review, and the Insights calendar and block groups.
+
+249 workspace tests passed. Strict Clippy, formatting, and diff checks passed. The eight Unix-socket tests listed under checkpoint 0b were filtered out.
+
+CHECKPOINT 9: Aggregate adherence per task, paginate notes, index assignment goal reads, and share distraction rates — files: crates/salah-cli/src/render.rs, crates/salah-cli/tests/{daemon/methods,rpc/goals,rpc/insights,rpc/reviews}.rs, crates/salah-cli/tests/fixtures/rpc/insights.json, crates/salah-core/src/{insights,reviews,sessions,sessions/notes,stats/table}.rs, crates/salah-domain/src/{lib,reports}.rs, crates/salah-protocol/src/{dispatcher,reads,reviews}.rs, crates/salah-store/src/{goals,lib,note_queries,reports,reviews}.rs, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md

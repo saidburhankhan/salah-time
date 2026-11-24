@@ -27,6 +27,8 @@
             "text": "Paragraph 2"
           }
         ],
+        "notes_count": 1,
+        "notes_more": false,
         "project": {
           "color": "#4c8bf5",
           "id": "<id:5>",
@@ -57,6 +59,8 @@
         "minutes": 10,
         "note": null,
         "notes": [],
+        "notes_count": 0,
+        "notes_more": false,
         "project": null,
         "project_id": null,
         "running": false,
@@ -383,6 +387,8 @@
         "minutes": 10,
         "note": null,
         "notes": [],
+        "notes_count": 0,
+        "notes_more": false,
         "project": null,
         "project_id": null,
         "running": false,
@@ -417,6 +423,8 @@
             "text": "Paragraph 2"
           }
         ],
+        "notes_count": 1,
+        "notes_more": false,
         "project": {
           "color": "#4c8bf5",
           "id": "<id:5>",
@@ -439,7 +447,10 @@
         "minutes": 30,
         "name": "Read",
         "on_plan_minutes": 15,
-        "planned_block": "fajr"
+        "planned_block": "fajr",
+        "planned_blocks": [
+          "fajr"
+        ]
       },
       {
         "item_id": "<id:7>",

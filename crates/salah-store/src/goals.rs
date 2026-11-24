@@ -1,4 +1,4 @@
-use crate::{Store, WriteTx, codec, reports::ASSIGNED_SESSIONS};
+use crate::{Store, WriteTx, codec};
 use chrono::NaiveDate;
 use rusqlite::{Row, params};
 use salah_domain::{
@@ -30,15 +30,6 @@ fn goal(row: &Row) -> rusqlite::Result<Goal> {
 }
 
 fn sample_query(scope: &Scope, has_metric: bool) -> (String, Option<&String>) {
-    let (column, owner) = if let Some(id) = &scope.item_id {
-        ("s.item_id", Some(id))
-    } else if let Some(id) = &scope.epic_id {
-        ("s.epic_id", Some(id))
-    } else if let Some(id) = &scope.project_id {
-        ("s.project_id", Some(id))
-    } else {
-        ("NULL", None)
-    };
     // CROSS JOIN fixes SQLite's outer loop on the matched sessions. Each
     // metric lookup can then use its (session_id, metric_id) primary key.
     let (source, value) = if has_metric {
@@ -49,12 +40,46 @@ fn sample_query(scope: &Scope, has_metric: bool) -> (String, Option<&String>) {
     } else {
         ("", "COALESCE(s.minutes,0)")
     };
-    let sql = format!(
-        "SELECT s.day, {value}, MAX(COALESCE(s.minutes, 1), 1) FROM {ASSIGNED_SESSIONS} s {source}
-            WHERE s.day BETWEEN ?1 AND ?2 AND {column} IS ?3 AND s.deleted_at IS NULL
-            AND (s.started_at IS NULL OR s.ended_at IS NOT NULL)"
-    );
-    (sql, owner)
+    let select = |from: &str, assignment: &str| {
+        format!(
+            "SELECT s.day, {value}, MAX(COALESCE(s.minutes, 1), 1)
+         FROM {from} {source}
+         WHERE s.day BETWEEN ?1 AND ?2 AND {assignment}
+           AND s.deleted_at IS NULL AND (s.started_at IS NULL OR s.ended_at IS NOT NULL)"
+        )
+    };
+    // Item work uses the item's resolved assignment. Direct logs retain their
+    // recorded owner. The branches are disjoint and each drives the session
+    // lookup with both an owner and a day range.
+    let item_sessions = "CROSS JOIN sessions s INDEXED BY sessions_by_item_day ON s.item_id=i.id";
+    if let Some(id) = &scope.project_id {
+        let items = select(
+            &format!("items i INDEXED BY items_by_project {item_sessions}"),
+            "i.project_id=?3",
+        );
+        let direct = select(
+            "sessions s INDEXED BY sessions_by_project_day",
+            "s.project_id=?3 AND s.item_id IS NULL",
+        );
+        (format!("{items} UNION ALL {direct}"), Some(id))
+    } else if let Some(id) = &scope.epic_id {
+        let items = select(
+            &format!(
+                "epics e CROSS JOIN items i INDEXED BY items_by_project
+                ON i.project_id=e.project_id AND i.epic_id=e.id {item_sessions}"
+            ),
+            "e.id=?3 AND e.deleted_at IS NULL",
+        );
+        let direct = select(
+            "sessions s INDEXED BY sessions_by_epic_day",
+            "s.epic_id=?3 AND s.item_id IS NULL",
+        );
+        (format!("{items} UNION ALL {direct}"), Some(id))
+    } else if let Some(id) = &scope.item_id {
+        (select("sessions s", "s.item_id=?3"), Some(id))
+    } else {
+        (select("sessions s", "?3 IS NULL"), None)
+    }
 }
 
 impl Store {
@@ -308,35 +333,41 @@ mod tests {
                     |r| r.get::<_, String>(3),
                 )
                 .unwrap();
-            let session_index = if scope.item_id.is_some() {
-                "sessions_by_item_day"
+            let session_indexes: &[&str] = if scope.project_id.is_some() {
+                &["sessions_by_item_day", "sessions_by_project_day"]
+            } else if scope.epic_id.is_some() {
+                &["sessions_by_item_day", "sessions_by_epic_day"]
+            } else if scope.item_id.is_some() {
+                &["sessions_by_item_day"]
             } else {
-                "sessions_by_day"
+                &["sessions_by_day"]
             };
-            let outer = plan
+            let searches: Vec<_> = plan
                 .iter()
-                .position(|p| {
-                    p.contains(session_index) && p.contains("day>?") && p.contains("day<?")
-                })
-                .expect("bounded session index search");
-            let probe = plan
+                .enumerate()
+                .filter(|(_, step)| step.starts_with("SEARCH s "))
+                .collect();
+            let probes: Vec<_> = plan
                 .iter()
-                .position(|p| p.contains("session_id=? AND metric_id=?"))
-                .expect("compound metric lookup");
-            assert!(outer < probe, "{plan:?}");
-            for (required, lookup) in [
-                (
-                    scope.project_id.is_some() || scope.epic_id.is_some(),
-                    "SEARCH i ",
-                ),
-                (scope.epic_id.is_some(), "SEARCH e "),
-            ] {
-                if required {
-                    assert!(
-                        plan[outer + 1..probe].iter().any(|p| p.starts_with(lookup)),
-                        "{plan:?}"
-                    );
-                }
+                .enumerate()
+                .filter(|(_, step)| step.contains("session_id=? AND metric_id=?"))
+                .collect();
+            assert_eq!(searches.len(), session_indexes.len(), "{plan:?}");
+            assert_eq!(probes.len(), searches.len(), "{plan:?}");
+            for ((outer, step), (index, (probe, _))) in
+                searches.into_iter().zip(session_indexes.iter().zip(probes))
+            {
+                assert!(
+                    step.contains(index) && step.contains("day>?") && step.contains("day<?"),
+                    "{plan:?}"
+                );
+                assert!(outer < probe, "{plan:?}");
+            }
+            if session_indexes.len() == 2 {
+                assert!(
+                    plan.iter().any(|step| step.contains("items_by_project")),
+                    "{plan:?}"
+                );
             }
             assert!(
                 !plan.iter().any(|p| p.contains("session_values_by_metric")),

@@ -480,3 +480,71 @@ fn first_week_goal_membership_is_fixed_by_its_closing_instant_and_sleep_boundary
     assert_eq!(wed.as_array().unwrap().len(), 1);
     assert_eq!(wed[0]["id"], second);
 }
+
+#[test]
+fn assignment_goal_branches_count_moved_task_and_direct_logs_once_in_scope() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    let old = added(
+        &mut rpc,
+        "project.add",
+        "projects",
+        json!({"op_id":"old","name":"Old project"}),
+    );
+    let project = added(
+        &mut rpc,
+        "project.add",
+        "projects",
+        json!({"op_id":"new","name":"New project"}),
+    );
+    let epic = added(
+        &mut rpc,
+        "epic.add",
+        "epics",
+        json!({"op_id":"epic","name":"Reading","project_id":project}),
+    );
+    let task = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"task","title":"Read","project_id":old}),
+    );
+    for (op, scope, count) in [
+        ("task-work", json!({"item_id":task}), 2.0),
+        ("bare-epic", json!({"epic_id":epic}), 3.0),
+        ("bare-project", json!({"project_id":project}), 5.0),
+        ("other", json!({"project_id":old}), 10.0),
+    ] {
+        let mut params = scope;
+        params["op_id"] = json!(op);
+        params["minutes"] = json!(10);
+        params["values"] = json!({"distractions":count});
+        good(&mut rpc, "session.log", params);
+    }
+    good(
+        &mut rpc,
+        "item.edit",
+        json!({"op_id":"move","id":task,"project_id":project,"epic_id":epic}),
+    );
+    for (owner, scope, target) in [
+        (
+            "project-goal",
+            json!({"project_id":project,"metric_id":"distractions"}),
+            10.0,
+        ),
+        (
+            "epic-goal",
+            json!({"epic_id":epic,"metric_id":"distractions"}),
+            5.0,
+        ),
+    ] {
+        let id = create(&mut rpc, owner, scope, "week", target);
+        let history = good(
+            &mut rpc,
+            "goals.history",
+            json!({"id":id,"from":DATE,"to":DATE}),
+        );
+        assert_eq!(history[0]["value"], target);
+        assert_eq!(history[0]["met"], true);
+    }
+}

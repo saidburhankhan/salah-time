@@ -56,6 +56,7 @@ enum Kind {
 /// Every method after `hello`.
 const METHODS: &[(&str, Kind, Handler)] = &[
     ("review.get", Kind::Read, reviews::get),
+    ("review.notes", Kind::Read, reviews::notes),
     ("review.save", Kind::Write, reviews::save),
     ("goals.list", Kind::Read, goals::list),
     ("goals.history", Kind::Read, goals::history),
@@ -73,6 +74,7 @@ const METHODS: &[(&str, Kind, Handler)] = &[
     ("stats.table", Kind::Read, reads::stats_table),
     ("stats.series", Kind::Read, reads::stats_series),
     ("sessions.list", Kind::Read, reads::sessions_list),
+    ("session.notes", Kind::Read, reads::session_notes),
     ("item.parse", Kind::Read, reads::item_parse),
     ("item.preview", Kind::Read, reads::item_preview),
     ("epics.list", Kind::Read, reads::epics),

@@ -6,6 +6,7 @@ mod goals;
 mod item_tags;
 pub use item_tags::ReportTags;
 mod migrations;
+pub mod note_queries;
 mod read;
 pub mod reports;
 pub mod resources;
@@ -94,7 +95,7 @@ impl Store {
             .or(path)
             .filter(|p| !p.as_os_str().is_empty());
         migrations::apply(&mut conn, file)?;
-        reports::register_search(&conn)?;
+        reports::register_report_functions(&conn)?;
         Ok(Self { conn })
     }
 

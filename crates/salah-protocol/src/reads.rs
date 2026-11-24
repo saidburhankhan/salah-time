@@ -98,6 +98,22 @@ pub(crate) fn stats_series(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Valu
     )?)
 }
 
+pub(crate) fn session_notes(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    #[derive(serde::Deserialize)]
+    struct Params {
+        id: String,
+        limit: Option<i64>,
+        after: Option<String>,
+    }
+    let p: Params = parse(call.params)?;
+    to_value(sessions::notes(
+        ctx.store,
+        &p.id,
+        p.limit,
+        p.after.as_deref(),
+    )?)
+}
+
 pub(crate) fn sessions_list(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let params: SessionsListParams = parse(call.params)?;
     let today = day::current(&ctx.config.load()?, ctx.now())?;

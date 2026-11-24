@@ -6,9 +6,15 @@ use crate::{
     codec::{self, storage_error},
 };
 use chrono::{DateTime, NaiveDate, Utc};
-use rusqlite::{Connection, functions::FunctionFlags, params_from_iter, types::Value};
+use rusqlite::{
+    Connection,
+    functions::{Aggregate, Context, FunctionFlags},
+    params_from_iter,
+    types::Value,
+};
 use salah_domain::{
     error::Error,
+    reports::{DistractionTotal, distractions_per_hour},
     tracking::{ItemRef, ProjectRef, Session, SessionNote, SessionValue},
 };
 use std::collections::BTreeMap;
@@ -80,23 +86,46 @@ impl ReportSession {
     }
 }
 
-/// SQLite's `lower()` only folds ASCII. This registers the same Unicode
-/// lowercase conversion used for the query text, so search stays in SQL.
-pub(crate) fn register_search(conn: &Connection) -> Result<(), Error> {
-    conn.create_scalar_function(
-        "salah_lower",
-        1,
-        FunctionFlags::SQLITE_UTF8
-            | FunctionFlags::SQLITE_DETERMINISTIC
-            | FunctionFlags::SQLITE_INNOCUOUS,
-        |ctx| Ok(ctx.get::<Option<String>>(0)?.map(|s| s.to_lowercase())),
-    )
-    .map_err(storage_error)
+struct SqlDistractionTotal;
+
+impl Aggregate<DistractionTotal, Option<f64>> for SqlDistractionTotal {
+    fn init(&self, _: &mut Context<'_>) -> rusqlite::Result<DistractionTotal> {
+        Ok(DistractionTotal::default())
+    }
+
+    fn step(&self, ctx: &mut Context<'_>, total: &mut DistractionTotal) -> rusqlite::Result<()> {
+        if let Some(value) = ctx.get(0)? {
+            total.add(value);
+        }
+        Ok(())
+    }
+
+    fn finalize(
+        &self,
+        _: &mut Context<'_>,
+        total: Option<DistractionTotal>,
+    ) -> rusqlite::Result<Option<f64>> {
+        Ok(total.and_then(DistractionTotal::finish))
+    }
+}
+
+pub(crate) fn register_report_functions(conn: &Connection) -> Result<(), Error> {
+    let flags = FunctionFlags::SQLITE_UTF8
+        | FunctionFlags::SQLITE_DETERMINISTIC
+        | FunctionFlags::SQLITE_INNOCUOUS;
+    // SQLite's lower() only folds ASCII. Share Unicode folding with the query text.
+    conn.create_scalar_function("salah_lower", 1, flags, |ctx| {
+        Ok(ctx.get::<Option<String>>(0)?.map(|s| s.to_lowercase()))
+    })
+    .map_err(storage_error)?;
+    conn.create_aggregate_function("salah_distraction_total", 1, flags, SqlDistractionTotal)
+        .map_err(storage_error)
 }
 
 /// The ordering instant in the store's own timestamp spelling, so text
 /// comparison matches time order even for older spellings.
-const SORT_AT: &str = "strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(s.ended_at, s.created_at))";
+pub(crate) const SORT_AT: &str =
+    "strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(s.ended_at, s.created_at))";
 
 /// Newest planning day first, then the newest instant within the day, so a
 /// session logged later for an earlier day sorts under that day.
@@ -319,7 +348,7 @@ impl Store {
             )
             SELECT bucket, COALESCE(SUM(minutes),0), COUNT(*),
                    SUM(weighted_focus ORDER BY weighted_focus) / SUM(weight) FILTER (WHERE weighted_focus IS NOT NULL),
-                   SUM(distractions ORDER BY distractions) * 60.0 / SUM(minutes)
+                   salah_distraction_total(distractions ORDER BY distractions)
             FROM samples GROUP BY bucket",
             query.sql
         );
@@ -331,7 +360,7 @@ impl Store {
                         minutes: r.get(1)?,
                         sessions: r.get(2)?,
                         focus_avg: r.get(3)?,
-                        distractions_per_hour: r.get(4)?,
+                        distractions_per_hour: distractions_per_hour(r.get(4)?, r.get(1)?),
                     },
                 ))
             })?
@@ -355,6 +384,24 @@ impl Store {
             }
             None => "s.day, s.created_at, s.id".into(),
         };
+        self.report_rows(query, &order)
+    }
+
+    /// Resolve labels and metric values for the distinct sessions on a note-hit page.
+    pub fn report_sessions_by_ids(&self, ids: &[&str]) -> Result<Vec<ReportSession>, Error> {
+        let ids = serde_json::to_string(ids).map_err(|e| Error::Internal(e.to_string()))?;
+        self.report_rows(
+            Query {
+                sql: format!(
+                    "SELECT * FROM {ASSIGNED_SESSIONS} WHERE id IN (SELECT value FROM json_each(?))"
+                ),
+                args: vec![ids.into()],
+            },
+            "s.id",
+        )
+    }
+
+    fn report_rows(&self, query: Query, order: &str) -> Result<Vec<ReportSession>, Error> {
         let sql = format!(
             "WITH matched AS ({}) SELECT s.*, p.name AS project_name, p.color AS project_color,
              e.name AS epic_name, v.metric_id, v.value FROM matched s

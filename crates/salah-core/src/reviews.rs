@@ -1,7 +1,9 @@
 //! Weekly review. Only the user's reflection is persisted.
 use crate::{
     Store, WriteTx, goals,
-    sessions::ListRow,
+    sessions::notes::{
+        NotePreview, encode_cursor, invalid_after, note_limit, parse_after, truncate_to_bytes,
+    },
     stats::{self, Filter, Range},
 };
 use chrono::{DateTime, Duration, NaiveDate, Utc};
@@ -11,15 +13,16 @@ use salah_domain::{
     review::{Minutes, Reflection, validate_week},
     runtime::IdGenerator,
 };
+use salah_store::note_queries::ReviewNoteCursor;
 use salah_store::reports::{AssignmentGroup, CalendarGroup, SessionPage, SessionScope};
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 // Byte budgets include escaped JSON and array delimiters. Together they
 // leave room in a 1 MiB frame for a full reflection, counts and the envelope.
 const GROUP_BYTES: usize = 128 * 1024;
 const NOTED_BYTES: usize = 384 * 1024;
 const NOTED_SESSIONS: usize = 32;
-const ENTRIES_PER_SESSION: u32 = 12;
 
 #[derive(Serialize)]
 pub struct Review {
@@ -36,58 +39,30 @@ struct Summary {
     by_project_count: usize,
     by_epic_count: usize,
     goals_met_count: usize,
-    sessions_with_notes: Vec<NotedSession>,
+    sessions_with_notes: Vec<NotePreview>,
     sessions_with_notes_count: i64,
     sessions_with_notes_more: bool,
     open_backlog_count: i64,
     distractions_per_hour: Option<f64>,
     previous_distractions_per_hour: Option<f64>,
 }
-#[derive(Serialize)]
-struct NotedSession {
-    #[serde(flatten)]
-    row: ListRow,
-    notes_count: i64,
-    notes_more: bool,
-}
-
 pub fn week(s: &str) -> Result<NaiveDate, Error> {
     let day = goals::parse_day("week", s)?;
     validate_week(day)?;
     Ok(day)
 }
 
-fn truncate_to_bytes<T: Serialize>(rows: &mut Vec<T>, budget: usize) -> Result<(), Error> {
-    let mut size = 2;
-    for (index, row) in rows.iter().enumerate() {
-        size += serde_json::to_vec(row)
-            .map_err(|e| Error::Internal(e.to_string()))?
-            .len()
-            + 1;
-        if size > budget {
-            rows.truncate(index);
-            break;
-        }
-    }
-    Ok(())
-}
-
-fn noted_sessions(store: &Store, scope: &SessionScope<'_>) -> Result<Vec<NotedSession>, Error> {
+fn noted_sessions(store: &Store, scope: &SessionScope<'_>) -> Result<Vec<NotePreview>, Error> {
     let page = SessionPage {
         with_note: true,
         fetch: NOTED_SESSIONS,
         ..Default::default()
     };
-    let mut preview = Vec::new();
-    for row in store.report_sessions(scope, Some(&page))? {
-        let (notes, notes_count) =
-            store.review_note_entries(&row.session.id, ENTRIES_PER_SESSION)?;
-        preview.push(NotedSession {
-            notes_more: (notes.len() as i64) < notes_count,
-            notes_count,
-            row: ListRow::from_report(&row, notes),
-        });
-    }
+    let mut preview = store
+        .report_sessions(scope, Some(&page))?
+        .iter()
+        .map(|row| NotePreview::new(store, row))
+        .collect::<Result<Vec<_>, _>>()?;
     truncate_to_bytes(&mut preview, NOTED_BYTES)?;
     Ok(preview)
 }
@@ -145,6 +120,83 @@ pub fn get(store: &Store, week: NaiveDate, today: NaiveDate) -> Result<Review, E
                 previous_distractions_per_hour: rate(previous),
             },
         })
+    })
+}
+
+#[derive(Serialize)]
+pub struct ReviewNotes {
+    rows: Vec<ReviewNoteRow>,
+    next: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ReviewNoteRow {
+    #[serde(flatten)]
+    session: NotePreview,
+    main_note_matches: bool,
+}
+
+pub fn notes(
+    store: &Store,
+    week: NaiveDate,
+    query: &str,
+    limit: Option<i64>,
+    after: Option<&str>,
+) -> Result<ReviewNotes, Error> {
+    validate_week(week)?;
+    let end = Period::Week.bounds(week)?.1;
+    let limit = note_limit(limit)?;
+    let query = query.trim().to_lowercase();
+    let after: Option<ReviewNoteCursor> = parse_after(after)?;
+    if after.as_ref().is_some_and(|cursor| {
+        !(week..=end).contains(&cursor.0)
+            || cursor.1.parse::<DateTime<Utc>>().is_err()
+            || cursor.2.is_empty()
+    }) {
+        return Err(invalid_after());
+    }
+    store.read_snapshot(|store| {
+        let hits = store.review_note_hits(week, end, &query, after.as_ref(), limit + 1)?;
+        let page = &hits[..hits.len().min(limit)];
+        let ids: Vec<_> = page.iter().map(|hit| hit.cursor.2.as_str()).collect();
+        let sessions: BTreeMap<_, _> = store
+            .report_sessions_by_ids(&ids)?
+            .into_iter()
+            .map(|session| (session.session.id.clone(), session))
+            .collect();
+        let mut rows = Vec::new();
+        let mut cursors = Vec::new();
+        for group in page.chunk_by(|a, b| a.cursor.2 == b.cursor.2) {
+            let id = &group[0].cursor.2;
+            let entries = group
+                .iter()
+                .rev()
+                .filter_map(|hit| hit.entry.clone())
+                .collect();
+            rows.push(ReviewNoteRow {
+                session: NotePreview::with_entries(
+                    &sessions[id],
+                    entries,
+                    store.session_note_count(id)?,
+                ),
+                main_note_matches: group.iter().any(|hit| hit.entry.is_none()),
+            });
+            cursors.push(&group.last().expect("non-empty hit group").cursor);
+        }
+        let matched_rows = rows.len();
+        truncate_to_bytes(&mut rows, NOTED_BYTES)?;
+        if matched_rows > 0 && rows.is_empty() {
+            return Err(Error::Internal(
+                "review notes row exceeds the response budget".into(),
+            ));
+        }
+        let more = hits.len() > limit || rows.len() < matched_rows;
+        let next = if more {
+            Some(encode_cursor(cursors[rows.len() - 1])?)
+        } else {
+            None
+        };
+        Ok(ReviewNotes { rows, next })
     })
 }
 

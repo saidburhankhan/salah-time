@@ -198,6 +198,14 @@ fn method_success_and_error(client: &mut Client) {
     );
     check_resources(client, &id);
     assert!(client.good("review.get", json!({"week":"2031-05-12"}))["summary"].is_object());
+    assert_eq!(
+        client.good("review.notes", json!({"week":"2031-05-12","query":""}))["rows"],
+        json!([])
+    );
+    assert_eq!(
+        client.bad("review.notes", json!({"week":DATE,"query":""})),
+        -32001
+    );
     assert_eq!(client.bad("review.get", json!({"week":DATE})), -32001);
     assert_eq!(
         client.good(
@@ -307,6 +315,12 @@ fn method_success_and_error(client: &mut Client) {
         .unwrap()
         .to_string();
     assert_eq!(started["changed"]["sessions"][0]["running"], true);
+    assert_eq!(
+        client.good("session.notes", json!({"id":session}))["notes"],
+        json!([])
+    );
+    assert_eq!(client.bad("session.notes", json!({"id":"missing"})), -32002);
+
     assert_eq!(
         client.bad(
             "session.start",

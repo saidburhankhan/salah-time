@@ -139,6 +139,8 @@ store-wide counter, never a precondition.
 | `prayer.mark` | `op_id`, `prayer`, `date?`, `expected_version?` | mutation result (`changed.marks`) | validation, conflict, storage | yes | optional |
 | `prayer.unmark` | same as `prayer.mark` | mutation result (`changed.marks`) | validation, conflict, storage | yes | optional |
 | `review.get` | `week` (Monday, YYYY-MM-DD) | `week`, computed `summary`, nullable `note` and `updated_at` | validation, storage | — | — |
+| `review.notes` | `week` (Monday, YYYY-MM-DD), `query`, `limit?`, `after?` | `rows` of matching session notes, `next` cursor or null | validation, storage | — | — |
+| `session.notes` | `id` (session), `limit?`, `after?` | `notes` of live timestamped entries, `next` cursor or null | validation, not_found, storage | — | — |
 | `goals.list` | `at?` (a tracking day, default today), `include_ended?` (default false) | `[GoalView]` in position order: goals active on `at` (with `include_ended`, every goal started by `at`) | validation, storage | — | — |
 | `goals.history` | `id` (any goal of an edit chain), `from`, `to` (at most 730 days) | `[{from, to, value, target, met}]`, oldest first, through today's period | validation, not_found, storage | — | — |
 | `goal.add` | `op_id`, at most one of `project_id` / `epic_id` / `item_id` (none: all work), `period` (`day`/`week`), `metric_id?` (none: minutes), `direction?` (`at_least` default, `at_most` only with a metric), `target` (finite, > 0) | mutation result (`changed.goals`) | validation, not_found, storage | yes | no |
@@ -305,6 +307,16 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
 - CLI session report filters accept full task IDs and unique prefixes of at
   least four characters across live and removed tasks. This includes Stats,
   Insights and the Notes list. Task edits resolve live task IDs.
+- `insights.get.on_plan` aggregates once per task. The numerator counts the
+  portions of each session allocated to that session day's planned block. The
+  denominator includes all filtered minutes for the task. `planned_blocks` lists
+  each historical block represented by the row and is omitted for unplanned work.
+  The compatibility field `planned_block` names the block when there is exactly
+  one and is null for multiple blocks. The matrix keeps the historical block split.
+- Insights `best` and `hardest` each include up to five sessions within a
+  192 KiB JSON budget. Like Review, ranked rows include the main note, up to
+  12 recent timestamped entries, `notes_count` and `notes_more`. When opening a
+  session with a partial preview, use `session.notes` to fetch its full entries.
 - `insights.get.on_plan` includes a final `Unplanned` row when the filter
   selects minutes logged directly on a project or epic. Its `item_id` and
   `planned_block` are null, `minutes` sums the item-less work, and
@@ -327,6 +339,21 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   order. Row fields `notes_count` and `notes_more` describe those entries.
   These limits leave room for the full reflection in the same response.
   See `review_get.json`.
+- `review.notes` searches the main notes and live timestamped entries of
+  finished sessions in the requested tracking week, including ticks. It uses a
+  case-insensitive literal substring after trimming `query`. An empty query
+  matches all notes. The result `rows` follow the newest-first session order.
+  Each row carries the session's usual labels, values and main note for context.
+  `main_note_matches` identifies a matching main note on this page. `notes`
+  contains the matching timestamped entries for that session on this page.
+  A session may continue on the next page. `limit` counts note matches, defaults
+  to 50, and accepts 1–100. The encoded rows also have a 384 KiB budget.
+- `session.notes` pages a live session's full timestamped entries oldest first.
+  Its `limit` defaults to 50 and accepts 1–100. For either page method, pass
+  `next` back as `after` with the same filters and follow it until null.
+- Stats table and series, Review, and Insights use the same compensated sum and
+  hourly distraction rate for the same samples. Their filters and block
+  allocations determine which samples reach that calculation.
 - All session filters and groups resolve project, epic and tags at read time. Moving
   a task into an epic brings its earlier sessions into that epic, including sessions
   recorded before the epic existed. Moving or clearing the project works the same

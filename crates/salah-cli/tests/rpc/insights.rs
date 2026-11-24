@@ -209,3 +209,107 @@ fn itemless_project_and_epic_work_share_an_unplanned_row_after_filtering() {
         );
     }
 }
+
+#[test]
+fn insights_uses_one_task_rate_across_a_historical_block_move() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, super::NOW);
+    let item = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"routine","title":"Read","block":"fajr","repeat":"daily"}),
+    );
+    good(
+        &mut rpc,
+        "session.log",
+        json!({"op_id":"first","item_id":item,"block":"fajr","minutes":30}),
+    );
+    drop(rpc);
+    let mut rpc = Session::open(&h, "2031-05-15T10:00:00+05:00");
+    good(
+        &mut rpc,
+        "item.edit",
+        json!({"op_id":"move","id":item,"block":"asr"}),
+    );
+    good(
+        &mut rpc,
+        "session.log",
+        json!({"op_id":"second","item_id":item,"block":"fajr","minutes":30}),
+    );
+    let result = good(&mut rpc, "insights.get", json!({"days":2,"item_id":item}));
+    assert_eq!(
+        result["on_plan"],
+        json!([{"item_id":item,"name":"Read","planned_block":null,
+        "planned_blocks":["fajr","asr"],"on_plan_minutes":30,"minutes":60}])
+    );
+    assert_eq!(
+        result["block_matrix"],
+        json!([
+            {"planned_block":"fajr","actual_block":"fajr","minutes":30},
+            {"planned_block":"asr","actual_block":"fajr","minutes":30}
+        ])
+    );
+}
+
+#[test]
+fn ranked_notes_fit_the_frame_and_every_entry_can_be_opened() {
+    use salah_domain::tracking::SessionNote;
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, super::NOW);
+    let item = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"read","title":"Read"}),
+    );
+    let id = added(
+        &mut rpc,
+        "session.log",
+        "sessions",
+        json!({"op_id":"log","item_id":item,"minutes":30,"note":"Main note","values":{"focus":5}}),
+    );
+    let body = "📖".repeat(500);
+    let mut store = salah_store::Store::open(&h.data).unwrap();
+    store
+        .write(|tx| {
+            for i in 0..300 {
+                tx.add_session_note(
+                    &id,
+                    &SessionNote {
+                        id: format!("note-{i}"),
+                        at: super::NOW.parse().unwrap(),
+                        text: body.clone(),
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    let response = rpc.request("insights.get", json!({"days":1}));
+    assert!(serde_json::to_vec(&response).unwrap().len() + 1 < salah_protocol::MAX_LINE_BYTES);
+    for key in ["best", "hardest"] {
+        let row = &response["result"][key][0];
+        assert_eq!(row["id"], id);
+        assert_eq!(row["note"], "Main note");
+        assert_eq!(row["notes_count"], 300);
+        assert_eq!(row["notes_more"], true);
+        assert_eq!(row["notes"].as_array().unwrap().len(), 12);
+        assert_eq!(row["notes"][0]["id"], "note-288");
+    }
+    let mut after = Value::Null;
+    let mut notes = Vec::new();
+    for page in 0..3 {
+        let response = rpc.request("session.notes", json!({"id":id,"limit":100,"after":after}));
+        assert!(serde_json::to_vec(&response).unwrap().len() + 1 < salah_protocol::MAX_LINE_BYTES);
+        let result = &response["result"];
+        notes.extend_from_slice(result["notes"].as_array().unwrap());
+        after = result["next"].clone();
+        assert_eq!(after.is_null(), page == 2);
+    }
+    assert_eq!(notes.len(), 300);
+    for (index, entry) in notes.iter().enumerate() {
+        assert_eq!(entry["id"], format!("note-{index}"));
+        assert_eq!(entry["text"], body);
+    }
+}

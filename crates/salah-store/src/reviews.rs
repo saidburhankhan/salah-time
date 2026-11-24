@@ -32,14 +32,7 @@ impl Store {
         id: &str,
         limit: u32,
     ) -> Result<(Vec<salah_domain::tracking::SessionNote>, i64), Error> {
-        let count = self
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM session_notes WHERE session_id=?1 AND deleted_at IS NULL",
-                [id],
-                |r| r.get(0),
-            )
-            .map_err(codec::storage_error)?;
+        let count = self.session_note_count(id)?;
         let mut entries = self.all(
             "SELECT id,at,text FROM session_notes WHERE session_id=?1 AND deleted_at IS NULL
             ORDER BY at DESC,rowid DESC LIMIT ?2",

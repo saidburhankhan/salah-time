@@ -13,6 +13,7 @@ use crate::Store;
 use chrono::{Datelike, Days, NaiveDate};
 use salah_domain::{
     error::Error,
+    reports::{distraction_total, distractions_per_hour},
     tracking::{Metric, MetricKind, ProjectMetric, Rollup, Session},
 };
 use salah_store::reports::{Choice, ReportSession};
@@ -283,18 +284,19 @@ pub(super) fn cells(
     let minutes = sessions.iter().filter_map(|s| s.minutes).sum();
     let mut values = BTreeMap::new();
     for metric in metrics {
-        let value = aggregate(
-            metric.rollup,
-            sessions
-                .iter()
-                .filter_map(|s| s.metric(metric.rollup, &metric.id)),
-        );
-        if metric.id == DISTRACTIONS {
-            let rate = value
-                .filter(|_| minutes > 0)
-                .map(|sum| sum * 60.0 / minutes as f64);
-            values.insert(DISTRACTIONS_PER_HOUR.to_owned(), rate);
-        }
+        let samples = sessions
+            .iter()
+            .filter_map(|s| s.metric(metric.rollup, &metric.id));
+        let value = if metric.id == DISTRACTIONS {
+            let total = distraction_total(samples.map(|(value, _)| value));
+            values.insert(
+                DISTRACTIONS_PER_HOUR.to_owned(),
+                distractions_per_hour(total, minutes),
+            );
+            total
+        } else {
+            aggregate(metric.rollup, samples)
+        };
         values.insert(metric.id.clone(), value);
     }
     (minutes, sessions.len() as i64, values)

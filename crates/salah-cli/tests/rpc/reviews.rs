@@ -273,3 +273,127 @@ fn a_large_week_keeps_its_summary_and_reflection_with_bounded_note_previews() {
         "the byte budget should bound this preview: {shown}"
     );
 }
+
+#[test]
+fn review_search_pages_across_all_entries_and_main_notes_in_the_requested_week() {
+    use salah_domain::tracking::SessionNote;
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    let item = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"item","title":"Reading"}),
+    );
+    let entry_session = added(
+        &mut rpc,
+        "session.log",
+        "sessions",
+        json!({"op_id":"latest","item_id":item,"minutes":10,"values":{"focus":4}}),
+    );
+    let main_session = added(
+        &mut rpc,
+        "session.log",
+        "sessions",
+        json!({"op_id":"main","item_id":item,"minutes":5,"date":"2031-05-13","note":"Main ÅNGSTRÖM"}),
+    );
+    good(
+        &mut rpc,
+        "session.log",
+        json!({"op_id":"outside","item_id":item,"minutes":1,"date":"2031-05-11","note":"ÅNGSTRÖM"}),
+    );
+    let mut store = salah_store::Store::open(&h.data).unwrap();
+    store
+        .write(|tx| {
+            for n in 0..15 {
+                tx.add_session_note(
+                    &entry_session,
+                    &SessionNote {
+                        id: format!("entry-{n:02}"),
+                        at: NOW.parse().unwrap(),
+                        text: if n < 3 {
+                            "Ångström in a hidden entry"
+                        } else {
+                            "Unrelated"
+                        }
+                        .into(),
+                    },
+                )?;
+            }
+            tx.remove_session_notes(&entry_session, &["entry-01".into()], NOW.parse().unwrap())?;
+            Ok(())
+        })
+        .unwrap();
+
+    let preview = good(&mut rpc, "review.get", json!({"week":WEEK}));
+    assert!(
+        preview["summary"]["sessions_with_notes"][0]["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|note| note["text"] == "Unrelated")
+    );
+    let request = json!({"week":WEEK,"query":"  ÅNGSTRÖM ","limit":1});
+    let first = good(&mut rpc, "review.notes", request.clone());
+    assert_eq!(first["rows"][0]["id"], entry_session);
+    assert_eq!(first["rows"][0]["values"]["focus"], 4.0);
+    assert_eq!(first["rows"][0]["main_note_matches"], false);
+    assert_eq!(first["rows"][0]["notes"][0]["id"], "entry-02");
+    let mut next_request = request;
+    next_request["after"] = first["next"].clone();
+    let second = good(&mut rpc, "review.notes", next_request.clone());
+    assert_eq!(second["rows"][0]["notes"][0]["id"], "entry-00");
+    next_request["after"] = second["next"].clone();
+    let last = good(&mut rpc, "review.notes", next_request);
+    assert_eq!(last["rows"][0]["id"], main_session);
+    assert_eq!(last["rows"][0]["note"], "Main ÅNGSTRÖM");
+    assert_eq!(last["rows"][0]["main_note_matches"], true);
+    assert!(last["next"].is_null());
+    bad(
+        &mut rpc,
+        "review.notes",
+        json!({"week":WEEK,"query":"","after":"invalid"}),
+        "validation",
+        Some("after"),
+    );
+}
+
+#[test]
+fn reports_share_the_same_fractional_distraction_rate() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    let item = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"item","title":"Read"}),
+    );
+    for (index, (minutes, count)) in [(1, 0.15), (1, 0.2), (2, 0.3)].into_iter().enumerate() {
+        good(
+            &mut rpc,
+            "session.log",
+            json!({"op_id":format!("log{index}"),"item_id":item,"block":"fajr",
+            "minutes":minutes,"values":{"distractions":count}}),
+        );
+    }
+    let table = good(
+        &mut rpc,
+        "stats.table",
+        json!({"from":WEEK,"to":"2031-05-18"}),
+    );
+    let review = good(&mut rpc, "review.get", json!({"week":WEEK}));
+    let insights = good(
+        &mut rpc,
+        "insights.get",
+        json!({"from":WEEK,"to":"2031-05-18"}),
+    );
+    for value in [
+        &table["rows"][0]["values"]["distractions_per_hour"],
+        &review["summary"]["distractions_per_hour"],
+        &insights["distractions_by_week"][0]["per_hour"],
+        &insights["by_weekday"][2]["distractions_per_hour"],
+        &insights["by_block"][1]["distractions_per_hour"],
+    ] {
+        assert_eq!(*value, 9.75);
+    }
+}

@@ -4,7 +4,7 @@ use crate::{
     Store,
     config::Config,
     day,
-    sessions::ListRow,
+    sessions::notes::{NotePreview, truncate_to_bytes},
     stats::{Filter, Range, aggregate, report_scope},
 };
 use chrono::{Duration, NaiveDate, Timelike};
@@ -12,11 +12,12 @@ use salah_domain::{
     day::BoundaryId,
     error::Error,
     goal::Period,
+    reports::{distraction_total, distractions_per_hour},
     tracking::{Rollup, Session},
 };
 use salah_store::reports::{CalendarGroup, GroupMeasures, ReportSession};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Serialize)]
 pub struct Measures {
@@ -42,7 +43,7 @@ struct Samples {
     minutes: i64,
     sessions: i64,
     focus: Vec<(f64, f64)>,
-    distractions: Vec<(f64, f64)>,
+    distractions: Vec<f64>,
 }
 
 impl Samples {
@@ -54,8 +55,7 @@ impl Samples {
             self.focus.push((focus, weight));
         }
         if let Some(count) = s.value("distractions") {
-            self.distractions
-                .push((count * (weight / s.weight()), weight));
+            self.distractions.push(count * (weight / s.weight()));
         }
     }
     fn finish(self) -> Measures {
@@ -63,9 +63,10 @@ impl Samples {
             minutes: self.minutes,
             sessions: self.sessions,
             focus_avg: aggregate(Rollup::Avg, self.focus.into_iter()),
-            distractions_per_hour: aggregate(Rollup::Sum, self.distractions.into_iter())
-                .filter(|_| self.minutes > 0)
-                .map(|d| d * 60. / self.minutes as f64),
+            distractions_per_hour: distractions_per_hour(
+                distraction_total(self.distractions.into_iter()),
+                self.minutes,
+            ),
         }
     }
 }
@@ -98,6 +99,8 @@ struct PlanRow {
     item_id: Option<String>,
     name: String,
     planned_block: Option<BoundaryId>,
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    planned_blocks: BTreeSet<BoundaryId>,
     minutes: i64,
     on_plan_minutes: i64,
 }
@@ -113,13 +116,13 @@ pub struct Insights {
     by_hour: Vec<HourRow>,
     by_weekday: Vec<WeekdayRow>,
     distractions_by_week: Vec<WeekRow>,
-    best: Vec<ListRow>,
-    hardest: Vec<ListRow>,
+    best: Vec<NotePreview>,
+    hardest: Vec<NotePreview>,
     on_plan: Vec<PlanRow>,
     block_matrix: Vec<MatrixCell>,
 }
 
-fn ranked(store: &Store, rows: &[ReportSession], best: bool) -> Result<Vec<ListRow>, Error> {
+fn ranked(store: &Store, rows: &[ReportSession], best: bool) -> Result<Vec<NotePreview>, Error> {
     let mut scored: Vec<_> = rows
         .iter()
         .filter_map(|row| Some((row, row.session.value("focus")?)))
@@ -132,17 +135,13 @@ fn ranked(store: &Store, rows: &[ReportSession], best: bool) -> Result<Vec<ListR
             .then(a.session.id.cmp(&b.session.id))
     });
     scored.truncate(5);
-    let ids: Vec<_> = scored
-        .iter()
-        .map(|(row, _)| row.session.id.as_str())
-        .collect();
-    let mut notes = store.session_notes_for(&ids)?;
-    Ok(scored
+    let mut previews = scored
         .into_iter()
-        .map(|(row, _)| {
-            ListRow::from_report(row, notes.remove(&row.session.id).unwrap_or_default())
-        })
-        .collect())
+        .map(|(row, _)| NotePreview::new(store, row))
+        .collect::<Result<Vec<_>, _>>()?;
+    const RANKED_BYTES: usize = 192 * 1024;
+    truncate_to_bytes(&mut previews, RANKED_BYTES)?;
+    Ok(previews)
 }
 
 pub fn get(
@@ -196,28 +195,38 @@ pub fn get(
                         (start + Duration::seconds(i64::from(snap.clock.offset_seconds))).hour();
                     hours.entry(hour).or_default().add(s, minutes);
                 }
-                for (actual, part) in day::block_minutes(s, &snap.blocks) {
+                let allocations = day::block_minutes(s, &snap.blocks);
+                for &(actual, part) in &allocations {
                     blocks.entry(actual).or_default().add(s, part);
                     *matrix.entry((planned_block, actual)).or_insert(0) += part;
-                    if let Some(item) = &row.item {
-                        let plan = plans
-                            .entry((item.id.clone(), planned_block))
-                            .or_insert_with(|| PlanRow {
-                                item_id: Some(item.id.clone()),
-                                name: item.title.clone(),
-                                planned_block,
-                                minutes: 0,
-                                on_plan_minutes: 0,
-                            });
-                        plan.minutes += part;
-                        if Some(actual) == planned_block {
-                            plan.on_plan_minutes += part;
-                        }
+                }
+                if let Some(item) = &row.item {
+                    let plan = plans.entry(item.id.clone()).or_insert_with(|| PlanRow {
+                        item_id: Some(item.id.clone()),
+                        name: item.title.clone(),
+                        planned_block: None,
+                        planned_blocks: BTreeSet::new(),
+                        minutes: 0,
+                        on_plan_minutes: 0,
+                    });
+                    plan.minutes += minutes;
+                    if let Some(block) = planned_block {
+                        plan.planned_blocks.insert(block);
+                        plan.on_plan_minutes += allocations
+                            .iter()
+                            .filter(|(actual, _)| *actual == block)
+                            .map(|(_, part)| part)
+                            .sum::<i64>();
                     }
                 }
             }
         }
         let mut on_plan: Vec<_> = plans.into_values().collect();
+        for row in &mut on_plan {
+            if row.planned_blocks.len() == 1 {
+                row.planned_block = row.planned_blocks.first().copied();
+            }
+        }
         on_plan.sort_by(|a, b| {
             (&a.name, &a.item_id, a.planned_block).cmp(&(&b.name, &b.item_id, b.planned_block))
         });
@@ -226,6 +235,7 @@ pub fn get(
                 item_id: None,
                 name: "Unplanned".into(),
                 planned_block: None,
+                planned_blocks: BTreeSet::new(),
                 minutes: bare_minutes,
                 on_plan_minutes: 0,
             });

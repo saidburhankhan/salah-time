@@ -5,6 +5,7 @@ pub mod epic;
 pub mod error;
 pub mod goal;
 pub mod item;
+pub mod reports;
 pub mod resource;
 pub mod review;
 pub mod runtime;

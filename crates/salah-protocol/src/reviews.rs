@@ -13,6 +13,13 @@ struct Get {
     week: String,
 }
 #[derive(Deserialize)]
+struct Notes {
+    week: String,
+    query: String,
+    limit: Option<i64>,
+    after: Option<String>,
+}
+#[derive(Deserialize)]
 struct Save {
     week: String,
     note: String,
@@ -25,6 +32,17 @@ pub(crate) fn get(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcErr
     let today = day::current(&ctx.config.load()?, ctx.now())?;
     to_value(reviews::get(ctx.store, week, today)?)
 }
+pub(crate) fn notes(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: Notes = parse(call.params)?;
+    to_value(reviews::notes(
+        ctx.store,
+        reviews::week(&p.week)?,
+        &p.query,
+        p.limit,
+        p.after.as_deref(),
+    )?)
+}
+
 pub(crate) fn save(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let p: Save = parse(call.params)?;
     let (now, ids) = (ctx.now(), ctx.ids);
