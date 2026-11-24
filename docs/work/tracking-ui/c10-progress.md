@@ -139,3 +139,26 @@ All 148 Node checks, Omarchy plugin validation, QML syntax checks, JSON
 parsing and `git diff --check` passed.
 
 CHECKPOINT 5: Show goal sum overflow distinctly in widget chips — files: plugin/local.salah/GoalChips.qml, plugin/local.salah/GoalLogic.js, plugin/local.salah/i18n/en.json, plugin/local.salah/tests/goal_logic_test.js, docs/work/tracking-ui/c10-progress.md
+
+## Ended routines — widget verification
+
+The timeline groups `status.get.planner.items` by prayer block. The CLI
+fallback reads the same projection through `salah status --json`. The widget
+has no occurrence filter to update, and the creation sheet and item row
+actions construct explicit payloads that omit `end_day`. No plugin changes or
+new Node test were needed.
+
+With migration 006 in a scratch database, `day.get`, `status.get` and
+`salah status --json` agreed before and after Sleep. The routine appeared on
+its inclusive end day and disappeared from the next day's plan. The
+title-only edit preserved `end_day`, and the historical day retained the
+routine's 12 recorded minutes. An offscreen widget run replayed those
+status snapshots through the stdio path and confirmed that the timeline
+removed the ended routine and kept the active one. The panel used an
+Items-only stand-in for Wayland.
+
+All 51 stdio RPC tests, including the updated fixtures and routine-end
+regression, and all 148 Node checks passed. Omarchy plugin validation and
+`git diff --check` passed.
+
+CHECKPOINT 6: Verify ended routines follow the backend plan in the widget — files: docs/work/tracking-ui/c10-progress.md
