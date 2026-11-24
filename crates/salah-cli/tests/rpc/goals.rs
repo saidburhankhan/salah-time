@@ -333,3 +333,46 @@ fn validates_goal_target_scope_and_calendar_and_ends_removed_scopes() {
     assert_eq!(goal(&ended, &tg)["ends_on"], "2031-05-22");
     assert_eq!(goal(&ended, &eg)["ends_on"], "2031-05-18");
 }
+
+#[test]
+fn weighted_equality_meets_both_directions_in_status_history_and_review() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    let p = added(
+        &mut rpc,
+        "project.add",
+        "projects",
+        json!({"op_id":"p","name":"Study"}),
+    );
+    for (rating, minutes) in [(1, 1), (2, 11), (3, 1)] {
+        good(
+            &mut rpc,
+            "session.log",
+            json!({"op_id":format!("s{rating}"),"project_id":p,"minutes":minutes,"values":{"focus":rating}}),
+        );
+    }
+    for direction in ["at_least", "at_most"] {
+        let id = create(
+            &mut rpc,
+            direction,
+            json!({"direction":direction,"metric_id":"focus"}),
+            "week",
+            2.,
+        );
+        let status = good(&mut rpc, "status.get", json!({}));
+        let progress = &goal(&status["goals"], &id)["progress"];
+        assert_eq!(progress["value"], 2.);
+        assert_eq!(progress["met"], true);
+        let history = good(
+            &mut rpc,
+            "goals.history",
+            json!({"id":id,"from":DATE,"to":DATE}),
+        );
+        assert_eq!(history[0]["met"], true);
+        let review = good(&mut rpc, "review.get", json!({"week":"2031-05-12"}));
+        assert_eq!(
+            goal(&review["summary"]["goals_met"], &id)["progress"],
+            *progress
+        );
+    }
+}

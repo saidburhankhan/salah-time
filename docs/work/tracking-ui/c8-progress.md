@@ -207,3 +207,15 @@ Existing JSON fixtures retained all their values. Three older test expectations 
 235 workspace tests passed. The eight Unix-socket tests named under checkpoint 0b were filtered out. Strict Clippy, formatting and diff checks passed.
 
 CHECKPOINT 5: Resolve session project and epic through the current task across reports, goals and session views — files: crates/salah-store/src/{reports,goals,epics}.rs, crates/salah-core/src/{sessions,sessions/list,stats/table,status}.rs, crates/salah-protocol/tests/dispatch.rs, crates/salah-cli/tests/{rpc,rpc/assignments,rpc/epics,rpc/goals,rpc/phase2}.rs, crates/salah-cli/tests/fixtures/rpc/stats_epic_reassigned.json, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md
+
+## 6 — weekly review, goal precision and CLI notes
+
+Weekly review uses the same distraction numerator and recorded-minute denominator as the Stats table. Insights keeps its duration filter. The only changed value in an existing fixture is `review_get.json`'s weekly rate, from 2 to 22 per hour (1 logged distraction plus 10 on a tick over 30 minutes). All other fixture changes are additive counts and preview flags.
+
+Review aggregates minutes by assignment in SQL and fetches a newest-first preview of up to 32 noted sessions, with up to 12 recent timestamped entries per session. The preview has a 384 KiB encoded budget. The project, epic and met-goal lists have 128 KiB each and report their full counts. A regression exercises 600 four-byte-character notes on one session, then 40 noted sessions, and checks that the serialized response fits the transport limit with a full-length reflection. Human Review and Insights print each entry's timestamp and text.
+
+Average goal comparisons retain low-order terms in the weighted numerator and compare it with target times total weight before division. The reported equality case passes in both directions across status, history and review. Regression tests also cover very large finite means and adjacent unequal values. EXPLAIN QUERY PLAN on all four scopes confirms a range search on sessions_by_day or sessions_by_item_day, followed by resolved scope lookups where needed and a (session_id, metric_id) primary-key probe.
+
+240 workspace tests passed. The eight Unix-socket tests named under checkpoint 0b were filtered out. Strict Clippy, formatting and diff checks passed.
+
+CHECKPOINT 6: Correct weekly review rates, bound review previews, stabilize and index metric goal progress, and render timestamped CLI notes — files: crates/salah-cli/src/render.rs, crates/salah-cli/tests/rpc/{goals,reviews}.rs, crates/salah-cli/tests/fixtures/rpc/review_get.json, crates/salah-core/src/{goals,reviews}.rs, crates/salah-domain/src/review.rs, crates/salah-store/src/{goals,reports,reviews}.rs, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md

@@ -25,6 +25,37 @@ impl Store {
         )
     }
 
+    /// The newest live timestamped entries, returned in chronological order.
+    /// Count separately so SQLite only fetches the text of the preview.
+    pub fn review_note_entries(
+        &self,
+        id: &str,
+        limit: u32,
+    ) -> Result<(Vec<salah_domain::tracking::SessionNote>, i64), Error> {
+        let count = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_notes WHERE session_id=?1 AND deleted_at IS NULL",
+                [id],
+                |r| r.get(0),
+            )
+            .map_err(codec::storage_error)?;
+        let mut entries = self.all(
+            "SELECT id,at,text FROM session_notes WHERE session_id=?1 AND deleted_at IS NULL
+            ORDER BY at DESC,rowid DESC LIMIT ?2",
+            params![id, limit],
+            |r| {
+                Ok(salah_domain::tracking::SessionNote {
+                    id: r.get(0)?,
+                    at: codec::get_timestamp(r, "at")?,
+                    text: r.get(2)?,
+                })
+            },
+        )?;
+        entries.reverse();
+        Ok((entries, count))
+    }
+
     pub fn open_backlog_count(&self) -> Result<i64, Error> {
         self.conn
             .query_row(

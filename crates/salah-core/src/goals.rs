@@ -30,6 +30,52 @@ pub fn parse_day(field: &'static str, s: &str) -> Result<NaiveDate, Error> {
         .ok_or_else(|| Error::validation(field, "use a valid YYYY-MM-DD date"))
 }
 
+/// Compare the weighted numerator to target × weight before rounding the
+/// quotient. Keep the low-order terms of both the products and their sum.
+/// All metric samples and weights are finite and nonnegative.
+fn weighted_progress(samples: &[(f64, f64)], target: f64) -> (f64, std::cmp::Ordering) {
+    let weight: f64 = samples.iter().map(|(_, w)| w).sum();
+    let largest = samples.iter().map(|(v, _)| *v).fold(0., f64::max);
+    // Scale the weights by an exact power of two only if the numerator
+    // might overflow. The mean of even the largest finite counts is finite.
+    let divisor = if largest >= (f64::MAX / 2.) / weight {
+        2.0_f64.powi(weight.log2().ceil() as i32 + 1)
+    } else {
+        1.
+    };
+    let weight = weight / divisor;
+    let mut sum = 0.;
+    let mut correction = 0.;
+    for &(v, w) in samples {
+        let w = w / divisor;
+        let product = v * w;
+        let next = sum + product;
+        // Neumaier summation also handles a term larger than the partial sum.
+        correction += if sum >= product {
+            (sum - next) + product
+        } else {
+            (product - next) + sum
+        };
+        correction += v.mul_add(w, -product);
+        sum = next;
+    }
+    let threshold = target * weight;
+    let ordering = if threshold.is_infinite() {
+        std::cmp::Ordering::Less
+    } else {
+        let residual = (sum - threshold) + (correction - target.mul_add(weight, -threshold));
+        residual
+            .partial_cmp(&0.)
+            .expect("finite weighted difference")
+    };
+    let value = if ordering.is_eq() {
+        target
+    } else {
+        ((sum + correction) / weight).min(largest)
+    };
+    (value, ordering)
+}
+
 fn progress(
     goal: &Goal,
     from: NaiveDate,
@@ -37,11 +83,17 @@ fn progress(
     rollup: Rollup,
     samples: &[(f64, f64)],
 ) -> Progress {
-    let value = stats::aggregate(rollup, samples.iter().copied())
-        .or_else(|| goal.metric_id.is_none().then_some(0.0));
-    let met = value.is_some_and(|v| match goal.direction {
-        Direction::AtLeast => v >= goal.target,
-        Direction::AtMost => v <= goal.target,
+    let (value, comparison) = if rollup == Rollup::Avg && !samples.is_empty() {
+        let (value, comparison) = weighted_progress(samples, goal.target);
+        (Some(value), Some(comparison))
+    } else {
+        let value = stats::aggregate(rollup, samples.iter().copied())
+            .or_else(|| goal.metric_id.is_none().then_some(0.));
+        (value, value.and_then(|v| v.partial_cmp(&goal.target)))
+    };
+    let met = comparison.is_some_and(|ordering| match goal.direction {
+        Direction::AtLeast => ordering.is_ge(),
+        Direction::AtMost => ordering.is_le(),
     });
     Progress {
         from,
@@ -83,8 +135,7 @@ fn periods(
             .or_default()
             .push((value, weight));
     }
-    // Sessions logged at the same instant tie in store order (by random id);
-    // a fixed sample order keeps the running mean reproducible to the bit.
+    // A fixed sample order keeps the weighted rollup reproducible across query plans.
     for samples in groups.values_mut() {
         samples.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
     }
@@ -364,4 +415,34 @@ pub fn remove(
     g.deleted_at = Some(now);
     tx.close_goal(&g)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::weighted_progress;
+    use std::cmp::Ordering;
+
+    #[test]
+    fn weighted_comparison_preserves_large_means_and_nearby_unequal_targets() {
+        assert_eq!(
+            weighted_progress(&[(1e308, 10.), (0., 10.)], 5e307),
+            (5e307, Ordering::Equal)
+        );
+        assert_eq!(
+            weighted_progress(&[(f64::MAX, 11.)], f64::MAX),
+            (f64::MAX, Ordering::Equal)
+        );
+        assert_eq!(
+            weighted_progress(&[(2., 1.), (2_f64.next_up(), 1.)], 2.).1,
+            Ordering::Greater
+        );
+        assert_eq!(
+            weighted_progress(&[(2_f64.next_down(), 1.), (2., 1.)], 2.).1,
+            Ordering::Less
+        );
+        assert_eq!(
+            weighted_progress(&[(1., 1.), (2., 11.), (3., 1.)], f64::MAX).1,
+            Ordering::Less
+        );
+    }
 }

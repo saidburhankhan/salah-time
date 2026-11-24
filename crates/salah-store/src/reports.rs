@@ -194,6 +194,10 @@ impl Query {
         self.args.extend(args);
     }
 
+    fn with_note(&mut self) {
+        self.push(&format!("(length(s.note) > 0 OR {HAS_ENTRY}))"), []);
+    }
+
     fn page(&mut self, page: &SessionPage<'_>) {
         if let Some(q) = page.q {
             self.push(
@@ -204,7 +208,7 @@ impl Query {
                 [text(q), text(q)],
             );
         } else if page.with_note {
-            self.push(&format!("(length(s.note) > 0 OR {HAS_ENTRY}))"), []);
+            self.with_note();
         }
         if let Some((day, at, id)) = page.before {
             self.push(
@@ -236,6 +240,11 @@ pub struct GroupMeasures {
     pub distractions_per_hour: Option<f64>,
 }
 
+pub enum AssignmentGroup {
+    Project,
+    Epic,
+}
+
 impl Store {
     /// Resolve a session for a single-session view (day, status or mutation).
     pub fn session_assignment(&self, id: &str) -> Result<(Option<String>, Option<String>), Error> {
@@ -248,13 +257,50 @@ impl Store {
             .map_err(storage_error)
     }
 
+    pub fn noted_session_count(&self, scope: &SessionScope<'_>) -> Result<i64, Error> {
+        let mut query = Query::scoped(scope);
+        query.with_note();
+        self.conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM ({})", query.sql),
+                params_from_iter(query.args),
+                |r| r.get(0),
+            )
+            .map_err(storage_error)
+    }
+
+    pub fn assignment_minutes(
+        &self,
+        scope: &SessionScope<'_>,
+        group: AssignmentGroup,
+    ) -> Result<Vec<salah_domain::review::Minutes>, Error> {
+        let (table, key, unassigned) = match group {
+            AssignmentGroup::Project => ("projects", "project_id", "No project"),
+            AssignmentGroup::Epic => ("epics", "epic_id", "No epic"),
+        };
+        let mut query = Query::scoped(scope);
+        query.push("s.minutes IS NOT NULL", []);
+        let sql = format!(
+            "SELECT COALESCE(s.{key},'none') AS id, COALESCE(a.name,'{unassigned}') AS name,
+            SUM(s.minutes) FROM ({}) s LEFT JOIN {table} a ON a.id=s.{key}
+            GROUP BY s.{key} ORDER BY 2,1",
+            query.sql
+        );
+        self.all(&sql, params_from_iter(query.args), |r| {
+            Ok(salah_domain::review::Minutes {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                minutes: r.get(2)?,
+            })
+        })
+    }
+
     pub fn calendar_groups(
         &self,
         scope: &SessionScope<'_>,
         group: CalendarGroup,
     ) -> Result<BTreeMap<String, GroupMeasures>, Error> {
-        let mut query = Query::scoped(scope);
-        query.push("s.minutes IS NOT NULL", []);
+        let query = Query::scoped(scope);
         let key = match group {
             CalendarGroup::Weekday => {
                 "CAST((CAST(strftime('%w', s.day) AS INTEGER) + 6) % 7 + 1 AS TEXT)"
@@ -262,8 +308,8 @@ impl Store {
             CalendarGroup::Week => "date(s.day, '-6 days', 'weekday 1')",
         };
         let sql = format!(
-            "WITH matched AS ({}) SELECT {key}, SUM(s.minutes), COUNT(*),
-            SUM(f.value * MAX(s.minutes,1)) / SUM(CASE WHEN f.value IS NOT NULL THEN MAX(s.minutes,1) END),
+            "WITH matched AS ({}) SELECT {key}, COALESCE(SUM(s.minutes),0), COUNT(*),
+            SUM(f.value * MAX(COALESCE(s.minutes,1),1)) / SUM(CASE WHEN f.value IS NOT NULL THEN MAX(COALESCE(s.minutes,1),1) END),
             SUM(d.value) * 60.0 / SUM(s.minutes) FROM matched s
             LEFT JOIN session_values f ON f.session_id=s.id AND f.metric_id='focus'
             LEFT JOIN session_values d ON d.session_id=s.id AND d.metric_id='distractions'

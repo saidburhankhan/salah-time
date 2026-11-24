@@ -138,6 +138,7 @@ store-wide counter, never a precondition.
 | `session.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`) | not_found, conflict, storage | yes | yes |
 | `prayer.mark` | `op_id`, `prayer`, `date?`, `expected_version?` | mutation result (`changed.marks`) | validation, conflict, storage | yes | optional |
 | `prayer.unmark` | same as `prayer.mark` | mutation result (`changed.marks`) | validation, conflict, storage | yes | optional |
+| `review.get` | `week` (Monday, YYYY-MM-DD) | `week`, computed `summary`, nullable `note` and `updated_at` | validation, storage | — | — |
 | `goals.list` | `at?` (a tracking day, default today), `include_ended?` (default false) | `[GoalView]` in position order: goals active on `at` (with `include_ended`, every goal started by `at`) | validation, storage | — | — |
 | `goals.history` | `id` (any goal of an edit chain), `from`, `to` (at most 730 days) | `[{from, to, value, target, met}]`, oldest first, through today's period | validation, not_found, storage | — | — |
 | `goal.add` | `op_id`, at most one of `project_id` / `epic_id` / `item_id` (none: all work), `period` (`day`/`week`), `metric_id?` (none: minutes), `direction?` (`at_least` default, `at_most` only with a metric), `target` (finite, > 0) | mutation result (`changed.goals`) | validation, not_found, storage | yes | no |
@@ -293,6 +294,24 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   period's target. Dates are strict `YYYY-MM-DD`. Fixtures are `goals_list.json`,
   `goal_add.json`, `goal_edit_successor.json`, `goals_history.json` and
   `status_goals.json`.
+- For an average metric goal the server compares the weighted numerator with the
+  target times the total sample weight before rounding the displayed mean. Exact
+  equality meets both directions.
+- `review.get.summary` reports minutes by resolved assignment in `by_project`
+  and `by_epic`, met goal periods in `goals_met`, and the current
+  `open_backlog_count`. The arrays have full row counts `by_project_count`,
+  `by_epic_count` and `goals_met_count`. Each array has a 128 KiB encoded budget.
+  The current and previous weekly distraction rates (`distractions_per_hour` and
+  `previous_distractions_per_hour`) include distractions on ticks. The denominator
+  is the week's recorded minutes. A week without minutes or recorded distractions
+  yields `null`. Insights excludes ticks from its sample.
+- Weekly review includes a newest-first preview of `sessions_with_notes`, with
+  the full `sessions_with_notes_count` and a `sessions_with_notes_more` flag.
+  The preview fits up to 32 sessions and 384 KiB of JSON. Each row includes its
+  main note and up to the latest 12 live timestamped entries in chronological
+  order. Row fields `notes_count` and `notes_more` describe those entries.
+  These limits leave room for the full reflection in the same response.
+  See `review_get.json`.
 - All session filters and groups resolve project, epic and tags at read time. Moving
   a task into an epic brings its earlier sessions into that epic, including sessions
   recorded before the epic existed. Moving or clearing the project works the same

@@ -158,6 +158,20 @@ fn session_line(row: &Value) -> String {
     if let Some(note) = row["note"].as_str().filter(|n| !n.is_empty()) {
         line.push_str(&format!("  \"{note}\""));
     }
+    for entry in rows(&row["notes"]) {
+        line.push_str(&format!(
+            "\n    {}  {}",
+            text(&entry["at"]),
+            text(&entry["text"])
+        ));
+    }
+    if row["notes_more"] == true {
+        line.push_str(&format!(
+            "\n    Showing {} of {} entries",
+            rows(&row["notes"]).len(),
+            row["notes_count"]
+        ));
+    }
     line
 }
 
@@ -185,6 +199,16 @@ pub fn review(result: &Value) -> String {
                 .map(|g| format!("  {}", goal_line(g))),
         );
     }
+    for (key, label) in [
+        ("by_project", "project groups"),
+        ("by_epic", "epic groups"),
+        ("goals_met", "met goal periods"),
+    ] {
+        let shown = rows(&s[key]).len() as u64;
+        if let Some(total) = s[format!("{key}_count")].as_u64().filter(|&n| n > shown) {
+            out.push(format!("Showing {shown} of {total} {label}"));
+        }
+    }
     out.push(format!(
         "Distractions: {} (previous week {})",
         rate(&s["distractions_per_hour"]),
@@ -194,6 +218,13 @@ pub fn review(result: &Value) -> String {
     if !rows(&s["sessions_with_notes"]).is_empty() {
         out.push("Sessions with notes:".into());
         out.extend(rows(&s["sessions_with_notes"]).iter().map(session_line));
+    }
+    if s["sessions_with_notes_more"] == true {
+        out.push(format!(
+            "Showing {} of {} noted sessions",
+            rows(&s["sessions_with_notes"]).len(),
+            s["sessions_with_notes_count"]
+        ));
     }
     match result["note"].as_str().filter(|n| !n.is_empty()) {
         Some(note) => out.push(format!("Reflection:\n{note}")),
@@ -431,4 +462,23 @@ pub fn stats(stats: &Value) -> String {
         ));
     }
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn human_reports_show_the_timestamp_and_text_of_note_entries() {
+        let review_fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/rpc/review_get.json")).unwrap();
+        let text = review(&review_fixture["result"]);
+        assert!(text.contains("2031-05-14T04:30:00Z  At the shop"));
+        assert!(text.contains("Monday"));
+        let insights_fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/rpc/insights.json")).unwrap();
+        let text = insights(&insights_fixture["result"]);
+        assert!(text.contains("2031-05-14T06:49:00Z  Paragraph 2"));
+        assert!(text.contains("Chapter 1"));
+    }
 }

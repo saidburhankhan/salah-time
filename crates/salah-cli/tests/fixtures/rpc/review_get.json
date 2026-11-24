@@ -16,6 +16,7 @@
           "name": "No epic"
         }
       ],
+      "by_epic_count": 2,
       "by_project": [
         {
           "id": "none",
@@ -28,7 +29,8 @@
           "name": "Study"
         }
       ],
-      "distractions_per_hour": 2.0,
+      "by_project_count": 2,
+      "distractions_per_hour": 22.0,
       "goals_met": [
         {
           "created_at": "2031-05-12T04:00:00Z",
@@ -106,6 +108,7 @@
           "version": 1
         }
       ],
+      "goals_met_count": 3,
       "open_backlog_count": 0,
       "previous_distractions_per_hour": 6.0,
       "sessions_with_notes": [
@@ -130,6 +133,8 @@
               "text": "At the shop"
             }
           ],
+          "notes_count": 1,
+          "notes_more": false,
           "project": null,
           "project_id": null,
           "running": false,
@@ -153,6 +158,8 @@
           "minutes": 10,
           "note": "Monday",
           "notes": [],
+          "notes_count": 0,
+          "notes_more": false,
           "project": {
             "color": "#4c8bf5",
             "id": "<id:3>",
@@ -167,7 +174,9 @@
           },
           "version": 1
         }
-      ]
+      ],
+      "sessions_with_notes_count": 2,
+      "sessions_with_notes_more": false
     },
     "updated_at": "2031-05-14T04:55:00Z",
     "week": "2031-05-12"

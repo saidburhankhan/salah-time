@@ -24,3 +24,11 @@ pub struct Reflection {
     pub deleted_at: Option<DateTime<Utc>>,
     pub version: i64,
 }
+
+/// Recorded minutes grouped by the resolved project or epic.
+#[derive(Serialize)]
+pub struct Minutes {
+    pub id: String,
+    pub name: String,
+    pub minutes: i64,
+}
