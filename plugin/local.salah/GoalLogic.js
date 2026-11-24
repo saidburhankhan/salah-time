@@ -58,7 +58,8 @@ function scopeLabel(goal, ctx) {
 function metricInfo(goal, ctx) {
   var id = text(goal.metric_id)
   if (id === "") return null
-  var hit = findBy(ctx.metrics, "metric_id", id)
+  // metrics.list rows carry `id`; project asks carry `metric_id`.
+  var hit = findBy(ctx.metrics, "id", id) || findBy(ctx.metrics, "metric_id", id)
   return { name: hit && hit.name ? text(hit.name) : id, unit: hit ? text(hit.unit) : "" }
 }
 

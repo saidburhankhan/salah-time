@@ -18,7 +18,7 @@ const ctx = {
   projects: [{ id: "<id:3>", name: "Study" }],
   epics: [{ id: "<id:4>", name: "Thesis" }],
   items: status.planner.items,
-  metrics: [{ metric_id: "focus", name: "Focus", unit: "" }, { metric_id: "distractions", name: "Distractions", unit: "times" }],
+  metrics: [{ id: "focus", name: "Focus", unit: "" }, { id: "distractions", name: "Distractions", unit: "times" }, { id: "pages", name: "Pages", unit: "pages" }],
   strings
 }
 
@@ -98,4 +98,10 @@ test("fixture scope labels win over stale project, epic and task names", () => {
   const { chips } = logic.goalChips(status.goals, stale, 10)
   assert.deepEqual(Array.from(chips, chip => chip.label),
     ["All work", "Study", "Read", "Book", "All work · Focus", "Study · Distractions"])
+})
+
+test("metric goals find the catalogue row by metrics.list id (custom metric name and unit)", () => {
+  const chip = logic.goalChips([goal({ metric_id: "pages", target: 20, progress: { value: 12, met: false } })], ctx).chips[0]
+  assert.equal(chip.label, "All work · Pages")
+  assert.equal(chip.amount, "12 / 20 pages")
 })
