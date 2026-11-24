@@ -209,7 +209,59 @@ impl Query {
     }
 }
 
+/// Calendar groups that depend only on the recorded planning day.
+pub enum CalendarGroup {
+    Weekday,
+    Week,
+}
+
+#[derive(Default, Debug)]
+pub struct GroupMeasures {
+    pub minutes: i64,
+    pub sessions: i64,
+    pub focus_avg: Option<f64>,
+    pub distractions_per_hour: Option<f64>,
+}
+
 impl Store {
+    pub fn calendar_groups(
+        &self,
+        scope: &SessionScope<'_>,
+        group: CalendarGroup,
+    ) -> Result<BTreeMap<String, GroupMeasures>, Error> {
+        let mut query = Query::scoped(scope);
+        query.push("s.minutes IS NOT NULL", []);
+        let key = match group {
+            CalendarGroup::Weekday => {
+                "CAST((CAST(strftime('%w', s.day) AS INTEGER) + 6) % 7 + 1 AS TEXT)"
+            }
+            CalendarGroup::Week => "date(s.day, '-6 days', 'weekday 1')",
+        };
+        let sql = format!(
+            "WITH matched AS ({}) SELECT {key}, SUM(s.minutes), COUNT(*),
+            SUM(f.value * MAX(s.minutes,1)) / SUM(CASE WHEN f.value IS NOT NULL THEN MAX(s.minutes,1) END),
+            SUM(d.value) * 60.0 / SUM(s.minutes) FROM matched s
+            LEFT JOIN session_values f ON f.session_id=s.id AND f.metric_id='focus'
+            LEFT JOIN session_values d ON d.session_id=s.id AND d.metric_id='distractions'
+            GROUP BY 1",
+            query.sql
+        );
+        Ok(self
+            .all(&sql, params_from_iter(query.args), |r| {
+                Ok((
+                    r.get(0)?,
+                    GroupMeasures {
+                        minutes: r.get(1)?,
+                        sessions: r.get(2)?,
+                        focus_avg: r.get(3)?,
+                        distractions_per_hour: r.get(4)?,
+                    },
+                ))
+            })?
+            .into_iter()
+            .collect())
+    }
+
     /// Finished live sessions in scope with their values and labels: oldest
     /// first by day without a page; with one, newest day first, then newest
     /// [`ReportSession::sort_at`], then id.

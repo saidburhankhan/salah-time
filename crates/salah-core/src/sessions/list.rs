@@ -9,9 +9,9 @@ use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use salah_domain::{
     epic::EpicRef,
     error::Error,
-    tracking::{ItemRef, ProjectRef},
+    tracking::{ItemRef, ProjectRef, SessionNote},
 };
-use salah_store::reports::SessionPage;
+use salah_store::reports::{ReportSession, SessionPage};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -87,6 +87,22 @@ pub struct ListRow {
     pub item: Option<ItemRef>,
 }
 
+impl ListRow {
+    pub(crate) fn from_report(row: &ReportSession, notes: Vec<SessionNote>) -> Self {
+        Self {
+            session: SessionView::with_notes(&row.session, notes, Some(false)),
+            project: row.project.clone(),
+            epic: row
+                .session
+                .epic_id
+                .clone()
+                .zip(row.epic_name.clone())
+                .map(|(id, name)| EpicRef { id, name }),
+            item: row.item.clone(),
+        }
+    }
+}
+
 /// One page of finished sessions (ticks included) in scope: newest planning
 /// day first, then newest end instant (creation for manual logs and ticks),
 /// then id.
@@ -137,21 +153,7 @@ pub fn list(
     };
     let rows = sessions
         .into_iter()
-        .map(|s| ListRow {
-            session: SessionView::with_notes(
-                &s.session,
-                notes.remove(&s.session.id).unwrap_or_default(),
-                Some(false),
-            ),
-            project: s.project,
-            epic: s
-                .session
-                .epic_id
-                .clone()
-                .zip(s.epic_name)
-                .map(|(id, name)| EpicRef { id, name }),
-            item: s.item,
-        })
+        .map(|s| ListRow::from_report(&s, notes.remove(&s.session.id).unwrap_or_default()))
         .collect();
     Ok(SessionList { rows, next })
 }

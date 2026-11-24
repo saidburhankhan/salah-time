@@ -596,3 +596,6 @@ mod quick;
 mod reports;
 #[path = "rpc/resources.rs"]
 mod resources;
+
+#[path = "rpc/insights.rs"]
+mod insights;

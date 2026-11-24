@@ -52,6 +52,16 @@ pub(crate) fn stats(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcE
     to_value(statistics::stats(ctx.store, &config, today, range, filter)?)
 }
 
+pub(crate) fn insights(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let params: ScopeParams = parse(call.params)?;
+    let config = ctx.config.load()?;
+    let today = day::current(&config, ctx.now())?;
+    let (range, filter) = scope(params, today, Measures::default())?;
+    to_value(salah_core::insights::get(
+        ctx.store, &config, today, range, filter,
+    )?)
+}
+
 pub(crate) fn stats_table(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let params: StatsTableParams = parse(call.params)?;
     let config = ctx.config.load()?;

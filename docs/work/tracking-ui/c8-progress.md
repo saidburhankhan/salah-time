@@ -169,3 +169,11 @@ name in ended goals. Four fixtures gained only `scope_label`.
 0b were filtered out. Strict Clippy, formatting and diff checks passed.
 
 CHECKPOINT 1b: Add stored scope labels to goal views, including ended goals — files: crates/salah-domain/src/goal.rs, crates/salah-store/src/goals.rs, crates/salah-core/src/goals.rs, crates/salah-cli/tests/rpc/goals.rs, crates/salah-cli/tests/fixtures/rpc/{goal_add,goal_edit_successor,goals_list,status_goals}.json, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md
+
+## 2 — insights
+
+Week and weekday aggregates run in SQLite against the shared report scope. Local start hours, split block minutes and planned-block comparisons use each session's planning-day snapshot. Ranked sessions include the same references and notes as the Notes page. The RPC regressions cover cross-boundary allocation, local starts, filters, ticks, empty ranges, tie-breaking and the five-session limit.
+
+224 workspace tests passed with the eight socket tests listed under 0b skipped. Strict Clippy, formatting and diff checks passed.
+
+CHECKPOINT 2: Add session insights and planned versus actual block reports — files: crates/salah-core/src/{insights,lib,sessions/list}.rs, crates/salah-store/src/reports.rs, crates/salah-protocol/src/{dispatcher,reads}.rs, crates/salah-cli/tests/{daemon/methods,rpc,rpc/insights}.rs, crates/salah-cli/tests/fixtures/rpc/insights.json, docs/work/tracking-ui/c8-progress.md

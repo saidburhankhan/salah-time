@@ -1,0 +1,453 @@
+{
+  "id": 5,
+  "jsonrpc": "2.0",
+  "result": {
+    "best": [
+      {
+        "block": "fajr",
+        "day": "2031-05-14",
+        "ended_at": "2031-05-14T07:49:00Z",
+        "epic": {
+          "id": "<id:1>",
+          "name": "Chapter"
+        },
+        "epic_id": "<id:1>",
+        "id": "<id:2>",
+        "item": {
+          "id": "<id:3>",
+          "title": "Read"
+        },
+        "item_id": "<id:3>",
+        "minutes": 30,
+        "note": "Chapter 1",
+        "notes": [
+          {
+            "at": "2031-05-14T06:49:00Z",
+            "id": "<id:4>",
+            "text": "Paragraph 2"
+          }
+        ],
+        "project": {
+          "color": "#4c8bf5",
+          "id": "<id:5>",
+          "name": "Study"
+        },
+        "project_id": "<id:5>",
+        "running": false,
+        "stale": false,
+        "started_at": "2031-05-14T06:49:00Z",
+        "values": {
+          "distractions": 2.0,
+          "focus": 5.0
+        },
+        "version": 3
+      },
+      {
+        "block": "dhuhr",
+        "day": "2031-05-14",
+        "ended_at": null,
+        "epic": null,
+        "epic_id": null,
+        "id": "<id:6>",
+        "item": {
+          "id": "<id:7>",
+          "title": "Walk"
+        },
+        "item_id": "<id:7>",
+        "minutes": 10,
+        "note": null,
+        "notes": [],
+        "project": null,
+        "project_id": null,
+        "running": false,
+        "stale": false,
+        "started_at": null,
+        "values": {
+          "focus": 1.0
+        },
+        "version": 1
+      }
+    ],
+    "block_matrix": [
+      {
+        "actual_block": "dhuhr",
+        "minutes": 10,
+        "planned_block": null
+      },
+      {
+        "actual_block": "fajr",
+        "minutes": 15,
+        "planned_block": "fajr"
+      },
+      {
+        "actual_block": "dhuhr",
+        "minutes": 15,
+        "planned_block": "fajr"
+      }
+    ],
+    "by_block": [
+      {
+        "block": "night",
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "block": "fajr",
+        "distractions_per_hour": 4.0,
+        "focus_avg": 5.0,
+        "minutes": 15,
+        "sessions": 1
+      },
+      {
+        "block": "dhuhr",
+        "distractions_per_hour": 2.4,
+        "focus_avg": 3.4,
+        "minutes": 25,
+        "sessions": 2
+      },
+      {
+        "block": "asr",
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "block": "maghrib",
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "block": "isha",
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "block": "sleep",
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0
+      }
+    ],
+    "by_hour": [
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 0,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 1,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 2,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 3,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 4,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 5,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 6,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 7,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 8,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 9,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 10,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": 4.0,
+        "focus_avg": 5.0,
+        "hour": 11,
+        "minutes": 30,
+        "sessions": 1
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 12,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 13,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 14,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 15,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 16,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 17,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 18,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 19,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 20,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 21,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 22,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 23,
+        "minutes": 0,
+        "sessions": 0
+      }
+    ],
+    "by_weekday": [
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0,
+        "weekday": 1
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0,
+        "weekday": 2
+      },
+      {
+        "distractions_per_hour": 3.0,
+        "focus_avg": 4.0,
+        "minutes": 40,
+        "sessions": 2,
+        "weekday": 3
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0,
+        "weekday": 4
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0,
+        "weekday": 5
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0,
+        "weekday": 6
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0,
+        "weekday": 7
+      }
+    ],
+    "distractions_by_week": [
+      {
+        "per_hour": null,
+        "week": "2031-05-05"
+      },
+      {
+        "per_hour": 3.0,
+        "week": "2031-05-12"
+      }
+    ],
+    "hardest": [
+      {
+        "block": "dhuhr",
+        "day": "2031-05-14",
+        "ended_at": null,
+        "epic": null,
+        "epic_id": null,
+        "id": "<id:6>",
+        "item": {
+          "id": "<id:7>",
+          "title": "Walk"
+        },
+        "item_id": "<id:7>",
+        "minutes": 10,
+        "note": null,
+        "notes": [],
+        "project": null,
+        "project_id": null,
+        "running": false,
+        "stale": false,
+        "started_at": null,
+        "values": {
+          "focus": 1.0
+        },
+        "version": 1
+      },
+      {
+        "block": "fajr",
+        "day": "2031-05-14",
+        "ended_at": "2031-05-14T07:49:00Z",
+        "epic": {
+          "id": "<id:1>",
+          "name": "Chapter"
+        },
+        "epic_id": "<id:1>",
+        "id": "<id:2>",
+        "item": {
+          "id": "<id:3>",
+          "title": "Read"
+        },
+        "item_id": "<id:3>",
+        "minutes": 30,
+        "note": "Chapter 1",
+        "notes": [
+          {
+            "at": "2031-05-14T06:49:00Z",
+            "id": "<id:4>",
+            "text": "Paragraph 2"
+          }
+        ],
+        "project": {
+          "color": "#4c8bf5",
+          "id": "<id:5>",
+          "name": "Study"
+        },
+        "project_id": "<id:5>",
+        "running": false,
+        "stale": false,
+        "started_at": "2031-05-14T06:49:00Z",
+        "values": {
+          "distractions": 2.0,
+          "focus": 5.0
+        },
+        "version": 3
+      }
+    ],
+    "on_plan": [
+      {
+        "item_id": "<id:3>",
+        "minutes": 30,
+        "name": "Read",
+        "on_plan_minutes": 15,
+        "planned_block": "fajr"
+      },
+      {
+        "item_id": "<id:7>",
+        "minutes": 10,
+        "name": "Walk",
+        "on_plan_minutes": 0,
+        "planned_block": null
+      }
+    ]
+  }
+}

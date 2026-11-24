@@ -66,6 +66,7 @@ const METHODS: &[(&str, Kind, Handler)] = &[
     ("items.list", Kind::Read, reads::items),
     ("backlog.list", Kind::Read, reads::backlog),
     ("resources.list", Kind::Read, resources::list),
+    ("insights.get", Kind::Read, reads::insights),
     ("stats.get", Kind::Read, reads::stats),
     ("stats.table", Kind::Read, reads::stats_table),
     ("stats.series", Kind::Read, reads::stats_series),
