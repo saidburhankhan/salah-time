@@ -247,3 +247,4 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   stopped being active; membership by the requested date only). R4 23 (low) → C9: goal history
   selection should follow the whole successor chain.
 - R4 25 (medium) → C9: GoalForm must not silently turn a metric draft into a minutes goal when the metric disappears; block Add until the user re-chooses.
+- R4 26 (medium) → C10: emptying the title in the creation sheet resets attachments and tag choices; keep the draft until dismissal or successful creation.
