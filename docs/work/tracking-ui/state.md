@@ -240,3 +240,6 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - 18:19 R4 added 3 findings (17–19): C8: CLI insights --item resolves removed tasks for reads;
   goal sum overflow → explicit error not null+met. C9: Goals page offline (CLI fallback) never
   reads goals back after a write. Route at each worker's next resume.
+- 18:2x R4 20 (widget untouched tags → omit tag_ids) fixed by orchestrator in cafe07d. R4 21 (widget:
+  creation retry after an ambiguous failure across Sleep gets a new op_id → duplicate task; keep the
+  original op_id + payload until acknowledged) → C10 next window.
