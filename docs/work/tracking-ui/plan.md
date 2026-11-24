@@ -519,3 +519,27 @@ Fix in this order; these come before the R4 review.
    new item id, op_ids reused on retry); a failed resource write shows an error and keeps the task.
 5. **Statistics with an epic selected** must show the epic's work (fixed by 1); add an app test that
    picking an epic whose sessions predate it shows non-zero totals with the 1 fixture.
+
+### Addendum: ending a routine keeps its history (user request 2026-11-24 ~19:50)
+User: converting a routine to a one-time task moves it back to its first created day and its
+day-by-day history looks lost; there is no way to stop a routine except deleting it.
+1. **End a routine (C8 Astra, migration 006; C9/C10 Sol UI).** Additive `items.end_day` (nullable,
+   YYYY-MM-DD, the routine's last day; CHECK end_day >= start_day). Occurrences stop after
+   end_day; past days (written snapshots and computed past days alike) keep the routine with its
+   sessions and ticks; stats/insights/goals unchanged (sessions follow the task). `item.edit`
+   accepts `end_day` (null resumes); ItemView gains `end_day` and `ended` (end_day < today).
+   `items.list`/routines lists can include ended routines (flag). Migration 006 follows the
+   runner rules (backup, keep 3, refused if newer, tests v5→v6 on realistic rows).
+2. **Converting routine → one-time (C8).** Never rewrites history. Investigate how past days that
+   were never written are computed (item_history / items_on) and make every past day show the item
+   as it was scheduled that day. Converting sets the one-time date to the chosen date (default
+   today), never the original start_day; past occurrences remain in their days. Tests: convert a
+   daily routine with sessions on 3 past days → those days (written or not) still list it with
+   their sessions; today shows the one-time task.
+3. **App (C9):** Routines page: "End routine" (today or a picked date) per row and in the editor;
+   an "Ended" section with Resume and Delete; Delete's confirm suggests End first. Task editor:
+   switching Repeat → One time explains "Ends the routine today; past days keep it" and asks for the
+   one-time date (default today).
+4. **Widget (C10):** ended routines never appear in the timeline after their end day; no new UI.
+Install gate: migration 006 tested on a fresh read-only copy of the live DB (diff of every table's
+row count; routine history by day before/after) before installing.

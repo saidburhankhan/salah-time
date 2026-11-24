@@ -276,3 +276,7 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   INSTALLED via gated chain (257 cargo + 97 app tests); live log clean; bar "Sleep 1h 45m ● 11:13 +".
   ALL R5 FINDINGS FIXED. C8 (Sol) now adds routines.activity (C9's spec) → CHECKPOINT 10; then C9
   switches the Routines page to it. After that the tracking-ui list is empty: ask the user.
+- 19:5x USER: routine → one-time jumps to the first created day, history by day looks lost; wants a
+  way to stop a routine. → plan.md "Addendum: ending a routine keeps its history". Queue at 23:58:
+  C8 (Astra) migration 006 end_day + conversion fix + routines.activity WIP (finish first);
+  then C9 (Sol) Routines activity switch + End routine UI; C10 (Sol) widget check.
