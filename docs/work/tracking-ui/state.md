@@ -197,3 +197,12 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   finish, goal follow-ups, Review page, app --page) in app/; C8 (task 4 CLI WIP + salah open --page)
   in crates/. C10 idle: at 13:14 set weeklyReviewCommand = ["salah","open","--page","review"].
   Then: independent review R4 of phase 4 (backend + app + widget), fixes, install with live log check.
+- 08:4x committed af1c189 (C8 4 CLI + salah open --page, Sonnet; 242 tests), 11fc7ce (C9 Insights,
+  Review, --page, goal follow-ups, Sonnet; 87 app tests, screenshots ok), 8c8a280 (widget review link
+  = salah-app --page review). ALL PHASE 4 FEATURES BUILT. INSTALLED 8c8a280 at 08:51: scripts/test
+  242 + widget checks, daemon restarted, DB v5 integrity ok, live shell log clean, bar shows
+  "Dhuhr 3h 22m ● 98:20 +" (bar check: capture the whole left half; the widget moves with its width).
+  Open polish: Review notes list not filterable (plan says filterable); Insights weekly line is a lone
+  dot with one week of data; Insights bars use the accent yellow (check against the muted rule).
+  NEXT (13:14 window): independent review R4 (Codex Astra, read-only → r4-findings.md) over phase 4 +
+  tags + scope_label in crates/app/plugin; route confirmed findings; fix; reinstall with live checks.
