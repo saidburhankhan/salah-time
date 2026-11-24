@@ -249,3 +249,4 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - R4 25 (medium) → C9: GoalForm must not silently turn a metric draft into a minutes goal when the metric disappears; block Add until the user re-chooses.
 - R4 26 (medium) → C10: emptying the title in the creation sheet resets attachments and tag choices; keep the draft until dismissal or successful creation.
 - R4 28 (medium) → C8: Insights on-plan table omits item-less (bare project/epic) work; emit an Unplanned row with its minutes.
+- R4 29 (low) → C9: Review "Saved" indicator must match the acknowledged week and text.
