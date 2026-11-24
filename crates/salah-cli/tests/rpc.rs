@@ -216,22 +216,6 @@ impl Drop for Harness {
     }
 }
 
-/// Floats to 9 places: sessions that tie on creation time sort by random id,
-/// so a weighted mean can differ in its last digit between runs.
-fn rounded(value: Value) -> Value {
-    match value {
-        Value::Number(n) if n.is_f64() => {
-            serde_json::Number::from_f64((n.as_f64().unwrap_or_default() * 1e9).round() / 1e9)
-                .map_or(Value::Number(n), Value::Number)
-        }
-        Value::Array(items) => Value::Array(items.into_iter().map(rounded).collect()),
-        Value::Object(map) => {
-            Value::Object(map.into_iter().map(|(k, v)| (k, rounded(v))).collect())
-        }
-        other => other,
-    }
-}
-
 fn compare_fixture(name: &str, value: &Value) {
     let path = Path::new(FIXTURES).join(format!("{name}.json"));
     let rendered = format!("{}\n", serde_json::to_string_pretty(value).unwrap());
@@ -240,14 +224,11 @@ fn compare_fixture(name: &str, value: &Value) {
         fs::write(&path, rendered).unwrap();
         return;
     }
-    let expected: Value = serde_json::from_str(
-        &fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("missing fixture {}: {error}", path.display())),
-    )
-    .unwrap();
+    let expected = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("missing fixture {}: {error}", path.display()));
+    // Compare the normalized JSON without rounding away changes in report averages.
     assert_eq!(
-        rounded(value.clone()),
-        rounded(expected),
+        rendered, expected,
         "fixture {name} changed; run \
          `UPDATE_FIXTURES=1 cargo test --offline --test rpc` if intentional"
     );

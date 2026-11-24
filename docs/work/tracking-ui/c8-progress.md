@@ -233,3 +233,13 @@ Item-less work produces a single Unplanned row with null task and planned block,
 244 workspace tests passed. The eight socket tests named under checkpoint 0b were filtered out. Strict Clippy, formatting and diff checks passed.
 
 CHECKPOINT 7: Resolve removed report tasks, report overflowing goal sums, fix dated goal membership and include item-less work in Insights adherence — files: crates/salah-cli/src/{local,render}.rs, crates/salah-cli/tests/{tracking_cli,tracking_cli/report_items,rpc/goals,rpc/insights}.rs, crates/salah-core/src/{day/mod,day/snapshot,goals,insights,items,status}.rs, crates/salah-domain/src/goal.rs, crates/salah-protocol/src/goals.rs, crates/salah-store/src/read.rs, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md
+
+## 8 — deterministic report averages
+
+Stats and Insights block and hour rollups order samples by value and weight, sum weighted contributions, and divide once. Very large finite values use an ordered incremental mean if the numerator overflows. Goal averages continue to compare compensated numerators in value-and-weight order. The SQL shared by Insights and Review orders the focus and distraction contributions within each aggregate.
+
+Exact fixture comparison replaces the nine-decimal rounding that masked the flake. The only fixture edits are last-digit changes in `stats_table_week.json`, `stats_table_project.json`, `stats_series_day.json`, `goals_list.json`, and `status_goals.json`. W20 focus consistently renders as `2.608695652173913`.
+
+All 42 RPC tests, including the weekly stats fixture test, passed in ten consecutive runs. 244 workspace tests passed with the eight Unix-socket tests listed under checkpoint 0b filtered out. Strict Clippy, formatting, and diff checks passed.
+
+CHECKPOINT 8: Make report averages deterministic and compare RPC fixtures exactly — files: crates/salah-core/src/{stats,insights,goals}.rs, crates/salah-store/src/reports.rs, crates/salah-cli/tests/rpc.rs, crates/salah-cli/tests/fixtures/rpc/{stats_table_week,stats_table_project,stats_series_day,goals_list,status_goals}.json, docs/work/tracking-ui/c8-progress.md

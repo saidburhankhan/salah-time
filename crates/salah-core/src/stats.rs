@@ -504,17 +504,34 @@ pub(crate) fn rollup<'a>(
     )
 }
 
-pub(crate) fn aggregate(
-    kind: Rollup,
-    mut samples: impl Iterator<Item = (f64, f64)>,
-) -> Option<f64> {
-    let (first, mut weight) = samples.next()?;
+pub(crate) fn aggregate(kind: Rollup, samples: impl Iterator<Item = (f64, f64)>) -> Option<f64> {
+    let mut samples: Vec<_> = samples.collect();
+    // Values and weights define the result even when tied timestamps give
+    // the same samples a different order on another database.
+    samples.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    let (&(first, first_weight), remaining) = samples.split_first()?;
+    if remaining.is_empty() {
+        return Some(first);
+    }
+    let samples = remaining.iter().copied();
     Some(match kind {
         Rollup::Sum => samples.fold(first, |sum, (value, _)| sum + value),
-        Rollup::Avg => samples.fold(first, |mean, (value, minutes)| {
-            weight += minutes;
-            mean + (value - mean) * (minutes / weight)
-        }),
+        Rollup::Avg => {
+            let (numerator, weight) = samples.clone().fold(
+                (first * first_weight, first_weight),
+                |(sum, weight), (value, minutes)| (sum + value * minutes, weight + minutes),
+            );
+            if numerator.is_finite() {
+                numerator / weight
+            } else {
+                // Very large finite count metrics can overflow the numerator.
+                let mut weight = first_weight;
+                samples.fold(first, |mean, (value, minutes)| {
+                    weight += minutes;
+                    mean + (value - mean) * (minutes / weight)
+                })
+            }
+        }
     })
 }
 

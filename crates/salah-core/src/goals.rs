@@ -138,9 +138,11 @@ fn periods(
             .or_default()
             .push((value, weight));
     }
-    // A fixed sample order keeps the weighted rollup reproducible across query plans.
-    for samples in groups.values_mut() {
-        samples.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    if rollup == Rollup::Avg {
+        // Compare weighted numerators in the same sample order across query plans.
+        for samples in groups.values_mut() {
+            samples.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        }
     }
     let mut rows = Vec::new();
     loop {

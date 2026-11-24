@@ -5,10 +5,15 @@ use crate::{
     config::Config,
     day,
     sessions::ListRow,
-    stats::{Filter, Range, report_scope},
+    stats::{Filter, Range, aggregate, report_scope},
 };
 use chrono::{Duration, NaiveDate, Timelike};
-use salah_domain::{day::BoundaryId, error::Error, goal::Period, tracking::Session};
+use salah_domain::{
+    day::BoundaryId,
+    error::Error,
+    goal::Period,
+    tracking::{Rollup, Session},
+};
 use salah_store::reports::{CalendarGroup, GroupMeasures, ReportSession};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -36,30 +41,29 @@ impl From<GroupMeasures> for Measures {
 struct Samples {
     minutes: i64,
     sessions: i64,
-    focus_sum: f64,
-    focus_weight: i64,
-    distractions: Option<f64>,
+    focus: Vec<(f64, f64)>,
+    distractions: Vec<(f64, f64)>,
 }
 
 impl Samples {
     fn add(&mut self, s: &Session, minutes: i64) {
         self.sessions += 1;
         self.minutes += minutes;
+        let weight = minutes.max(1) as f64;
         if let Some(focus) = s.value("focus") {
-            self.focus_sum += focus * minutes.max(1) as f64;
-            self.focus_weight += minutes.max(1);
+            self.focus.push((focus, weight));
         }
         if let Some(count) = s.value("distractions") {
-            *self.distractions.get_or_insert(0.) += count * (minutes.max(1) as f64 / s.weight());
+            self.distractions
+                .push((count * (weight / s.weight()), weight));
         }
     }
     fn finish(self) -> Measures {
         Measures {
             minutes: self.minutes,
             sessions: self.sessions,
-            focus_avg: (self.focus_weight > 0).then(|| self.focus_sum / self.focus_weight as f64),
-            distractions_per_hour: self
-                .distractions
+            focus_avg: aggregate(Rollup::Avg, self.focus.into_iter()),
+            distractions_per_hour: aggregate(Rollup::Sum, self.distractions.into_iter())
                 .filter(|_| self.minutes > 0)
                 .map(|d| d * 60. / self.minutes as f64),
         }

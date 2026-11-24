@@ -307,13 +307,20 @@ impl Store {
             }
             CalendarGroup::Week => "date(s.day, '-6 days', 'weekday 1')",
         };
+        // Order floating-point sums by their inputs, independently of the
+        // access path SQLite chooses and of the sessions' random IDs.
         let sql = format!(
-            "WITH matched AS ({}) SELECT {key}, COALESCE(SUM(s.minutes),0), COUNT(*),
-            SUM(f.value * MAX(COALESCE(s.minutes,1),1)) / SUM(CASE WHEN f.value IS NOT NULL THEN MAX(COALESCE(s.minutes,1),1) END),
-            SUM(d.value) * 60.0 / SUM(s.minutes) FROM matched s
+            "WITH matched AS ({}), samples AS (
+            SELECT {key} AS bucket, s.minutes, MAX(COALESCE(s.minutes,1),1) AS weight,
+                   f.value * MAX(COALESCE(s.minutes,1),1) AS weighted_focus, d.value AS distractions
+            FROM matched s
             LEFT JOIN session_values f ON f.session_id=s.id AND f.metric_id='focus'
             LEFT JOIN session_values d ON d.session_id=s.id AND d.metric_id='distractions'
-            GROUP BY 1",
+            )
+            SELECT bucket, COALESCE(SUM(minutes),0), COUNT(*),
+                   SUM(weighted_focus ORDER BY weighted_focus) / SUM(weight) FILTER (WHERE weighted_focus IS NOT NULL),
+                   SUM(distractions ORDER BY distractions) * 60.0 / SUM(minutes)
+            FROM samples GROUP BY bucket",
             query.sql
         );
         Ok(self
