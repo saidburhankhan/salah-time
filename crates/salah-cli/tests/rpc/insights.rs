@@ -161,3 +161,51 @@ fn insights_rank_only_five_scored_sessions_breaking_ties_by_minutes() {
         assert_eq!(minutes, expected);
     }
 }
+
+#[test]
+fn itemless_project_and_epic_work_share_an_unplanned_row_after_filtering() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, super::NOW);
+    let p = added(
+        &mut rpc,
+        "project.add",
+        "projects",
+        json!({"op_id":"p","name":"Study"}),
+    );
+    let e = added(
+        &mut rpc,
+        "epic.add",
+        "epics",
+        json!({"op_id":"e","project_id":p,"name":"Book"}),
+    );
+    good(
+        &mut rpc,
+        "session.log",
+        json!({"op_id":"project","project_id":p,"minutes":45}),
+    );
+    good(
+        &mut rpc,
+        "session.log",
+        json!({"op_id":"epic","epic_id":e,"minutes":15,"block":"isha"}),
+    );
+    for (filter, minutes) in [
+        (json!({"project_id":p}), 60),
+        (json!({"epic_id":e}), 15),
+        (json!({"project_id":p,"epic_id":"none"}), 45),
+    ] {
+        let report = good(&mut rpc, "insights.get", filter);
+        assert_eq!(
+            report["on_plan"],
+            json!([{"item_id":null,"name":"Unplanned","planned_block":null,"minutes":minutes,"on_plan_minutes":0}])
+        );
+        let cells = report["block_matrix"].as_array().unwrap();
+        assert!(cells.iter().all(|c| c["planned_block"].is_null()));
+        assert_eq!(
+            cells
+                .iter()
+                .map(|c| c["minutes"].as_i64().unwrap())
+                .sum::<i64>(),
+            minutes
+        );
+    }
+}

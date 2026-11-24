@@ -79,6 +79,9 @@ pub struct Progress {
     pub to: NaiveDate,
     pub value: Option<f64>,
     pub met: bool,
+    /// Present when the period's sum exceeds the finite numeric range.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<&'static str>,
 }
 
 #[derive(Clone, Debug, Serialize)]

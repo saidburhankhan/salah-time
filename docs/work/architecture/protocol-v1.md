@@ -294,6 +294,21 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   period's target. Dates are strict `YYYY-MM-DD`. Fixtures are `goals_list.json`,
   `goal_add.json`, `goal_edit_successor.json`, `goals_history.json` and
   `status_goals.json`.
+- A sum that exceeds the finite numeric range yields `value: null`, `met: false`
+  and `error: "sum_overflow"` in that period's progress or history row. Empty
+  periods omit `error`.
+- Active membership in `goals.list` uses the requested tracking day. For a
+  closed goal, `updated_at` records its closing instant. A goal that closed
+  before the requested day's ending Sleep boundary is already inactive for
+  that date. Closing exactly at Sleep takes effect on the following tracking
+  day. The stored `ends_on` still bounds the final history period.
+- CLI session report filters accept full task IDs and unique prefixes of at
+  least four characters across live and removed tasks. This includes Stats,
+  Insights and the Notes list. Task edits resolve live task IDs.
+- `insights.get.on_plan` includes a final `Unplanned` row when the filter
+  selects minutes logged directly on a project or epic. Its `item_id` and
+  `planned_block` are null, `minutes` sums the item-less work, and
+  `on_plan_minutes` is zero. Adherence is undefined for this row.
 - For an average metric goal the server compares the weighted numerator with the
   target times the total sample weight before rounding the displayed mean. Exact
   equality meets both directions.

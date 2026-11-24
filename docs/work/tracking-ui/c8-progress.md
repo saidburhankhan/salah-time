@@ -219,3 +219,17 @@ Average goal comparisons retain low-order terms in the weighted numerator and co
 240 workspace tests passed. The eight Unix-socket tests named under checkpoint 0b were filtered out. Strict Clippy, formatting and diff checks passed.
 
 CHECKPOINT 6: Correct weekly review rates, bound review previews, stabilize and index metric goal progress, and render timestamped CLI notes — files: crates/salah-cli/src/render.rs, crates/salah-cli/tests/rpc/{goals,reviews}.rs, crates/salah-cli/tests/fixtures/rpc/review_get.json, crates/salah-core/src/{goals,reviews}.rs, crates/salah-domain/src/review.rs, crates/salah-store/src/{goals,reports,reviews}.rs, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md
+
+## 7 — historical report IDs, goal overflow and membership, unplanned work
+
+Stats (summary, table and series), Insights and the Notes CLI list accept a removed task's full ID or unique prefix. Mutation commands retain live-only lookup. The end-to-end CLI regression checks all five reports and rejects an edit using either form of the removed ID.
+
+A goal period whose sum exceeds the finite numeric range returns `error: "sum_overflow"`, `value: null` and `met: false`. The error is local to the affected progress or history row. Regression coverage includes list, history, status, review and ending the affected goal.
+
+Fixed-date membership uses the ended version's existing `updated_at` closing instant and the requested date's ending Sleep boundary (frozen clock or applicable settings). A closure exactly at Sleep takes effect on the following tracking day. History and `include_ended` keep the original period bounds. The test repeats the same date queries on successive days, then changes the Sleep setting on a later day and checks the historical result again. This uses schema version 5.
+
+Item-less work produces a single Unplanned row with null task and planned block, its filtered minutes, and no adherence percentage. The regression checks project and epic logs together, separately by epic filter, and against the block matrix. All existing golden fixtures passed without edits.
+
+244 workspace tests passed. The eight socket tests named under checkpoint 0b were filtered out. Strict Clippy, formatting and diff checks passed.
+
+CHECKPOINT 7: Resolve removed report tasks, report overflowing goal sums, fix dated goal membership and include item-less work in Insights adherence — files: crates/salah-cli/src/{local,render}.rs, crates/salah-cli/tests/{tracking_cli,tracking_cli/report_items,rpc/goals,rpc/insights}.rs, crates/salah-core/src/{day/mod,day/snapshot,goals,insights,items,status}.rs, crates/salah-domain/src/goal.rs, crates/salah-protocol/src/goals.rs, crates/salah-store/src/read.rs, docs/work/architecture/protocol-v1.md, docs/work/tracking-ui/c8-progress.md

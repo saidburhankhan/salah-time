@@ -48,13 +48,12 @@ struct Edit {
 
 pub(crate) fn list(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let p: List = parse(call.params)?;
-    let today = day::current(&ctx.config.load()?, ctx.now())?;
-    let at =
-        p.at.as_deref()
-            .map(|s| parse_day("at", s))
-            .transpose()?
-            .unwrap_or(today);
-    to_value(goals::list(ctx.store, at, today, p.include_ended)?)
+    let config = ctx.config.load()?;
+    let at = match p.at {
+        Some(s) => parse_day("at", &s)?,
+        None => day::current(&config, ctx.now())?,
+    };
+    to_value(goals::list(ctx.store, &config, at, p.include_ended)?)
 }
 pub(crate) fn history(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let p: History = parse(call.params)?;

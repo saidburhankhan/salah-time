@@ -376,3 +376,107 @@ fn weighted_equality_meets_both_directions_in_status_history_and_review() {
         );
     }
 }
+
+#[test]
+fn overflowing_metric_sums_report_an_error_for_the_affected_period() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    let id = create(
+        &mut rpc,
+        "goal",
+        json!({"metric_id":"distractions"}),
+        "week",
+        1.,
+    );
+    let empty = good(&mut rpc, "goals.list", json!({}));
+    assert!(empty[0]["progress"]["value"].is_null() && empty[0]["progress"].get("error").is_none());
+    let p = added(
+        &mut rpc,
+        "project.add",
+        "projects",
+        json!({"op_id":"project","name":"Study"}),
+    );
+    for i in 0..2 {
+        good(
+            &mut rpc,
+            "session.log",
+            json!({"op_id":format!("log{i}"),"project_id":p,"minutes":1,"values":{"distractions":1e308}}),
+        );
+    }
+    let list = good(&mut rpc, "goals.list", json!({}));
+    let progress = &goal(&list, &id)["progress"];
+    assert_eq!(progress["error"], "sum_overflow");
+    assert!(progress["value"].is_null());
+    assert_eq!(progress["met"], false);
+    let status = good(&mut rpc, "status.get", json!({}));
+    assert_eq!(goal(&status["goals"], &id)["progress"], *progress);
+    let history = good(
+        &mut rpc,
+        "goals.history",
+        json!({"id":id,"from":DATE,"to":DATE}),
+    );
+    assert_eq!(history[0]["error"], "sum_overflow");
+    assert_eq!(history[0]["met"], false);
+    assert!(history[0]["value"].is_null());
+    let review = good(&mut rpc, "review.get", json!({"week":"2031-05-12"}));
+    assert_eq!(review["summary"]["goals_met"], json!([]));
+    good(&mut rpc, "goal.end", json!({"op_id":"end","id":id}));
+}
+
+#[test]
+fn first_week_goal_membership_is_fixed_by_its_closing_instant_and_sleep_boundary() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, "2031-05-12T12:00:00+05:00");
+    let first = create(&mut rpc, "first", json!({}), "week", 15.);
+    let second = create(&mut rpc, "second", json!({}), "week", 30.);
+    drop(rpc);
+    let mut before_sleep = Session::open(&h, "2031-05-14T22:59:59+05:00");
+    good(
+        &mut before_sleep,
+        "goal.end",
+        json!({"op_id":"before","id":first}),
+    );
+    drop(before_sleep);
+    // Sleep at 23:00 local begins Thursday even though the UTC date is Wednesday.
+    let mut at_sleep = Session::open(&h, "2031-05-14T23:00:00+05:00");
+    good(&mut at_sleep, "goal.end", json!({"op_id":"at","id":second}));
+    drop(at_sleep);
+    for now in [
+        "2031-05-15T12:00:00+05:00",
+        "2031-05-16T12:00:00+05:00",
+        "2031-05-20T12:00:00+05:00",
+    ] {
+        let mut rpc = Session::open(&h, now);
+        let tuesday = good(&mut rpc, "goals.list", json!({"at":"2031-05-13"}));
+        assert_eq!(tuesday.as_array().unwrap().len(), 2);
+        let wed = good(&mut rpc, "goals.list", json!({"at":DATE}));
+        assert_eq!(wed.as_array().unwrap().len(), 1);
+        assert_eq!(wed[0]["id"], second);
+        assert_eq!(
+            good(&mut rpc, "goals.list", json!({"at":"2031-05-15"})),
+            json!([])
+        );
+        let ended = good(
+            &mut rpc,
+            "goals.list",
+            json!({"at":"2031-05-15","include_ended":true}),
+        );
+        assert_eq!(goal(&ended, &first)["ends_on"], "2031-05-18");
+        let history = good(
+            &mut rpc,
+            "goals.history",
+            json!({"id":second,"from":DATE,"to":"2031-05-18"}),
+        );
+        assert_eq!(history[0]["to"], "2031-05-18");
+    }
+    // A later settings change preserves the Sleep boundary for the queried date.
+    let mut later = Session::open(&h, "2031-05-21T12:00:00+05:00");
+    good(
+        &mut later,
+        "config.set",
+        json!({"op_id":"earlier-sleep","sleep_time":"22:00"}),
+    );
+    let wed = good(&mut later, "goals.list", json!({"at":DATE}));
+    assert_eq!(wed.as_array().unwrap().len(), 1);
+    assert_eq!(wed[0]["id"], second);
+}

@@ -9,7 +9,7 @@ mod view;
 pub use allocation::block_minutes;
 pub use fulfilment::{Fulfilment, total_minutes};
 pub use snapshot::{Snapshot, block_capacity, day_capacity, freeze, freeze_past, snapshot};
-pub(crate) use snapshot::{clock_for_day, report_blocks};
+pub(crate) use snapshot::{clock_for_day, historical_clock, report_blocks};
 pub use view::{
     BlockPlan, DayPlan, DayRow, NextBoundary, Now, PrayerRow, ProjectRef, SleepRow, Today,
     day_plan, today,

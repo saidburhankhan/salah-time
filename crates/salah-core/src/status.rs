@@ -128,7 +128,7 @@ impl Status {
             Err(error) => errors.push(error.to_string()),
         }
         let today = self.current_block.block.day;
-        match crate::goals::list(store, today, today, false) {
+        match crate::goals::list(store, config, today, false) {
             Ok(goals) => self.goals = goals,
             Err(error) => errors.push(error.to_string()),
         }

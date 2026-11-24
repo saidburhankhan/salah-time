@@ -91,15 +91,18 @@ fn progress(
             .or_else(|| goal.metric_id.is_none().then_some(0.));
         (value, value.and_then(|v| v.partial_cmp(&goal.target)))
     };
-    let met = comparison.is_some_and(|ordering| match goal.direction {
-        Direction::AtLeast => ordering.is_ge(),
-        Direction::AtMost => ordering.is_le(),
-    });
+    let overflow = value.is_some_and(|v| !v.is_finite());
+    let met = !overflow
+        && comparison.is_some_and(|ordering| match goal.direction {
+            Direction::AtLeast => ordering.is_ge(),
+            Direction::AtMost => ordering.is_le(),
+        });
     Progress {
         from,
         to,
-        value,
+        value: value.filter(|v| v.is_finite()),
         met,
+        error: overflow.then_some("sum_overflow"),
     }
 }
 
@@ -201,17 +204,19 @@ pub fn view(store: &Store, g: Goal, at: NaiveDate) -> Result<GoalView, Error> {
 
 pub fn list(
     store: &Store,
+    config: &crate::config::Config,
     at: NaiveDate,
-    today: NaiveDate,
     include_ended: bool,
 ) -> Result<Vec<GoalView>, Error> {
     store.read_snapshot(|store| {
-        store
-            .goals_at(at, include_ended)?
-            .into_iter()
-            .filter(|g| include_ended || at < today || g.ends_on.is_none())
-            .map(|g| view(store, g, at))
-            .collect()
+        let mut goals = store.goals_at(at, include_ended)?;
+        if !include_ended && goals.iter().any(|g| g.ends_on.is_some()) {
+            // An ended, non-deleted version's last update is its closing instant.
+            // A close exactly at Sleep belongs to the next tracking day.
+            let sleep = crate::day::historical_clock(store, config, at)?.sleep_at;
+            goals.retain(|g| g.ends_on.is_none() || g.updated_at >= sleep);
+        }
+        goals.into_iter().map(|g| view(store, g, at)).collect()
     })
 }
 

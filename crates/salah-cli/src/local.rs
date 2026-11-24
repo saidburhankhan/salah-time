@@ -78,7 +78,7 @@ impl<'a> Local<'a> {
         if id == salah_core::stats::NONE {
             Ok(id.to_owned())
         } else {
-            self.item_id(id)
+            Ok(salah_core::items::resolve_report_id(&self.store, id)?)
         }
     }
 

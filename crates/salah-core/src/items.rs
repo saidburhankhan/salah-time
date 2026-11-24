@@ -127,16 +127,28 @@ pub fn find(store: &Store, id: &str) -> Result<Item, Error> {
 /// Resolves a full id or a unique prefix of at least four characters. A
 /// convenience of the human CLI; RPC callers always send full ids.
 pub fn resolve_id(store: &Store, id: &str) -> Result<String, Error> {
+    resolve_item_id(store, id, false)
+}
+
+/// Report filters can select historical work on a soft-deleted task.
+pub fn resolve_report_id(store: &Store, id: &str) -> Result<String, Error> {
+    resolve_item_id(store, id, true)
+}
+
+fn resolve_item_id(store: &Store, id: &str, include_removed: bool) -> Result<String, Error> {
     let id = id.trim();
-    if store.item(id)?.is_some_and(|i| i.is_live()) {
+    if store
+        .item(id)?
+        .is_some_and(|i| include_removed || i.is_live())
+    {
         return Ok(id.to_owned());
     }
     if id.len() < MIN_ID_PREFIX {
         return Err(not_found("item", id));
     }
-    let mut matches = list(store)?.into_iter().filter(|i| i.id.starts_with(id));
+    let mut matches = store.item_ids_with_prefix(id, include_removed)?.into_iter();
     match (matches.next(), matches.next()) {
-        (Some(item), None) => Ok(item.id),
+        (Some(id), None) => Ok(id),
         (None, _) => Err(not_found("item", id)),
         (Some(_), Some(_)) => Err(Error::Ambiguous { id: id.to_owned() }),
     }

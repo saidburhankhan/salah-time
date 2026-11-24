@@ -858,3 +858,6 @@ fn open_rejects_unknown_pages_before_starting_anything() {
         "{error}"
     );
 }
+
+#[path = "tracking_cli/report_items.rs"]
+mod report_items;

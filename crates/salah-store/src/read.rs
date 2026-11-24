@@ -103,6 +103,19 @@ impl Store {
             .transpose()
     }
 
+    /// Two candidate IDs suffice to distinguish a unique literal prefix from an ambiguous one.
+    pub fn item_ids_with_prefix(
+        &self,
+        prefix: &str,
+        include_removed: bool,
+    ) -> Result<Vec<String>, Error> {
+        self.all(
+            "SELECT id FROM items WHERE instr(id,?1)=1 AND (?2 OR deleted_at IS NULL) LIMIT 2",
+            rusqlite::params![prefix, include_removed],
+            |r| r.get(0),
+        )
+    }
+
     pub fn items_in_epic(&self, id: &str) -> Result<Vec<Item>, Error> {
         self.items_where("SELECT * FROM items WHERE epic_id=?1 ORDER BY id", [id])
     }

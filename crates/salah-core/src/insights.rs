@@ -91,7 +91,7 @@ struct WeekRow {
 }
 #[derive(Serialize)]
 struct PlanRow {
-    item_id: String,
+    item_id: Option<String>,
     name: String,
     planned_block: Option<BoundaryId>,
     minutes: i64,
@@ -170,6 +170,7 @@ pub fn get(
         let mut hours = BTreeMap::<u32, Samples>::new();
         let mut matrix = BTreeMap::new();
         let mut plans = BTreeMap::new();
+        let mut bare_minutes = 0;
         // report_sessions is ordered by planning day. Load that day's frozen
         // plan once, including the task's block before any subsequent moves.
         for group in rows.chunk_by(|a, b| a.session.block.day == b.session.block.day) {
@@ -183,6 +184,9 @@ pub fn get(
                 let s = &row.session;
                 let planned_block = s.item_id.as_deref().and_then(|id| planned.get(id)).copied();
                 let minutes = s.minutes.expect("recorded minutes in report scope");
+                if s.item_id.is_none() {
+                    bare_minutes += minutes;
+                }
                 if let Some(start) = s.started_at {
                     let hour =
                         (start + Duration::seconds(i64::from(snap.clock.offset_seconds))).hour();
@@ -195,7 +199,7 @@ pub fn get(
                         let plan = plans
                             .entry((item.id.clone(), planned_block))
                             .or_insert_with(|| PlanRow {
-                                item_id: item.id.clone(),
+                                item_id: Some(item.id.clone()),
                                 name: item.title.clone(),
                                 planned_block,
                                 minutes: 0,
@@ -213,6 +217,15 @@ pub fn get(
         on_plan.sort_by(|a, b| {
             (&a.name, &a.item_id, a.planned_block).cmp(&(&b.name, &b.item_id, b.planned_block))
         });
+        if bare_minutes > 0 {
+            on_plan.push(PlanRow {
+                item_id: None,
+                name: "Unplanned".into(),
+                planned_block: None,
+                minutes: bare_minutes,
+                on_plan_minutes: 0,
+            });
+        }
         Ok(Insights {
             by_block: BoundaryId::AWAKE
                 .into_iter()

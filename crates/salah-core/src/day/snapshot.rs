@@ -35,7 +35,7 @@ pub fn snapshot(
             plan: store.day_plan(day)?,
         });
     }
-    let (blocks, clock) = blocks_for_day(store, config, day, today)?;
+    let (blocks, clock) = blocks_for_day(store, config, day, day < today)?;
     let items = if day < today {
         store.items_on(day)?
     } else {
@@ -57,17 +57,28 @@ pub(crate) fn clock_for_day(
     day: NaiveDate,
     today: NaiveDate,
 ) -> Result<DayClock, Error> {
-    if day < today
-        && let Some(clock) = store.day_clock(day)?
-    {
+    if day < today {
+        historical_clock(store, config, day)
+    } else {
+        Ok(blocks_for_day(store, config, day, false)?.1)
+    }
+}
+
+/// Resolve this date's boundary from its frozen clock or applicable settings,
+/// regardless of the date on which a historical query happens to run.
+pub(crate) fn historical_clock(
+    store: &Store,
+    config: &Config,
+    day: NaiveDate,
+) -> Result<DayClock, Error> {
+    if let Some(clock) = store.day_clock(day)? {
         return Ok(clock);
     }
-    let (_, mut clock) = blocks_for_day(store, config, day, today)?;
-    if day < today
-        && let Some(night) = store
-            .day_blocks(day)?
-            .iter()
-            .find(|b| b.block == BoundaryId::Night)
+    let (_, mut clock) = blocks_for_day(store, config, day, true)?;
+    if let Some(night) = store
+        .day_blocks(day)?
+        .iter()
+        .find(|b| b.block == BoundaryId::Night)
     {
         // Legacy snapshots only contain UTC block windows. Both nights
         // used the same fixed offset and sleep time.
@@ -139,16 +150,16 @@ pub(crate) fn report_blocks(
     if day < today && store.day_written(day)? {
         return store.day_blocks(day);
     }
-    Ok(blocks_for_day(store, config, day, today)?.0)
+    Ok(blocks_for_day(store, config, day, day < today)?.0)
 }
 
 fn blocks_for_day(
     store: &Store,
     config: &Config,
     day: NaiveDate,
-    today: NaiveDate,
+    use_history: bool,
 ) -> Result<(Vec<DayBlock>, DayClock), Error> {
-    let historical: Option<Config> = if day < today {
+    let historical: Option<Config> = if use_history {
         store
             .historical_config(day)?
             .map(|body| serde_json::from_str(&body))

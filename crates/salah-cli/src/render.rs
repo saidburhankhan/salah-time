@@ -106,10 +106,15 @@ fn goal_line(row: &Value) -> String {
     } else {
         "at least"
     };
-    let value = row["progress"]["value"]
-        .as_f64()
-        .map(|v| v.to_string())
-        .unwrap_or_else(|| "—".into());
+    let progress = &row["progress"];
+    let value = if progress["error"] == "sum_overflow" {
+        "sum overflow".into()
+    } else {
+        progress["value"]
+            .as_f64()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "—".into())
+    };
     format!(
         "{}  {}  {}  {} {} {}  ({} so far)",
         text(&row["id"]),
@@ -126,12 +131,17 @@ pub fn goal_history(result: &Value) -> String {
     rows(result)
         .iter()
         .map(|p| {
+            let value = if p["error"] == "sum_overflow" {
+                "sum overflow".into()
+            } else {
+                p["value"].to_string()
+            };
             format!(
                 "{} to {}  target {}  value {}  {}",
                 text(&p["from"]),
                 text(&p["to"]),
                 p["target"],
-                p["value"],
+                value,
                 if p["met"] == true { "met" } else { "not met" }
             )
         })
@@ -280,6 +290,10 @@ pub fn insights(result: &Value) -> String {
     }
     out.push("Planned vs actual:".into());
     for r in rows(&result["on_plan"]) {
+        if r["planned_block"].is_null() {
+            out.push(format!("  {}  {} min", text(&r["name"]), r["minutes"]));
+            continue;
+        }
         out.push(format!(
             "  {}  {} of {} min on plan ({})",
             text(&r["name"]),
