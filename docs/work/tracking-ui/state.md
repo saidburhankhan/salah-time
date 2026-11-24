@@ -267,3 +267,7 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   FIXED. INSTALLED 19:1x via `scripts/test && app/bin/test && ./scripts/install`; live log clean;
   DB v5 ok; bar "Sleep 2h 16m". Next useful work: a short R5 review (Sol) of today's fixes;
   open user decision: should archiving a project end its goals.
+- 19:2x R5 (Sol) DONE: 13 findings (2 high, app: stale pages after socket reconnect; past-day editor
+  pairs frozen fields with live version). Routed: C9 (Sol) app → CHECKPOINT 5; C8 (Sol) insights
+  on-plan per task, ranked-notes budget, goal batching, one rate rule, new review.notes search →
+  CHECKPOINT 9; C10 (Sol) chip sum_overflow → CHECKPOINT 5. Cron 00:02 for the 23:58 window.
