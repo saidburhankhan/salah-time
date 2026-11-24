@@ -271,3 +271,8 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   pairs frozen fields with live version). Routed: C9 (Sol) app → CHECKPOINT 5; C8 (Sol) insights
   on-plan per task, ranked-notes budget, goal batching, one rate rule, new review.notes search →
   CHECKPOINT 9; C10 (Sol) chip sum_overflow → CHECKPOINT 5. Cron 00:02 for the 23:58 window.
+- 19:4x committed 7e733a6 (C10 5), d2b4cba (C8 9: R5 backend + review.notes/session.notes), 326fd23
+  (C9 5: R5 app incl. both highs; orchestrator updated resourceDrawerScreens for blank-note rule).
+  INSTALLED via gated chain (257 cargo + 97 app tests); live log clean; bar "Sleep 1h 45m ● 11:13 +".
+  ALL R5 FINDINGS FIXED. C8 (Sol) now adds routines.activity (C9's spec) → CHECKPOINT 10; then C9
+  switches the Routines page to it. After that the tracking-ui list is empty: ask the user.
