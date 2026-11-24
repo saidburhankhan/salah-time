@@ -177,6 +177,7 @@ fn mutations_are_exactly_the_writing_methods() {
         || *m == "item.schedule"
         || *m == "item.backlog"
         || *m == "goal.end"
+        || *m == "review.save"
         || m.starts_with("session.")
         || m.starts_with("prayer.")
         || *m == "config.set"));

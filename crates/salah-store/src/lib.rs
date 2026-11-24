@@ -9,6 +9,7 @@ mod migrations;
 mod read;
 pub mod reports;
 pub mod resources;
+mod reviews;
 mod write;
 
 pub use write::WriteTx;

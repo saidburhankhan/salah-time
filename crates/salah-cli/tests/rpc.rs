@@ -599,3 +599,6 @@ mod resources;
 
 #[path = "rpc/insights.rs"]
 mod insights;
+
+#[path = "rpc/reviews.rs"]
+mod reviews;

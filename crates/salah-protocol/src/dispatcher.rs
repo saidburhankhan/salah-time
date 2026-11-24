@@ -6,7 +6,7 @@
 use crate::error::RpcError;
 use crate::message::{MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response, SERVER_NAME};
 use crate::methods::{HelloParams, HelloResult};
-use crate::{goals, reads, resources, writes};
+use crate::{goals, reads, resources, reviews, writes};
 use chrono::{DateTime, Utc};
 use salah_core::{Store, config::Config};
 use salah_domain::error::Error;
@@ -55,6 +55,8 @@ enum Kind {
 
 /// Every method after `hello`.
 const METHODS: &[(&str, Kind, Handler)] = &[
+    ("review.get", Kind::Read, reviews::get),
+    ("review.save", Kind::Write, reviews::save),
     ("goals.list", Kind::Read, goals::list),
     ("goals.history", Kind::Read, goals::history),
     ("goal.add", Kind::Write, goals::add),

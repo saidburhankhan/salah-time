@@ -6,5 +6,6 @@ pub mod error;
 pub mod goal;
 pub mod item;
 pub mod resource;
+pub mod review;
 pub mod runtime;
 pub mod tracking;

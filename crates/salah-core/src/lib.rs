@@ -18,6 +18,7 @@ pub mod metrics;
 pub mod projects;
 pub mod quick;
 pub mod resources;
+pub mod reviews;
 pub mod sessions;
 pub mod stats;
 pub mod status;

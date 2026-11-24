@@ -197,6 +197,22 @@ fn method_success_and_error(client: &mut Client) {
         -32001
     );
     check_resources(client, &id);
+    assert!(client.good("review.get", json!({"week":"2031-05-12"}))["summary"].is_object());
+    assert_eq!(client.bad("review.get", json!({"week":DATE})), -32001);
+    assert_eq!(
+        client.good(
+            "review.save",
+            json!({"week":"2031-05-12","note":"Reading","op_id":"reflection"})
+        )["changed"]["reviews"][0]["version"],
+        1
+    );
+    assert_eq!(
+        client.bad(
+            "review.save",
+            json!({"week":DATE,"note":"hi","op_id":"wrong-week"})
+        ),
+        -32001
+    );
     check_goals(client);
     let extra = client.good(
         "item.add",

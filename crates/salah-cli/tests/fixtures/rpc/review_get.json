@@ -1,0 +1,175 @@
+{
+  "id": 6,
+  "jsonrpc": "2.0",
+  "result": {
+    "note": "Keep reading.\nTry mornings.",
+    "summary": {
+      "by_epic": [
+        {
+          "id": "<id:2>",
+          "minutes": 10,
+          "name": "Chapter"
+        },
+        {
+          "id": "none",
+          "minutes": 20,
+          "name": "No epic"
+        }
+      ],
+      "by_project": [
+        {
+          "id": "none",
+          "minutes": 20,
+          "name": "No project"
+        },
+        {
+          "id": "<id:3>",
+          "minutes": 10,
+          "name": "Study"
+        }
+      ],
+      "distractions_per_hour": 2.0,
+      "goals_met": [
+        {
+          "created_at": "2031-05-12T04:00:00Z",
+          "deleted_at": null,
+          "direction": "at_least",
+          "ends_on": null,
+          "epic_id": null,
+          "id": "<id:4>",
+          "item_id": null,
+          "metric_id": null,
+          "period": "day",
+          "position": 0,
+          "progress": {
+            "from": "2031-05-12",
+            "met": true,
+            "to": "2031-05-12",
+            "value": 10.0
+          },
+          "project_id": null,
+          "replaces_id": null,
+          "scope_label": null,
+          "starts_on": "2031-05-12",
+          "target": 10.0,
+          "updated_at": "2031-05-12T04:00:00Z",
+          "version": 1
+        },
+        {
+          "created_at": "2031-05-12T04:00:00Z",
+          "deleted_at": null,
+          "direction": "at_least",
+          "ends_on": null,
+          "epic_id": null,
+          "id": "<id:4>",
+          "item_id": null,
+          "metric_id": null,
+          "period": "day",
+          "position": 0,
+          "progress": {
+            "from": "2031-05-14",
+            "met": true,
+            "to": "2031-05-14",
+            "value": 20.0
+          },
+          "project_id": null,
+          "replaces_id": null,
+          "scope_label": null,
+          "starts_on": "2031-05-12",
+          "target": 10.0,
+          "updated_at": "2031-05-12T04:00:00Z",
+          "version": 1
+        },
+        {
+          "created_at": "2031-05-12T04:00:00Z",
+          "deleted_at": null,
+          "direction": "at_least",
+          "ends_on": null,
+          "epic_id": null,
+          "id": "<id:5>",
+          "item_id": null,
+          "metric_id": null,
+          "period": "week",
+          "position": 1,
+          "progress": {
+            "from": "2031-05-12",
+            "met": true,
+            "to": "2031-05-18",
+            "value": 30.0
+          },
+          "project_id": null,
+          "replaces_id": null,
+          "scope_label": null,
+          "starts_on": "2031-05-12",
+          "target": 30.0,
+          "updated_at": "2031-05-12T04:00:00Z",
+          "version": 1
+        }
+      ],
+      "open_backlog_count": 1,
+      "previous_distractions_per_hour": 6.0,
+      "sessions_with_notes": [
+        {
+          "block": "fajr",
+          "day": "2031-05-14",
+          "ended_at": "2031-05-14T04:55:00Z",
+          "epic": null,
+          "epic_id": null,
+          "id": "<id:6>",
+          "item": {
+            "id": "<id:7>",
+            "title": "Errand"
+          },
+          "item_id": "<id:7>",
+          "minutes": 20,
+          "note": null,
+          "notes": [
+            {
+              "at": "2031-05-14T04:30:00Z",
+              "id": "<id:8>",
+              "text": "At the shop"
+            }
+          ],
+          "project": null,
+          "project_id": null,
+          "running": false,
+          "stale": false,
+          "started_at": "2031-05-14T04:30:00Z",
+          "values": {},
+          "version": 3
+        },
+        {
+          "block": "fajr",
+          "day": "2031-05-12",
+          "ended_at": null,
+          "epic": {
+            "id": "<id:2>",
+            "name": "Chapter"
+          },
+          "epic_id": "<id:2>",
+          "id": "<id:9>",
+          "item": null,
+          "item_id": null,
+          "minutes": 10,
+          "note": "Monday",
+          "notes": [],
+          "project": {
+            "color": "#4c8bf5",
+            "id": "<id:3>",
+            "name": "Study"
+          },
+          "project_id": "<id:3>",
+          "running": false,
+          "stale": false,
+          "started_at": null,
+          "values": {
+            "distractions": 1.0
+          },
+          "version": 1
+        }
+      ]
+    },
+    "updated_at": "2031-05-14T04:55:00Z",
+    "week": "2031-05-12"
+  }
+}

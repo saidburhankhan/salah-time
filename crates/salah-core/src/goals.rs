@@ -111,6 +111,31 @@ fn periods(
     Ok(rows)
 }
 
+/// Met daily and weekly periods in the selected review week.
+pub(crate) fn met_between(
+    store: &Store,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> Result<Vec<GoalView>, Error> {
+    let mut met = Vec::new();
+    if from > to {
+        return Ok(met);
+    }
+    for g in store.goals_between(from, to)? {
+        let label = store.goal_scope_label(&g.scope)?;
+        for row in periods(store, &g, from, to)? {
+            if row.progress.met {
+                met.push(GoalView {
+                    goal: g.clone(),
+                    scope_label: label.clone(),
+                    progress: row.progress,
+                });
+            }
+        }
+    }
+    Ok(met)
+}
+
 pub fn view(store: &Store, g: Goal, at: NaiveDate) -> Result<GoalView, Error> {
     let at = at.min(g.ends_on.unwrap_or(at)).max(g.starts_on);
     let p = periods(store, &g, at, at)?

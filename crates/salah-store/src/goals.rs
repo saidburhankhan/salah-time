@@ -57,6 +57,11 @@ impl Store {
         )
     }
 
+    pub fn goals_between(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Goal>, Error> {
+        self.all("SELECT * FROM goals WHERE deleted_at IS NULL AND starts_on<=?2 AND (ends_on IS NULL OR ends_on>=?1) ORDER BY position,starts_on,id",
+            params![codec::day(from),codec::day(to)],goal)
+    }
+
     pub fn goals_for_scope(&self, scope: &Scope) -> Result<Vec<Goal>, Error> {
         self.all(
             "SELECT * FROM goals WHERE deleted_at IS NULL AND ends_on IS NULL AND

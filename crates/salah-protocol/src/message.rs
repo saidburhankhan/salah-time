@@ -109,6 +109,7 @@ pub enum ChangeScope {
     Epics,
     Resources,
     Goals,
+    Reviews,
     Tags,
     Metrics,
     Marks,
@@ -119,6 +120,7 @@ impl ChangeScope {
     /// The scope of a store change-log entity name.
     pub fn of_entity(entity: &str) -> Option<Self> {
         Some(match entity {
+            "reviews" => Self::Reviews,
             "goals" => Self::Goals,
             "item" => Self::Items,
             "session" => Self::Sessions,

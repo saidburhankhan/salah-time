@@ -13,6 +13,7 @@ pub mod message;
 pub mod methods;
 mod reads;
 mod resources;
+mod reviews;
 mod writes;
 
 pub use dispatcher::{ConfigRepository, Context, Dispatcher};
