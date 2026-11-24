@@ -257,3 +257,7 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   backend value; C9's WIP already reads it from the fixture). ORCHESTRATOR MISTAKE: the install ran
   although scripts/test exited 1 — always gate install on `scripts/test && app/bin/test`.
   Live log clean; bar "Sleep 2h 56m". C9 WIP restored (18 paths). Queue at 23:18 in the 23:20 cron.
+- 18:5x USER asked to recalc windows: waiting → ~5.5 windows by 25 Nov night, reset now → 6 windows
+  and no 5 h idle. RESET REDEEMED at 18:57 (0 left). Windows now ≈ 18:57, 23:57, 04:57, 09:57,
+  14:57, 19:57. USER: Astra only for complex tasks, Sol for simpler ones → C8/C9 restarted on Sol
+  (R4 fixes are simple). C10 (Sol) CHECKPOINT 4 committed.
