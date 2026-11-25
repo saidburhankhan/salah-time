@@ -295,3 +295,5 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   CHECKPOINT 8 (multi-metric Trends). Codex 5h 4%, weekly 24%. Waiting for its CHECKPOINT line.
 - 07:4x C9 CHECKPOINT 8 verified outside the sandbox (100 app tests, 0 skipped; screenshots of
   1/2/3/5 measures, hover, pinned, Table header reviewed) and committed.
+- 07:41 INSTALLED via gated chain (263 cargo + 100 app tests); live shell log clean (reload only, no
+  failures); bar "Dhuhr 4h 33m". Codex 5h ~4%+, weekly ~25%. Queue empty: ask the user what next.
