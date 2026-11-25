@@ -39,7 +39,7 @@ Column {
   readonly property var schedule: CreationLogic.schedule(parsed, whenChoice, today)
   readonly property var fields: CreationLogic.prefill(parsed, minutesChoice, blockChoice,
     host.quickAddBlock, schedule.when === "tomorrow" ? "fajr" : (planning ? planning.start : ""))
-  readonly property var projects: host.projects
+  readonly property var projects: CreationLogic.activeProjects(host.projects)
   readonly property var tagIds: CreationLogic.taskTagIds(
     CreationLogic.defaultTagIds(projects, projectId), tagChoice, host.tags)
   readonly property var projectEpics: CreationLogic.epicsForProject(host.epics, projectId)
@@ -128,6 +128,18 @@ Column {
     interval: 140
     onTriggered: if (quickField.text.trim() && !root.itemAttempt && !root.taskAdded)
       root.transport.parseItem(quickField.text)
+  }
+
+  Connections {
+    target: root.host
+    function onReportChanged() {
+      // Stdio has no changed push. An open sheet refreshes its choices with
+      // the status snapshot so an archive can clear a selected project.
+      if (root.host.opened && root.expanded && !root.transport.socketActive) {
+        root.transport.loadProjects()
+        root.transport.loadEpics()
+      }
+    }
   }
 
   Connections {

@@ -162,3 +162,27 @@ regression, and all 148 Node checks passed. Omarchy plugin validation and
 `git diff --check` passed.
 
 CHECKPOINT 6: Verify ended routines follow the backend plan in the widget — files: docs/work/tracking-ui/c10-progress.md
+
+## Archived projects — paused rows, goals and creation choices
+
+The timeline follows the backend's planner. If a refreshed plan removes
+a task during a drag, the widget cancels the drag and applies the new
+plan immediately. Goal chips omit paused rows before sorting and counting.
+The creation sheet requests active projects and the default unpaused
+epic catalogue, filters both choices, and clears a selection when it
+becomes unavailable. An open sheet refreshes these catalogues with
+status snapshots in stdio fallback mode.
+
+All 151 Node checks and C8's three project-pause RPC tests passed, including
+the paused catalogue and status fixtures. Omarchy validation, QML syntax
+checks and `git diff --check` passed.
+
+The offscreen Quickshell harness used C8's real CLI and a scratch database.
+Archiving while the creation sheet was open and a routine was being
+dragged removed the routine, open task, scoped goal chips, project and
+epic. The all-work goal and unrelated task remained. Resuming the project
+restored the applicable timeline rows and choices. Both captures were
+reviewed in `/tmp/salah-c10-paused.IJ1gdW/`. The harness used an Items-only
+panel stand-in and stdio RPC.
+
+CHECKPOINT 7: Keep paused project work out of the widget timeline, goal chips and creation choices — files: plugin/local.salah/BarWidget.qml, plugin/local.salah/CreationLogic.js, plugin/local.salah/GoalLogic.js, plugin/local.salah/QuickAdd.qml, plugin/local.salah/tests/creation_logic_test.js, plugin/local.salah/tests/goal_logic_test.js, docs/work/tracking-ui/c10-progress.md

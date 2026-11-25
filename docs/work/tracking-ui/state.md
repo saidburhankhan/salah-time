@@ -309,3 +309,7 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   migration 007 gate on a fresh copy of the live DB: v6→v7, integrity/FK ok, 25 tables same row
   counts, day.get 23–25 Nov, stats.get Oct–Nov and routines.activity identical, items.list only
   adds paused:false. Committed. Next: C9 (Sol) app + C10 (Sol) widget on c8-progress.md §12.
+- 12:5x C9 CHECKPOINT 9 (app pause UI; 102 app tests outside sandbox, screenshots reviewed: archive
+  confirm counts, Goals Paused section + neutral history rows, Routines paused group, Statistics
+  archived filters) and C10 CHECKPOINT 7 (widget hides paused rows, creation skips archived
+  projects/paused epics; 151 node checks) committed.

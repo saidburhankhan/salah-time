@@ -99,7 +99,7 @@ function chipFor(goal, ctx) {
 function goalChips(goals, ctx, max) {
   var limit = max === undefined ? MAX_CHIPS : max
   var rows = list(goals).filter(function(goal) {
-    return goal && (goal.period === "day" || goal.period === "week")
+    return goal && goal.paused !== true && (goal.period === "day" || goal.period === "week")
   })
   var day = rows.filter(function(goal) { return goal.period === "day" })
   var week = rows.filter(function(goal) { return goal.period === "week" })

@@ -960,11 +960,15 @@ BarWidget {
       }
 
       function syncTimeline(status) {
-        // A server push during a drag is applied once the drag ends.
-        if (dragKey !== "") return
         var desired = desiredRows(status)
         var desiredKeys = ({})
         for (var k = 0; k < desired.length; k++) desiredKeys[desired[k].rowKey] = true
+        if (dragKey !== "") {
+          // Keep the local drag order unless the latest plan removes a task.
+          if (!dragSnapshot.some(key => key.indexOf("item:") === 0 && !desiredKeys[key])) return
+          dragKey = ""
+          dragSnapshot = []
+        }
         for (var extra = timelineModel.count - 1; extra >= 0; extra--) {
           var key = timelineModel.get(extra).rowKey
           if (!desiredKeys[key] && String(key).indexOf("pending:") !== 0)

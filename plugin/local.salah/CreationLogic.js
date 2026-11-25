@@ -17,6 +17,10 @@ function minuteChoices(parsed) {
   return choices
 }
 
+function activeProjects(projects) {
+  return (projects || []).filter(function(project) { return project && project.archived !== true })
+}
+
 function defaultTagIds(projects, projectId) {
   var project = projects.find(function(row) { return row.id === projectId })
   return project ? (project.tag_ids || []) : []
@@ -51,11 +55,12 @@ function schedule(parsed, whenChoice, today) {
   return { when: when, date: date }
 }
 
-// A project's active epics in the core's order. Finished epics are not offered.
+// A project's active, unpaused epics in the core's order.
 function epicsForProject(epics, projectId) {
   if (!projectId) return []
   return (epics || []).filter(function(epic) {
-    return epic && epic.project_id === projectId && (epic.status || "active") === "active"
+    return epic && epic.project_id === projectId && epic.paused !== true
+      && (epic.status || "active") === "active"
   }).sort(function(a, b) { return (Number(a.position) || 0) - (Number(b.position) || 0) })
 }
 

@@ -13,8 +13,11 @@ vm.runInNewContext(fs.readFileSync(filename, "utf8").replace(/^\.pragma library\
 
 const strings = { allWork: "All work", task: "Task", epic: "Epic", project: "Project",
   none: "—", sumOverflow: "Total too large", minuteUnit: "min" }
-const status = JSON.parse(fs.readFileSync(path.join(__dirname,
-  "../../../crates/salah-cli/tests/fixtures/rpc/status_goals.json"), "utf8")).result
+function fixture(name) {
+  const dir = path.join(__dirname, "../../../crates/salah-cli/tests/fixtures/rpc")
+  return JSON.parse(fs.readFileSync(path.join(dir, name + ".json"), "utf8")).result
+}
+const status = fixture("status_goals")
 const ctx = {
   projects: [{ id: "<id:3>", name: "Study" }],
   epics: [{ id: "<id:4>", name: "Thesis" }],
@@ -58,6 +61,18 @@ test("fixture: week goals, metric names, at_most unmet", () => {
 
 test("empty and missing goals give no chips", () => {
   for (const input of [[], null, undefined, "x"]) { const o = logic.goalChips(input, ctx); assert.equal(o.chips.length, 0); assert.equal(o.more, 0) }
+})
+
+test("paused project, epic and task goals consume neither chips nor overflow slots", () => {
+  const catalog = fixture("goals_list_paused")
+  const report = fixture("status_project_paused")
+  const paused = catalog.filter(row => row.paused)
+  assert.equal(paused.length, 3)
+  const out = logic.goalChips(catalog, ctx)
+  assert.deepEqual(Array.from(out.chips, chip => chip.id), report.goals.map(goal => goal.id))
+  assert.equal(out.chips[0].label, "All work")
+  assert.equal(out.more, 0)
+  assert.equal(logic.goalChips(paused, ctx).chips.length, 0)
 })
 
 test("null metric value shows the placeholder and an empty bar", () => {

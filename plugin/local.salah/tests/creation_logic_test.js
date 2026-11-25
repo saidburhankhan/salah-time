@@ -46,6 +46,14 @@ test("project defaults are selected before the tag catalogue loads", () => {
   same(logic.defaultTagIds(projects, "archived"), [])
 })
 
+test("creation offers active projects and leaves out archived ones", () => {
+  const [active] = fixture("projects_list")
+  const [pausedEpic] = fixture("epics_list_paused")
+  const archived = { id: pausedEpic.project_id, name: "Study", archived: true }
+  same(logic.activeProjects([archived, active]), [active])
+  same(logic.activeProjects(null), [])
+})
+
 test("task tags can clear all defaults or include tags from outside the chosen project", () => {
   const [quran] = fixture("projects_list")
   const catalogue = [...quran.tags, { id: "standalone", name: "Arabic" }]
@@ -133,6 +141,14 @@ test("a stale or foreign epic choice falls back to No epic", () => {
   assert.equal(logic.validEpicId(epics, "p", "f"), "")
   assert.equal(logic.validEpicId(epics, "q", "a"), "")
   assert.equal(logic.validEpicId(epics, "p", ""), "")
+})
+
+test("a paused epic from the report catalogue cannot be selected for a new task", () => {
+  const [paused] = fixture("epics_list_paused")
+  const resumed = { ...paused, paused: false }
+  same(logic.epicsForProject([paused], paused.project_id), [])
+  assert.equal(logic.validEpicId([paused], paused.project_id, paused.id), "")
+  assert.equal(logic.validEpicId([resumed], resumed.project_id, resumed.id), resumed.id)
 })
 
 test("epic_id is sent with item.add only alongside its project", () => {
