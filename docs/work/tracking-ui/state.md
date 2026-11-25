@@ -331,3 +331,7 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - 13:53 INSTALLED via gated chain (272 cargo + 103 app); daemon restarted 13:52; live notes.list
   (28 days) = 12 notes; shell log clean; bar "Asr 1h 23m". Codex 5h 85%, weekly 53%.
   Notes/filters feature DONE. Queue empty: ask the user.
+- 14:0x USER: instant inline note editing in app + widget (click note or pencil; Enter save,
+  Shift+Enter newline, Esc cancel; buttons kept); Esc closes the widget; Esc/Enter rule on every
+  dialog (Enter = plain Save when Save & done exists) → plan addendum "instant note editing…".
+  Dispatched C9 (Sol) → CHECKPOINT 11 and C10 (Sol) → CHECKPOINT 8. Codex 5h 85%: may cap.

@@ -645,3 +645,33 @@ edits the main note only; timestamped entries are read-only.
 Tests: backend fixtures for each method (filters combined, derived rate, paging, idempotent edits,
 version conflicts). App tests + reviewed screenshots (Insights metric filters, Notes page with
 filters, inline edit, entry add/remove in the editor). Widget unchanged.
+
+### Addendum: instant note editing everywhere; Esc cancels, Enter saves (user request 2026-11-25 ~14:00)
+User: editing a note takes several layers. It should be instant in the app AND the widget (the
+widget needs note editing too). Pressing the note itself opens its editor where that doesn't clash
+with other click targets, or a small edit button where it would. Esc cancels, Enter saves, and the
+Cancel/Save buttons stay. Also: Esc closes the widget, and everywhere Esc = cancel and Enter = save.
+In a dialog with both Save and "Save & done", Enter presses Save.
+1. **Inline note editor, one shared component (app C9 Sol).** Every place a session note or timed
+   entry is shown (Today session rows, the session editor, Statistics Notes tab, the Notes page,
+   epic page notes, Insights sessions, Review notes) edits in place. Click the note text, or the
+   small pencil button that appears on hover/focus at the row's end, to open a text field over it
+   with Cancel and Save. Where the row itself already opens something (the session editor), the
+   note text and pencil take the click and the rest of the row keeps its action. Enter saves,
+   Shift+Enter adds a newline, Esc cancels and restores the text. Blank text is refused; to delete
+   an entry use Remove. Save uses session.edit for the main note and session.note_edit for an entry,
+   with the version captured when editing started and a retry that reuses op_id. One note edits at a
+   time, and opening another asks nothing but saves nothing: it cancels the first unless it is dirty,
+   in which case it keeps focus and shows "Unsaved note". A running session's note can be edited too.
+2. **Widget (C10 Sol).** Wherever the widget shows a note (the running session's note and entries,
+   recent sessions or note lines in the popup), the same interaction: click the note or its pencil,
+   then Enter saves, Shift+Enter adds a newline, Esc cancels. Add "+ note" for the running session if
+   it isn't there yet. Uses the same RPCs. Keep the timeline drag and other clicks working.
+3. **Keyboard everywhere (C9 app, C10 widget).** Esc closes the widget popup/panel (after first
+   cancelling an open inline editor or sheet, one layer per Esc). In the app and widget every
+   dialog, sheet and inline form: Esc = Cancel, Enter = the primary Save. Where Save and "Save &
+   done" (or Stop & save, etc.) both exist, Enter presses plain Save. Multi-line fields take
+   Shift+Enter for a newline. Number/date fields follow the same rule. Audit every dialog and list
+   them in the progress file with their Enter/Esc actions.
+Tests: app keyboard tests (Enter/Esc/Shift+Enter on each editor, click targets don't clash), widget
+node/harness tests, and reviewed screenshots of the inline editor in each place.
