@@ -342,3 +342,6 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   app test itemEditorPicksAndCreatesProjects now presses Enter via submitForm (C9 routed Enter
   through a window Shortcut; the socket test was skipped in the sandbox). 104 app tests; app
   inline-editor and widget harness screenshots reviewed. Committed; installing.
+- 18:10 INSTALLED via gated chain (273 cargo + 104 app); daemon restarted 18:09; shell log clean;
+  bar "Isha 7m". Instant note editing + Esc/Enter DONE. Codex 5h 61%, weekly 65%; one more window
+  (22:2x) before the subscription ends. Queue empty: ask the user.
