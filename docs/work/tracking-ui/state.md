@@ -320,3 +320,5 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - 13:0x USER request: metric range filters in Insights (+ distractions/h), editable timestamped
   session notes, Insights "Notes" tab (one row per note, session-measure filters) → plan.md addendum
   "metric filters everywhere…". Dispatched C8 (Sol) backend → CHECKPOINT 13; C9 (Sol) app after.
+- 13:1x USER: notes list as a separate sidebar page "Notes", not an Insights tab (plan item 3
+  updated; backend notes.list unchanged, so C8 continues as dispatched).
