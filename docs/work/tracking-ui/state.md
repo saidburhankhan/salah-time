@@ -317,3 +317,6 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   kept; integrity/FK ok; project_pauses empty (no archived projects); daemon restarted 12:53;
   `salah day` today ok; shell log clean; bar "Asr 2h 22m". Archive-pauses feature DONE.
   Queue empty: ask the user what next.
+- 13:0x USER request: metric range filters in Insights (+ distractions/h), editable timestamped
+  session notes, Insights "Notes" tab (one row per note, session-measure filters) → plan.md addendum
+  "metric filters everywhere…". Dispatched C8 (Sol) backend → CHECKPOINT 13; C9 (Sol) app after.

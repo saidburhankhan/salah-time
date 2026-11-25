@@ -604,3 +604,42 @@ Paused time is never scored as missed. Past work stays everywhere it is read.
    archived projects. Verify against the C8 fixtures. No new UI.
 Install gate: migration 007 on a fresh read-only copy of the live DB (row counts per table, day.get
 for the last 3 days and stats totals identical before/after) before installing.
+
+### Addendum: metric filters everywhere, editable session notes, Insights Notes panel (user request 2026-11-25 ~13:00)
+User: improve the sessions filter with metric range searches (distractions, quality…); edit
+session notes; a new Insights panel listing the notes themselves (not every session of a task)
+with filters by project/task/… and by the session's measures ("distractions more than x for that
+length of session").
+Today: Statistics has a Metrics row (minutes + metric ranges) and a Notes tab that lists whole
+sessions. Insights and Review hide the Metrics row (`showMetrics: false`). The session editor
+edits the main note only; timestamped entries are read-only.
+1. **Metric filters in Insights (C8 Sol backend, C9 Sol app).** `insights.get` (and every Insights
+   read the app makes) accepts the same measures filter as stats (`minutes_min/max`,
+   `values: {metric_id: {min, max}}`), applied per session before aggregation. Insights shows the
+   Metrics row for Patterns, Sessions and Notes. Plan adherence ignores it and says so in one muted
+   line. The range editor gains a derived **Distractions per hour** range (per session, from
+   distractions and minutes; sessions without distractions don't match) and a one-click "only
+   sessions with a value" when both bounds are empty. Chips read "Distractions ≥ 3", "Quality 2–4",
+   "Duration 20–60m", "Distractions/h ≥ 4". Statistics gets the same editor improvements.
+2. **Editable session notes (C8 Sol, C9 Sol).** Backend: `session.note_edit {session_id, note_id,
+   text, op_id, expected_version}` and `session.note_remove {session_id, note_id, op_id,
+   expected_version}`. `session.note` accepts an optional `at` (HH:MM within the session's span)
+   so a finished session can get an entry. Blank text is rejected. Each change bumps the session
+   version and is idempotent per op_id, with CLI parity (`salah session note-edit/note-rm`). App:
+   in the session editor every timestamped entry can be edited in place or removed (with undo
+   toast or confirm), and "+ Add note" adds one with a time. The same editor opens from Today,
+   Statistics Notes, Insights and the epic page.
+3. **Insights → Notes tab (C8 Sol backend, C9 Sol app).** One row per note, never one per session:
+   the main note and each timestamped entry are separate rows. Backend `notes.list {scope filters
+   (range, project_id, epic_id, item_id, tag_id), measures (as in 1, incl. distractions per hour),
+   q, kind: all|main|entry, limit, before}` → `{rows: [{session_id, note_id|null, kind, at,
+   text, session: {day, start, end, minutes, item_id, title, project_id, epic_id, values}}],
+   next, total}`, newest first, paginated under the transport limit, archived/paused work included.
+   CLI `salah notes list … --json`. App: an Insights tab "Notes" using the Insights filter bar
+   (with Metrics), a search field and an All/Main/Timed toggle. Rows show the note text first, its
+   time, then compact muted context (date · task · project/epic · minutes · metric chips). A
+   click edits the note in place (same rules as 2), and "Open session" opens the editor. Empty
+   state names the active filters. Load more pages.
+Tests: backend fixtures for each method (filters combined, derived rate, paging, idempotent edits,
+version conflicts). App tests + reviewed screenshots (Insights metric filters, notes tab with
+filters, inline edit, entry add/remove in the editor). Widget unchanged.
