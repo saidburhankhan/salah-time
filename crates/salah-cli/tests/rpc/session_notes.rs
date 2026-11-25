@@ -455,3 +455,46 @@ fn notes_pages_stay_below_the_frame_limit_and_skip_removed_or_running_work() {
     assert!(before.is_null());
     assert_eq!(seen.len(), note_count + 1);
 }
+
+#[test]
+fn timed_notes_keep_newlines_and_refuse_other_control_characters() {
+    let h = Harness::new();
+    let mut rpc = Session::open(&h, NOW);
+    let task = added(
+        &mut rpc,
+        "item.add",
+        "items",
+        json!({"op_id":"task","title":"Read"}),
+    );
+    let id = added(
+        &mut rpc,
+        "session.start",
+        "sessions",
+        json!({"op_id":"start","item_id":task}),
+    );
+    let noted = good(
+        &mut rpc,
+        "session.note",
+        json!({"op_id":"n1","id":id,"text":"line one\nline two"}),
+    );
+    let view = &noted["changed"]["sessions"][0];
+    assert_eq!(view["notes"][0]["text"], "line one\nline two");
+    let note_id = view["notes"][0]["id"].as_str().unwrap().to_owned();
+    let version = view["version"].as_i64().unwrap();
+    let edited = good(
+        &mut rpc,
+        "session.note_edit",
+        json!({"op_id":"e1","session_id":id,"note_id":note_id,"text":"a\nb\nc","expected_version":version}),
+    );
+    assert_eq!(
+        edited["changed"]["sessions"][0]["notes"][0]["text"],
+        "a\nb\nc"
+    );
+    bad(
+        &mut rpc,
+        "session.note",
+        json!({"op_id":"n2","id":id,"text":"tab\there"}),
+        "validation",
+        Some("text"),
+    );
+}

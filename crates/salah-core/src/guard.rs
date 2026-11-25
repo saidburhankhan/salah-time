@@ -88,6 +88,31 @@ pub(crate) fn note(value: Option<String>) -> Result<Option<String>, Error> {
     Ok(Some(value.to_owned()))
 }
 
+/// A required note text such as a timed entry: the `note` rules (newlines
+/// allowed, at most 500 characters), but blank text is refused.
+pub(crate) fn note_text(field: &'static str, value: &str) -> Result<String, Error> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(Error::validation(
+            field,
+            format!("{field} must not be empty"),
+        ));
+    }
+    if value.chars().count() > 500 {
+        return Err(Error::validation(
+            field,
+            format!("{field} must be at most 500 characters"),
+        ));
+    }
+    if value.chars().any(|c| c.is_control() && c != '\n') {
+        return Err(Error::validation(
+            field,
+            format!("{field} must not contain control characters"),
+        ));
+    }
+    Ok(value.to_owned())
+}
+
 /// Minutes of work: 1 to 1440.
 pub(crate) fn minutes(field: &'static str, value: i64) -> Result<i64, Error> {
     if (1..=1440).contains(&value) {

@@ -5,7 +5,7 @@ use crate::{
     WriteTx,
     config::Config,
     day,
-    guard::{ensure_version, label},
+    guard::{ensure_version, note_text},
 };
 use chrono::{DateTime, Duration, FixedOffset, Utc};
 use salah_domain::{
@@ -30,7 +30,7 @@ pub fn append_note(
     ids: &dyn IdGenerator,
     draft: NewNote<'_>,
 ) -> Result<Session, Error> {
-    let text = label("text", draft.text, 500)?;
+    let text = note_text("text", draft.text)?;
     let mut session = if let (Some(id), Some(_)) = (draft.session_id, draft.at) {
         let session = find(tx, id)?;
         if session.is_running() {
@@ -113,7 +113,7 @@ pub fn edit_note(
     text: &str,
     expected_version: i64,
 ) -> Result<Session, Error> {
-    let text = label("text", text, 500)?;
+    let text = note_text("text", text)?;
     change_note(tx, now, session_id, note_id, Some(&text), expected_version)
 }
 
