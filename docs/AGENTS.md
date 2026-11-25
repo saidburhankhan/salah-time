@@ -18,10 +18,17 @@ daily timetable when selected.
   resolution (`schedule.rs`).
 - `crates/salah-store/` is the SQLite store and its numbered migrations.
 - `crates/salah-core/` is the application layer: validated config and its XDG
-  repository, planner use cases, quick add, export, status, and location sync
-  policy.
+  repository, planner, sessions, stats, goals, insights, reviews, quick add,
+  status, and location sync policy.
+- `crates/salah-protocol/` holds the JSON-RPC protocol v1: method table,
+  dispatcher, params/DTOs and `changed` notifications (`docs/protocol-v1.md`).
 - `crates/salah-cli/` builds the `salah` binary and owns its integration tests
-  and contract fixtures.
+  and contract fixtures. It also runs the
+  single-writer daemon `salah serve` on `$XDG_RUNTIME_DIR/salah/salah.sock`
+  (socket-activated user units `salah.socket`/`salah.service`) and the stdio
+  transport `salah rpc`.
+- `app/` is the Qt Quick desktop app (C++ client, typed models, QML pages);
+  `app/bin/test` runs its tests, including socket tests a sandbox may skip.
 - `plugin/local.salah/BarWidget.qml` owns presentation and process lifecycle;
   it must not contain prayer-time mathematics.
 - `scripts/install` and `scripts/uninstall` are ownership-checked and must not

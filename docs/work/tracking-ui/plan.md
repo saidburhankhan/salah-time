@@ -98,7 +98,7 @@ the required and optional metrics, and see results in charts. Both surfaces stay
 - [x] U2 — app: Today running timer + stop prompt, session list edit/remove, + time, tick/untick.
 - [x] U3 — app: Stats rebuilt with charts and working filter.
 - [x] U4 — widget: tick/untick, running indicator + stop, Log panel (item or project, metrics).
-- [ ] U5 — integration: install, live smoke in scratch env, user visual check.
+- [x] U5 — integration: install, live smoke in scratch env, user visual check.
 
 ## Phase 2 (user request 2026-11-23 07:2x; starts 11:27 with Codex)
 
@@ -207,11 +207,11 @@ the required and optional metrics, and see results in charts. Both surfaces stay
   dispatched by the orchestrator after C2's first checkpoint.
 
 ### Slices
-- [ ] P1 backend: stats.table, item filter, custom range, session.stop done (C2)
-- [ ] P2 widget pause panel (C3)
-- [ ] P3 app pause panel + stats filters/range/table (C4)
-- [ ] P3b app Notes page (C4, after the stats work)
-- [ ] P4 integration, screenshots reviewed by the orchestrator, install, user check
+- [x] P1 backend: stats.table, item filter, custom range, session.stop done (C2)
+- [x] P2 widget pause panel (C3)
+- [x] P3 app pause panel + stats filters/range/table (C4)
+- [x] P3b app Notes page (C4, after the stats work)
+- [x] P4 integration, screenshots reviewed by the orchestrator, install, user check
 
 ## Phase 3: resources, backlog, widget task creation (user request 2026-11-23 ~07:50)
 
@@ -311,10 +311,10 @@ Starts after phase 2's backend (C2) is committed, so two workers never edit the 
 - C7 app (`app/**`): task drawer, Backlog page, schedule dialog, drag from backlog, "→ Backlog".
 
 ### Slices
-- [ ] R1 backend (C5): backlog + resources, then epics
-- [ ] R2 widget (C6)
-- [ ] R3 app (C7)
-- [ ] R4 integration, screenshots reviewed, install, user check
+- [x] R1 backend (C5): backlog + resources, then epics
+- [x] R2 widget (C6)
+- [x] R3 app (C7)
+- [x] R4 integration, screenshots reviewed, install, user check
 
 ## Phase 4: insights, goals, weekly review (user request 2026-11-23 12:2x)
 
@@ -388,10 +388,10 @@ data-model.md "005". Builds on phase 3 (epics); starts after phase 3's backend i
 - **C10 widget (`plugin/**`, Sol):** goal chips and the review link; offscreen render reviewed.
 
 ### Slices
-- [ ] G1 backend (C8): 005 + goals (CHECKPOINT 0 alone for the independent review), then insights, then review
-- [ ] G2 app (C9)
-- [ ] G3 widget (C10)
-- [ ] G4 integration, screenshots reviewed, install, user check
+- [x] G1 backend (C8): 005 + goals (CHECKPOINT 0 alone for the independent review), then insights, then review
+- [x] G2 app (C9)
+- [x] G3 widget (C10)
+- [x] G4 integration, screenshots reviewed, install, user check
 
 ### Addendum: metric and duration filters on Statistics (user request 2026-11-23 ~13:00)
 The user wants Statistics filtered by focus and other metrics too, not only by tag/project/task.
@@ -675,3 +675,13 @@ In a dialog with both Save and "Save & done", Enter presses Save.
    them in the progress file with their Enter/Esc actions.
 Tests: app keyboard tests (Enter/Esc/Shift+Enter on each editor, click targets don't clash), widget
 node/harness tests, and reviewed screenshots of the inline editor in each place.
+
+## Status 2026-11-25 (merged to main)
+
+Every slice and addendum above is built, verified outside the Codex sandbox (cargo tests incl.
+daemon sockets, app tests incl. FakeDaemon sockets, widget node checks + offscreen harness,
+reviewed screenshots) and installed on the live machine. Live DB at schema v7 with backups.
+Last shipped: multi-metric Trends (ad27cd1), archive pauses (231ca6a, ce7d7e4, 4c5450c),
+Insights metric filters + editable timed notes + Notes page (fe5ed7a, 4707ee0), inline note
+editing + Esc/Enter everywhere (a7eda30, 3b63f8c, a0f547b).
+Open: the user's live check of the 25 Nov features (see state.md).

@@ -20,9 +20,10 @@ the final user report. Workers own only the slice assigned to them.
 
 | Work item | Status | Next | Updated |
 |---|---|---|---|
-| `items-mvp` | Installed | Superseded by `redesign` (same branch) | 2026-11-22 |
-| `redesign` | Installed | Finish A9 app fixes; then superseded by `architecture` | 2026-11-22 |
-| `tracking-ui` | Installed | User visual check (U5); fix reported issues | 2026-11-23 |
+| `tracking-ui` | Shipped, merged to `main`, installed | User live check of the 25 Nov features; fix only observed failures | 2026-11-25 |
+
+The JSON-RPC protocol reference is `docs/protocol-v1.md` (living document; update it with every
+protocol change).
 
 Completed work may be moved from `docs/work/` to `docs/archive/`. Do not load
 archived work unless the current task explicitly depends on it.

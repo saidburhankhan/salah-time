@@ -1,69 +1,79 @@
 # Salah
 
-Salah is a small, offline prayer-time widget and planner for Omarchy. The day
-is divided by the five prayers (Fajr, Dhuhr, Asr, Maghrib, and Isha), and
-items, either one-time tasks or routines, are planned in the blocks between
-them. The bar widget shows now: the current block and the next boundary. The
-desktop app (`salah open`, or "Salah" in the launcher) shows the day, routines,
-and statistics. The configured sleep time ends the day.
+Salah is an offline prayer-time widget, planner and time tracker for Omarchy.
+The day is divided by the five prayers (Fajr, Dhuhr, Asr, Maghrib and Isha),
+and the configured sleep time ends it. Tasks are planned into the blocks between
+the prayers, work is tracked as sessions, and the results feed statistics,
+goals and a weekly review.
 
-## Planning
+- **Bar widget**: the current block and the countdown to the next prayer or
+  sleep; a popup with the day's timeline, the running session (pause, done,
+  distractions, notes), quick add and task creation.
+- **Desktop app** (`salah open`, or "Salah" in the launcher): Today, Backlog,
+  Routines, Statistics (charts, a multi-measure Trends chart, tables and
+  session notes), Insights (patterns, best and hardest sessions, plan
+  adherence), Notes, Goals, Review and Settings.
 
-Quick add understands the prayer, repeat, and measure in one line:
+In the app and the widget, click a note to edit it in place. Enter saves,
+Shift+Enter starts a new line and Esc cancels; Esc also closes the widget one
+layer at a time.
+
+## Concepts
+
+- **Tasks** are one-time (dated, or undated in the Backlog) or **routines**
+  that repeat on chosen days. A routine can be ended on a day and resumed; its
+  past days keep their history.
+- **Projects** group tasks and can be split into **epics**; **tags** label
+  tasks. Archiving a project pauses its goals, routines and open tasks until it
+  is unarchived. Paused periods never count as missed, and statistics keep all
+  of its work.
+- **Sessions** are timed or logged work on a task, epic or project. A session
+  can record metrics (focus, quality, distractions and custom metrics such as
+  pages read), a main note and timed notes.
+- **Goals** set a daily or weekly target in minutes or in a metric, for all work
+  or for a project, epic, tag or task. Editing a target starts a new period and
+  never rewrites the past.
+- **Resources** are notes, links and reminders attached to tasks and epics.
+
+## Command line
+
+Quick add understands the prayer, repeat and length in one line:
 
 ```sh
 salah item add --quick -- "read 20m after isha daily"
-salah item add --quick -- "pushups x30 at asr weekdays"
-salah item add --quick -- "call mum 15 min on sundays"
+salah item parse --json -- "pushups at asr weekdays"   # preview without saving
 ```
 
-Use `salah item parse --json -- "read 20m after isha daily"` to preview the
-result without saving it.
-
-The core item commands are:
+Track work and its notes:
 
 ```sh
-salah item add --block fajr -- "Read Quran"
-salah item list
-salah item done <id>
-salah item undo <id>
-salah item log <id> 20
-salah item start <id>
-salah item stop
-salah item move <id> --block asr --index 0
-salah item edit <id> --title "Read Quran" --target 30
-salah item remove <id>
+salah session start --item <id>
+salah session note -- "stopped at page 12"
+salah session stop
+salah session log --item <id> --minutes 25 --value focus=4 --note "calm"
+salah notes list --days 30 --min distractions_per_hour=4 --kind entry
 ```
 
-An item is measured by check, minutes, or count, and repeats once, daily, or on
-chosen weekdays. Item ids may be shortened to a unique prefix. `salah day`
-shows one day's prayers and items by block, `salah prayer mark fajr` records a
-prayer, and `salah stats --days 30` shows per-item and per-prayer totals.
-
-Unfinished one-time items carry forward through the rest of their day and
-appear in the current block. When the day ends they are history as missed. A
-running timer stops automatically at the end of the block where it started.
-
-Sleep ends the day. Set the local 24-hour boundary with:
+Read the day and the reports:
 
 ```sh
-salah config set --sleep-time 23:00
+salah day
+salah stats --days 30
+salah insights --json
+salah goal list
+salah review show
 ```
+
+Every command has `--help`, and most accept `--json`. Ids may be shortened to
+a unique prefix. Other subcommands manage projects, epics, tags, metrics,
+resources, the backlog, routines and prayers (`salah --help`).
 
 ## Your data
 
-Planner data lives in one SQLite database at
+All data lives in one SQLite database at
 `${XDG_DATA_HOME:-~/.local/share}/salah/salah.db`. Set `SALAH_DATA` to use a
-different path.
-
-Export writes versioned JSON, including deletions, and import is idempotent:
-importing the same file again changes nothing, and a newer `updated_at` wins.
-Export refuses to replace an existing file unless `--force` is given.
-
-```sh
-salah export --output file.json
-salah import file.json
-```
+different path. Before a schema migration Salah keeps a backup next to it
+(`salah.db.bak-v<N>-…`, the newest three).
 
 ## Build and test
 
@@ -105,7 +115,7 @@ The installer also writes user systemd units
 (`~/.config/systemd/user/salah.socket` and `salah.service`) so a connect starts
 the daemon on demand; `./scripts/uninstall` removes them. There is no TCP
 listener and no authentication token: same-user access is enforced by file
-permissions. See `docs/work/architecture/protocol-v1.md` for the full method
+permissions. See `docs/protocol-v1.md` for the full method
 table and notification rules.
 
 ## Automatic location
@@ -206,13 +216,14 @@ Do not present an unverified preset as an exact official timetable.
 ## Development layout
 
 ```text
-crates/salah-domain/   pure day/item rules, errors, clock/id traits (no I/O)
+crates/salah-domain/   pure day, item, session and goal rules (no I/O)
 crates/salah-prayer/   calculation, official timetable, location, schedule
 crates/salah-store/    SQLite persistence and numbered migrations
-crates/salah-core/     config, planner use cases, quick add, export, status
-crates/salah-cli/      `salah` binary, integration tests, contract fixtures
-app/                   Qt Quick desktop app
+crates/salah-core/     config and use cases: planner, sessions, stats, goals, insights, review
+crates/salah-protocol/ JSON-RPC methods, dispatcher and notifications (protocol v1)
+crates/salah-cli/      `salah` binary, daemon, integration tests, contract fixtures
+app/                   Qt Quick desktop app (C++ models, QML pages)
 plugin/local.salah/    Omarchy bar widget and popup
-scripts/install        reversible local install
+scripts/install        reversible local install (binary, app, plugin, systemd units)
 scripts/uninstall      ownership- and content-checked uninstall
 ```
