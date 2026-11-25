@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLocale>
+#include <QMap>
 #include <QStringList>
 #include <QtMath>
 
@@ -364,16 +365,26 @@ inline QJsonObject trendMonth(const QJsonArray &measures, const QString &split) 
     for (int d = 0; d < 28; ++d) periods.append(first.addDays(d).toString(Qt::ISODate));
     const QStringList titles = split == "epic" ? QStringList{"Memorise Juz 30", "Arabic grammar course", "No epic"}
                                                : QStringList{"Read Quran", "Deep work", "Morning walk"};
+    const QMap<QString, QString> names{{"minutes", "Minutes"}, {"sessions", "Sessions"}, {"focus", "Focus"},
+                                        {"quality", "Quality"}, {"distractions_per_hour", "Distractions per hour"}};
+    const QMap<QString, QString> units{{"minutes", "min"}, {"sessions", "sessions"}, {"distractions_per_hour", "per hour"}};
+    const QMap<QString, int> scales{{"focus", 5}, {"quality", 10}};
     for (int task = 0; task < (tasks ? titles.size() : 1); ++task) {
         for (const auto &measure : measures) {
-            const bool minutes = measure.toString() == "minutes";
-            const QString name = minutes ? "Minutes" : "Focus";
+            const QString id = measure.toString();
+            const QString name = names.value(id, id);
             QJsonArray points;
             for (int d = 0; d < 28; ++d) {
                 const int sessions = (d + task * 2) % 9 == 5 ? 0 : 1 + d % 3;
                 QJsonValue value;
-                if (minutes)
+                if (id == "minutes")
                     value = sessions ? 25 + (d * 7) % 60 : 0;
+                else if (id == "sessions")
+                    value = sessions;
+                else if (id == "quality" && sessions)
+                    value = 4 + (d * 3) % 7;
+                else if (id == "distractions_per_hour" && sessions)
+                    value = 0.3 * ((d * 7) % 12);
                 else if (sessions && (d + task) % 13 != 6)
                     value = qRound(10 * (2.9 + 0.4 * task + 0.9 * qSin(0.38 * d + 2 * task))) / 10.0;
                 points.append(QJsonObject{{"value", value}, {"sessions", sessions}});
@@ -381,8 +392,8 @@ inline QJsonObject trendMonth(const QJsonArray &measures, const QString &split) 
             const QString key = split == "epic" && task == 2 ? QStringLiteral("none") : QString::number(task);
             lines.append(QJsonObject{{"key", tasks ? key : QStringLiteral("all")},
                                      {"label", tasks ? titles[task] : name}, {"color", QJsonValue::Null},
-                                     {"measure", measure}, {"unit", minutes ? "min" : ""},
-                                     {"scale_max", minutes ? QJsonValue(QJsonValue::Null) : QJsonValue(5)},
+                                     {"measure", measure}, {"unit", units.value(id)},
+                                     {"scale_max", scales.contains(id) ? QJsonValue(scales[id]) : QJsonValue(QJsonValue::Null)},
                                      {"points", points}});
         }
     }

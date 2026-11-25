@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
+import "AxisScale.js" as AxisScale
 
 // The Table tab: stats.table grouped by week (default), day, project, epic, tag or
 // task. Column chips hide columns (remembered); scale metrics are tinted by
@@ -20,6 +21,10 @@ Rectangle {
     readonly property string displayedGroup: report.group || group
     readonly property var columns: report.columns || []
     readonly property var shown: columns.filter(function(c) { return table.hidden.indexOf(String(c.id)) < 0 })
+    readonly property bool showRanges: shown.length > 1
+    property string hoveredHeader: ""
+    onShownChanged: hoveredHeader = ""
+    onVisibleChanged: if (!visible) hoveredHeader = ""
     readonly property bool showsSessions: shown.some(function(c) { return c.id === "sessions" })
     readonly property var rows: sorted(report.rows || [], sortKey, sortDesc)
     readonly property var totals: report.totals || {}
@@ -126,6 +131,16 @@ Rectangle {
             return desc ? Number(y) - Number(x) : Number(x) - Number(y)
         })
         return copy
+    }
+    function columnRange(column) {
+        if (column.scale_max) return "1–" + column.scale_max
+        let high = 0
+        for (const row of report.rows || [])
+            high = Math.max(high, Number(value(row, column) || 0))
+        return "0–" + win.numberText(AxisScale.niceMax(high))
+    }
+    function headerOpacity(id) {
+        return !showRanges || !hoveredHeader || hoveredHeader === id ? 1 : 0.35
     }
     function headerText(id, name) {
         var arrow = sortKey === id ? (sortDesc ? "  ▾" : "  ▴") : ""
@@ -260,8 +275,9 @@ Rectangle {
                     + (table.showsMinutes ? table.minutesWidth - table.cellWidth : 0)
 
                 Row {
-                    height: 40
+                    height: table.showRanges ? 58 : 40
                     Label {
+                        opacity: table.headerOpacity("label")
                         width: table.labelWidth
                         height: parent.height
                         leftPadding: 4
@@ -274,32 +290,60 @@ Rectangle {
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
+                            hoverEnabled: true
+                            onEntered: table.hoveredHeader = "label"
+                            onExited: if (table.hoveredHeader === "label") table.hoveredHeader = ""
                             onClicked: table.sortBy("label")
                         }
                     }
                     Repeater {
                         model: table.shown
-                        Label {
+                        Item {
+                            id: header
                             required property var modelData
                             objectName: "tableHeader_" + modelData.id
                             width: modelData.id === "minutes" ? table.minutesWidth : table.cellWidth
                             height: parent.height
-                            rightPadding: 12
-                            leftPadding: 6
-                            horizontalAlignment: Text.AlignRight
-                            verticalAlignment: Text.AlignVCenter
-                            text: table.headerText(String(modelData.id), String(modelData.name || modelData.id))
-                            textFormat: Text.PlainText
-                            color: table.sortKey === String(modelData.id) ? table.win.selectedText : table.win.muted
-                            font.family: table.win.mono
-                            font.pixelSize: 11
-                            wrapMode: Text.WordWrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
+                            opacity: table.headerOpacity(modelData.id)
+                            Column {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.bottomMargin: table.showRanges ? 8 : (header.height - height) / 2
+                                anchors.leftMargin: 2
+                                anchors.rightMargin: 12
+                                spacing: 2
+                                Label {
+                                    width: parent.width
+                                    horizontalAlignment: Text.AlignRight
+                                    text: table.headerText(header.modelData.id, header.modelData.name || header.modelData.id)
+                                    textFormat: Text.PlainText
+                                    color: table.sortKey === header.modelData.id ? table.win.selectedText
+                                         : table.hoveredHeader === header.modelData.id ? table.win.text : table.win.muted
+                                    font.family: table.win.mono
+                                    font.pixelSize: 11
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                }
+                                Label {
+                                    visible: table.showRanges
+                                    width: parent.width
+                                    horizontalAlignment: Text.AlignRight
+                                    text: visible ? table.columnRange(header.modelData) : ""
+                                    textFormat: Text.PlainText
+                                    color: table.win.muted
+                                    font.family: table.win.mono
+                                    font.pixelSize: 11
+                                }
+                            }
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: table.sortBy(String(parent.modelData.id))
+                                hoverEnabled: true
+                                onEntered: table.hoveredHeader = header.modelData.id
+                                onExited: if (table.hoveredHeader === header.modelData.id) table.hoveredHeader = ""
+                                onClicked: table.sortBy(header.modelData.id)
                             }
                         }
                     }

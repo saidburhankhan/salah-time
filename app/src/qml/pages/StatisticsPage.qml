@@ -46,6 +46,9 @@ ScrollView {
             charts.trends.load(query)
         }
     }
+    function clearTrendHighlight() {
+        charts.trends.clearHighlight()
+    }
     function setTab(id) {
         if (tab === id)
             return

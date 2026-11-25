@@ -1,3 +1,4 @@
+#include <limits>
 #include <QDir>
 #include <cstring>
 #include <memory>
@@ -690,21 +691,21 @@ esac
         QVERIFY(click("trendsSplit_item"));
         QTRY_COMPARE(chart->property("shown").toList().size(), 3);
         QCOMPARE(chart->property("periods").toList().size(), 28);
-        QCOMPARE(chart->property("panels").toList().size(), 1);
+        QCOMPARE(chart->property("axes").toList().size(), 1);
         QTest::qWait(50);
         placeChart();
         shotWindow(window, "trends-focus-tasks.png");
-        QVERIFY(click("trendsLine_1"));
+        QVERIFY(click("trendsHide_1"));
         QCOMPARE(chart->property("shown").toList().size(), 2);
         QVERIFY(click("trendsLine_1"));
 
         QVERIFY(click("trendsSplit_"));
         QVERIFY(click("trendsMeasure_minutes"));
-        QTRY_COMPARE(chart->property("panels").toList().size(), 2);
+        QTRY_COMPARE(chart->property("axes").toList().size(), 2);
         placeChart();
         shotWindow(window, "trends-mixed-split.png");
         QVERIFY(click("trendsRelative"));
-        QCOMPARE(chart->property("panels").toList().size(), 1);
+        QVERIFY(chart->property("normalized").toBool());
         auto *hover = qobject_cast<QQuickItem *>(findItemByName(chart, "trendsHover"));
         QVERIFY(hover);
         // The second period has Focus 3.2 and 32 minutes across two sessions.
@@ -723,7 +724,7 @@ esac
         QVERIFY(rows[5].toList().contains("—"));
         QVERIFY(rows[5].toList().contains("0 min"));
         QVERIFY(click("chartChartButton"));
-        QVERIFY(click("trendsSplitView"));
+        QVERIFY(click("trendsAxesView"));
         QVERIFY(click("trendsMeasure_focus"));
         flick->setProperty("contentY", 0);
     }
@@ -4032,9 +4033,19 @@ fi
         auto *chart = findByName(stats, "trendsChart");
         QVERIFY(chart);
         chart->setProperty("report", fixture("stats_series_day").toVariantMap());
-        QCOMPARE(chart->property("groups").toList().size(), 3);
+        QCOMPARE(chart->property("axes").toList().size(), 3);
         chart->setProperty("report", fixture("stats_series_split_item").toVariantMap());
-        QCOMPARE(chart->property("groups").toList().size(), 1);
+        QCOMPARE(chart->property("axes").toList().size(), 1);
+        // Two measures with identical domains still get separate axes.
+        auto sameScale = TrackingFixture::trendMonth({"focus", "quality"}, false);
+        auto ratings = sameScale.value("series").toArray();
+        auto quality = ratings[1].toObject();
+        quality["scale_max"] = 5;
+        quality["points"] = ratings[0].toObject().value("points");
+        ratings[1] = quality;
+        sameScale["series"] = ratings;
+        chart->setProperty("report", sameScale.toVariantMap());
+        QCOMPARE(chart->property("axes").toList().size(), 2);
         auto overflow = fixture("stats_series_split_item");
         auto series = overflow.value("series").toArray();
         while (series.size() < 9) {
@@ -4047,7 +4058,7 @@ fi
         QCOMPARE(chart->property("shown").toList().size(), 8);
         auto *ninth = findItemByName(chart, "trendsLine_8");
         QVERIFY(ninth && !ninth->property("enabled").toBool());
-        QVERIFY(QMetaObject::invokeMethod(findItemByName(chart, "trendsLine_0"), "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(findItemByName(chart, "trendsHide_0"), "clicked"));
         QVERIFY(ninth->property("enabled").toBool());
         QVERIFY(QMetaObject::invokeMethod(ninth, "clicked"));
         QCOMPARE(chart->property("shown").toList().size(), 8);
@@ -4069,6 +4080,189 @@ fi
         const auto filtered = args.readAll().trimmed().split('\n').last();
         QCOMPARE(filtered, QByteArray("stats series --from 2031-04-01 --to 2031-05-02 --project study "
                                       "--min-minutes 10 --max-minutes 60 --interval day --measure minutes --min focus=3.5"));
+    }
+
+    void trendsMeasureAxesAndHeaderFocus() {
+        QTemporaryDir dir;
+        fake(dir);
+        const QStringList ids{"minutes", "focus", "quality", "distractions_per_hour", "sessions"};
+        const QList<int> low{0, 1, 1, 0, 0}, high{100, 5, 10, 5, 5};
+        QJsonArray measures;
+        for (const QString &id : ids) {
+            measures.append(id);
+            write(dir.filePath(id + ".json"), QJsonDocument(TrackingFixture::trendMonth(measures, false)).toJson());
+        }
+        const QString cli = dir.filePath("chart-cli");
+        write(cli, "#!/bin/sh\ncd '" + dir.path().toUtf8() + "'\n" + R"SH(
+case "$1 $2" in
+    "stats series")
+        while [ -n "$1" ]; do
+            if [ "$1" = "--measure" ]; then shift; measure=$1; fi
+            shift
+        done
+        cat "$measure.json" ;;
+    *) exec ./salah "$@" ;;
+esac
+)SH");
+        QFile::setPermissions(cli, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        TrackingUiPreviewBackend backend(cli, daemon_path(dir), {}, {}, TrackingFixture::statsTable("week"));
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        window->resize(1280, 820);
+        window->requestActivate();
+        root->setProperty("page", 2);
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "loadStatistics"));
+        waitForBackendIdle(backend);
+        backend.dismissError();
+        auto *stats = findByName(window, "statsScroll");
+        auto *chart = qobject_cast<QQuickItem *>(findByName(stats, "trendsChart"));
+        auto *flick = stats->property("contentItem").value<QQuickItem *>();
+        auto *tip = findByName(window, "statsTooltip");
+        QVERIFY(chart && flick && tip);
+        auto item = [&](const QString &name) { return qobject_cast<QQuickItem *>(findItemByName(chart, name)); };
+        auto center = [](QQuickItem *target) {
+            return target->mapToScene(target->boundingRect().center()).toPoint();
+        };
+        auto align = [&](QQuickItem *target) {
+            flick->setProperty("contentY", flick->property("contentY").toReal() + target->mapToItem(flick, QPointF()).y() - 12);
+        };
+        for (int n = 1; n <= ids.size(); ++n) {
+            if (n > 1)
+                QVERIFY(QMetaObject::invokeMethod(item("trendsMeasure_" + ids[n - 1]), "clicked"));
+            QTRY_COMPARE(chart->property("axes").toList().size(), n);
+            QCoreApplication::processEvents();
+            auto *plot = item("trendsPlot");
+            auto *hover = item("trendsHover");
+            QVERIFY(plot && hover);
+            const bool relative = n > 4;
+            QCOMPARE(chart->property("normalized").toBool(), relative);
+            QCOMPARE(plot->property("axes").toList().size(), relative ? 1 : n);
+            QCOMPARE(chart->property("extraAxes").toInt(), relative ? 1 : 0);
+            const auto axes = chart->property("axes").toList();
+            const auto series = backend.trends().value("series").toList();
+            for (int j = 0; j < n; ++j) {
+                const auto axis = axes[j].toMap();
+                QCOMPARE(axis.value("measure").toString(), ids[j]);
+                QCOMPARE(axis.value("low").toInt(), low[j]);
+                QCOMPARE(axis.value("high").toInt(), high[j]);
+            }
+            QTest::mouseMove(window, QPoint(10, 10));
+            align(chart);
+            const QString prefix = QString("trends-%1-measure").arg(n);
+            shotWindow(window, prefix + ".png");
+            if (n == 4) continue;
+
+            // Locate one isolated dot per stroke, independently scaled from the report.
+            QVector<QVector<double>> heights;
+            for (int j = 0; j < n; ++j) {
+                const auto points = series[j].toMap().value("points").toList();
+                double bottom = low[j], top = high[j];
+                if (relative) {
+                    bottom = std::numeric_limits<double>::infinity();
+                    top = 0;
+                    for (const auto &point : points) {
+                        const auto v = point.toMap().value("value");
+                        if (!v.isNull()) { bottom = std::min(bottom, v.toDouble()); top = std::max(top, v.toDouble()); }
+                    }
+                }
+                QVector<double> offsets;
+                for (const auto &point : points) {
+                    const auto v = point.toMap().value("value");
+                    offsets << (v.isNull() ? -1.0 : (top - v.toDouble()) / (top - bottom));
+                }
+                heights << offsets;
+            }
+            for (int j = 0; j < n; ++j) {
+                int day = -1;
+                for (int d = 1; d < heights[j].size() - 1 && day < 0; ++d) {
+                    if (heights[j][d] < 0) continue;
+                    bool separated = true;
+                    for (int k = 0; k < n; ++k)
+                        if (j != k && qAbs(heights[j][d] - heights[k][d]) < 0.09) separated = false;
+                    if (separated) day = d;
+                }
+                QVERIFY(day >= 0);
+                const QPoint dot = hover->mapToScene({4 + day * plot->property("plotWidth").toDouble() / 27,
+                    4 + heights[j][day] * plot->property("graphHeight").toDouble()}).toPoint();
+                QTest::mouseMove(window, dot);
+                QTRY_COMPARE(chart->property("highlight").toString(), QString("line:%1").arg(j));
+                QVERIFY(tip->property("visible").toBool());
+                const auto tipRows = tip->property("text").toString().split('\n');
+                QCOMPARE(tipRows.size(), n + 1);
+                for (int k = 0; k < n; ++k) {
+                    const auto line = series[k].toMap();
+                    const auto point = line.value("points").toList()[day].toMap();
+                    QString unit = line.value("unit").toString();
+                    if (unit.isEmpty()) unit = "/" + line.value("scale_max").toString();
+                    if (ids[k] == "sessions" && point.value("value").toInt() == 1) unit = "session";
+                    QVERIFY(tipRows[k + 1].contains(line.value("label").toString()));
+                    QVERIFY(tipRows[k + 1].contains(point.value("value").isNull() ? QString("—") : unit));
+                    QVERIFY(tipRows[k + 1].contains(QString("%1 session").arg(point.value("sessions").toInt())));
+                    if (!relative) QCOMPARE(item("trendsAxis_" + ids[k])->opacity(), j == k ? 1.0 : 0.35);
+                }
+                shotWindow(window, prefix + "-hover-" + ids[j] + ".png");
+                if (n == 3 && j == 1) {
+                    QTest::mouseClick(window, Qt::LeftButton, {}, dot);
+                    QTest::mouseMove(window, center(item("trendsAxis_minutes")));
+                    QCOMPARE(chart->property("highlight").toString(), QString("line:1"));
+                    QVERIFY(hasVisualText(window, "Focus · pinned"));
+                    shotWindow(window, "trends-pinned.png");
+                    QTest::keyClick(window, Qt::Key_Escape);
+                    QTRY_VERIFY(chart->property("highlight").toString().isEmpty());
+                }
+            }
+            if (n == 3) {
+                auto *axis = item("trendsAxis_quality");
+                auto *chip = item("trendsLine_0");
+                QTest::mouseMove(window, center(axis));
+                QCOMPARE(chart->property("highlight").toString(), QString("line:2"));
+                QTest::mouseClick(window, Qt::LeftButton, {}, center(axis));
+                QCOMPARE(chart->property("pinned").toString(), QString("line:2"));
+                QTest::mouseClick(window, Qt::LeftButton, {}, center(axis));
+                QVERIFY(chart->property("highlight").toString().isEmpty());
+                QTest::mouseMove(window, center(chip));
+                QCOMPARE(chart->property("highlight").toString(), QString("line:0"));
+                QTest::mouseClick(window, Qt::LeftButton, {}, center(chip));
+                QCOMPARE(chart->property("pinned").toString(), QString("line:0"));
+                QTest::mouseClick(window, Qt::LeftButton, {}, center(chip));
+                QTest::mouseMove(window, QPoint(10, 10));
+                chip->forceActiveFocus(Qt::TabFocusReason);
+                QTest::keyClick(window, Qt::Key_Tab);
+                QTRY_COMPARE(chart->property("highlight").toString(), QString("line:1"));
+                QTest::keyClick(window, Qt::Key_Space);
+                QCOMPARE(chart->property("pinned").toString(), QString("line:1"));
+                QTest::keyClick(window, Qt::Key_Escape);
+            }
+        }
+        QVERIFY(!item("trendsAxesView")->isEnabled());
+        QVERIFY(hasVisualText(window, "+1 beyond the 4-axis limit"));
+        QVERIFY(QMetaObject::invokeMethod(item("trendsMeasure_sessions"), "clicked"));
+        QTRY_VERIFY(!chart->property("normalized").toBool());
+        QVERIFY(QMetaObject::invokeMethod(stats, "setTab", Q_ARG(QVariant, QVariant("table"))));
+        waitForBackendIdle(backend);
+        auto *table = qobject_cast<QQuickItem *>(findByName(stats, "generalTable"));
+        QVERIFY(table);
+        auto *header = qobject_cast<QQuickItem *>(findItemByName(table, "tableHeader_focus"));
+        auto *minutes = qobject_cast<QQuickItem *>(findItemByName(table, "tableHeader_minutes"));
+        QVERIFY(header && minutes);
+        align(table);
+        QTest::mouseMove(window, center(header));
+        QTRY_COMPARE(table->property("hoveredHeader").toString(), QString("focus"));
+        QCOMPARE(header->opacity(), 1.0);
+        QCOMPARE(minutes->opacity(), 0.35);
+        QVERIFY(hasVisualText(window, "1–5"));
+        QVERIFY(hasVisualText(window, "0–1000"));
+        shotWindow(window, "table-header-focus.png");
+        QTest::mouseClick(window, Qt::LeftButton, {}, center(header));
+        QCOMPARE(table->property("sortKey").toString(), QString("focus"));
+        QTest::mouseMove(window, QPoint(10, 10));
+        QCOMPARE(minutes->opacity(), 1.0);
     }
 
     static QJsonArray backlogRows() {

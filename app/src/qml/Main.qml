@@ -169,6 +169,8 @@ ApplicationWindow {
         if (quickVisible) { quickVisible = false; return true }
         if (dragging) { finishDrag(true); return true }
         if (backlogDrag.active) { backlogDrag.finish(true); return true }
+        if (statisticsPage.visible && statisticsPage.tab === "charts")
+            statisticsPage.clearTrendHighlight()
         return false
     }
     function joinedDetail(block, schedule) {

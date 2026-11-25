@@ -88,3 +88,13 @@ The editor stages an end date with the other task fields and saves it using the 
 `app/bin/build` and `git diff --check` passed. `SALAH_UI_SHOT_DIR=/tmp/c9-cp7-final app/bin/test` passed 55 tests with zero failures and 44 AF_UNIX skips. Reviewed all 50 screenshots, including both end-date choices, the Ended section, the editor end date and one-time conversion.
 
 CHECKPOINT 7: End, resume and convert routines in the app while preserving their history (app/src/backend.cpp, app/src/backend.h, app/src/backend_reports.cpp, app/src/client/coreclient.cpp, app/src/client/coreclient.h, app/src/models/viewstate.cpp, app/src/models/viewstate.h, app/src/qml/Main.qml, app/src/qml/controls/TrackingDateField.qml, app/src/qml/overlays/EntryFields.qml, app/src/qml/overlays/EntryForm.qml, app/src/qml/overlays/RoutineEndDialog.qml, app/src/qml/pages/RoutinesPage.qml, app/src/resources.qrc, app/tests/salah_app_tests.cpp, docs/work/tracking-ui/c9-progress.md)
+
+## Multi-metric Trends
+
+Trends draws up to four measure axes on the left of one plot. Each scale uses its configured bounds, and counts and durations start at zero with a rounded upper bound. Split series share their measure’s axis. A fifth axis switches the plot to 0–100% of each series’ observed range. Tooltips retain the original units and session counts in both views.
+
+Hovering a stroke, axis or series chip highlights it. Clicking pins the highlight, Tab moves keyboard focus between series chips, and Escape clears it. The Table tab shows ranges beneath its numeric headers and fades the other headers on hover. Header sorting still works.
+
+`app/bin/build` and `git diff --check` passed. `SALAH_UI_SHOT_DIR=/tmp/c9-cp8-reviewed app/bin/test` passed 56 tests with zero failures and 44 AF_UNIX skips. Reviewed all 68 screenshots, including one through five measures, each requested series hover, the pinned state and the Table header hover.
+
+CHECKPOINT 8: Give Trends a scale per measure, normalised overflow and pinnable focus, and show ranges in Table headers (app/src/qml/Main.qml, app/src/qml/pages/StatisticsPage.qml, app/src/qml/statistics/AxisScale.js, app/src/qml/statistics/GeneralTable.qml, app/src/qml/statistics/TrendsChart.qml, app/src/qml/statistics/TrendsPlot.qml, app/src/resources.qrc, app/tests/salah_app_tests.cpp, app/tests/tracking_fixture.h, docs/work/tracking-ui/c9-progress.md)

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
+import "AxisScale.js" as AxisScale
 
 Card {
     id: chart
@@ -36,25 +37,60 @@ Card {
     // (including "Other") are available even when the initial eight are full.
     property var slots: []
     readonly property string roster: JSON.stringify([report.split, lines.map(l => [l.series.key, l.series.measure])])
-    onRosterChanged: slots = lines.slice(0, lineColors.length).map((line, i) => i)
-    readonly property var shown: lines.filter((line, i) => slots.includes(i))
-    readonly property var groups: {
-        let byUnit = []
-        for (let line of shown) {
-            let s = line.series
-            let key = JSON.stringify([s.unit, s.scale_max])
-            let group = byUnit.find(g => g.key === key)
-            if (!group) {
-                group = { key: key, title: s.scale_max ? qsTr("Rating (1–%1)").arg(s.scale_max)
-                                                       : String(s.unit || qsTr("Count")), lines: [] }
-                byUnit.push(group)
-            }
-            group.lines.push(line)
-        }
-        return byUnit
+    onRosterChanged: {
+        slots = lines.slice(0, lineColors.length).map((line, i) => i)
+        clearHighlight()
     }
-    readonly property bool normalized: groups.length > 1 && relative
-    readonly property var panels: normalized ? [{ title: qsTr("Relative to each line’s range"), lines: shown }] : groups
+    readonly property var shown: lines.filter(line => slots.includes(line.index))
+    readonly property var axes: {
+        const result = []
+        for (const line of shown) {
+            const s = line.series
+            let axis = result.find(a => a.measure === s.measure)
+            if (!axis) {
+                const choice = choices.find(c => c.id === s.measure)
+                axis = { measure: s.measure, name: choice ? choice.name : (!report.split && s.label || s.measure || s.name || ""),
+                         unit: s.unit || "", low: s.scale_max ? 1 : 0, high: 1, lines: [] }
+                result.push(axis)
+            }
+            axis.high = s.scale_max || Math.max(axis.high, AxisScale.niceMax(line.high))
+            axis.lines.push(line)
+        }
+        return result
+    }
+    readonly property int extraAxes: Math.max(0, axes.length - 4)
+    readonly property bool normalized: extraAxes > 0 || (axes.length > 1 && relative)
+    property var pointerItem: null
+    property string pointed: ""
+    property string keyboardLine: ""
+    property string pinned: ""
+    readonly property string highlight: pinned || pointed || keyboardLine
+    function clearHighlight() {
+        pinned = ""
+        pointerItem = null
+        pointed = ""
+        keyboardLine = ""
+    }
+    function pin(key) {
+        if (pinned === key) clearHighlight()
+        else pinned = key
+    }
+    function pointAt(item, key) {
+        pointerItem = item
+        pointed = key
+    }
+    function leave(item) {
+        if (pointerItem === item) pointAt(null, "")
+    }
+    function lineKey(line) { return "line:" + line.index }
+    function axisKey(axis) {
+        return axis.lines.length === 1 ? lineKey(axis.lines[0]) : "axis:" + axis.measure
+    }
+    function highlighted(line) {
+        return highlight === "" || highlight === lineKey(line) || highlight === "axis:" + line.series.measure
+    }
+    onTableModeChanged: clearHighlight()
+    onVisibleChanged: if (!visible) clearHighlight()
     readonly property var tableRows: tableMode ? periods.map((period, i) =>
         [period].concat(shown.map(line => valueText(line.series, i)))) : []
     implicitHeight: body.implicitHeight + 32
@@ -93,6 +129,7 @@ Card {
             if (slot < 0) return
             next[slot] = index
         }
+        clearHighlight()
         slots = next
     }
     function ink(line) {
@@ -100,15 +137,21 @@ Card {
     }
     function valueText(series, i) {
         let value = series.points[i].value
-        return win.numberText(value) + (value !== null && value !== undefined && series.unit ? " " + series.unit : "")
+        if (value === null || value === undefined) return "—"
+        const unit = series.measure === "sessions" && value === 1 ? qsTr("session") : series.unit
+        const suffix = unit ? " " + unit : (series.scale_max ? "/" + series.scale_max : "")
+        return win.numberText(value) + suffix
     }
     function tooltip(i) {
         let date = win.shortDate(periods[i])
         let rows = [report.interval === "week" ? qsTr("Week of %1").arg(date) : date]
-        for (let line of shown) {
-            let s = line.series
-            let count = s.points[i].sessions
-            rows.push(s.label + "   " + valueText(s, i) + "   ·   " +
+        const names = shown.map(l => l.series.label)
+        const values = shown.map(l => valueText(l.series, i))
+        const nameWidth = Math.max(0, ...names.map(s => s.length))
+        const valueWidth = Math.max(0, ...values.map(s => s.length))
+        for (let j = 0; j < shown.length; ++j) {
+            const count = shown[j].series.points[i].sessions
+            rows.push(names[j].padEnd(nameWidth) + "   " + values[j].padStart(valueWidth) + "   ·   " +
                       (count === 1 ? qsTr("1 session") : qsTr("%1 sessions").arg(count)))
         }
         return rows.join("\n")
@@ -153,7 +196,7 @@ Card {
         background: Rectangle {
             radius: 6
             color: chip.selected ? chart.win.selectedFill : "transparent"
-            border.color: chip.selected ? chart.win.selectedBorder : chart.win.border
+            border.color: chip.visualFocus ? chart.win.selectedText : chip.selected ? chart.win.selectedBorder : chart.win.border
         }
     }
 
@@ -243,15 +286,51 @@ Card {
             visible: chart.lines.length > 0
             Repeater {
                 model: chart.lines
-                Chip {
+                Row {
+                    id: legend
                     required property int index
                     required property var modelData
-                    objectName: "trendsLine_" + index
-                    selected: chart.slots.includes(index)
-                    dot: selected ? chart.ink(modelData) : chart.win.muted
-                    text: modelData.series.label
-                    enabled: selected || chart.shown.length < chart.lineColors.length
-                    onClicked: chart.toggleLine(index)
+                    readonly property bool shown: chart.slots.includes(index)
+                    readonly property string key: chart.lineKey(modelData)
+                    spacing: 2
+                    opacity: !shown || chart.highlighted(modelData) ? 1 : 0.35
+                    Chip {
+                        id: lineChip
+                        objectName: "trendsLine_" + legend.index
+                        width: Math.min(implicitWidth, body.width - (hideChip.visible ? hideChip.width + 2 : 0))
+                        selected: legend.shown
+                        dot: selected ? chart.ink(legend.modelData) : chart.win.muted
+                        text: legend.modelData.series.label + (chart.pinned === legend.key ? qsTr(" · pinned") : "")
+                        enabled: selected || chart.shown.length < chart.lineColors.length
+                        hoverEnabled: true
+                        focusPolicy: Qt.StrongFocus
+                        Accessible.description: qsTr("Highlight or pin this series")
+                        onHoveredChanged: {
+                            if (hovered && selected) chart.pointAt(lineChip, legend.key)
+                            else chart.leave(lineChip)
+                        }
+                        onVisualFocusChanged: {
+                            if (visualFocus && selected) {
+                                chart.pointAt(null, "")
+                                chart.keyboardLine = legend.key
+                            } else if (chart.keyboardLine === legend.key) chart.keyboardLine = ""
+                        }
+                        onClicked: {
+                            if (legend.shown && !chart.tableMode) chart.pin(legend.key)
+                            else chart.toggleLine(legend.index)
+                        }
+                    }
+                    Chip {
+                        id: hideChip
+                        objectName: "trendsHide_" + legend.index
+                        visible: legend.shown && !chart.tableMode && (!!chart.report.split || chart.lines.length > chart.lineColors.length)
+                        width: 26
+                        leftPadding: 7
+                        rightPadding: 7
+                        text: "−"
+                        Accessible.name: qsTr("Hide %1").arg(legend.modelData.series.label)
+                        onClicked: chart.toggleLine(legend.index)
+                    }
                 }
             }
         }
@@ -259,19 +338,31 @@ Card {
             visible: chart.lines.length > chart.lineColors.length
             text: qsTr("%1 of %2 lines shown · Select up to 8").arg(chart.shown.length).arg(chart.lines.length)
         }
-        Row {
-            visible: !chart.tableMode && chart.groups.length > 1
-            spacing: 4
-            Repeater {
-                model: [{ relative: false, name: qsTr("Split") }, { relative: true, name: qsTr("Relative") }]
-                Chip {
-                    required property var modelData
-                    objectName: modelData.relative ? "trendsRelative" : "trendsSplitView"
-                    width: implicitWidth
-                    text: modelData.name
-                    selected: chart.relative === modelData.relative
-                    onClicked: chart.relative = modelData.relative
-                }
+        Flow {
+            Layout.fillWidth: true
+            visible: !chart.tableMode && chart.axes.length > 1
+            spacing: 5
+            Chip {
+                objectName: "trendsAxesView"
+                width: implicitWidth
+                text: qsTr("Measure axes")
+                enabled: chart.extraAxes === 0
+                opacity: enabled ? 1 : 0.45
+                selected: !chart.normalized
+                onClicked: chart.relative = false
+            }
+            Chip {
+                objectName: "trendsRelative"
+                width: implicitWidth
+                text: qsTr("Normalised")
+                selected: chart.normalized
+                onClicked: chart.relative = true
+            }
+            Caption {
+                visible: chart.extraAxes > 0
+                height: 28
+                leftPadding: 5
+                text: qsTr("+%1 beyond the 4-axis limit").arg(chart.extraAxes)
             }
         }
         TrendsPlot {

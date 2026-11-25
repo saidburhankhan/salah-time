@@ -291,3 +291,7 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   "multi-metric Trends chart". Dispatched C9 (Astra) → CHECKPOINT 8. USER asked for a fresh session;
   the next session continues from here: verify/commit C9 8 (app/bin/test + screenshots), install via
   the gated chain, live log + bar check (display may be off), then ask the user what next.
+- 07:2x (25 Nov) new session. The 00:3x C9 dispatch did not run (cap); C9 (Astra) resumed 07:21 on
+  CHECKPOINT 8 (multi-metric Trends). Codex 5h 4%, weekly 24%. Waiting for its CHECKPOINT line.
+- 07:4x C9 CHECKPOINT 8 verified outside the sandbox (100 app tests, 0 skipped; screenshots of
+  1/2/3/5 measures, hover, pinned, Table header reviewed) and committed.
