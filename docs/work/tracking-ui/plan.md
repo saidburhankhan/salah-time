@@ -563,3 +563,44 @@ scales (focus 1–5, quality 1–10, pages 0–100/200, minutes, distractions pe
   column header shows its range (e.g. "Focus 1–5") and hovering a column header fades the others.
 - Worker: C9 on Astra (design-sensitive chart). App tests + screenshots: 1, 2, 3 and 5 measures,
   hover on each, pinned state, the Table header hover.
+
+### Addendum: archiving a project pauses its goals, routines and tasks (user decision 2026-11-25 ~07:50)
+User: "Pause them, the routines and tasks. But they should stay in statistics." Archiving a project
+pauses everything planned under it (the project, its epics and its tasks); unarchiving resumes it.
+Paused time is never scored as missed. Past work stays everywhere it is read.
+1. **Backend (C8 Astra, migration 007).** Record archive history so any date can be evaluated:
+   additive `project_pauses(project_id, from_day, to_day NULL)` in tracking days (archive on day D
+   opens a span from D; unarchive on day E closes it at E-1; archive and unarchive on the same day
+   leave no span). A project already archived at migration gets an open span from the migration day.
+   `projects.archived` stays the current flag and must agree with an open span.
+   - **Goals** scoped to the project, one of its epics or one of its tasks: a period that overlaps a
+     pause span is *paused*, so it counts as neither met nor missed and is left out of met counts,
+     rates and streaks. `goals.list` (also with a past `at`) shows `paused: true` for such goals.
+     History lists paused periods as paused. Goals on tags or all work are unchanged, and archived
+     projects' sessions still count toward them.
+   - **Routines** of the project create no occurrences on paused days, so nothing shows in day.get
+     for those days and nothing counts as missed. Days before the pause keep their items, sessions
+     and ticks. After unarchive the routine resumes on that day. Routine lists flag
+     `paused: true`, and `routines.activity` still returns past rows.
+   - **Tasks**: open (undone) tasks are hidden from today and future days, from the backlog and from
+     task pickers while paused. Done tasks and every session stay on their days. After unarchive,
+     open one-time tasks whose date fell inside the span go to the Backlog (not lost, not overdue).
+   - **Statistics, insights, review, sessions** are unchanged: archived projects' sessions count, and
+     filters/catalogues used for reading include archived projects, epics and tasks (marked
+     `archived`/`paused`). On-plan adherence counts no planned minutes for paused items.
+   - `project.edit {archived}` applies the pause/resume atomically. Add `project.pause_preview`
+     (or counts on ProjectView) with the numbers the confirm dialog needs: goals, routines and
+     open tasks to pause. CLI mirrors it. Migration 007 follows the runner rules (backup, keep 3,
+     refused if newer, tests v6→v7 on realistic rows). Tests cover a goal across a pause (met-rate
+     and streak unchanged by paused periods), a daily routine paused for 3 days then resumed, an
+     open one-time task dated inside the span landing in the Backlog, and stats totals identical
+     before/after archiving.
+2. **App (C9 Sol).** Archive confirm: "Pauses 2 goals, 1 routine and 3 open tasks. Past work stays in
+   Statistics." Unarchive says "Resume". Goals page: a "Paused" section naming the archived project,
+   with paused periods drawn neutral in history. Routines page: paused routines under "Paused —
+   project archived" with an "Unarchive project" action. Statistics/Insights/Review filters still
+   offer archived projects, epics and tasks, marked archived. Tests + reviewed screenshots.
+3. **Widget (C10 Sol).** Paused routines, tasks and goal chips never appear; creation never offers
+   archived projects. Verify against the C8 fixtures. No new UI.
+Install gate: migration 007 on a fresh read-only copy of the live DB (row counts per table, day.get
+for the last 3 days and stats totals identical before/after) before installing.

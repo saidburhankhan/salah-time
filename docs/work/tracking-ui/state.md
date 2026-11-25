@@ -297,3 +297,7 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   1/2/3/5 measures, hover, pinned, Table header reviewed) and committed.
 - 07:41 INSTALLED via gated chain (263 cargo + 100 app tests); live shell log clean (reload only, no
   failures); bar "Dhuhr 4h 33m". Codex 5h ~4%+, weekly ~25%. Queue empty: ask the user what next.
+- 07:5x USER decision: archiving a project PAUSES its goals, routines and tasks (resume on
+  unarchive); everything stays in statistics → plan.md addendum "archiving a project pauses…".
+  Live: no goals, no archived projects (Quran, Career active), so migration 007 is additive only.
+  Dispatched C8 (Astra) backend → CHECKPOINT 12. Then C9 (Sol) app, C10 (Sol) widget.
