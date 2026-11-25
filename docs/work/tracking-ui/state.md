@@ -287,3 +287,7 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   bak-v5 kept; integrity/FK ok; 23 Nov 3 items/14 sessions, 24 Nov 4/9 as on the copy; live shell
   log clean; bar screenshot impossible (display off, DPMS) — check the bar when the user is back.
   QUEUE EMPTY for tracking-ui. Ask the user what next (quota: weekly ~20%, windows until 25 Nov night).
+- 00:3x USER: multi-metric Trends chart (one axis per metric, hover focus) → plan.md addendum
+  "multi-metric Trends chart". Dispatched C9 (Astra) → CHECKPOINT 8. USER asked for a fresh session;
+  the next session continues from here: verify/commit C9 8 (app/bin/test + screenshots), install via
+  the gated chain, live log + bar check (display may be off), then ask the user what next.

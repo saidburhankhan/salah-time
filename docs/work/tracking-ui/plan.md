@@ -543,3 +543,23 @@ day-by-day history looks lost; there is no way to stop a routine except deleting
 4. **Widget (C10):** ended routines never appear in the timeline after their end day; no new UI.
 Install gate: migration 006 tested on a fresh read-only copy of the live DB (diff of every table's
 row count; routine history by day before/after) before installing.
+
+### Addendum: multi-metric Trends chart with one axis per metric (user request 2026-11-25 ~00:35)
+User: picking several measures in Statistics makes the chart messy, because metrics have different
+scales (focus 1–5, quality 1–10, pages 0–100/200, minutes, distractions per hour…).
+- **One vertical axis per selected measure**, side by side on the left of the Trends chart (a
+  narrow number column each, labelled with the measure's name/unit and its own range: a scale
+  metric uses 1..scale_max, counts/minutes use 0..nice max). Each line is drawn against its own
+  axis. Up to ~4 axes visible; more selections show a compact "+N" note and fall back to the
+  normalised view toggle (0–100% of each series' range) rather than squeezing axes.
+- **Focus on hover:** hovering a line, its legend chip or its axis column highlights that series
+  and its axis (full colour, axis ticks clear) and fades the others (~35% opacity); the hover
+  tooltip shows every series' value for that x with its own unit. Click pins the highlight; click
+  again or Esc clears. Keyboard: Tab through series chips does the same.
+- Axis colours match their line; no bright white; numbers in mono; one decimal max; small samples
+  still shown as counts in the tooltip.
+- Applies to the Charts tab Trends chart (and the Insights weekly line if it ever shows several
+  measures). The Table tab is unchanged except: when several metric columns are shown, each
+  column header shows its range (e.g. "Focus 1–5") and hovering a column header fades the others.
+- Worker: C9 on Astra (design-sensitive chart). App tests + screenshots: 1, 2, 3 and 5 measures,
+  hover on each, pinned state, the Table header hover.
