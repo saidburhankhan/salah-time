@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
+import "../notes"
 
 // One dialog for the session writes that carry metrics:
 //   pause — stop a timer, optionally correcting time and marking its item done
@@ -28,6 +29,13 @@ Popup {
     property var values: ({})
     property var initialValues: ({})
     property var notes: []
+    property bool notesPreview: false
+    property string notesNext: ""
+    property string notesError: ""
+    property int notesRequest: 0
+    property bool notesLoading: false
+    property string activeNote: ""
+    readonly property bool editingEntry: entryEditor.draft !== null
     property int initialMinutes: 0
     // pause: the most minutes the server accepts (0 = unknown), and whether
     // the timer ran past its day's Sleep.
@@ -42,7 +50,7 @@ Popup {
     readonly property bool pauseMode: mode === "pause"
     readonly property bool needsMinutes: mode === "log" || (mode === "edit" && !tick)
     readonly property int minutes: Number(minutesField.text || 0)
-    readonly property bool canSave: !waiting && (!needsMinutes || minutes > 0)
+    readonly property bool canSave: !waiting && !editingEntry && (!needsMinutes || minutes > 0)
 
     visible: win ? win.sessionPromptVisible : false
     modal: true
@@ -80,6 +88,14 @@ Popup {
         initialValues = copy
         metrics = win.promptMetrics(projectId, copy, options.metrics, mode === "edit")
         notes = options.notes || []
+        notesPreview = !!options.notesMore
+        notesNext = ""
+        notesError = ""
+        notesLoading = false
+        ++notesRequest
+        activeNote = ""
+        entryEditor.parent = addSlot
+        entryEditor.reset()
         operation = ""
         logDay = options.day || ""
         editVersion = options.version === undefined ? -1 : options.version
@@ -95,6 +111,33 @@ Popup {
         scroller.contentY = 0
         if (needsMinutes)
             minutesField.forceActiveFocus()
+        if (mode === "edit" && notesPreview) requestNotes()
+    }
+
+    function requestNotes() {
+        notesLoading = true
+        notesError = ""
+        backend.loadSessionNoteEntries(++notesRequest, sessionId, notesNext)
+    }
+
+    function beginTimed(action, note, slot) {
+        entryEditor.parent = slot
+        activeNote = String(note?.id || "")
+        entryEditor.begin(action, sessionId, note, editVersion)
+        // The added row can sit below the fold after the form grows.
+        Qt.callLater(function() {
+            var y = entryEditor.mapToItem(scroller.contentItem, 0, 0).y
+            if (y + entryEditor.height > scroller.contentY + scroller.height)
+                scroller.contentY = Math.min(y, Math.max(0, scroller.contentHeight - scroller.height))
+        })
+    }
+
+    function minutesFocus() { if (needsMinutes) minutesField.forceActiveFocus() }
+
+    function cancel() {
+        if (waiting || entryEditor.waiting) return
+        if (editingEntry) entryEditor.cancel()
+        else win.sessionPromptVisible = false
     }
 
     function setValue(id, value) {
@@ -155,6 +198,15 @@ Popup {
 
     Connections {
         target: backend
+        function onSessionNoteEntriesLoaded(request, page, error) {
+            if (!prompt.visible || request !== prompt.notesRequest) return
+            prompt.notesLoading = false
+            prompt.notesError = error
+            if (error) return
+            prompt.notes = (prompt.notesNext ? prompt.notes : []).concat(page.notes || [])
+            prompt.notesNext = page.next || ""
+            prompt.notesPreview = !!prompt.notesNext
+        }
         function onRunningChanged() {
             if (prompt.visible) prompt.updateWorkedLimit()
         }
@@ -402,8 +454,118 @@ Popup {
                 onAccepted: prompt.save(false)
             }
 
+            ColumnLayout {
+                visible: prompt.mode === "edit" && !!prompt.sessionId
+                Layout.fillWidth: true
+                spacing: 8
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Timed notes")
+                        color: prompt.win.muted
+                        font.pixelSize: 13
+                    }
+                    AppButton {
+                        objectName: "addTimedNote"
+                        win: prompt.win
+                        text: qsTr("+ Add note")
+                        enabled: prompt.editVersion >= 0 && !prompt.waiting && !prompt.editingEntry && !prompt.notesLoading
+                        onClicked: prompt.beginTimed("add", null, addSlot)
+                    }
+                }
+                Repeater {
+                    model: prompt.notes
+                    ColumnLayout {
+                        id: entry
+                        required property var modelData
+                        Layout.fillWidth: true
+                        spacing: 6
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                text: prompt.win.clockTime(entry.modelData.at)
+                                textFormat: Text.PlainText
+                                font.family: prompt.win.mono
+                                color: prompt.win.muted
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: String(entry.modelData.text || "")
+                                textFormat: Text.PlainText
+                                color: prompt.win.text
+                                wrapMode: Text.Wrap
+                            }
+                            AppButton {
+                                objectName: "editTimedNote_" + entry.modelData.id
+                                win: prompt.win
+                                text: qsTr("Edit")
+                                enabled: prompt.editVersion >= 0 && !prompt.waiting && !prompt.editingEntry && !prompt.notesLoading
+                                onClicked: prompt.beginTimed("edit", entry.modelData, editSlot)
+                            }
+                            AppButton {
+                                objectName: "removeTimedNote_" + entry.modelData.id
+                                win: prompt.win
+                                text: qsTr("Remove")
+                                enabled: prompt.editVersion >= 0 && !prompt.waiting && !prompt.editingEntry && !prompt.notesLoading
+                                onClicked: prompt.beginTimed("remove", entry.modelData, editSlot)
+                            }
+                        }
+                        Item {
+                            id: editSlot
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: entryEditor.parent === editSlot ? entryEditor.implicitHeight : 0
+                            visible: prompt.editingEntry && prompt.activeNote === entry.modelData.id
+                        }
+                    }
+                }
+                AppButton {
+                    objectName: "loadTimedNotes"
+                    visible: prompt.notesPreview
+                    enabled: !prompt.notesLoading && !prompt.editingEntry
+                    win: prompt.win
+                    text: prompt.notesLoading ? qsTr("Loading…") : qsTr("Load timed notes")
+                    onClicked: prompt.requestNotes()
+                }
+                Label {
+                    visible: !!prompt.notesError
+                    Layout.fillWidth: true
+                    text: prompt.notesError
+                    textFormat: Text.PlainText
+                    color: "#ef8068"
+                    wrapMode: Text.Wrap
+                }
+                Item {
+                    id: addSlot
+                    visible: prompt.editingEntry && !prompt.activeNote
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: entryEditor.parent === addSlot ? entryEditor.implicitHeight : 0
+                    NoteEditor {
+                        id: entryEditor
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        visible: !!draft
+                        win: prompt.win
+                        onCanceled: {
+                            parent = addSlot
+                            prompt.activeNote = ""
+                            prompt.minutesFocus()
+                        }
+                        onCompleted: session => {
+                            parent = addSlot
+                            prompt.activeNote = ""
+                            prompt.editVersion = session.version
+                            prompt.notes = session.notes || []
+                            prompt.notesPreview = false
+                            prompt.notesNext = ""
+                            prompt.minutesFocus()
+                        }
+                    }
+                }
+            }
+
             Repeater {
-                model: prompt.notes
+                model: prompt.pauseMode ? prompt.notes : []
                 Label {
                     required property var modelData
                     Layout.fillWidth: true
@@ -424,6 +586,7 @@ Popup {
             }
 
             RowLayout {
+                visible: !prompt.editingEntry
                 Layout.fillWidth: true
                 spacing: 10
                 Item {
@@ -432,7 +595,8 @@ Popup {
                 AppButton {
                     win: prompt.win
                     text: qsTr("Cancel")
-                    onClicked: prompt.win.sessionPromptVisible = false
+                    enabled: !prompt.editingEntry && !prompt.waiting
+                    onClicked: prompt.cancel()
                 }
                 AppButton {
                     objectName: "sessionSkipButton"

@@ -325,3 +325,6 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - 13:2x C8 CHECKPOINT 13 (insights measures + distractions/h, note_edit/note_remove/note at,
   notes.list) verified: scripts/test 272 incl. sockets; no migration. Committed. Dispatched C9 (Sol)
   app → CHECKPOINT 10 (Insights metric row, note editing, Notes page).
+- 13:5x C9 CHECKPOINT 10 verified (103 app tests outside sandbox; screenshots: Notes page with
+  filters/search/Timed, inline edit, session editor timed notes edit/add/remove, Insights metric
+  row with Distractions/h and "recorded") and committed; installing via the gated chain.

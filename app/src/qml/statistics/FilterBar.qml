@@ -13,6 +13,10 @@ ColumnLayout {
     property var win
     // 7, 28 or 90 days, or 0 for the custom from/to range.
     property bool showMetrics: true
+    // Derived choices are filter-only. Trends uses the measure catalogue below.
+    readonly property var filterMetrics: metricChoices.concat([
+        { id: "distractions_per_hour", name: qsTr("Distractions per hour") }
+    ])
     property bool showRange: true
     property bool showTags: true
     property int range: 28
@@ -97,11 +101,13 @@ ColumnLayout {
     readonly property var activeChips: {
         var chips = []
         if (minutesMin >= 0 || minutesMax >= 0)
-            chips.push({ key: "minutes", text: rangeText(qsTr("Duration"), minutesMin >= 0 ? minutesMin : undefined,
-                                                         minutesMax >= 0 ? minutesMax : undefined, qsTr("min")) })
+            chips.push({ key: "minutes", text: minutesMin === 0 && minutesMax < 0 ? qsTr("Duration recorded")
+                : rangeText(qsTr("Duration"), minutesMin >= 0 ? minutesMin : undefined,
+                            minutesMax >= 0 ? minutesMax : undefined, qsTr("m")) })
         for (var id in valueRanges) {
             var metric = win.metricById(id)
-            var name = metric ? String(metric.name) : (id === "distractions" ? qsTr("Distractions") : id)
+            var name = id === "distractions_per_hour" ? qsTr("Distractions/h")
+                : metric ? String(metric.name) : id === "distractions" ? qsTr("Distractions") : id
             chips.push({ key: id, text: rangeText(name, valueRanges[id].min, valueRanges[id].max, "") })
         }
         return chips
@@ -124,7 +130,9 @@ ColumnLayout {
         return value !== undefined && value !== null && !isNaN(Number(value))
     }
     function rangeText(name, min, max, unit) {
-        var suffix = unit ? " " + unit : ""
+        var suffix = unit || ""
+        if (!has(min) && !has(max))
+            return qsTr("%1 recorded").arg(name)
         if (has(min) && has(max))
             return Number(min) === Number(max) ? name + " = " + win.numberText(min) + suffix
                                                : name + " " + win.numberText(min) + "–" + win.numberText(max) + suffix
@@ -166,6 +174,18 @@ ColumnLayout {
         if (any)
             q.values = values
         return q
+    }
+    function restore(query) {
+        range = query.days || (query.from && query.to ? 0 : 28)
+        customFrom = query.from || ""
+        customTo = query.to || ""
+        projectId = query.project_id || ""
+        epicId = query.epic_id || ""
+        itemId = query.item_id || ""
+        tagId = query.tag_id || ""
+        minutesMin = query.minutes_min ?? -1
+        minutesMax = query.minutes_max ?? -1
+        valueRanges = query.values || {}
     }
     function epicLabel(epic) {
         var project = win.projectById(epic.project_id)
@@ -263,6 +283,17 @@ ColumnLayout {
         editing = ""
         edited()
     }
+    function requireMetric(id) {
+        if (id === "minutes") {
+            setMetricRange(id, 0, undefined)
+            return
+        }
+        var ranges = Object.assign({}, valueRanges)
+        ranges[id] = {}
+        valueRanges = ranges
+        editing = ""
+        edited()
+    }
     function removeChip(key) {
         setMetricRange(key, undefined, undefined)
     }
@@ -284,6 +315,8 @@ ColumnLayout {
     function editorHint() {
         if (editing === "minutes")
             return qsTr("minutes")
+        if (editing === "distractions_per_hour")
+            return qsTr("per hour")
         var metric = win.metricById(editing) || (editing === "distractions" ? win.distractionMetric() : null)
         if (!metric)
             return ""
@@ -654,9 +687,10 @@ ColumnLayout {
                     onClicked: bar.openEditor("minutes")
                 }
                 Repeater {
-                    model: bar.metricChoices
+                    model: bar.filterMetrics
                     ChoiceChip {
                         required property var modelData
+                        objectName: "metricFilter_" + String(modelData.id)
                         win: bar.win
                         text: String(modelData.name || modelData.id)
                         selected: bar.editing === String(modelData.id)
@@ -712,6 +746,13 @@ ColumnLayout {
                     text: qsTr("Apply")
                     onClicked: bar.setMetricRange(bar.editing, minField.text, maxField.text)
                 }
+            }
+            AppButton {
+                objectName: "metricPresenceButton"
+                visible: !minField.text.trim() && !maxField.text.trim()
+                win: bar.win
+                text: qsTr("Only sessions with a value")
+                onClicked: bar.requireMetric(bar.editing)
             }
         }
     }

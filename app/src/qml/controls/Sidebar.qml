@@ -15,10 +15,10 @@ Rectangle {
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 18
-        spacing: 8
+        spacing: sidebar.height < 700 ? 5 : 8
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 64
+            Layout.preferredHeight: sidebar.height < 700 ? 56 : 64
             spacing: 12
             Item {
                 width: 28
@@ -80,6 +80,13 @@ Rectangle {
             pageIndex: 7
             label: qsTr("Insights")
             iconKind: "insights"
+        }
+        SidebarItem {
+            objectName: "notesSidebarItem"
+            appWindow: sidebar.win
+            pageIndex: 9
+            label: qsTr("Notes")
+            iconKind: "notes"
         }
         SidebarItem {
             objectName: "goalsSidebarItem"

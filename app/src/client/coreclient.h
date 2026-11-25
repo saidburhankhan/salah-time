@@ -77,7 +77,9 @@ public:
     // method plus parameters.
     void goalsList(Callback callback);
     void goalsHistory(const QString &id, const QString &from, const QString &to, Callback callback);
-    void rpcRead(const QString &method, const QJsonObject &params, Callback callback);
+    void rpcRead(const QString &method, const QJsonObject &params, Callback callback, bool stdioFallback = false);
+    void insights(const QJsonObject &params, Callback callback);
+    void notesList(const QJsonObject &params, Callback callback);
     void routineActivity(const QDate &from, const QDate &to, const QString &before, Callback callback);
     void itemsList(Callback callback, bool includeEnded = false, bool includePaused = false);
     void itemAdd(const ItemFields &fields, Callback callback = {});
@@ -99,7 +101,10 @@ public:
                      const QString &operation = {});
     void sessionRemove(const QString &sessionId, Callback callback = {});
     void sessionBump(const QString &sessionId, const QString &metricId, int delta, Callback callback = {});
-    void sessionNote(const QString &sessionId, const QString &text, Callback callback = {});
+    void sessionNote(const QString &id, const QString &text, Callback callback, const QString &at = {},
+                     qint64 version = -1, const QString &operation = {});
+    void changeSessionNote(const QString &sessionId, const QString &noteId, const QString &text,
+                           bool remove, qint64 version, const QString &operation, Callback callback);
     void status(Callback callback);
     void prayerMark(const QString &prayer, const QDate &date, Callback callback = {}, qint64 expectedVersion = -1);
     void prayerUnmark(const QString &prayer, const QDate &date, Callback callback = {}, qint64 expectedVersion = -1);
@@ -110,6 +115,8 @@ public:
     void configSetSleepTime(const QString &time, Callback callback = {});
     void projectsList(Callback callback);
     void reportEpicsList(Callback callback);
+    void tagsList(Callback callback);
+    void metricsList(Callback callback);
     void projectPausePreview(const QString &id, Callback callback);
     void mutateEntity(const QString &method, QJsonObject params, Callback callback = {}, const QString &operation = {});
 

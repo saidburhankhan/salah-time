@@ -108,3 +108,15 @@ Goals list paused periods separately and identify the project. Goal history keep
 `app/bin/build` and `git diff --check` passed. `SALAH_UI_SHOT_DIR=/tmp/c9-cp9-checkpoint app/bin/test` passed 57 tests with zero failures and 45 AF_UNIX skips, including the new socket regression in the skip count. Reviewed all 76 screenshots, including the eight archive, resume, paused and report views.
 
 CHECKPOINT 9: Confirm project archives, show paused goals and routines, and keep archived work selectable in reports (app/src/backend.cpp, app/src/backend.h, app/src/backend_reports.cpp, app/src/client/coreclient.cpp, app/src/client/coreclient.h, app/src/qml/Main.qml, app/src/qml/goals/GoalHistory.qml, app/src/qml/goals/GoalRow.qml, app/src/qml/insights/PlanAdherence.qml, app/src/qml/pages/EpicPage.qml, app/src/qml/pages/GoalsPage.qml, app/src/qml/pages/InsightsPage.qml, app/src/qml/pages/ReviewPage.qml, app/src/qml/pages/RoutinesPage.qml, app/src/qml/pages/StatisticsPage.qml, app/src/qml/settings/ProjectEpics.qml, app/src/qml/settings/ProjectsSettings.qml, app/src/qml/statistics/FilterBar.qml, app/tests/salah_app_tests.cpp, docs/work/tracking-ui/c9-progress.md)
+
+## Metric filters and editable Notes
+
+Statistics, Insights Patterns and Sessions, and the Notes page share the range editor. The editor includes Distractions per hour and a recorded-value filter. Insights keeps the metric selections when switching to Plan adherence and explains which filters score the plan.
+
+The session editor edits timed notes in place, confirms removals, and accepts a local HH:MM when adding a note. Writes carry the session version and update it from the mutation result. Retrying an unconfirmed write reuses the same operation ID and payload. Insights and Review note previews can load their full timed entries in the editor.
+
+Notes sits after Insights in the sidebar and can open directly with `salah-app --page notes`. Each note has its own row, with text search, saved filters, kind choices, pagination, inline editing and Open session. The Statistics Notes tab still lists sessions. Notes and Insights reads have CLI fallback. Note writes use the same RPC frames over the socket or CLI stdio.
+
+`app/bin/build` and `git diff --check` passed. `SALAH_UI_SHOT_DIR=/tmp/c9-cp10-checkpoint app/bin/test` passed 58 tests with zero failures and 45 AF_UNIX skips. Reviewed all 84 screenshots, including the new filter, empty, inline edit and timed note states.
+
+CHECKPOINT 10: Add metric filters to Insights and editable session notes with a dedicated Notes page (app/src/backend.h, app/src/backend_reports.cpp, app/src/client/coreclient.cpp, app/src/client/coreclient.h, app/src/launch.h, app/src/qml/Main.qml, app/src/qml/controls/AppHeader.qml, app/src/qml/controls/LineIcon.qml, app/src/qml/controls/Sidebar.qml, app/src/qml/notes/NoteEditor.qml, app/src/qml/overlays/SessionPrompt.qml, app/src/qml/pages/EpicPage.qml, app/src/qml/pages/InsightsPage.qml, app/src/qml/pages/NotesPage.qml, app/src/qml/pages/ReviewPage.qml, app/src/qml/statistics/FilterBar.qml, app/src/resources.qrc, app/tests/salah_app_tests.cpp, docs/work/tracking-ui/c9-progress.md)

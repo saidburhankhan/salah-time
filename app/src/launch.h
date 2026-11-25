@@ -5,7 +5,7 @@
 
 namespace launch {
 inline const QStringList &pageNames() {
-    static const QStringList names{"today", "backlog", "routines", "statistics", "insights", "goals", "review", "settings"};
+    static const QStringList names{"today", "backlog", "routines", "statistics", "insights", "notes", "goals", "review", "settings"};
     return names;
 }
 

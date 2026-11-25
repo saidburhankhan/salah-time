@@ -11,7 +11,7 @@ ScrollView {
     required property var win
     readonly property alias filterBar: filters
     readonly property var report: backend.insights
-    readonly property bool hasReport: !backend.offlineMode && Object.keys(report).length > 0
+    readonly property bool hasReport: Object.keys(report).length > 0
     property string tab: "patterns"
     clip: true
     contentWidth: availableWidth
@@ -63,7 +63,9 @@ ScrollView {
                 textFormat: Text.PlainText
                 text: [filters.filterName(), filters.range === 0
                          ? page.win.shortDate(filters.customFrom) + " – " + page.win.shortDate(filters.customTo)
-                         : qsTr("Last %1 days").arg(filters.range)].filter(Boolean).join("  ·  ")
+                         : qsTr("Last %1 days").arg(filters.range)]
+                    .concat(page.tab !== "plan" && !filters.visible ? filters.activeChips.map(chip => chip.text) : [])
+                    .filter(Boolean).join("  ·  ")
             }
             ChoiceChip {
                 objectName: "insightsFilters"
@@ -78,13 +80,18 @@ ScrollView {
             win: page.win
             Layout.fillWidth: true
             visible: false
-            showMetrics: false
+            showMetrics: page.tab !== "plan"
             onEdited: page.reload()
         }
         Label {
+            visible: page.tab === "plan"
+            text: qsTr("Plan adherence uses the date and assignment filters only.")
+            color: page.win.muted
+            font.pixelSize: 13
+        }
+        Label {
             visible: !page.hasReport
-            text: backend.offlineMode ? qsTr("Connect to the daemon to view Insights.")
-                : backend.busy ? qsTr("Loading insights…") : qsTr("Insights unavailable.")
+            text: backend.busy ? qsTr("Loading insights…") : qsTr("Insights unavailable.")
             color: page.win.muted
         }
         Patterns {

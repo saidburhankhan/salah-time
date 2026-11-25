@@ -42,6 +42,7 @@ Rectangle {
                 : header.win.page === 4 ? qsTr("Epic")
                 : header.win.page === 5 ? qsTr("Backlog")
                 : header.win.page === 7 ? qsTr("Insights")
+                : header.win.page === 9 ? qsTr("Notes")
                 : header.win.page === 8 ? qsTr("Review")
                 : header.win.page === 6 ? qsTr("Goals") : qsTr("Settings")
             color: header.win.text

@@ -24,10 +24,10 @@ ApplicationWindow {
     Material.accent: theme.accent
     Material.roundedScale: theme.radius
 
-    // 0 Today, 1 Routines, 2 Statistics, 3 Settings, 4 an Epic, 5 Backlog, 6 Goals, 7 Insights, 8 Review.
+    // 0 Today, 1 Routines, 2 Statistics, 3 Settings, 4 an Epic, 5 Backlog, 6 Goals, 7 Insights, 8 Review, 9 Notes.
     property int page: 0
     readonly property var pageByName: ({today: 0, backlog: 5, routines: 1, statistics: 2, insights: 7,
-                                        goals: 6, review: 8, settings: 3})
+                                        goals: 6, review: 8, notes: 9, settings: 3})
     // `salah-app --page <name>`; an unknown name leaves Today open.
     function showPage(name) {
         var index = pageByName[String(name)]
@@ -161,7 +161,7 @@ ApplicationWindow {
             return true
         }
         if (resourceDrawer.opened) { resourceDrawer.close(); return true }
-        if (sessionPromptVisible) { sessionPromptVisible = false; return true }
+        if (sessionPromptVisible) { sessionPrompt.cancel(); return true }
         if (entryVisible && entryPopup.saving) return true
         if (entryVisible && entryPopup.confirming) { entryPopup.confirming = false; return true }
         if (helpVisible) { helpVisible = false; return true }
@@ -428,6 +428,7 @@ ApplicationWindow {
             minutes: session.minutes || 0,
             values: session.values || {},
             notes: session.notes || [],
+            notesMore: !!session.notes_more,
             note: String(session.note || "")
         })
     }
@@ -582,6 +583,13 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     Layout.margins: 26
                     sourceComponent: InsightsPage { win: insightsLoader.appWindow }
+                }
+                NotesPage {
+                    visible: win.page === 9
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.margins: 26
+                    win: win
                 }
                 GoalsPage {
                     id: goalsPage

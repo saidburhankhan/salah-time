@@ -4,6 +4,8 @@
         <file alias="qml/pages/TodayPage.qml">qml/pages/TodayPage.qml</file>
         <file alias="qml/pages/RoutinesPage.qml">qml/pages/RoutinesPage.qml</file>
         <file alias="qml/pages/ReviewPage.qml">qml/pages/ReviewPage.qml</file>
+        <file alias="qml/pages/NotesPage.qml">qml/pages/NotesPage.qml</file>
+        <file alias="qml/notes/NoteEditor.qml">qml/notes/NoteEditor.qml</file>
         <file alias="qml/pages/InsightsPage.qml">qml/pages/InsightsPage.qml</file>
         <file alias="qml/insights/Patterns.qml">qml/insights/Patterns.qml</file>
         <file alias="qml/insights/PlanAdherence.qml">qml/insights/PlanAdherence.qml</file>

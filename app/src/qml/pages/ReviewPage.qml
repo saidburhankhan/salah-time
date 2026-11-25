@@ -482,7 +482,7 @@ ScrollView {
                     objectName: "reviewSession_" + modelData.id
                     win: page.win
                     session: modelData
-                    onOpen: function(row) { page.win.editReportSession(row) }
+                    onOpen: function(row) { page.win.editReportSession(Object.assign({}, row, {notes_more: row.notes_more || (!!page.noteQuery && !page.previewSearch)})) }
                 }
             }
             Label {

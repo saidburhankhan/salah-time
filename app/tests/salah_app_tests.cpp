@@ -4282,7 +4282,7 @@ const int original = model->indexOfItem("<id:4>");
         QCOMPARE(seriesParams.take("interval").toString(), QString("day"));
         QCOMPARE(seriesParams, lastRequest(daemon, "stats.get").value("params").toObject());
         QCOMPARE(chips.size(), 3);
-        QCOMPARE(chips.at(0).toMap().value("text").toString(), QString("Duration 10–60 min"));
+        QCOMPARE(chips.at(0).toMap().value("text").toString(), QString("Duration 10–60m"));
         QCOMPARE(chips.at(1).toMap().value("text").toString(), QString::fromUtf8("Focus ≥ 4"));
         QCOMPARE(chips.at(2).toMap().value("text").toString(), QString::fromUtf8("Distractions ≤ 2"));
         QJsonObject params = lastRequest(daemon, "stats.get").value("params").toObject();
@@ -5686,7 +5686,7 @@ esac
         shotWindow(window, "insights-blocks.png");
         QVERIFY(click("insightsFilters"));
         QVERIFY(firstShown(window, "statsTaskSearch"));
-        QVERIFY(!firstShown(window, "metricAddChip"));
+        QVERIFY(firstShown(window, "metricAddChip"));
         window->resize(960, 1280);
         shotWindow(window, "insights-filters.png");
         auto *endDate = qobject_cast<QQuickItem *>(firstShown(window, "filterEndDate"));
@@ -5765,6 +5765,213 @@ esac
         shotWindow(window, "goals-stored-scope-history.png");
     }
 
+    void editableNotesAndMetricFilters() {
+        QTemporaryDir dir;
+        fake(dir);
+        const QString cli = dir.filePath("notes-cli");
+        auto save = [&](const QString &name, const QJsonObject &data) {
+            write(dir.filePath(name + ".json"), QJsonDocument(data).toJson());
+        };
+        save("insights", fixture("insights_measures"));
+        save("first", fixture("notes_list"));
+        save("next", fixture("notes_list_next"));
+        auto add = fixture("session_note_at");
+        auto edited = fixture("session_note_edit");
+        auto removed = fixture("session_note_remove");
+        save("add", add);
+        save("edit", edited);
+        save("remove", removed);
+        auto session = add.value("changed").toObject().value("sessions").toArray().first().toObject();
+        session["id"] = "<id:4>";
+        session["item_id"] = "<id:3>";
+        session["version"] = 4;
+        session["item"] = QJsonObject{{"title", "Read"}};
+        save("sessions", QJsonObject{{"rows", QJsonArray{session}}, {"next", QJsonValue::Null}});
+        write(cli, R"SH(#!/bin/sh
+cd "$(dirname "$0")"
+case "$1 $2" in
+ "insights "*)
+    printf '%s\n' "$*" >> report-args
+    cat insights.json ;;
+ "notes list")
+    printf '%s\n' "$*" >> report-args
+    case "$*" in
+      *--q=missing*) printf '%s\n' '{"rows":[],"next":null,"total":0}' ;;
+      *--before=*|*--kind=entry*) cat next.json ;;
+      *) cat first.json ;;
+    esac ;;
+ "rpc ")
+    read -r hello && read -r request || exit 2
+    printf '%s\n' "$request" >> frames
+    case "$request" in
+      *'"text":"Retry this note"'*)
+        if [ ! -f retry-seen ]; then touch retry-seen; exit 0; fi ;;
+      *'"at":"02:00"'*)
+        printf '%s\n' "$request" | jq -c '{jsonrpc,id,error:{code:-32602,message:"Time is outside the session",data:{kind:"validation"}}}'
+        exit 0 ;;
+    esac
+    method=$(printf '%s\n' "$request" | jq -r .method)
+    case "$method" in
+      sessions.list)
+        jq -c --argjson r "$request" '{jsonrpc:$r.jsonrpc,id:$r.id,result:.}' sessions.json
+        exit 0 ;;
+      session.note) file=add.json ;;
+      session.note_edit) file=edit.json ;;
+      session.note_remove) file=remove.json ;;
+      session.edit) file=edit.json ;;
+      *) printf '%s\n' "$request" | jq '{jsonrpc,id,result:{}}'; exit 0 ;;
+    esac
+    jq -c --argjson r "$request" '
+      .op_id=$r.params.op_id |
+      .changed.sessions[0].id=($r.params.id // $r.params.session_id) |
+      .changed.sessions[0].version=($r.params.expected_version+1) |
+      {jsonrpc:$r.jsonrpc,id:$r.id,result:.}' "$file" ;;
+ *) exec ./salah "$@" ;;
+esac
+)SH");
+        QFile::setPermissions(cli, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        TrackingUiPreviewBackend backend(cli, daemon_path(dir), {}, {});
+        auto project = TrackingFixture::projects().at(1).toObject().toVariantMap();
+        project["id"] = "<id:1>";
+        backend.projectCatalog = {project};
+        backend.epicCatalog = rpcFixture("epics_list_paused").value("result").toArray().toVariantList();
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        window->resize(1280, 1050);
+        backend.reload();
+        waitForBackendIdle(backend);
+        auto click = [window](const QString &name) {
+            auto *button = firstShown(window, name);
+            return button && button->property("enabled").toBool() && QMetaObject::invokeMethod(button, "clicked");
+        };
+        window->setProperty("page", 7);
+        QTRY_VERIFY(firstShown(window, "insightsFilters"));
+        QVERIFY(click("insightsFilters"));
+        QVERIFY(click("metricAddChip"));
+        QVERIFY(click("metricFilter_distractions_per_hour"));
+        firstShown(window, "metricMinField")->setProperty("text", "4");
+        QVERIFY(click("metricApplyButton"));
+        QVERIFY(click("metricAddChip"));
+        QVERIFY(click("metricFilter_quality"));
+        QVERIFY(click("metricPresenceButton"));
+        waitForBackendIdle(backend);
+        QVERIFY(hasVisualText(window, "Distractions/h ≥ 4"));
+        QVERIFY(hasVisualText(window, "Quality recorded"));
+        shotWindow(window, "insights-metric-filters.png");
+        QVERIFY(click("insightsTab_plan"));
+        QVERIFY(hasVisualText(window, "Plan adherence uses the date and assignment filters only."));
+        QVERIFY(!firstShown(window, "metricAddChip"));
+        shotWindow(window, "insights-plan-metric-scope.png");
+
+        QVERIFY(QMetaObject::invokeMethod(window, "showPage", Q_ARG(QVariant, QVariant("notes"))));
+        QTRY_COMPARE(backend.noteRows().size(), 1);
+        QVERIFY(click("catalogueMoreNotes"));
+        QTRY_COMPARE(backend.noteRows().size(), 2);
+        QCOMPARE(backend.notesTotal(), 2);
+        QVERIFY(hasVisualText(window, "Ärger in the main note"));
+        QVERIFY(hasVisualText(window, "Ärger in a timed entry"));
+        QVERIFY(click("catalogueNoteKind_entry"));
+        QTRY_COMPARE(backend.noteRows().size(), 1);
+        QVERIFY(click("metricAddChip"));
+        QVERIFY(click("metricFilter_focus"));
+        QVERIFY(click("metricPresenceButton"));
+        auto *search = firstShown(window, "catalogueNoteSearch");
+        QVERIFY(search);
+        search->setProperty("text", "ärger");
+        QVERIFY(QMetaObject::invokeMethod(search, "accepted"));
+        QTRY_VERIFY(!backend.notesLoading());
+        QVERIFY(hasVisualText(window, "Focus recorded"));
+        shotWindow(window, "notes-page-filters.png");
+        QVERIFY(click("catalogueNoteEdit"));
+        auto *text = firstShown(window, "editableNoteText");
+        QVERIFY(text);
+        text->setProperty("text", "Retry this note");
+        shotWindow(window, "notes-page-inline-edit.png");
+        QSignalSpy noteSaved(&backend, &Backend::sessionNoteWriteFinished);
+        QVERIFY(click("editableNoteSave"));
+        QTRY_COMPARE(noteSaved.size(), 1);
+        QVERIFY(!noteSaved.first().at(1).toBool());
+        QVERIFY(noteSaved.first().at(2).toBool());
+        QVERIFY(!offlineRequests(dir).isEmpty());
+        const auto attempted = offlineRequests(dir).last().value("params");
+        QVERIFY(text->property("readOnly").toBool());
+        QVERIFY(click("editableNoteSave"));
+        QTRY_COMPARE(noteSaved.size(), 2);
+        QVERIFY2(noteSaved.last().at(1).toBool(), qPrintable(noteSaved.last().at(4).toString()));
+        QCOMPARE(offlineRequests(dir).last().value("params"), attempted);
+        QTRY_VERIFY(!firstShown(window, "editableNoteSave"));
+        QTRY_VERIFY(!backend.notesLoading());
+        auto frames = offlineRequests(dir);
+        auto noteWrite = frames.last().value("params").toObject();
+        QCOMPARE(frames.last().value("method"), QJsonValue("session.note_edit"));
+        QCOMPARE(noteWrite.value("note_id"), QJsonValue("<id:5>"));
+        QCOMPARE(noteWrite.value("expected_version").toInt(), 4);
+        QVERIFY(!noteWrite.value("op_id").toString().isEmpty());
+
+        QVERIFY(click("catalogueOpenSession"));
+        QTRY_VERIFY(firstShown(window, "sessionNoteField"));
+        QCOMPARE(firstShown(window, "sessionNoteField")->property("text").toString(), QString("Main note"));
+        QVERIFY(click("editTimedNote_<id:3>"));
+        text = firstShown(window, "editableNoteText");
+        QVERIFY(text);
+        text->setProperty("text", "Revised");
+        shotWindow(window, "session-timed-note-edit.png");
+        QVERIFY(click("editableNoteSave"));
+        auto *prompt = findByName(window, "sessionPrompt");
+        QTRY_COMPARE(prompt->property("editVersion").toInt(), 5);
+        QVERIFY(click("removeTimedNote_<id:3>"));
+        QVERIFY(hasVisualText(window, "Remove this timed note?"));
+        shotWindow(window, "session-timed-note-remove.png");
+        QVERIFY(click("editableNoteSave"));
+        QTRY_COMPARE(prompt->property("editVersion").toInt(), 6);
+        QVERIFY(click("addTimedNote"));
+        auto *time = firstShown(window, "timedNoteTimeField");
+        text = firstShown(window, "editableNoteText");
+        QVERIFY(time && text);
+        text->setProperty("text", "   ");
+        time->setProperty("text", "09:40");
+        QVERIFY(!firstShown(window, "editableNoteSave")->property("enabled").toBool());
+        text->setProperty("text", "A new thought");
+        time->setProperty("text", "02:00");
+        QVERIFY(click("editableNoteSave"));
+        QTRY_VERIFY(hasVisualText(window, "Time is outside the session"));
+        QVERIFY(!time->property("readOnly").toBool());
+        time->setProperty("text", "09:40");
+        shotWindow(window, "session-timed-note-add.png");
+        QVERIFY(click("editableNoteSave"));
+        QTRY_COMPARE(prompt->property("editVersion").toInt(), 7);
+        frames = offlineRequests(dir);
+        QCOMPARE(frames.last().value("method"), QJsonValue("session.note"));
+        QCOMPARE(frames.last().value("params").toObject().value("at"), QJsonValue("09:40"));
+        QCOMPARE(frames.last().value("params").toObject().value("expected_version").toInt(), 6);
+        QVERIFY(window->property("sessionPromptVisible").toBool());
+        QVERIFY(click("sessionSaveButton"));
+        QTRY_VERIFY(!window->property("sessionPromptVisible").toBool());
+        QCOMPARE(offlineRequests(dir).last().value("params").toObject().value("expected_version").toInt(), 7);
+
+        search->setProperty("text", "missing");
+        QVERIFY(QMetaObject::invokeMethod(search, "accepted"));
+        QTRY_VERIFY(!backend.notesLoading());
+        QVERIFY(hasVisualText(window, "No notes match Last 28 days · Focus recorded · Timed notes · Search “missing”."));
+        shotWindow(window, "notes-page-empty.png");
+        const auto saved = QJsonDocument::fromJson(backend.uiSetting("notes/filters").toString().toUtf8()).object();
+        QCOMPARE(saved.value("kind"), QJsonValue("entry"));
+        QCOMPARE(saved.value("filter").toObject().value("values").toObject().value("focus"), QJsonValue(QJsonObject{}));
+        QFile args(dir.filePath("report-args"));
+        QVERIFY(args.open(QIODevice::ReadOnly));
+        const auto commands = args.readAll();
+        QVERIFY(commands.contains("--min distractions_per_hour=4 --has-value quality"));
+        QVERIFY(commands.contains("--has-value focus"));
+        QVERIFY(commands.contains("--before="));
+    }
+
     void insightsDateRangeAndScope() {
         QTemporaryDir dir;
         FakeDaemon daemon(daemon_path(dir));
@@ -5784,7 +5991,9 @@ esac
         const QDate today = QDate::fromString(backend.todayDay(), Qt::ISODate);
         QCOMPARE(params, (QJsonObject{{"from", today.addDays(-6).toString(Qt::ISODate)}, {"to", backend.todayDay()}}));
         const QJsonObject scoped{{"from", "2031-05-01"}, {"to", "2031-05-14"}, {"tag_id", "none"},
-                                 {"project_id", "none"}, {"epic_id", "none"}, {"item_id", "read"}};
+                                 {"project_id", "none"}, {"epic_id", "none"}, {"item_id", "read"},
+                                 {"minutes_min", 20}, {"values", QJsonObject{{"quality", QJsonObject{}},
+                                     {"distractions_per_hour", QJsonObject{{"min", 4}}}}}};
         backend.loadInsights(scoped.toVariantMap());
         QTRY_COMPARE(lastRequest(daemon, "insights.get").value("params").toObject(), scoped);
         backend.loadInsights({{"from", "2031-05-14"}, {"to", "2031-05-01"}});
@@ -5818,7 +6027,7 @@ esac
         QScopedPointer<QObject> root(component.create());
         QVERIFY2(root, qPrintable(component.errorString()));
         const QList<QPair<QString, int>> pages{{"today", 0}, {"routines", 1}, {"statistics", 2}, {"settings", 3},
-                                               {"backlog", 5}, {"goals", 6}, {"insights", 7}, {"review", 8}};
+                                               {"backlog", 5}, {"goals", 6}, {"insights", 7}, {"review", 8}, {"notes", 9}};
         for (const auto &entry : pages) {
             QVariant ok;
             QVERIFY(QMetaObject::invokeMethod(root.data(), "showPage", Q_RETURN_ARG(QVariant, ok), Q_ARG(QVariant, entry.first)));

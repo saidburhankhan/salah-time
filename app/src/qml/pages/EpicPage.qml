@@ -57,24 +57,7 @@ ScrollView {
             color: project ? String(project.color || "") : ""
         })
     }
-    function openSession(session) {
-        var item = session.item || null
-        var owner = session.project || null
-        win.openSessionPrompt({
-            mode: "edit",
-            tick: session.minutes === null || session.minutes === undefined,
-            version: session.version,
-            sessionId: String(session.id),
-            itemId: String(session.item_id || ""),
-            projectId: String(session.project_id || ""),
-            title: item ? String(item.title || "") : (owner ? String(owner.name || "") : qsTr("Session")),
-            color: owner ? String(owner.color || "") : "",
-            minutes: session.minutes || 0,
-            values: session.values || {},
-            notes: session.notes || [],
-            note: String(session.note || "")
-        })
-    }
+    function openSession(session) { win.editReportSession(session) }
     function taskText(item) {
         return item.repeat === "none" ? qsTr("one-time") : String(item.schedule_text || item.repeat || "")
     }

@@ -58,14 +58,18 @@ QJsonObject Backend::filterParams(const QVariantMap &filter, bool allowAnyDays) 
         double bound = 0;
         if (numberOf(bounds.value(QStringLiteral("min")), &bound)) range.insert(QStringLiteral("min"), bound);
         if (numberOf(bounds.value(QStringLiteral("max")), &bound)) range.insert(QStringLiteral("max"), bound);
-        if (!it.key().isEmpty() && !range.isEmpty()) ranges.insert(it.key(), range);
+        if (!it.key().isEmpty() && (bounds.isEmpty() || !range.isEmpty())) ranges.insert(it.key(), range);
     }
     if (!ranges.isEmpty()) params.insert(QStringLiteral("values"), ranges);
     return params;
 }
 
 void Backend::loadReportItems() {
-    if (m_client.offline()) loadProjectCatalogues();
+    if (m_client.offline()) {
+        loadProjectCatalogues();
+        m_client.tagsList(settingsListResponse(m_tags));
+        m_client.metricsList(settingsListResponse(m_metrics));
+    }
     const quint64 request = ++m_reportItemsRequest;
     m_client.itemsList(readResponse([this, request](const CoreClient::Result &result) {
         if (request != m_reportItemsRequest) return;
@@ -125,7 +129,7 @@ void Backend::loadRoutineHistory(const QDate &through, const QString &before) {
 void Backend::loadInsights(const QVariantMap &filter) {
     const quint64 request = ++m_insightsRequest;
     QJsonObject params = filterParams(filter, false);
-    if (params.isEmpty() || m_client.offline()) {
+    if (params.isEmpty()) {
         m_insights.clear();
         emit insightsChanged();
         return;
@@ -135,21 +139,18 @@ void Backend::loadInsights(const QVariantMap &filter) {
         params.insert("from", m_today.addDays(1 - days).toString(Qt::ISODate));
         params.insert("to", todayDay());
     }
-    params.remove("minutes_min");
-    params.remove("minutes_max");
-    params.remove("values");
     if (params != m_insightsParams) {
         m_insightsParams = params;
         m_insights.clear();
         emit insightsChanged();
     }
-    m_client.rpcRead(QStringLiteral("insights.get"), params, [this, request](const CoreClient::Result &result) {
+    m_client.insights(params, [this, request](const CoreClient::Result &result) {
         if (request != m_insightsRequest) return;
         if (result.ok) {
             m_insights = std::get<Dto::Json>(result.value).json.toVariantMap();
         } else {
             m_insights.clear();
-            if (!m_client.offline()) fail(result.error.message);
+            fail(result.error.message);
         }
         emit insightsChanged();
     });
@@ -295,4 +296,142 @@ QVariant Backend::uiSetting(const QString &key, const QVariant &fallback) const 
 void Backend::setUiSetting(const QString &key, const QVariant &value) {
     QSettings settings(QStringLiteral("salah"), QStringLiteral("salah-app"));
     settings.setValue(key, value);
+}
+
+void Backend::loadNotesReport(const QVariantMap &filter, const QString &query, const QString &kind) {
+    const QJsonObject scope = filterParams(filter, true);
+    if (scope.isEmpty()) return;
+    auto params = scope;
+    const auto text = query.trimmed();
+    if (!text.isEmpty()) params.insert("q", text);
+    if (kind == "main" || kind == "entry") params.insert("kind", kind);
+    params.insert("limit", 50);
+    if (m_notesParams != params) {
+        m_noteRows.clear();
+        m_notesTotal = 0;
+    }
+    m_notesParams = params;
+    m_notesNext.clear();
+    requestNotesReport({});
+}
+
+void Backend::loadMoreNotesReport() {
+    if (!m_notesLoading && !m_notesNext.isEmpty()) requestNotesReport(m_notesNext);
+}
+
+void Backend::requestNotesReport(const QString &before) {
+    auto params = m_notesParams;
+    if (!before.isEmpty()) params.insert("before", before);
+    const quint64 request = ++m_notesRequest;
+    m_notesError.clear();
+    m_notesLoading = true;
+    emit notesReportChanged();
+
+    m_client.notesList(params, [this, request, before](const CoreClient::Result &result) {
+        if (request != m_notesRequest) return;
+        m_notesLoading = false;
+        const auto *data = std::get_if<Dto::Json>(&result.value);
+        if (result.ok && data && data->json.value("rows").isArray()) {
+            const auto rows = data->json.value("rows").toArray().toVariantList();
+            if (before.isEmpty()) m_noteRows = rows;
+            else m_noteRows.append(rows);
+            m_notesTotal = data->json.value("total").toInteger();
+            const auto next = data->json.value("next").toString();
+            m_notesNext = next == before ? QString() : next;
+        } else {
+            m_notesError = result.ok ? tr("Could not read the notes list.") : result.error.message;
+            if (before.isEmpty()) {
+                m_noteRows.clear();
+                m_notesTotal = 0;
+            }
+        }
+        emit notesReportChanged();
+    });
+}
+
+void Backend::loadSessionForNote(int request, const QString &id, const QVariantMap &context) {
+    m_sessionForNoteRequest = request;
+    const auto day = context.value("day").toString();
+    if (id.isEmpty() || !QDate::fromString(day, Qt::ISODate).isValid()) {
+        emit sessionForNoteLoaded(request, {}, tr("Could not locate the session."));
+        return;
+    }
+    // The note catalogue carries a session summary. Read its current editor
+    // fields, including the main note, through a bounded single-day query.
+    QJsonObject params{{"from", day}, {"to", day}, {"limit", 10}, {"with_note", false}};
+    const auto item = context.value("item_id").toString();
+    if (!item.isEmpty()) params.insert("item_id", item);
+    findSessionForNote(request, id, params);
+}
+
+void Backend::findSessionForNote(int request, const QString &id, QJsonObject params) {
+    m_client.rpcRead(QStringLiteral("sessions.list"), params, [this, request, id, params](const CoreClient::Result &result) mutable {
+        if (request != m_sessionForNoteRequest) return;
+        if (const auto *data = std::get_if<Dto::Json>(&result.value); result.ok && data) {
+            for (const auto &value : data->json.value("rows").toArray()) {
+                const auto row = value.toObject();
+                if (row.value("id").toString() != id) continue;
+                emit sessionForNoteLoaded(request, row.toVariantMap(), {});
+                return;
+            }
+            const auto next = data->json.value("next").toString();
+            if (!next.isEmpty() && next != params.value("before").toString()) {
+                params.insert("before", next);
+                findSessionForNote(request, id, params);
+                return;
+            }
+        }
+        emit sessionForNoteLoaded(request, {}, result.ok ? tr("This session is no longer available.") : result.error.message);
+    }, true);
+}
+
+void Backend::loadSessionNoteEntries(int request, const QString &id, const QString &after) {
+    QJsonObject params{{"id", id}};
+    if (!after.isEmpty()) params.insert("after", after);
+    m_client.rpcRead(QStringLiteral("session.notes"), params, [this, request](const CoreClient::Result &result) {
+        if (const auto *data = std::get_if<Dto::Json>(&result.value); result.ok && data && data->json.value("notes").isArray())
+            emit sessionNoteEntriesLoaded(request, data->json.toVariantMap(), {});
+        else
+            emit sessionNoteEntriesLoaded(request, {}, result.ok ? tr("Could not read the timed notes.") : result.error.message);
+    }, true);
+}
+
+void Backend::writeSessionNote(const QVariantMap &edit, const QString &operation) {
+    const QString id = edit.value("sessionId").toString();
+    const QString noteId = edit.value("noteId").toString();
+    const QString text = edit.value("text").toString();
+    const QString action = edit.value("action").toString();
+    const qint64 version = edit.value("version", -1).toLongLong();
+    if (id.isEmpty() || version < 0 || (action != "remove" && text.trimmed().isEmpty())) {
+        emit sessionNoteWriteFinished(operation, false, false, {}, tr("A session version and a note are required."));
+        return;
+    }
+
+    auto finished = [this, id, operation](const CoreClient::Result &result) {
+        if (!result.ok) {
+            const bool uncertain = !result.error.definitiveRejection() && result.error.kind != CoreClient::ErrorKind::Conflict;
+            emit sessionNoteWriteFinished(operation, false, uncertain, {}, result.error.message);
+            return;
+        }
+        const auto *mutation = std::get_if<Dto::MutationResult>(&result.value);
+        if (mutation) {
+            const auto sessions = mutation->json.value("changed").toObject().value("sessions").toArray();
+            for (const auto &value : sessions) {
+                const auto session = value.toObject();
+                if (session.value("id").toString() != id || !session.value("version").isDouble()) continue;
+                clearError();
+                m_refreshPending = true;
+                emit sessionNoteWriteFinished(operation, true, false, session.toVariantMap(), {});
+                emit sessionWriteFinished(true, {}, operation);
+                return;
+            }
+        }
+        emit sessionNoteWriteFinished(operation, false, true, {}, tr("Could not confirm the saved note."));
+    };
+    if (action == "main")
+        m_client.sessionEdit(id, -1, false, {}, true, text, std::move(finished), version, operation);
+    else if (action == "add")
+        m_client.sessionNote(id, text, std::move(finished), edit.value("at").toString(), version, operation);
+    else
+        m_client.changeSessionNote(id, noteId, text, action == "remove", version, operation, std::move(finished));
 }
