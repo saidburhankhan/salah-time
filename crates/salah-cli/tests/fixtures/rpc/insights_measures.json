@@ -1,0 +1,402 @@
+{
+  "id": 10,
+  "jsonrpc": "2.0",
+  "result": {
+    "best": [
+      {
+        "block": "fajr",
+        "day": "2031-05-14",
+        "ended_at": "2031-05-14T04:55:00Z",
+        "epic": {
+          "id": "<id:2>",
+          "name": "Book"
+        },
+        "epic_id": "<id:2>",
+        "id": "<id:4>",
+        "item": {
+          "id": "<id:3>",
+          "title": "Read"
+        },
+        "item_id": "<id:3>",
+        "minutes": 20,
+        "note": "Ärger in the main note",
+        "notes": [
+          {
+            "at": "2031-05-14T04:40:00Z",
+            "id": "<id:5>",
+            "text": "Ärger in a timed entry"
+          },
+          {
+            "at": "2031-05-14T04:45:00Z",
+            "id": "<id:6>",
+            "text": "Different text"
+          }
+        ],
+        "notes_count": 2,
+        "notes_more": false,
+        "project": {
+          "color": "#4c8bf5",
+          "id": "<id:1>",
+          "name": "Study"
+        },
+        "project_id": "<id:1>",
+        "running": false,
+        "stale": false,
+        "started_at": "2031-05-14T04:30:00Z",
+        "values": {
+          "distractions": 2.0,
+          "focus": 4.0,
+          "quality": 3.0
+        },
+        "version": 4
+      }
+    ],
+    "block_matrix": [
+      {
+        "actual_block": "fajr",
+        "minutes": 90,
+        "planned_block": "fajr"
+      }
+    ],
+    "by_block": [
+      {
+        "block": "night",
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "block": "fajr",
+        "distractions_per_hour": 6.0,
+        "focus_avg": 4.0,
+        "minutes": 20,
+        "sessions": 1
+      },
+      {
+        "block": "dhuhr",
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "block": "asr",
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "block": "maghrib",
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "block": "isha",
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "block": "sleep",
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0
+      }
+    ],
+    "by_hour": [
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 0,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 1,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 2,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 3,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 4,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 5,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 6,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 7,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 8,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": 6.0,
+        "focus_avg": 4.0,
+        "hour": 9,
+        "minutes": 20,
+        "sessions": 1
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 10,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 11,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 12,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 13,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 14,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 15,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 16,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 17,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 18,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 19,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 20,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 21,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 22,
+        "minutes": 0,
+        "sessions": 0
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "hour": 23,
+        "minutes": 0,
+        "sessions": 0
+      }
+    ],
+    "by_weekday": [
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0,
+        "weekday": 1
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0,
+        "weekday": 2
+      },
+      {
+        "distractions_per_hour": 6.0,
+        "focus_avg": 4.0,
+        "minutes": 20,
+        "sessions": 1,
+        "weekday": 3
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0,
+        "weekday": 4
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0,
+        "weekday": 5
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0,
+        "weekday": 6
+      },
+      {
+        "distractions_per_hour": null,
+        "focus_avg": null,
+        "minutes": 0,
+        "sessions": 0,
+        "weekday": 7
+      }
+    ],
+    "distractions_by_week": [
+      {
+        "per_hour": 6.0,
+        "week": "2031-05-12"
+      }
+    ],
+    "hardest": [
+      {
+        "block": "fajr",
+        "day": "2031-05-14",
+        "ended_at": "2031-05-14T04:55:00Z",
+        "epic": {
+          "id": "<id:2>",
+          "name": "Book"
+        },
+        "epic_id": "<id:2>",
+        "id": "<id:4>",
+        "item": {
+          "id": "<id:3>",
+          "title": "Read"
+        },
+        "item_id": "<id:3>",
+        "minutes": 20,
+        "note": "Ärger in the main note",
+        "notes": [
+          {
+            "at": "2031-05-14T04:40:00Z",
+            "id": "<id:5>",
+            "text": "Ärger in a timed entry"
+          },
+          {
+            "at": "2031-05-14T04:45:00Z",
+            "id": "<id:6>",
+            "text": "Different text"
+          }
+        ],
+        "notes_count": 2,
+        "notes_more": false,
+        "project": {
+          "color": "#4c8bf5",
+          "id": "<id:1>",
+          "name": "Study"
+        },
+        "project_id": "<id:1>",
+        "running": false,
+        "stale": false,
+        "started_at": "2031-05-14T04:30:00Z",
+        "values": {
+          "distractions": 2.0,
+          "focus": 4.0,
+          "quality": 3.0
+        },
+        "version": 4
+      }
+    ],
+    "on_plan": [
+      {
+        "item_id": "<id:3>",
+        "minutes": 90,
+        "name": "Read",
+        "on_plan_minutes": 90,
+        "planned_block": "fajr",
+        "planned_blocks": [
+          "fajr"
+        ],
+        "scored_minutes": 90
+      }
+    ]
+  }
+}

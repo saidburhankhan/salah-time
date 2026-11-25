@@ -162,7 +162,16 @@ fn world() -> World {
         .store
         .write(|tx| {
             let started = sessions::start(tx, &config(), at(20, 13, 0), ids(), on_project(&gym))?;
-            sessions::append_note(tx, &config(), at(20, 13, 5), ids(), None, "Ünïcode entry")?;
+            sessions::append_note(
+                tx,
+                &config(),
+                at(20, 13, 5),
+                ids(),
+                sessions::NewNote {
+                    text: "Ünïcode entry",
+                    ..Default::default()
+                },
+            )?;
             sessions::stop(
                 tx,
                 &config(),
@@ -518,7 +527,16 @@ fn removed_and_running_sessions_are_not_listed() {
         .write(|tx| {
             sessions::remove(tx, &config(), at(25, 9, 0), &w.read_log, None)?;
             sessions::start(tx, &config(), at(25, 13, 0), ids(), on_project(&w.quran))?;
-            sessions::append_note(tx, &config(), at(25, 13, 1), ids(), None, "running note")
+            sessions::append_note(
+                tx,
+                &config(),
+                at(25, 13, 1),
+                ids(),
+                sessions::NewNote {
+                    text: "running note",
+                    ..Default::default()
+                },
+            )
         })
         .unwrap();
     let page = run(&w, Filter::default(), all());

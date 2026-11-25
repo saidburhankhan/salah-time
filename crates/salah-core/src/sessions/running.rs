@@ -2,13 +2,13 @@
 
 use super::{Values, checked_values, new_session, running};
 use crate::config::Config;
-use crate::guard::{label, not_found, note};
+use crate::guard::{not_found, note};
 use crate::{Store, WriteTx, day, metrics};
 use chrono::{DateTime, Utc};
 use salah_domain::{
     error::Error,
     runtime::IdGenerator,
-    tracking::{MetricKind, Session, SessionNote, SessionValue},
+    tracking::{MetricKind, Session, SessionValue},
 };
 use serde::Deserialize;
 
@@ -89,7 +89,7 @@ fn require_running(store: &Store, id: Option<&str>) -> Result<Session, Error> {
 /// The running timer, refused once it ran past its planning day's Sleep
 /// boundary: a count or note at `now` would land on the earlier day's
 /// session after the instant it will be cut off at.
-fn require_live_timer(
+pub(super) fn require_live_timer(
     tx: &WriteTx<'_>,
     config: &Config,
     now: DateTime<Utc>,
@@ -141,27 +141,6 @@ pub fn bump(
             value,
         });
     }
-    Ok(session)
-}
-
-/// Appends one timestamped entry to the running timer.
-pub fn append_note(
-    tx: &WriteTx<'_>,
-    config: &Config,
-    now: DateTime<Utc>,
-    ids: &dyn IdGenerator,
-    id: Option<&str>,
-    text: &str,
-) -> Result<Session, Error> {
-    let text = label("text", text, 500)?;
-    let mut session = require_live_timer(tx, config, now, id)?;
-    let entry = SessionNote {
-        id: ids.new_id(),
-        at: now,
-        text,
-    };
-    session.version = tx.add_session_note(&session.id, &entry)?;
-    session.updated_at = now;
     Ok(session)
 }
 

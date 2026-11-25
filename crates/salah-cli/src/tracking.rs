@@ -51,6 +51,12 @@ pub enum SessionCommand {
     Log(SessionLogArgs),
     /// Change a session
     Edit(SessionEditArgs),
+    /// Add a timed note to a session
+    Note(crate::session_notes::Add),
+    /// Edit a timed note
+    NoteEdit(crate::session_notes::Edit),
+    /// Remove a timed note
+    NoteRm(crate::session_notes::Target),
     /// Remove a session
     Remove(IdArgs),
 }
@@ -634,6 +640,9 @@ pub fn session(local: &mut Local<'_>, command: SessionCommand) -> Result<(), Str
                 .opt("block", a.block);
             ("session.edit", params.done(), a.output)
         }
+        SessionCommand::Note(a) => return crate::session_notes::add(local, a),
+        SessionCommand::NoteEdit(a) => return crate::session_notes::edit(local, a),
+        SessionCommand::NoteRm(a) => return crate::session_notes::remove(local, a),
         SessionCommand::Remove(a) => ("session.remove", json!({"id": a.id}), a.output),
     };
     let result = local.mutate(method, params)?;

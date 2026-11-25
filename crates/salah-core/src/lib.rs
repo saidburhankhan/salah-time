@@ -15,6 +15,7 @@ pub mod items;
 pub mod location;
 pub mod marks;
 pub mod metrics;
+pub mod notes;
 pub mod projects;
 pub mod quick;
 pub mod resources;

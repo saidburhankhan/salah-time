@@ -106,7 +106,9 @@ store-wide counter, never a precondition.
 | `stats.get` | `from,to` or `days?` (default 30, max 730), `tag_id?`, `project_id?`, `epic_id?`, `item_id?` (each also `"none"`), `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}` | `range`, `filter`, `days` (with `unplanned_minutes`, nullable `fulfilment_ratio`), `series` (minutes first), `projects`, `epics`, `tags`, `blocks`, `totals` | validation, not_found, storage | — | — |
 | `stats.table` | `stats.get`'s range and filter (including the session bounds), `group?` (`week` default, `day`, `block`, `project`, `epic`, `tag`, `item`) | `range`, `filter`, `group`, `columns`, `rows`, `totals` | validation, not_found, storage | — | — |
 | `stats.series` | `stats.get`'s range and filter (including the session bounds), `interval?` (`day` default, `week`), `split?` (`block`, `project`, `epic`, `tag`, `item`), `measures: [id]` (required, non-empty: `minutes`, `sessions`, a metric id or `distractions_per_hour`) | `range`, `filter`, `interval`, `split`, `periods`, `series` | validation (empty `measures`, range over 730 days), not_found (unknown measure), storage | — | — |
+| `insights.get` | `stats.get` range and filters (including session bounds) | `{by_block, by_hour, by_weekday, distractions_by_week, best, hardest, on_plan, block_matrix}` | validation, not_found, storage | — | — |
 | `routines.activity` | `from`, `to`, `limit?` (default 500, 1–500), `before?` | `{rows: [{item_id, day, minutes, done}], next: cursor\|null}` | validation, storage | — | — |
+| `notes.list` | `stats.get` range and filters (including session bounds), `q?`, `kind?` (`all` default, `main`, `entry`), `limit?` (default 50, 1–100), `before?` (a previous `next`) | `{rows, next, total}` | validation, not_found, storage | — | — |
 | `sessions.list` | `stats.get`'s range and project, epic, tag and item filters, `with_note?` (default true), `q?`, `minutes_min?`, `minutes_max?`, `values?: {metric_id: {min?, max?}}`, `limit?` (default 100, 1–500), `before?` (a previous `next`) | `rows: [SessionView + project + epic + item]`, `next: cursor\|null` | validation, not_found, storage | — | — |
 | `item.parse` | `text` | draft `{title, block, repeat, weekdays, planned_minutes, start_day}` | validation (and, only when the text names a day, config/source) | — | — |
 | `item.preview` | `block`, `repeat`, `weekdays?`, `planned_minutes?`, `date` | `next_occurrence`, `occurrences_this_month`, `schedule_text` | validation | — | — |
@@ -134,7 +136,9 @@ store-wide counter, never a precondition.
 | `session.start` | `op_id`, `item_id?` / `project_id?` / `epic_id?` | mutation result (`changed.sessions`) | validation, not_found, conflict (one already runs), storage | yes | no |
 | `session.stop` | `op_id`, `id?` (defaults to the running timer), `values?:{metric_id: number}`, `note?`, `minutes?`, `done?: bool` | mutation result (`changed.sessions`) | validation, not_found, storage | yes | no |
 | `session.bump` | `op_id`, `id?` (defaults to the running timer), `metric_id`, `delta` (1 or −1) | mutation result (`changed.sessions`) | validation, not_found, storage | yes | no |
-| `session.note` | `op_id`, `id?` (defaults to the running timer), `text` | mutation result (`changed.sessions`) | validation, not_found, storage | yes | no |
+| `session.note` | `op_id`, `id?` (defaults to the running timer), `text`, `at?` (local `HH:MM`), `expected_version?` | mutation result (`changed.sessions`) | validation, not_found, conflict, storage | yes | optional |
+| `session.note_edit` | `op_id`, `session_id`, `note_id`, `text`, `expected_version` | mutation result (`changed.sessions`) | validation, not_found, conflict, storage | yes | yes |
+| `session.note_remove` | `op_id`, `session_id`, `note_id`, `expected_version` | mutation result (`changed.sessions`) | not_found, conflict, storage | yes | yes |
 | `session.log` | `op_id`, `item_id?` / `project_id?` / `epic_id?`, `date?`, `block?`, `minutes?` (none: a tick), `values?`, `note?` | mutation result | validation, not_found, storage | yes | no |
 | `session.edit` | `op_id`, `id`, `expected_version?`, `minutes?`, `values?`, `note?` (`null` clears), `block?`, `remove_note_ids?: [id]` | mutation result | validation, not_found, conflict, storage | yes | yes |
 | `session.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`) | not_found, conflict, storage | yes | yes |
@@ -462,14 +466,19 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   (`key label · measure name` when several measures). At most 8 keys are kept, most
   minutes first; further keys merge into one `key: "other"`, `label: "Other"` series
   that counts each session once. A tag split counts a session in each of its tags.
-- Session bounds (`stats.get`, `stats.table`, `sessions.list`): `minutes_min?`,
-  `minutes_max?` and `values?` share one predicate. `minutes_*` are inclusive and never
-  match a tick; each `values` entry needs the session to have that metric within the
-  inclusive bounds (a session lacking it does not match); an unknown metric is
-  `not_found`; reversed bounds or a negative duration are `validation` errors naming
-  the field. On `stats.get` and `stats.table` they narrow which sessions are
-  aggregated (days, series, projects, tags, blocks, totals, rows). Planned minutes,
-  capacity and the fulfilment denominator are unaffected. The result's `filter` echoes
+- `stats.*`, `insights.get`, `sessions.list` and `notes.list` share the
+  `minutes_min?`, `minutes_max?` and `values?` filters. Duration bounds are
+  inclusive and exclude ticks. Each `values` entry requires a sample within
+  the inclusive bounds. An empty range such as `values: {"quality": {}}` requires the
+  session to have that metric. `values.distractions_per_hour` uses recorded
+  distractions × 60 ÷ recorded minutes and requires both a recorded count and
+  positive minutes. An unknown metric returns `not_found`. Reversed bounds
+  or a negative duration return a `validation` error naming the field. In Stats
+  the bounds narrow the aggregated sessions. Planned minutes,
+  capacity and the fulfilment denominator are unaffected. Insights uses these
+  bounds for calendar and block patterns, and Best and Hardest sessions. Its
+  `on_plan` and `block_matrix` use only the date and assignment filters.
+  The Stats result's `filter` echoes
   `minutes_min`, `minutes_max` (`null` when absent) and `values` (`{}` when absent)
   beside `tag_id`, `project_id`, `epic_id` and `item_id`. `stats.get` also accepts `"none"` for
   the project, epic, tag and item filters, as `stats.table` does; under `item_id: "none"`
@@ -482,7 +491,21 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   descending and item ID ascending. Pass the opaque `next` back as `before`
   with the same range until `next` is null. The CLI equivalent is
   `salah routines activity --from DATE --to DATE --limit 500 [--before CURSOR] --json`.
-- `sessions.list` is the Notes page query. Every predicate, the cursor, and the limit
+- `notes.list` produces one row per matching main note or live timestamped
+  entry on a finished session, including ticks and archived or paused work.
+  The trimmed `q` matches literal text in that row only using Unicode
+  lowercase. Rows sort by UTC `at` descending, then session ID and note ID
+  descending. The main note uses the session end or creation time. Rows
+  have `{session_id, note_id, kind, at, text, session}`. A main note has
+  `kind: "main"` and null `note_id`. An entry has `kind: "entry"` and its note
+  ID. The session summary has `{day, start, end, minutes, item_id, title,
+  project_id, epic_id, values, version}`. `start` and `end` are nullable UTC
+  timestamps. `title` is the current task's title or null. `values` is keyed by
+  metric ID. `version` is the precondition for session mutations.
+  The response's `total` counts all matching notes. Pass the opaque `next`
+  as `before` with the same filters to continue. A byte budget can shorten a
+  page. A null cursor marks the last page.
+- `sessions.list` is the Statistics Notes page query. Every predicate, the cursor, and the limit
   run in SQL. Rows are finished live sessions (ticks included): newest planning day
   first, then the newest end instant (creation for manual logs and ticks), then id.
   Each row is a `SessionView` (with its timestamped `notes`) plus `project:
@@ -549,11 +572,25 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   live values and omitted values retain them.
 - `session.bump` and `session.note` refuse a stale timer (the request is past its
   planning day's Sleep instant) with `validation` on `id`: stop it first.
-- `session.note` appends a separate timestamped entry to the running timer. Trimmed text
-  must contain 1–500 characters. `session.edit.note` edits the main note.
-  `session.edit.remove_note_ids` soft-deletes the named entries belonging to the session.
-  Removing a session soft-deletes all of its live entries. Note writes advance the
-  session version and use the `sessions` notification scope.
+- `session.note` appends a timestamped entry. Omit `at` to use the running
+  timer's current time. Supply the session `id` and `at: "HH:MM"` to append to
+  finished work. The local time uses the session day's clock and must fall
+  within the recorded timer span (through now for running work). An untimed
+  log or tick uses its recorded prayer block. A timer crossing midnight
+  accepts times on either date. Trimmed text must contain 1–500 characters.
+- `session.note_edit` changes the entry's text and preserves its timestamp.
+  `session.note_remove` soft-deletes an entry. Both require the current
+  **session** `expected_version` and verify the entry belongs to that session.
+  Each note write bumps the session version once, emits a `sessions` change,
+  and replays under its `op_id`. `session.edit.note` edits the main note and
+  `session.edit.remove_note_ids` still removes entries in one session edit.
+  Removing a session soft-deletes all of its entries.
+- CLI equivalents are `salah session note TEXT [--id SESSION] [--at HH:MM]`,
+  `salah session note-edit SESSION NOTE TEXT` and `salah session note-rm SESSION NOTE`,
+  with optional `--expected-version`. Use `salah notes list --json` with the
+  report scope flags, `--q`, `--kind`, `--limit` and `--before`. Report
+  measure flags include `--has-value METRIC`, `--min METRIC=VALUE`,
+  `--max METRIC=VALUE` and `--min-minutes` / `--max-minutes`.
 - To mark an item done, call `session.log` with its `item_id` and omit `minutes`.
   If that item has a running timer, the server stops it at the usual clamp point first
   and writes the tick in the same transaction. The tick receives the supplied metrics
@@ -640,9 +677,11 @@ Example stale edit:
 - Reuse the same `op_id` when retrying after a timeout; use a new one for a new
   intent.
 - `expected_version` applies per entity on every `*.edit` and `*.remove`,
-  `item.move`, `item.schedule`, `item.backlog`, and optionally prayer marks. Appends (`*.add`, `session.start`,
-  `session.stop`, `session.bump`, `session.note`, `session.log`) need no precondition, only `op_id`. A stale
-  version is `data.kind = "conflict"` and writes nothing.
+  `item.move`, `item.schedule`, `item.backlog` and optionally prayer marks.
+  `session.note_edit` and `session.note_remove` require the parent session's
+  `expected_version`. `session.note` also accepts that precondition. Every
+  write requires an `op_id`. A stale version returns `data.kind = "conflict"`
+  and leaves the transaction unchanged.
 - Every entity row carries its `version` (lists, day rows, and `changed`). `revision` orders pushes and de-duplicates them; it
   is never sent as a mutation precondition.
 

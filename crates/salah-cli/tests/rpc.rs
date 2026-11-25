@@ -196,6 +196,15 @@ impl Fixtures {
                 *map = std::mem::take(map)
                     .into_iter()
                     .map(|(key, mut value)| {
+                        // Notes cursors encode an ordering tuple that can contain a random ID.
+                        if key == "next"
+                            && let Value::String(cursor) = &mut value
+                            && let Ok(Value::Array(parts)) = serde_json::from_str::<Value>(cursor)
+                        {
+                            let mut parts = Value::Array(parts);
+                            self.normalise(&mut parts);
+                            *cursor = parts.to_string();
+                        }
                         self.normalise(&mut value);
                         let mut key = Value::String(key);
                         self.normalise(&mut key);
@@ -608,3 +617,6 @@ mod routines;
 
 #[path = "rpc/project_pauses.rs"]
 mod project_pauses;
+
+#[path = "rpc/session_notes.rs"]
+mod session_notes;

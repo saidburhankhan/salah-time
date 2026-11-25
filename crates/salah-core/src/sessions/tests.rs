@@ -501,12 +501,33 @@ fn a_timer_past_sleep_refuses_counts_and_notes_until_stopped() {
         .write(|tx| super::bump(tx, &config(), at(20, 22, 0), None, "distractions", 1))
         .unwrap();
     store
-        .write(|tx| super::append_note(tx, &config(), at(20, 22, 59), ids(), None, "late"))
+        .write(|tx| {
+            super::append_note(
+                tx,
+                &config(),
+                at(20, 22, 59),
+                ids(),
+                super::NewNote {
+                    text: "late",
+                    ..Default::default()
+                },
+            )
+        })
         .unwrap();
     let bumped =
         store.write(|tx| super::bump(tx, &config(), at(21, 8, 0), None, "distractions", 1));
-    let noted =
-        store.write(|tx| super::append_note(tx, &config(), at(21, 8, 0), ids(), None, "morning"));
+    let noted = store.write(|tx| {
+        super::append_note(
+            tx,
+            &config(),
+            at(21, 8, 0),
+            ids(),
+            super::NewNote {
+                text: "morning",
+                ..Default::default()
+            },
+        )
+    });
     for result in [bumped, noted] {
         match result {
             Err(Error::Validation { field, message }) => {

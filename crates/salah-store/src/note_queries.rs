@@ -1,11 +1,12 @@
 use crate::{
     Store,
     codec::{self, storage_error},
-    reports::SORT_AT,
+    reports::{Query, SORT_AT, SessionScope},
 };
-use chrono::NaiveDate;
-use rusqlite::params;
+use chrono::{DateTime, NaiveDate, Utc};
+use rusqlite::{params, params_from_iter};
 use salah_domain::{error::Error, tracking::SessionNote};
+use serde::Deserialize;
 
 /// The ordering key for a review note hit. Empty entry keys identify the main note.
 pub type ReviewNoteCursor = (NaiveDate, String, String, String, String);
@@ -114,5 +115,90 @@ impl Store {
                 })
             },
         )
+    }
+}
+
+/// Newest first by note instant, session id, then note id (empty for a main note).
+pub type NoteCursor = (DateTime<Utc>, String, String);
+
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NoteKind {
+    #[default]
+    All,
+    Main,
+    Entry,
+}
+
+pub struct NoteHit {
+    pub cursor: NoteCursor,
+    pub text: String,
+}
+
+pub struct NotesPage<'a> {
+    pub kind: NoteKind,
+    pub query: &'a str,
+    pub before: Option<&'a NoteCursor>,
+    pub fetch: usize,
+}
+
+impl Store {
+    pub fn report_note_hits(
+        &self,
+        scope: &SessionScope<'_>,
+        page: NotesPage<'_>,
+    ) -> Result<(i64, Vec<NoteHit>), Error> {
+        let Query { sql, mut args } = Query::scoped(scope);
+        let main = format!(
+            "SELECT {SORT_AT} AS at, s.id AS session_id, '' AS note_id, s.note AS body
+             FROM matched s WHERE length(s.note)>0"
+        );
+        let entries = "SELECT strftime('%Y-%m-%dT%H:%M:%fZ',n.at) AS at, s.id AS session_id,
+                              n.id AS note_id, n.text AS body
+                       FROM matched s JOIN session_notes n ON n.session_id=s.id
+                       WHERE n.deleted_at IS NULL";
+        let notes = match page.kind {
+            NoteKind::Main => main,
+            NoteKind::Entry => entries.to_owned(),
+            NoteKind::All => format!("{main} UNION ALL {entries}"),
+        };
+        let mut select = format!("WITH matched AS MATERIALIZED ({sql}), notes AS ({notes})");
+        let mut predicate = "WHERE 1".to_owned();
+        if !page.query.is_empty() {
+            predicate.push_str(" AND instr(salah_lower(body), ?)>0");
+            args.push(page.query.to_owned().into());
+        }
+        let total = self
+            .conn
+            .query_row(
+                &format!("{select} SELECT count(*) FROM notes {predicate}"),
+                params_from_iter(&args),
+                |r| r.get(0),
+            )
+            .map_err(storage_error)?;
+        if let Some((at, session, note)) = page.before {
+            predicate.push_str(" AND (at,session_id,note_id) < (?,?,?)");
+            args.extend([
+                codec::timestamp(*at).into(),
+                session.clone().into(),
+                note.clone().into(),
+            ]);
+        }
+        select.push_str(&format!(
+            " SELECT * FROM notes {predicate}
+            ORDER BY at DESC, session_id DESC, note_id DESC LIMIT ?"
+        ));
+        args.push((page.fetch as i64).into());
+        let hits = self.all(&select, params_from_iter(args), |r| {
+            Ok(NoteHit {
+                cursor: (
+                    codec::get_timestamp(r, "at")?,
+                    r.get("session_id")?,
+                    r.get("note_id")?,
+                ),
+                text: r.get("body")?,
+            })
+        })?;
+        Ok((total, hits))
     }
 }

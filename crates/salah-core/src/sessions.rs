@@ -2,11 +2,13 @@
 //! hand, with the metric values recorded when it ended.
 
 mod list;
+mod note_write;
 pub(crate) mod notes;
 mod running;
 pub use list::{ListRow, SessionList, SessionQuery, ValueRange, list};
+pub use note_write::{NewNote, append_note, edit_note, remove_note};
 pub use notes::notes;
-pub use running::{Stop, StopResult, append_note, bump, stop};
+pub use running::{Stop, StopResult, bump, stop};
 
 use crate::config::Config;
 use crate::guard::{ensure_version, minutes, not_found, note, nullable};

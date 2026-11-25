@@ -23,6 +23,7 @@ mod render;
 mod reports;
 mod resources;
 mod reviews;
+mod session_notes;
 mod tracking;
 
 #[derive(Parser)]
@@ -124,6 +125,11 @@ enum Command {
     Sessions {
         #[command(subcommand)]
         command: reports::SessionsCommand,
+    },
+    /// List individual session notes
+    Notes {
+        #[command(subcommand)]
+        command: reports::NotesCommand,
     },
     /// Read JSON-RPC 2.0 requests from stdin and write responses to stdout
     Rpc(RpcArgs),
@@ -321,6 +327,7 @@ fn run(cli: Cli) -> Result<(), String> {
         },
         Some(Command::Routines { command }) => reports::routines(&mut local()?, command),
         Some(Command::Sessions { command }) => reports::sessions(&mut local()?, command),
+        Some(Command::Notes { command }) => reports::notes(&mut local()?, command),
         Some(Command::Rpc(args)) => match args.socket {
             Some(path) if path.is_empty() => daemon::bridge(None),
             Some(path) => daemon::bridge(Some(std::path::Path::new(&path))),

@@ -66,10 +66,10 @@ pub(crate) fn stats(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcE
 }
 
 pub(crate) fn insights(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
-    let params: ScopeParams = parse(call.params)?;
+    let params: StatsParams = parse(call.params)?;
     let config = ctx.config.load()?;
     let today = day::current(&config, ctx.now())?;
-    let (range, filter) = scope(params, today, Measures::default())?;
+    let (range, filter) = scope(params.scope, today, params.measures)?;
     to_value(salah_core::insights::get(
         ctx.store, &config, today, range, filter,
     )?)
@@ -150,6 +150,25 @@ pub(crate) fn sessions_list(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Val
     let today = day::current(&ctx.config.load()?, ctx.now())?;
     let (range, filter) = scope(params.stats, today, Measures::default())?;
     to_value(sessions::list(ctx.store, range, filter, params.query)?)
+}
+
+pub(crate) fn notes_list(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    #[derive(serde::Deserialize)]
+    struct Params {
+        #[serde(flatten)]
+        stats: StatsParams,
+        #[serde(flatten)]
+        query: salah_core::notes::NoteQuery,
+    }
+    let params: Params = parse(call.params)?;
+    let today = day::current(&ctx.config.load()?, ctx.now())?;
+    let (range, filter) = scope(params.stats.scope, today, params.stats.measures)?;
+    to_value(salah_core::notes::list(
+        ctx.store,
+        range,
+        filter,
+        params.query,
+    )?)
 }
 
 /// `from` and `to` together, or `days` ending today (default 30), and the filter.

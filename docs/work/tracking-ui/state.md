@@ -322,3 +322,6 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   "metric filters everywhere…". Dispatched C8 (Sol) backend → CHECKPOINT 13; C9 (Sol) app after.
 - 13:1x USER: notes list as a separate sidebar page "Notes", not an Insights tab (plan item 3
   updated; backend notes.list unchanged, so C8 continues as dispatched).
+- 13:2x C8 CHECKPOINT 13 (insights measures + distractions/h, note_edit/note_remove/note at,
+  notes.list) verified: scripts/test 272 incl. sockets; no migration. Committed. Dispatched C9 (Sol)
+  app → CHECKPOINT 10 (Insights metric row, note editing, Notes page).

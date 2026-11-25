@@ -861,3 +861,6 @@ fn open_rejects_unknown_pages_before_starting_anything() {
 
 #[path = "tracking_cli/report_items.rs"]
 mod report_items;
+
+#[path = "tracking_cli/session_notes.rs"]
+mod session_notes;

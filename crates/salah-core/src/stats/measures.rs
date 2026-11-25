@@ -51,7 +51,19 @@ impl Measures {
         }
         let mut values = BTreeMap::new();
         for (metric_id, range) in &self.values {
-            metrics::find(store, metric_id)?;
+            if metric_id != "distractions_per_hour" {
+                metrics::find(store, metric_id)?;
+            }
+            if [range.min, range.max]
+                .into_iter()
+                .flatten()
+                .any(|bound| !bound.is_finite())
+            {
+                return Err(Error::validation(
+                    "values",
+                    format!("the {metric_id} bounds must be finite"),
+                ));
+            }
             if let (Some(min), Some(max)) = (range.min, range.max)
                 && min > max
             {

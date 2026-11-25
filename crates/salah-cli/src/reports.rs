@@ -44,7 +44,10 @@ pub struct MeasureArgs {
     min_quality: Option<f64>,
     #[arg(long, value_name = "N")]
     max_quality: Option<f64>,
-    /// Lower bound of any metric, repeatable
+    /// Require a recorded value for a metric, repeatable
+    #[arg(long = "has-value", value_name = "METRIC")]
+    has_value: Vec<String>,
+    /// Lower bound of any metric, including distractions_per_hour, repeatable
     #[arg(long = "min", value_name = "METRIC=VALUE")]
     min: Vec<String>,
     /// Upper bound of any metric, repeatable
@@ -144,9 +147,16 @@ pub fn measures(params: &mut Map<String, Value>, args: &MeasureArgs) -> Result<(
         }
     }
     let mut bounds = Map::new();
-    let mut bound = |metric: &str, side: &str, value: f64| {
+    for metric in &args.has_value {
+        bounds.insert(metric.trim().into(), json!({}));
+    }
+    let mut bound = |metric: &str, side: &str, value: f64| -> Result<(), String> {
+        if !value.is_finite() {
+            return Err(format!("{metric} bounds must be finite"));
+        }
         let entry = bounds.entry(metric).or_insert_with(|| json!({}));
         entry[side] = json!(value);
+        Ok(())
     };
     for (metric, side, value) in [
         ("focus", "min", args.min_focus),
@@ -155,7 +165,7 @@ pub fn measures(params: &mut Map<String, Value>, args: &MeasureArgs) -> Result<(
         ("quality", "max", args.max_quality),
     ] {
         if let Some(value) = value {
-            bound(metric, side, value);
+            bound(metric, side, value)?;
         }
     }
     for (side, pairs) in [("min", &args.min), ("max", &args.max)] {
@@ -167,7 +177,7 @@ pub fn measures(params: &mut Map<String, Value>, args: &MeasureArgs) -> Result<(
                 .trim()
                 .parse()
                 .map_err(|_| format!("{value:?} is not a number"))?;
-            bound(metric.trim(), side, value);
+            bound(metric.trim(), side, value)?;
         }
     }
     if !bounds.is_empty() {
@@ -228,11 +238,14 @@ pub struct InsightsArgs {
     #[command(flatten)]
     scope: ReportScope,
     #[command(flatten)]
+    measures: MeasureArgs,
+    #[command(flatten)]
     output: crate::tracking::Output,
 }
 
 pub fn insights(local: &mut Local<'_>, args: InsightsArgs) -> Result<(), String> {
-    let params = scope(local, args.scope)?;
+    let mut params = scope(local, args.scope)?;
+    measures(&mut params, &args.measures)?;
     let result = local.call("insights.get", Value::Object(params))?;
     crate::tracking::print(&args.output, &result, crate::render::insights)
 }
@@ -268,4 +281,50 @@ pub fn routines(local: &mut Local<'_>, command: RoutinesCommand) -> Result<(), S
         json!({"from":from,"to":to,"limit":limit,"before":before}),
     )?;
     crate::tracking::print(&output, &result, crate::render::pretty)
+}
+
+#[derive(Subcommand)]
+pub enum NotesCommand {
+    /// List the main and timed notes on finished sessions
+    List(NotesListArgs),
+}
+
+#[derive(Args)]
+pub struct NotesListArgs {
+    #[command(flatten)]
+    scope: ReportScope,
+    #[command(flatten)]
+    measures: MeasureArgs,
+    /// Case-insensitive text in the individual note
+    #[arg(long)]
+    q: Option<String>,
+    /// all, main or entry
+    #[arg(long)]
+    kind: Option<String>,
+    /// Rows per page (default 50, at most 100)
+    #[arg(long)]
+    limit: Option<i64>,
+    /// The next cursor returned by the previous page
+    #[arg(long)]
+    before: Option<String>,
+    #[command(flatten)]
+    output: crate::tracking::Output,
+}
+
+pub fn notes(local: &mut Local<'_>, command: NotesCommand) -> Result<(), String> {
+    let NotesCommand::List(args) = command;
+    let mut params = scope(local, args.scope)?;
+    for (name, value) in [
+        ("q", args.q.map(Value::from)),
+        ("kind", args.kind.map(Value::from)),
+        ("limit", args.limit.map(Value::from)),
+        ("before", args.before.map(Value::from)),
+    ] {
+        if let Some(value) = value {
+            params.insert(name.into(), value);
+        }
+    }
+    measures(&mut params, &args.measures)?;
+    let result = local.call("notes.list", Value::Object(params))?;
+    crate::tracking::print(&args.output, &result, crate::render::pretty)
 }

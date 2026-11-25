@@ -156,6 +156,23 @@ pub fn get(
         let mut scope = report_scope(store, &range, &filter)?;
         scope.measures.minutes_min = Some(scope.measures.minutes_min.unwrap_or(0));
         let rows = store.report_sessions(&scope, None)?;
+        let (unfiltered, matched) = if filter.measures != Default::default() {
+            let matched = rows
+                .iter()
+                .map(|row| row.session.id.as_str())
+                .collect::<BTreeSet<_>>();
+            let mut plan_scope = scope.clone();
+            plan_scope.measures = salah_store::reports::SessionFilter {
+                minutes_min: Some(0),
+                ..Default::default()
+            };
+            (
+                Some(store.report_sessions(&plan_scope, None)?),
+                Some(matched),
+            )
+        } else {
+            (None, None)
+        };
         let mut weekdays = store.calendar_groups(&scope, CalendarGroup::Weekday)?;
         let mut weeks = store.calendar_groups(&scope, CalendarGroup::Week)?;
         let mut distractions_by_week = Vec::new();
@@ -177,7 +194,11 @@ pub fn get(
         let mut bare_minutes = 0;
         // report_sessions is ordered by planning day. Load that day's frozen
         // plan once, including the task's block before any subsequent moves.
-        for group in rows.chunk_by(|a, b| a.session.block.day == b.session.block.day) {
+        for group in unfiltered
+            .as_deref()
+            .unwrap_or(&rows)
+            .chunk_by(|a, b| a.session.block.day == b.session.block.day)
+        {
             let snap = day::snapshot(store, config, group[0].session.block.day, today)?;
             let paused_items = if snap.paused_projects.is_empty() {
                 BTreeSet::new()
@@ -196,14 +217,19 @@ pub fn get(
                 if s.item_id.is_none() {
                     bare_minutes += minutes;
                 }
-                if let Some(start) = s.started_at {
+                let matches = matched
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(s.id.as_str()));
+                if matches && let Some(start) = s.started_at {
                     let hour =
                         (start + Duration::seconds(i64::from(snap.clock.offset_seconds))).hour();
                     hours.entry(hour).or_default().add(s, minutes);
                 }
                 let allocations = day::block_minutes(s, &snap.blocks);
                 for &(actual, part) in &allocations {
-                    blocks.entry(actual).or_default().add(s, part);
+                    if matches {
+                        blocks.entry(actual).or_default().add(s, part);
+                    }
                     *matrix.entry((planned_block, actual)).or_insert(0) += part;
                 }
                 if let Some(item) = &row.item {

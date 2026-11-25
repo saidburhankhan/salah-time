@@ -152,13 +152,13 @@ const SESSION_TAGS: &str = "SELECT it.tag_id FROM item_tags it WHERE it.item_id 
 const HAS_ENTRY: &str = "EXISTS (SELECT 1 FROM session_notes n WHERE n.session_id = s.id
     AND n.deleted_at IS NULL";
 
-struct Query {
-    sql: String,
-    args: Vec<Value>,
+pub(crate) struct Query {
+    pub(crate) sql: String,
+    pub(crate) args: Vec<Value>,
 }
 
 impl Query {
-    fn scoped(scope: &SessionScope<'_>) -> Self {
+    pub(crate) fn scoped(scope: &SessionScope<'_>) -> Self {
         let mut query = Self {
             sql: format!(
                 "SELECT s.* FROM {ASSIGNED_SESSIONS} s WHERE s.deleted_at IS NULL
@@ -204,11 +204,17 @@ impl Query {
             self.push("s.minutes <= ?", [max.into()]);
         }
         for (metric_id, bounds) in &filter.values {
+            let (metric, expression) = if *metric_id == "distractions_per_hour" {
+                self.push("s.minutes > 0", []);
+                ("distractions", "v.value * 60.0 / s.minutes")
+            } else {
+                (*metric_id, "v.value")
+            };
             self.push(
-                "EXISTS (SELECT 1 FROM session_values v WHERE v.session_id = s.id
-                 AND v.metric_id = ? AND (? IS NULL OR v.value >= ?) AND (? IS NULL OR v.value <= ?))",
+                &format!("EXISTS (SELECT 1 FROM session_values v WHERE v.session_id = s.id
+                 AND v.metric_id = ? AND (? IS NULL OR {expression} >= ?) AND (? IS NULL OR {expression} <= ?))"),
                 [
-                    text(metric_id),
+                    text(metric),
                     bounds.min.into(),
                     bounds.min.into(),
                     bounds.max.into(),

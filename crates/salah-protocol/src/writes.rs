@@ -454,7 +454,50 @@ pub(crate) fn session_note(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Valu
     let config = ctx.config.load()?;
     let (now, ids) = (ctx.now(), ctx.ids);
     mutate(ctx.store, call.method, &p.op_id, |tx| {
-        let session = sessions::append_note(tx, &config, now, ids, p.id.as_deref(), &p.text)?;
+        let session = sessions::append_note(
+            tx,
+            &config,
+            now,
+            ids,
+            sessions::NewNote {
+                session_id: p.id.as_deref(),
+                text: &p.text,
+                at: p.at.as_deref(),
+                expected_version: p.expected_version,
+            },
+        )?;
+        session_views(tx, &config, now, [&session])
+    })
+}
+
+pub(crate) fn session_note_edit(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    let p: SessionNoteEditParams = parse(call.params)?;
+    let config = ctx.config.load()?;
+    let now = ctx.now();
+    let target = p.target;
+    mutate(ctx.store, call.method, &target.op_id, |tx| {
+        let session = sessions::edit_note(
+            tx,
+            now,
+            &target.session_id,
+            &target.note_id,
+            &p.text,
+            target.expected_version,
+        )?;
+        session_views(tx, &config, now, [&session])
+    })
+}
+
+pub(crate) fn session_note_remove(
+    call: Call<'_>,
+    ctx: &mut Context<'_>,
+) -> Result<Value, RpcError> {
+    let p: SessionNoteTarget = parse(call.params)?;
+    let config = ctx.config.load()?;
+    let now = ctx.now();
+    mutate(ctx.store, call.method, &p.op_id, |tx| {
+        let session =
+            sessions::remove_note(tx, now, &p.session_id, &p.note_id, p.expected_version)?;
         session_views(tx, &config, now, [&session])
     })
 }

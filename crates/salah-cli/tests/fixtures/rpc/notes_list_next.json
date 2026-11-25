@@ -1,0 +1,33 @@
+{
+  "id": 16,
+  "jsonrpc": "2.0",
+  "result": {
+    "next": null,
+    "rows": [
+      {
+        "at": "2031-05-14T04:40:00Z",
+        "kind": "entry",
+        "note_id": "<id:5>",
+        "session": {
+          "day": "2031-05-14",
+          "end": "2031-05-14T04:55:00Z",
+          "epic_id": "<id:2>",
+          "item_id": "<id:3>",
+          "minutes": 20,
+          "project_id": "<id:1>",
+          "start": "2031-05-14T04:30:00Z",
+          "title": "Read",
+          "values": {
+            "distractions": 2.0,
+            "focus": 4.0,
+            "quality": 3.0
+          },
+          "version": 4
+        },
+        "session_id": "<id:4>",
+        "text": "Ärger in a timed entry"
+      }
+    ],
+    "total": 2
+  }
+}

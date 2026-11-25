@@ -1,0 +1,45 @@
+{
+  "id": 13,
+  "jsonrpc": "2.0",
+  "result": {
+    "changed": {
+      "deleted": [],
+      "epics": [],
+      "goals": [],
+      "items": [],
+      "marks": [],
+      "metrics": [],
+      "projects": [],
+      "resources": [],
+      "reviews": [],
+      "sessions": [
+        {
+          "block": "fajr",
+          "day": "2031-05-14",
+          "ended_at": "2031-05-14T04:55:00Z",
+          "epic_id": null,
+          "id": "<id:1>",
+          "item_id": "<id:2>",
+          "minutes": 25,
+          "note": "Main note",
+          "notes": [
+            {
+              "at": "2031-05-14T04:40:00Z",
+              "id": "<id:3>",
+              "text": "Revised"
+            }
+          ],
+          "project_id": null,
+          "running": false,
+          "stale": false,
+          "started_at": "2031-05-14T04:30:00Z",
+          "values": {},
+          "version": 4
+        }
+      ],
+      "tags": []
+    },
+    "op_id": "edit",
+    "revision": 6
+  }
+}

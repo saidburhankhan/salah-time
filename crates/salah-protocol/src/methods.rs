@@ -347,6 +347,23 @@ pub struct SessionNoteParams {
     #[serde(default)]
     pub id: Option<String>,
     pub text: String,
+    pub at: Option<String>,
+    pub expected_version: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct SessionNoteTarget {
+    pub op_id: String,
+    pub session_id: String,
+    pub note_id: String,
+    pub expected_version: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct SessionNoteEditParams {
+    #[serde(flatten)]
+    pub target: SessionNoteTarget,
+    pub text: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]

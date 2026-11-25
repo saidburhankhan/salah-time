@@ -69,6 +69,8 @@ fn method_success_and_error(client: &mut Client) {
     );
     assert!(client.good("sessions.list", json!({"days":7}))["rows"].is_array());
     assert_eq!(client.bad("sessions.list", json!({"limit":0})), -32001);
+    assert_eq!(client.good("notes.list", json!({"days":1}))["total"], 0);
+    assert_eq!(client.bad("notes.list", json!({"limit":0})), -32001);
 
     assert_eq!(
         client.good("item.parse", json!({"text":"read 20m after isha daily"}))["block"],
@@ -336,6 +338,29 @@ fn method_success_and_error(client: &mut Client) {
         json!([])
     );
     assert_eq!(client.bad("session.notes", json!({"id":"missing"})), -32002);
+    let appended = client.good(
+        "session.note",
+        json!({"op_id":"s4-note","id":session,"text":"First"}),
+    );
+    let row = &appended["changed"]["sessions"][0];
+    let note = &row["notes"][0]["id"];
+    let version = row["version"].as_i64().unwrap();
+    assert_eq!(
+        client.bad(
+            "session.note",
+            json!({"op_id":"s4-note-blank","id":session,"text":" "})
+        ),
+        -32001
+    );
+    assert_eq!(client.bad("session.note_edit", json!({"op_id":"s4-note-stale","session_id":session,"note_id":note,"expected_version":version-1,"text":"Revised"})), -32004);
+    let edited = client.good("session.note_edit", json!({"op_id":"s4-note-edit","session_id":session,"note_id":note,"expected_version":version,"text":"Revised"}));
+    assert_eq!(
+        edited["changed"]["sessions"][0]["notes"][0]["text"],
+        "Revised"
+    );
+    assert_eq!(client.bad("session.note_remove", json!({"op_id":"s4-note-missing","session_id":session,"note_id":"missing","expected_version":version+1})), -32002);
+    let removed = client.good("session.note_remove", json!({"op_id":"s4-note-remove","session_id":session,"note_id":note,"expected_version":version+1}));
+    assert_eq!(removed["changed"]["sessions"][0]["notes"], json!([]));
 
     assert_eq!(
         client.bad(

@@ -369,12 +369,52 @@ impl WriteTx<'_> {
     }
 
     pub fn add_session_note(&self, session_id: &str, note: &SessionNote) -> Result<i64, Error> {
+        self.insert_session_note(session_id, note, note.at)
+    }
+
+    pub fn insert_session_note(
+        &self,
+        session_id: &str,
+        note: &SessionNote,
+        now: DateTime<Utc>,
+    ) -> Result<i64, Error> {
         self.execute(
             "INSERT INTO session_notes (id, session_id, at, text, created_at, updated_at, version)
-             VALUES (?1, ?2, ?3, ?4, ?3, ?3, 1)",
-            params![note.id, session_id, codec::timestamp(note.at), note.text],
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, 1)",
+            params![
+                note.id,
+                session_id,
+                codec::timestamp(note.at),
+                note.text,
+                codec::timestamp(now)
+            ],
         )?;
-        self.touch_session(session_id, note.at)
+        self.touch_session(session_id, now)
+    }
+
+    /// Update one live entry, without changing its timestamp or its parent.
+    pub fn change_session_note(
+        &self,
+        session_id: &str,
+        id: &str,
+        text: Option<&str>,
+        now: DateTime<Utc>,
+    ) -> Result<i64, Error> {
+        let changed = self.store.one(
+            "UPDATE session_notes SET text = COALESCE(?3,text),
+             deleted_at = CASE WHEN ?3 IS NULL THEN ?4 END,
+             updated_at = ?4, version = version + 1
+             WHERE session_id = ?1 AND id = ?2 AND deleted_at IS NULL RETURNING id",
+            params![session_id, id, text, codec::timestamp(now)],
+            |row| row.get::<_, String>(0),
+        )?;
+        if changed.is_none() {
+            return Err(Error::NotFound {
+                what: "session note",
+                id: id.to_owned(),
+            });
+        }
+        self.touch_session(session_id, now)
     }
 
     pub fn remove_session_notes(
