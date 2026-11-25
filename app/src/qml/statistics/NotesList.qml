@@ -13,7 +13,12 @@ ColumnLayout {
     property var lastQuery: ({})
     property bool withNote: true
     property string search: ""
-    readonly property var rows: backend.sessionsList || []
+    property var rows: []
+    Binding {
+        notes.rows: backend.sessionsList || []
+        when: !notes.win.noteIsIn(notes)
+        restoreMode: Binding.RestoreNone
+    }
     spacing: 10
 
     function load(query) {

@@ -120,3 +120,46 @@ Notes sits after Insights in the sidebar and can open directly with `salah-app -
 `app/bin/build` and `git diff --check` passed. `SALAH_UI_SHOT_DIR=/tmp/c9-cp10-checkpoint app/bin/test` passed 58 tests with zero failures and 45 AF_UNIX skips. Reviewed all 84 screenshots, including the new filter, empty, inline edit and timed note states.
 
 CHECKPOINT 10: Add metric filters to Insights and editable session notes with a dedicated Notes page (app/src/backend.h, app/src/backend_reports.cpp, app/src/client/coreclient.cpp, app/src/client/coreclient.h, app/src/launch.h, app/src/qml/Main.qml, app/src/qml/controls/AppHeader.qml, app/src/qml/controls/LineIcon.qml, app/src/qml/controls/Sidebar.qml, app/src/qml/notes/NoteEditor.qml, app/src/qml/overlays/SessionPrompt.qml, app/src/qml/pages/EpicPage.qml, app/src/qml/pages/InsightsPage.qml, app/src/qml/pages/NotesPage.qml, app/src/qml/pages/ReviewPage.qml, app/src/qml/statistics/FilterBar.qml, app/src/resources.qrc, app/tests/salah_app_tests.cpp, docs/work/tracking-ui/c9-progress.md)
+
+## Instant session-note edits and keyboard actions
+
+Session-note text and its hover or keyboard-focus pencil open the shared editor in Today’s session rows and running card, the session dialog, Statistics Notes, Notes, epic notes, Insights sessions and Review notes. A second edit replaces a pristine draft. A dirty draft keeps focus and shows “Unsaved note.” Saves use the session version captured on open and reuse the operation ID and payload on retry.
+
+The app preserves embedded Shift+Enter newlines when it submits the draft. At this checkpoint the timed-note RPCs still use the backend’s single-line `label` validator, so they reject embedded newlines and leave the draft available to edit. Main notes accept embedded newlines.
+
+### App keyboard audit
+
+| Dialog or inline form | Enter | Esc |
+| --- | --- | --- |
+| Quick Add | Add the task | Cancel Quick Add |
+| Entry editor (Today, Backlog, Routines) | Save the entry | Cancel the entry |
+| Entry delete confirmation | Confirm deletion | Return to the entry draft |
+| New project within an entry | Create the project | Clear the project-name draft |
+| Entry attachment and rejected attachment editor | Stage or save the attachment | Cancel the attachment draft or skip the rejected attachment |
+| Session log, edit and Done panels | Save or mark Done | Cancel the panel |
+| Pause panel | Plain Save | Cancel the panel |
+| Inline session-note edit (all surfaces) | Save note | Restore the displayed note |
+| Add timed note and timed-note removal confirmation | Add or confirm removal | Cancel the note action |
+| Running card’s Add note | Save note | Cancel the note draft |
+| Session-row removal confirmation | Remove session | Keep session |
+| End routine dialog, including the entry editor’s date picker | End the routine or use the chosen date | Cancel the date dialog |
+| Schedule backlog task | Schedule on the chosen date | Cancel scheduling |
+| Routines delete confirmation | Confirm delete | Keep routine |
+| Resources drawer | Save the active resource form | Cancel its form, then close the drawer on the next Esc |
+| Project editor | Save project | Cancel project draft |
+| Project archive confirmation | Archive after preview | Close preview |
+| Epic add, rename or removal confirmation | Add, save rename or confirm removal | Clear add draft, cancel rename or keep epic |
+| Tag editor and removal confirmation | Save tag or confirm removal | Cancel the draft or keep the tag |
+| Metric editor | Save metric | Cancel metric draft |
+| Sleep time | Save the time | Restore the current time |
+| Goal add, target edit and End confirmation | Add, save target or end goal | Cancel draft, target edit or confirmation |
+| Statistics, Notes and Insights metric range | Apply the bounds | Close the editor |
+| Statistics, Notes and Insights custom dates | Apply both dates | Restore the applied dates |
+| Review reflection | Save reflection | Restore the last saved reflection |
+| Keyboard shortcuts help | Close help | Close help |
+
+Multiline inputs insert a newline on Shift+Enter. Session-note controls wait for the current write to finish.
+
+Verification: `app/bin/build` and `git diff --check` passed. `app/bin/test` passed 59 tests, with 45 Unix-socket tests skipped in the sandbox. Reviewed all 91 screenshots from `SALAH_UI_SHOT_DIR=/tmp/c9-cp11-deliver`, including inline note editors on each surface and timed-note add, edit and removal.
+
+CHECKPOINT 11: Add inline session-note editing and consistent Enter and Escape actions (app/src/backend_reports.cpp, app/src/qml/Main.qml, app/src/qml/backlog/ScheduleDialog.qml, app/src/qml/controls/AppButton.qml, app/src/qml/controls/ChoiceChip.qml, app/src/qml/controls/FormKeys.js, app/src/qml/controls/GlobalShortcuts.qml, app/src/qml/goals/GoalForm.qml, app/src/qml/goals/GoalRow.qml, app/src/qml/goals/GoalsSection.qml, app/src/qml/notes/InlineNote.qml, app/src/qml/notes/NoteEditor.qml, app/src/qml/overlays/EntryFields.qml, app/src/qml/overlays/EntryForm.qml, app/src/qml/overlays/QuickAdd.qml, app/src/qml/overlays/RoutineEndDialog.qml, app/src/qml/overlays/SessionPrompt.qml, app/src/qml/overlays/ShortcutHelp.qml, app/src/qml/pages/EpicPage.qml, app/src/qml/pages/InsightsPage.qml, app/src/qml/pages/NotesPage.qml, app/src/qml/pages/ReviewPage.qml, app/src/qml/pages/RoutinesPage.qml, app/src/qml/resources/ResourceDrawer.qml, app/src/qml/resources/ResourceForm.qml, app/src/qml/settings/GeneralSettings.qml, app/src/qml/settings/MetricsSettings.qml, app/src/qml/settings/ProjectEpics.qml, app/src/qml/settings/ProjectsSettings.qml, app/src/qml/settings/TagsSettings.qml, app/src/qml/statistics/FilterBar.qml, app/src/qml/statistics/NoteRow.qml, app/src/qml/statistics/NotesList.qml, app/src/qml/today/ItemCard.qml, app/src/qml/today/RunningCard.qml, app/src/qml/today/SessionRow.qml, app/src/qml/today/Timeline.qml, app/src/resources.qrc, app/tests/salah_app_tests.cpp, docs/work/tracking-ui/c9-progress.md)

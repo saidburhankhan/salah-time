@@ -7,6 +7,8 @@ import "../controls"
 // rollup are fixed once a metric exists; built-in metrics are locked.
 RowLayout {
     id: metrics
+    function submitForm() { save() }
+    function cancelForm() { startNew() }
     property var win
     property bool showArchived: false
     property string editId: ""

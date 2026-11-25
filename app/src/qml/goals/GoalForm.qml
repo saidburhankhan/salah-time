@@ -7,6 +7,8 @@ import "../controls"
 // metric, and the target. Nothing is required except a target above zero.
 ColumnLayout {
     id: form
+    function submitForm() { submit() }
+    function cancelForm() { reset(); cancelled() }
     objectName: "goalForm"
     property var win
     // At most one of these is set; none means all work.
@@ -23,6 +25,7 @@ ColumnLayout {
     readonly property bool metricAvailable: metricId === "" || metricChoices.some(metric => String(metric.id) === metricId)
     readonly property bool canSubmit: metricAvailable && Number.isFinite(targetValue()) && targetValue() > 0
     signal added()
+    signal cancelled()
     spacing: 8
 
     function reset() {

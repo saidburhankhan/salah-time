@@ -19,7 +19,7 @@ Popup {
     anchors.centerIn: Overlay.overlay
     width: Math.min(500, win.width - 48)
     padding: 22
-    closePolicy: waiting ? Popup.NoAutoClose : Popup.CloseOnEscape
+    closePolicy: Popup.NoAutoClose
     Overlay.modal: Rectangle { color: "#b3000000" }
     background: Card { win: dialog.win }
 
@@ -56,6 +56,9 @@ Popup {
     }
 
     contentItem: ColumnLayout {
+        focus: true
+        function submitForm() { dialog.submit(dialog.endDay) }
+        function cancelForm() { if (!dialog.waiting) dialog.close() }
         spacing: 12
         Label {
             text: qsTr("End routine")

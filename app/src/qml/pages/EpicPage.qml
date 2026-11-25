@@ -16,6 +16,12 @@ ScrollView {
     readonly property var epic: win.epicById(win.epicId)
     readonly property var project: epic ? win.projectById(epic.project_id) : null
     readonly property color dot: project ? Qt.color(String(project.color || "#78909c")) : Qt.color("#5f5b53")
+    property var displayedSessions: []
+    Binding {
+        epicPage.displayedSessions: backend.epicSessions
+        when: !epicPage.win.noteIsIn(epicPage.contentItem)
+        restoreMode: Binding.RestoreNone
+    }
     readonly property bool paused: !!epic?.paused || !!project?.archived
     readonly property bool finished: !!epic && epic.status === "finished"
     readonly property var tasks: ((paused ? backend.reportItems : backend.trackingItems) || []).filter(function(item) {
@@ -306,7 +312,7 @@ ScrollView {
             font.pixelSize: 13
         }
         Repeater {
-            model: epicPage.epic ? (backend.epicSessions || []) : []
+            model: epicPage.epic ? (epicPage.displayedSessions || []) : []
             NoteRow {
                 required property var modelData
                 win: epicPage.win

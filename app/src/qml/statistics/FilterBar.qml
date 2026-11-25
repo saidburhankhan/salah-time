@@ -175,6 +175,11 @@ ColumnLayout {
             q.values = values
         return q
     }
+    function cancelDateRange() {
+        fromField.text = customFrom
+        toField.text = customTo
+        rangeError = ""
+    }
     function restore(query) {
         range = query.days || (query.from && query.to ? 0 : 28)
         customFrom = query.from || ""
@@ -406,7 +411,8 @@ ColumnLayout {
                     placeholderText: "YYYY-MM-DD"
                     Accessible.name: qsTr("Start date")
                     font.family: bar.win.mono
-                    onEditingFinished: if (text !== bar.customFrom || bar.rangeError) bar.setCustom(text, toField.text)
+                    function submitForm() { bar.setCustom(text, toField.text) }
+                    function cancelForm() { bar.cancelDateRange() }
                 }
                 Label {
                     anchors.verticalCenter: parent.verticalCenter
@@ -421,7 +427,8 @@ ColumnLayout {
                     placeholderText: "YYYY-MM-DD"
                     Accessible.name: qsTr("End date")
                     font.family: bar.win.mono
-                    onEditingFinished: if (text !== bar.customTo || bar.rangeError) bar.setCustom(fromField.text, text)
+                    function submitForm() { bar.setCustom(fromField.text, text) }
+                    function cancelForm() { bar.cancelDateRange() }
                 }
             }
         }
@@ -663,6 +670,8 @@ ColumnLayout {
     // The range editor: pick Duration or a metric, then its min and max.
     Rectangle {
         objectName: "metricEditor"
+        function submitForm() { bar.setMetricRange(bar.editing, minField.text, maxField.text) }
+        function cancelForm() { bar.editing = "" }
         visible: bar.showMetrics && bar.editing !== ""
         Layout.fillWidth: true
         Layout.leftMargin: 84

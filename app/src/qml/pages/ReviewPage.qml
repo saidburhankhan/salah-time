@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
+import "../controls/FormKeys.js" as FormKeys
 import "../statistics"
 import "../goals/GoalText.js" as GoalText
 
@@ -48,6 +49,12 @@ ScrollView {
                 || (session.notes || []).some(entry => String(entry.text || "").toLowerCase().includes(query))
         })
     }
+    property var displayedNotes: []
+    Binding {
+        page.displayedNotes: page.matchingNotes
+        when: !page.win.noteIsIn(page.contentItem)
+        restoreMode: Binding.RestoreNone
+    }
     clip: true
     contentWidth: availableWidth
 
@@ -77,6 +84,10 @@ ScrollView {
         var saved = String(review.note || "")
         var keepDraft = state.text !== state.saved || state.pending !== null
         updateState(review.week, saved, keepDraft ? state.text : saved, state.pending)
+    }
+    function cancelDraft() {
+        var state = stateFor(week)
+        if (state.pending === null) updateState(week, state.saved, state.saved, null)
     }
     function saveDraft() {
         var state = stateFor(week)
@@ -154,6 +165,7 @@ ScrollView {
             page.appendNotes(result.rows || [])
             page.notesNext = String(result.next || "")
         }
+        function onSessionWriteFinished(ok, message, op) { if (ok && page.visible) page.loadWeek() }
         function onReviewsInvalidated() { if (page.visible) page.open() }
         function onOfflineChanged() { if (page.visible) page.open() }
         function onTodayDayChanged() { if (page.visible) Qt.callLater(page.loadWeek) }
@@ -474,9 +486,10 @@ ScrollView {
                 visible: page.notedCount > 0
                 placeholderText: page.previewSearch && page.notesArePreview ? qsTr("Search notes shown here") : qsTr("Search notes")
                 Accessible.name: placeholderText
+                onAccepted: if (page.searchAcrossWeek) { noteSearchDelay.stop(); page.requestNotes("") }
             }
             Repeater {
-                model: page.matchingNotes
+                model: page.displayedNotes
                 NoteRow {
                     required property var modelData
                     objectName: "reviewSession_" + modelData.id
@@ -519,6 +532,9 @@ ScrollView {
                     }
                     TextArea {
                         id: noteField
+                        Keys.onPressed: event => FormKeys.multiline(event, noteField, page.saveDraft, page.cancelDraft)
+                        function submitForm() { page.saveDraft() }
+                        function cancelForm() { page.cancelDraft() }
                         objectName: "reviewNote"
                         Layout.fillWidth: true
                         Layout.preferredHeight: 120

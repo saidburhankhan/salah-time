@@ -74,7 +74,6 @@ Popup {
     padding: 0
     closePolicy: Popup.NoAutoClose
     Overlay.modal: Rectangle { color: "#d9000000" }
-    background: null
     property double openedVersion: -1
     onOpened: {
         openedVersion = item.version ?? -1
@@ -255,6 +254,20 @@ Popup {
             entryPopup.advanceAttachments()
         }
     }
+    function confirmDelete() {
+        if (!confirming || saving) return
+        backend.removeItem(item.id, openedVersion)
+        win.entryVisible = false
+    }
+    function submitPrimary() {
+        if (confirming) confirmDelete()
+        else submitTitle(false)
+    }
+    function cancel() {
+        if (saving) return
+        if (confirming) confirming = false
+        else win.entryVisible = false
+    }
     function submitTitle(keepOpen) {
         if (!canSubmit) return
         if (pendingTask) { saveNext(); return }
@@ -317,14 +330,16 @@ Popup {
             }
         }
     }
-    Rectangle {
-        anchors.fill: parent
+    background: Rectangle {
         color: "#151411"
         radius: Math.max(8, theme.radius)
         border.width: 1
         border.color: entryPopup.win.border
     }
-    ColumnLayout {
+    contentItem: ColumnLayout {
+        focus: true
+        function submitForm() { entryPopup.submitPrimary() }
+        function cancelForm() { entryPopup.cancel() }
         anchors.fill: parent
         anchors.margins: 1
         spacing: 0
@@ -350,8 +365,7 @@ Popup {
                 text: entryPopup.confirming ? qsTr("Confirm delete") : qsTr("Delete")
                 onClicked: {
                     if (entryPopup.confirming) {
-                        backend.removeItem(entryPopup.item.id, entryPopup.openedVersion)
-                        entryPopup.win.entryVisible = false
+                        entryPopup.confirmDelete()
                     } else {
                         entryPopup.confirming = true
                     }

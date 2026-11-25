@@ -2,12 +2,15 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
+import "../controls/FormKeys.js" as FormKeys
 import "ResourceTime.js" as Time
 
 // Add or edit one resource. Everything is optional except what a kind needs
 // to mean anything: note text, a link URL, or reminder date and time.
 Rectangle {
     id: form
+    function submitForm() { submit() }
+    function cancelForm() { if (!waiting) cancelled() }
     required property var win
     // Empty for a new resource, else the row being edited (its kind is fixed).
     property var resource: null
@@ -29,6 +32,12 @@ Rectangle {
     signal submitted(var fields)
     signal cancelled()
 
+    function focusField() {
+        if (kind === "note") bodyField.forceActiveFocus()
+        else if (kind === "link") urlField.forceActiveFocus()
+        else dateField.forceActiveFocus()
+    }
+    onVisibleChanged: if (visible) Qt.callLater(focusField)
     function load(res) {
         resource = res
         kind = res ? String(res.kind) : "note"
@@ -94,6 +103,7 @@ Rectangle {
 
         TextArea {
             id: bodyField
+            Keys.onPressed: event => FormKeys.multiline(event, bodyField, form.submitForm, form.cancelForm)
             objectName: "resourceBody"
             visible: form.kind === "note"
             Layout.fillWidth: true
@@ -150,6 +160,7 @@ Rectangle {
                     font.family: form.win.mono
                     inputMask: "0000-00-00"
                     inputMethodHints: Qt.ImhDigitsOnly
+                    onAccepted: form.submit()
                 }
                 TextField {
                     id: timeField
@@ -158,6 +169,7 @@ Rectangle {
                     font.family: form.win.mono
                     inputMask: "00:00"
                     inputMethodHints: Qt.ImhDigitsOnly
+                    onAccepted: form.submit()
                 }
                 Label {
                     visible: form.instant === ""

@@ -5,6 +5,8 @@ import "../controls"
 
 RowLayout {
     id: tags
+    function submitForm() { if (confirmingRemove) confirmRemoval(); else save() }
+    function cancelForm() { if (confirmingRemove) confirmingRemove = false; else startNew() }
     property var win
     property string editId: ""
     property string editColor: "#2e7d32"
@@ -26,6 +28,11 @@ RowLayout {
         editId = String(tag.id)
         nameField.text = String(tag.name || "")
         editColor = String(tag.color || "#2e7d32")
+        confirmingRemove = false
+    }
+
+    function confirmRemoval() {
+        backend.removeTag(editId)
         confirmingRemove = false
     }
 
@@ -208,9 +215,10 @@ RowLayout {
                     text: tags.confirmingRemove ? qsTr("Confirm remove") : qsTr("Remove")
                     onClicked: {
                         if (tags.confirmingRemove)
-                            backend.removeTag(tags.editId)
+                            tags.confirmRemoval()
                         else
                             tags.confirmingRemove = true
+                        forceActiveFocus()
                     }
                 }
                 Item {

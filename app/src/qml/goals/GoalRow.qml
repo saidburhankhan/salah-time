@@ -30,6 +30,10 @@ Rectangle {
     color: win.card
     border.color: win.border
 
+    function endGoal() {
+        confirming = false
+        backend.endGoal(String(goal.id))
+    }
     function startEdit() {
         confirming = false
         targetField.text = String(goal.target)
@@ -143,8 +147,8 @@ Rectangle {
                 Layout.preferredWidth: 90
                 implicitHeight: 36
                 inputMethodHints: Qt.ImhFormattedNumbersOnly
-                onAccepted: row.commitEdit()
-                Keys.onEscapePressed: row.editing = false
+                function submitForm() { row.commitEdit() }
+                function cancelForm() { row.editing = false }
             }
             AppButton {
                 objectName: "goalEditSave"
@@ -185,7 +189,10 @@ Rectangle {
                 win: row.win
                 implicitHeight: 34
                 text: qsTr("End")
-                onClicked: row.confirming = true
+                onClicked: {
+                    row.confirming = true
+                    endConfirm.forceActiveFocus()
+                }
             }
             AppButton {
                 objectName: "goalRemoveButton"
@@ -196,15 +203,15 @@ Rectangle {
                 onClicked: backend.removeGoal(String(row.goal.id))
             }
             AppButton {
+                id: endConfirm
                 objectName: "goalEndConfirm"
+                function submitForm() { row.endGoal() }
+                function cancelForm() { row.confirming = false }
                 visible: row.confirming
                 win: row.win
                 implicitHeight: 34
                 text: qsTr("End goal")
-                onClicked: {
-                    row.confirming = false
-                    backend.endGoal(String(row.goal.id))
-                }
+                onClicked: row.endGoal()
             }
             AppButton {
                 visible: row.confirming

@@ -1,9 +1,11 @@
 import QtQuick
 import QtQuick.Controls
+import "FormKeys.js" as FormKeys
 
 Button {
     id: control
     property var win
+    Keys.onPressed: event => FormKeys.route(event, control.win)
     property bool primary: false
     implicitHeight: 42
     leftPadding: 17

@@ -110,7 +110,12 @@ ScrollView {
                 ColumnLayout {
                     id: ranking
                     required property var modelData
-                    readonly property var rows: page.report[modelData.key] || []
+                    property var rows: []
+                    Binding {
+                        ranking.rows: page.report[ranking.modelData.key] || []
+                        when: !page.win.noteIsIn(ranking)
+                        restoreMode: Binding.RestoreNone
+                    }
                     Layout.fillWidth: true
                     spacing: 8
                     Label {

@@ -5,6 +5,7 @@
         <file alias="qml/pages/RoutinesPage.qml">qml/pages/RoutinesPage.qml</file>
         <file alias="qml/pages/ReviewPage.qml">qml/pages/ReviewPage.qml</file>
         <file alias="qml/pages/NotesPage.qml">qml/pages/NotesPage.qml</file>
+        <file alias="qml/notes/InlineNote.qml">qml/notes/InlineNote.qml</file>
         <file alias="qml/notes/NoteEditor.qml">qml/notes/NoteEditor.qml</file>
         <file alias="qml/pages/InsightsPage.qml">qml/pages/InsightsPage.qml</file>
         <file alias="qml/insights/Patterns.qml">qml/insights/Patterns.qml</file>
@@ -62,6 +63,7 @@
         <file alias="qml/today/RunningCard.qml">qml/today/RunningCard.qml</file>
         <file alias="qml/today/SessionRow.qml">qml/today/SessionRow.qml</file>
         <file alias="qml/overlays/ErrorBanner.qml">qml/overlays/ErrorBanner.qml</file>
+        <file alias="qml/controls/FormKeys.js">qml/controls/FormKeys.js</file>
         <file alias="qml/controls/AppButton.qml">qml/controls/AppButton.qml</file>
         <file alias="qml/controls/TrackingDateField.qml">qml/controls/TrackingDateField.qml</file>
         <file alias="qml/controls/ChoiceChip.qml">qml/controls/ChoiceChip.qml</file>

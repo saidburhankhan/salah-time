@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Controls.Basic as Basic
 import QtQuick.Layouts
 import "../controls"
+import "../controls/FormKeys.js" as FormKeys
 
 ColumnLayout {
     id: editor
@@ -11,6 +12,17 @@ ColumnLayout {
     property var pending: null
     property string operation: ""
     property string errorText: ""
+    property string original: ""
+    readonly property bool dirty: waiting || frozen || (!removing
+        && (body.text !== original || (adding && timeField.text !== "")))
+    function submitForm() { submit() }
+    function cancelForm() { cancel() }
+    function focusDraft() {
+        if (adding) timeField.forceActiveFocus()
+        else if (!removing) body.forceActiveFocus()
+        else confirm.forceActiveFocus()
+    }
+    Component.onDestruction: if (win) win.releaseNoteEditor(editor)
     readonly property bool waiting: operation !== ""
     readonly property bool frozen: pending !== null
     readonly property bool adding: draft?.action === "add"
@@ -21,28 +33,31 @@ ColumnLayout {
     spacing: 8
 
     function begin(action, id, note, version) {
+        if (!win.claimNoteEditor(editor)) return false
         draft = { action: action, sessionId: id, noteId: note?.id || "", version: version ?? -1 }
         pending = null
         operation = ""
         errorText = ""
-        body.text = action === "edit" || action === "main" ? String(note?.text || "") : ""
+        original = action === "edit" || action === "main" ? String(note?.text || "") : ""
+        body.text = original
         timeField.text = ""
-        if (adding) timeField.forceActiveFocus()
-        else if (!removing) body.forceActiveFocus()
-        else confirm.forceActiveFocus()
+        Qt.callLater(focusDraft)
+        return true
     }
 
-    function reset() {
+    function reset(keepOwner) {
         draft = null
         pending = null
         operation = ""
         errorText = ""
+        if (!keepOwner) win.releaseNoteEditor(editor)
     }
 
     function cancel() {
         if (waiting) return
-        reset()
+        reset(true)
         canceled()
+        win.releaseNoteEditor(editor)
     }
 
     function submit() {
@@ -64,8 +79,9 @@ ColumnLayout {
             if (!editor.waiting || op !== editor.operation) return
             editor.operation = ""
             if (ok) {
-                editor.reset()
+                editor.reset(true)
                 editor.completed(session)
+                editor.win.releaseNoteEditor(editor)
             } else {
                 if (!uncertain) editor.pending = null
                 editor.errorText = uncertain ? qsTr("%1 Retry to confirm this change.").arg(error) : error
@@ -87,8 +103,8 @@ ColumnLayout {
             font.family: editor.win.mono
             readOnly: editor.frozen
             validator: RegularExpressionValidator { regularExpression: /(?:[01][0-9]|2[0-3]):[0-5][0-9]/ }
+            Keys.onPressed: event => FormKeys.route(event, editor.win)
             onTextChanged: if (!editor.frozen) editor.errorText = ""
-            onAccepted: body.forceActiveFocus()
         }
         Label {
             Layout.fillWidth: true
@@ -105,6 +121,7 @@ ColumnLayout {
         clip: true
         Basic.TextArea {
             id: body
+            Keys.onPressed: event => FormKeys.multiline(event, body, editor.submit, editor.cancel)
             objectName: "editableNoteText"
             Accessible.name: qsTr("Note text")
             placeholderText: qsTr("Note text")

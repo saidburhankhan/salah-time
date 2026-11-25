@@ -90,6 +90,7 @@ ColumnLayout {
         }
     }
     GoalForm {
+        onCancelled: section.formOpen = false
         visible: section.formOpen
         Layout.fillWidth: true
         win: section.win

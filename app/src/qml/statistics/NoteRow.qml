@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "../notes"
 
 // One session of the Notes tab: day and time, project and task, minutes, its
 // metric values (scale values tinted like the table), the main note and the
@@ -53,6 +54,7 @@ Rectangle {
 
     MouseArea {
         id: area
+        objectName: "sessionRowOpenArea"
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
@@ -157,28 +159,21 @@ Rectangle {
             }
         }
 
-        Label {
-            visible: !!row.session.note
-            Layout.fillWidth: true
+        InlineNote {
+            win: row.win
+            session: row.session
             Layout.leftMargin: 216
-            text: String(row.session.note || "")
-            textFormat: Text.PlainText
-            color: row.win.text
-            font.pixelSize: 14
-            wrapMode: Text.Wrap
+            pixelSize: 14
         }
 
         Repeater {
             model: row.entries
-            Label {
+            InlineNote {
                 required property var modelData
-                Layout.fillWidth: true
+                win: row.win
+                session: row.session
+                entry: modelData
                 Layout.leftMargin: 216
-                text: row.win.noteEntryText(modelData)
-                textFormat: Text.PlainText
-                color: row.win.muted
-                font.pixelSize: 13
-                wrapMode: Text.Wrap
             }
         }
     }

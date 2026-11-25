@@ -11,7 +11,13 @@ ScrollView {
     required property var win
     readonly property alias filterBar: filters
     property string kind: "all"
-    property string editingKey: ""
+    readonly property bool editingNote: win.noteIsIn(page.contentItem)
+    property var displayedRows: []
+    Binding {
+        page.displayedRows: backend.noteRows
+        when: !page.editingNote
+        restoreMode: Binding.RestoreNone
+    }
     property string openingId: ""
     property string openError: ""
     property int openRequest: 0
@@ -48,13 +54,13 @@ ScrollView {
 
     function open() {
         backend.loadReportItems()
-        if (!editingKey) reload()
+        if (!editingNote) reload()
     }
     function reload() {
         backend.loadNotesReport(filters.query(), search.text, kind)
     }
     function changeFilters() {
-        if (!ready || editingKey) return
+        if (!ready || editingNote) return
         searchDelay.stop()
         openingId = ""
         ++openRequest
@@ -73,12 +79,12 @@ ScrollView {
         function onReportsInvalidated() {
             if (page.visible) {
                 backend.loadReportItems()
-                if (!page.editingKey) page.reload()
+                if (!page.editingNote) page.reload()
             }
         }
-        function onTodayDayChanged() { if (page.visible && filters.range > 0 && !page.editingKey) page.reload() }
+        function onTodayDayChanged() { if (page.visible && filters.range > 0 && !page.editingNote) page.reload() }
         function onSessionWriteFinished(ok, message, operation) {
-            if (page.visible && ok && !page.editingKey) page.reload()
+            if (page.visible && ok && !page.editingNote) page.reload()
         }
         function onSessionForNoteLoaded(request, session, error) {
             if (!page.visible || request !== page.openRequest) return
@@ -101,7 +107,7 @@ ScrollView {
         FilterBar {
             id: filters
             win: page.win
-            enabled: !page.editingKey
+            enabled: !page.editingNote
             Layout.fillWidth: true
             onEdited: page.changeFilters()
         }
@@ -115,7 +121,7 @@ ScrollView {
                 objectName: "catalogueNoteSearch"
                 Layout.fillWidth: true
                 placeholderText: qsTr("Search notes")
-                enabled: !page.editingKey
+                enabled: !page.editingNote
                 onTextEdited: searchDelay.restart()
                 onAccepted: page.changeFilters()
             }
@@ -127,7 +133,7 @@ ScrollView {
                     win: page.win
                     selected: page.kind === modelData.id
                     text: modelData.label
-                    enabled: !page.editingKey
+                    enabled: !page.editingNote
                     onClicked: {
                         page.kind = modelData.id
                         page.changeFilters()
@@ -156,7 +162,7 @@ ScrollView {
             wrapMode: Text.Wrap
         }
         Repeater {
-            model: backend.noteRows
+            model: page.displayedRows
             Pane {
                 id: row
                 required property var modelData
@@ -164,50 +170,22 @@ ScrollView {
                 readonly property string key: modelData.session_id + "/" + (modelData.note_id || "")
                 readonly property var project: page.win.projectById(session.project_id)
                 readonly property var epic: page.win.epicById(session.epic_id)
-                readonly property bool editing: page.editingKey === key
                 objectName: "catalogueNote_" + key
                 Layout.fillWidth: true
                 padding: 16
                 background: Card { win: page.win }
                 contentItem: ColumnLayout {
                     spacing: 8
-                    Button {
-                        id: noteText
-                        objectName: "catalogueNoteEdit"
-                        visible: !row.editing
-                        Layout.fillWidth: true
-                        enabled: !page.editingKey && !backend.notesLoading && !searchDelay.running
+                    InlineNote {
+                        win: page.win
+                        session: ({id: row.modelData.session_id, version: row.session.version})
+                        entry: row.modelData.note_id ? {id: row.modelData.note_id} : null
+                        prefix: ""
                         text: row.modelData.text
-                        Accessible.description: qsTr("Edit note")
-                        padding: 0
-                        leftPadding: 0
-                        rightPadding: 0
-                        topPadding: 6
-                        bottomPadding: 6
-                        background: Rectangle {
-                            color: noteText.visualFocus || noteText.hovered ? page.win.card : "transparent"
-                            border.color: noteText.visualFocus ? page.win.selectedBorder : "transparent"
-                            radius: theme.radius
-                        }
-                        contentItem: Label {
-                            text: noteText.text
-                            textFormat: Text.PlainText
-                            wrapMode: Text.Wrap
-                            color: page.win.text
-                            font.pixelSize: 16
-                        }
-                        onClicked: {
-                            page.editingKey = row.key
-                            editor.parent = inlineSlot
-                            editor.begin(row.modelData.kind === "main" ? "main" : "edit", row.modelData.session_id,
-                                         {id: row.modelData.note_id, text: row.modelData.text}, row.session.version)
-                        }
-                    }
-                    Item {
-                        id: inlineSlot
-                        visible: row.editing
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: editor.parent === inlineSlot ? editor.implicitHeight : 0
+                        pixelSize: 16
+                        buttonName: "catalogueNoteEdit"
+                        enabled: !backend.notesLoading && !searchDelay.running
+                        onCanceled: Qt.callLater(page.reload)
                     }
                     RowLayout {
                         Layout.fillWidth: true
@@ -229,7 +207,7 @@ ScrollView {
                         AppButton {
                             objectName: "catalogueOpenSession"
                             win: page.win
-                            enabled: !page.openingId && !page.editingKey
+                            enabled: !page.openingId && !page.editingNote
                             text: page.openingId === row.modelData.session_id ? qsTr("Opening…") : qsTr("Open session")
                             onClicked: page.openSession(row.modelData)
                         }
@@ -274,7 +252,7 @@ ScrollView {
         AppButton {
             objectName: "catalogueMoreNotes"
             visible: backend.notesHasMore
-            enabled: !backend.notesLoading && !page.editingKey
+            enabled: !backend.notesLoading && !page.editingNote
             win: page.win
             text: backend.notesLoading ? qsTr("Loading…") : qsTr("Load more")
             onClicked: backend.loadMoreNotesReport()
@@ -287,25 +265,5 @@ ScrollView {
         }
         Item { implicitHeight: 12 }
 
-        // Keep the editor alive when a write changes the result set.
-        Item {
-            id: editorHome
-            visible: false
-            NoteEditor {
-                id: editor
-                anchors.left: parent.left
-                anchors.right: parent.right
-                win: page.win
-                onCanceled: {
-                    parent = editorHome
-                    page.editingKey = ""
-                    page.reload()
-                }
-                onCompleted: session => {
-                    parent = editorHome
-                    page.editingKey = ""
-                }
-            }
-        }
     }
 }

@@ -187,7 +187,8 @@ ScrollView {
                         placeholderText: form.win.activeProjects().length === 0
                             ? qsTr("Name your first project")
                             : qsTr("New project name")
-                        onAccepted: entryFields.createProject()
+                        function submitForm() { entryFields.createProject() }
+                        function cancelForm() { clear(); focus = false }
                     }
                     AppButton {
                         win: form.win
@@ -327,6 +328,7 @@ ScrollView {
                         font.family: form.win.mono
                         inputMethodHints: Qt.ImhDigitsOnly
                         validator: IntValidator { bottom: 1; top: 1440 }
+                        onAccepted: form.submitPrimary()
                     }
                     Repeater {
                         model: [15, 30, 60]

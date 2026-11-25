@@ -23,6 +23,11 @@ Popup {
         backend.loadResources(kind, id)
         open()
     }
+    function cancel() {
+        if (form.waiting) return
+        if (formFor) formFor = ""
+        else close()
+    }
     function startAdd() { form.load(null); formFor = "new" }
     function startEdit(res) { form.load(res); formFor = String(res.id) }
 
@@ -34,7 +39,7 @@ Popup {
     modal: false
     focus: true
     padding: 0
-    closePolicy: Popup.CloseOnEscape
+    closePolicy: Popup.NoAutoClose
     onClosed: { backend.closeResources(); win.resourceTargetId = "" }
     onOpened: win.resourceTargetId = targetId
     enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 120 } }

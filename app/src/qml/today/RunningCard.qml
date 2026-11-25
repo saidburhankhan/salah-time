@@ -2,6 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
+import "../controls/FormKeys.js" as FormKeys
+import "../notes"
 
 // The running session, wherever it was started (here, the bar widget, the CLI).
 Card {
@@ -16,7 +18,12 @@ Card {
     readonly property bool stale: session.stale === true
     readonly property int maxMinutes: Number(session.max_minutes || 0)
     readonly property real distractions: Number((session.values || {}).distractions || 0)
-    readonly property var notes: session.notes || []
+    property var notes: []
+    Binding {
+        runningCard.notes: runningCard.session.notes || []
+        when: !runningCard.win.noteIsIn(runningCard)
+        restoreMode: Binding.RestoreNone
+    }
     implicitHeight: body.implicitHeight + 36
     visible: active
     border.color: theme.accent
@@ -29,7 +36,7 @@ Card {
 
     function saveNote() {
         var text = noteField.text.trim()
-        if (text === "" || savingNote || stale)
+        if (text === "" || text.length > 500 || savingNote || stale)
             return
         savingNote = true
         backend.addRunningNote(sessionId, text)
@@ -174,25 +181,17 @@ Card {
             }
         }
 
-        ListView {
-            id: notesList
-            Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(contentHeight, 76)
-            visible: count > 0
+        InlineNote {
+            win: runningCard.win
+            session: runningCard.session
+        }
+        Repeater {
             model: runningCard.notes
-            clip: true
-            spacing: 4
-            boundsBehavior: Flickable.StopAtBounds
-            onCountChanged: Qt.callLater(positionViewAtEnd)
-            ScrollBar.vertical: ScrollBar {}
-            delegate: Label {
+            InlineNote {
                 required property var modelData
-                width: notesList.width - 12
-                text: runningCard.win.noteEntryText(modelData)
-                textFormat: Text.PlainText
-                color: runningCard.win.muted
-                font.pixelSize: 12
-                wrapMode: Text.Wrap
+                win: runningCard.win
+                session: runningCard.session
+                entry: modelData
             }
         }
 
@@ -211,15 +210,19 @@ Card {
         RowLayout {
             visible: runningCard.addingNote
             Layout.fillWidth: true
-            TextField {
+            TextArea {
                 id: noteField
+                Layout.preferredHeight: 76
+                wrapMode: TextEdit.Wrap
+                textFormat: TextEdit.PlainText
+                Keys.onPressed: event => FormKeys.multiline(event, noteField, noteField.submitForm, noteField.cancelForm)
                 objectName: "runningNoteField"
                 Layout.fillWidth: true
                 placeholderText: qsTr("Note")
-                maximumLength: 500
                 enabled: !runningCard.stale && !runningCard.savingNote
-                onAccepted: runningCard.saveNote()
-                Keys.onEscapePressed: {
+                function submitForm() { runningCard.saveNote() }
+                function cancelForm() {
+                    if (runningCard.savingNote) return
                     clear()
                     runningCard.addingNote = false
                 }
@@ -227,7 +230,7 @@ Card {
             AppButton {
                 win: runningCard.win
                 text: qsTr("Save")
-                enabled: !runningCard.stale && !runningCard.savingNote && noteField.text.trim() !== ""
+                enabled: !runningCard.stale && !runningCard.savingNote && noteField.text.trim() !== "" && noteField.text.trim().length <= 500
                 onClicked: runningCard.saveNote()
             }
         }

@@ -179,6 +179,8 @@ class ReportsPreviewBackend : public TrackingUiPreviewBackend {
     Q_PROPERTY(QString todayDay READ trackingDate NOTIFY todayDayChanged)
     Q_PROPERTY(QVariantMap insights MEMBER report NOTIFY previewChanged)
     Q_PROPERTY(QVariantMap review MEMBER reviewData NOTIFY previewChanged)
+    Q_PROPERTY(QVariantList sessionsList MEMBER previewSessions NOTIFY previewChanged)
+    Q_PROPERTY(QVariantList epicSessions MEMBER previewEpicSessions NOTIFY previewChanged)
     Q_PROPERTY(QVariantList goals MEMBER goalRows NOTIFY previewChanged)
     Q_PROPERTY(QString goalHistoryId MEMBER historyId CONSTANT)
     Q_PROPERTY(QVariantList goalHistory MEMBER history CONSTANT)
@@ -199,7 +201,7 @@ public:
     Q_INVOKABLE void loadReview(const QString &week) { reads.append(week); }
     Q_INVOKABLE void saveReview(const QString &week, const QString &note) { submittedWeek = week; submittedNote = note; }
     QVariantMap report, reviewData;
-    QVariantList goalRows, history;
+    QVariantList goalRows, history, previewSessions, previewEpicSessions;
     QString historyId;
 signals:
     void previewChanged();
@@ -3529,7 +3531,8 @@ const int original = model->indexOfItem("<id:4>");
         QVERIFY(!entryHasText("Garden"));
         QObject *field = findByName(root.data(), "newProjectField"); QVERIFY(field);
         field->setProperty("text", "Reading");
-        QVERIFY(QMetaObject::invokeMethod(field, "accepted"));
+        // Enter reaches the focused field's submitForm() through the window shortcut.
+        QVERIFY(QMetaObject::invokeMethod(field, "submitForm"));
         QTRY_COMPARE_WITH_TIMEOUT(entry->property("projectId").toString(), QString("new-project"), 3000);
         QCOMPARE(lastRequest(daemon, "project.add").value("params").toObject().value("name").toString(), QString("Reading"));
         QVariant draftMap; QVERIFY(QMetaObject::invokeMethod(entry, "draft", Q_RETURN_ARG(QVariant, draftMap)));
@@ -5150,7 +5153,7 @@ esac
         noteField->setProperty("text", "Reading the dative chapter");
         QCOMPARE(findByName(root.data(), "runningDistractions")->property("text").toString(), QString("Distractions 3"));
         shotWindow(window, "running-card.png");
-        QVERIFY(QMetaObject::invokeMethod(noteField, "accepted"));
+        QTest::keyClick(window, Qt::Key_Return);
         QTRY_VERIFY_WITH_TIMEOUT(!lastRequest(daemon, "session.note").isEmpty(), 3000);
         QCOMPARE(lastRequest(daemon, "session.note").value("params").toObject().value("text").toString(), QString("Reading the dative chapter"));
         QVERIFY(QMetaObject::invokeMethod(findByName(root.data(), "distractionPlus"), "clicked"));
@@ -5892,10 +5895,21 @@ esac
         QVERIFY(click("catalogueNoteEdit"));
         auto *text = firstShown(window, "editableNoteText");
         QVERIFY(text);
+        QTRY_VERIFY(text->property("activeFocus").toBool());
+        QTest::keyClick(window, Qt::Key_Return, Qt::ShiftModifier);
+        QVERIFY(text->property("text").toString().contains('\n'));
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!firstShown(window, "editableNoteText"));
+        QVERIFY(offlineRequests(dir).isEmpty());
+        QTRY_VERIFY(!backend.notesLoading());
+        QVERIFY(click("catalogueNoteEdit"));
+        text = firstShown(window, "editableNoteText");
+        QVERIFY(text);
         text->setProperty("text", "Retry this note");
         shotWindow(window, "notes-page-inline-edit.png");
         QSignalSpy noteSaved(&backend, &Backend::sessionNoteWriteFinished);
-        QVERIFY(click("editableNoteSave"));
+        QTRY_VERIFY(text->property("activeFocus").toBool());
+        QTest::keyClick(window, Qt::Key_Return);
         QTRY_COMPARE(noteSaved.size(), 1);
         QVERIFY(!noteSaved.first().at(1).toBool());
         QVERIFY(noteSaved.first().at(2).toBool());
@@ -5916,14 +5930,15 @@ esac
         QVERIFY(!noteWrite.value("op_id").toString().isEmpty());
 
         QVERIFY(click("catalogueOpenSession"));
-        QTRY_VERIFY(firstShown(window, "sessionNoteField"));
-        QCOMPARE(firstShown(window, "sessionNoteField")->property("text").toString(), QString("Main note"));
+        QTRY_VERIFY(firstShown(window, "editMainSessionNote"));
+        QCOMPARE(firstShown(window, "editMainSessionNote")->property("text").toString(), QString("Main note"));
         QVERIFY(click("editTimedNote_<id:3>"));
         text = firstShown(window, "editableNoteText");
         QVERIFY(text);
         text->setProperty("text", "Revised");
         shotWindow(window, "session-timed-note-edit.png");
-        QVERIFY(click("editableNoteSave"));
+        QTRY_VERIFY(text->property("activeFocus").toBool());
+        QTest::keyClick(window, Qt::Key_Return);
         auto *prompt = findByName(window, "sessionPrompt");
         QTRY_COMPARE(prompt->property("editVersion").toInt(), 5);
         QVERIFY(click("removeTimedNote_<id:3>"));
@@ -5945,7 +5960,12 @@ esac
         QVERIFY(!time->property("readOnly").toBool());
         time->setProperty("text", "09:40");
         shotWindow(window, "session-timed-note-add.png");
-        QVERIFY(click("editableNoteSave"));
+        auto *timeInput = qobject_cast<QQuickItem *>(time);
+        QVERIFY(timeInput);
+        timeInput->forceActiveFocus();
+        QTRY_VERIFY(timeInput->hasActiveFocus());
+        QVERIFY(timeInput->property("acceptableInput").toBool());
+        QTest::keyClick(window, Qt::Key_Return);
         QTRY_COMPARE(prompt->property("editVersion").toInt(), 7);
         frames = offlineRequests(dir);
         QCOMPARE(frames.last().value("method"), QJsonValue("session.note"));
@@ -5970,6 +5990,217 @@ esac
         QVERIFY(commands.contains("--min distractions_per_hour=4 --has-value quality"));
         QVERIFY(commands.contains("--has-value focus"));
         QVERIFY(commands.contains("--before="));
+    }
+
+    void inlineNotesAcrossSessionSurfaces() {
+        QTemporaryDir dir;
+        fake(dir);
+        write(dir.filePath("day.json"), QJsonDocument(TrackingFixture::day(fixture("day"))).toJson());
+        auto status = TrackingFixture::status(fixture("status_running"));
+        auto activeSession = status.value("running").toObject();
+        activeSession.insert("max_minutes", 90);
+        status.insert("running", activeSession);
+        write(dir.filePath("status.json"), QJsonDocument(status).toJson());
+        const auto cli = dir.filePath("inline-cli");
+        write(cli, R"SH(#!/bin/sh
+cd "$(dirname "$0")"
+case "$1" in
+    day) cat day.json ;;
+    rpc)
+        read -r hello && read -r request || exit 2
+        printf '%s\n' "$request" >> frames
+        method=$(printf '%s\n' "$request" | jq -r .method)
+        if [ "$method" = session.note_edit ]; then
+            jq -c --argjson r "$request" '
+                .running.version += 1 |
+                (.running.notes[] | select(.id == $r.params.note_id)).text = $r.params.text
+            ' status.json > updated-status.json && mv updated-status.json status.json
+            sessions=$(jq -c '[.running | del(.max_minutes)]' status.json)
+        else
+            sessions='[]'
+        fi
+        printf '%s\n' "$request" | jq -c --argjson sessions "$sessions" '
+            {jsonrpc,id,result:{revision:1,op_id:.params.op_id,
+                changed:{items:[],sessions:$sessions,projects:[],tags:[],metrics:[],marks:[],deleted:[]}}}
+        ' ;;
+    *) exec ./salah "$@" ;;
+esac
+)SH");
+        QFile::setPermissions(cli, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        ReportsPreviewBackend backend(cli, daemon_path(dir), {}, {});
+        const QVariantMap reportSession{{"id", "s-inline"}, {"version", 7}, {"day", "2031-05-14"},
+            {"minutes", 30}, {"note", "Read the first chapter"}, {"item", QVariantMap{{"title", "Reading"}}},
+            {"notes", QVariantList{QVariantMap{{"id", "n-inline"}, {"at", "2031-05-14T07:30:00Z"},
+                                               {"text", "Finished page twelve"}}}}};
+        backend.previewSessions = {reportSession};
+        backend.previewEpicSessions = {reportSession};
+        backend.report = fixture("insights").toVariantMap();
+        backend.report["best"] = QVariantList{reportSession};
+        backend.report["hardest"] = QVariantList{};
+        backend.reviewData = fixture("review_get").toVariantMap();
+        auto summary = backend.reviewData.value("summary").toMap();
+        summary["sessions_with_notes"] = QVariantList{reportSession};
+        summary["sessions_with_notes_count"] = 1;
+        backend.reviewData["summary"] = summary;
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        window->resize(1280, 1220);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowActive(window));
+        backend.reload();
+        waitForBackendIdle(backend);
+
+        auto button = [&](const QString &text) -> QQuickItem * {
+            for (auto *item : visualNamed(window, "inlineNoteText")) {
+                auto *quick = qobject_cast<QQuickItem *>(item);
+                if (quick && quick->isVisible() && quick->property("text").toString() == text) return quick;
+            }
+            return nullptr;
+        };
+        auto click = [&](QQuickItem *item) {
+            QTest::mouseClick(window, Qt::LeftButton, {}, item->mapToScene(QPointF(item->width()/2, item->height()/2)).toPoint());
+        };
+        auto invoke = [&](const char *name) {
+            auto *item = firstShown(window, QString::fromLatin1(name));
+            return item && QMetaObject::invokeMethod(item, "clicked");
+        };
+        auto verifyEdit = [&](QQuickItem *note, const QString &shot, bool mouse) {
+            QVERIFY(note);
+            const auto original = note->property("text").toString();
+            QTest::qWait(70);
+            if (mouse) click(note);
+            else QVERIFY(QMetaObject::invokeMethod(note, "clicked"));
+            QTRY_VERIFY2(firstShown(window, "editableNoteText"),
+                         qPrintable(QString("%1 at (%2,%3)").arg(shot)
+                             .arg(note->mapToScene({0, 0}).x()).arg(note->mapToScene({0, 0}).y())));
+            auto *field = firstShown(window, "editableNoteText");
+            QTRY_VERIFY(field->property("activeFocus").toBool());
+            QCOMPARE(field->property("text").toString(), original);
+            QTest::keyClick(window, Qt::Key_Return, Qt::ShiftModifier);
+            QVERIFY(field->property("text").toString().contains('\n'));
+            QVERIFY(!root->property("sessionPromptVisible").toBool());
+            shotWindow(window, shot);
+            QTest::keyClick(window, Qt::Key_Escape);
+            QTRY_VERIFY(!firstShown(window, "editableNoteText"));
+            QVERIFY(hasVisualText(window, original));
+        };
+
+        QTRY_VERIFY(button("Phone buzzed, put it away"));
+        verifyEdit(button("Phone buzzed, put it away"), "inline-running-note.png", true);
+        QObject *timeline = nullptr;
+        for (QObject *object : root->findChildren<QObject *>())
+            if (object->metaObject()->indexOfMethod("toggleExpanded(QVariant)") >= 0) timeline = object;
+        QVERIFY(timeline);
+        QVERIFY(QMetaObject::invokeMethod(timeline, "toggleExpanded", Q_ARG(QVariant, QVariant("quran"))));
+        QTRY_VERIFY(button("Calm morning, slow recitation"));
+        verifyEdit(button("Calm morning, slow recitation"), "inline-today-note.png", false);
+
+        QVERIFY(QMetaObject::invokeMethod(window, "showPage", Q_ARG(QVariant, QVariant("statistics"))));
+        auto *stats = findByName(window, "statsScroll");
+        QVERIFY(QMetaObject::invokeMethod(stats, "setTab", Q_ARG(QVariant, QVariant("notes"))));
+        QTRY_VERIFY(button("Read the first chapter"));
+        verifyEdit(button("Read the first chapter"), "inline-statistics-note.png", false);
+        // The session metadata row still opens the outer session editor.
+        auto *hit = qobject_cast<QQuickItem *>(firstShown(window, "sessionRowOpenArea"));
+        QVERIFY(hit);
+        QTest::mouseClick(window, Qt::LeftButton, {}, hit->mapToScene(QPointF(30, 16)).toPoint());
+        QTRY_VERIFY(root->property("sessionPromptVisible").toBool());
+        QVERIFY(invoke("editMainSessionNote"));
+        QTRY_VERIFY(firstShown(window, "editableNoteText"));
+        shotWindow(window, "inline-session-main-note.png");
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!firstShown(window, "editableNoteText"));
+        QVERIFY(root->property("sessionPromptVisible").toBool());
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!root->property("sessionPromptVisible").toBool());
+
+        root->setProperty("page", 7);
+        QTRY_VERIFY(invoke("insightsTab_sessions"));
+        QTRY_VERIFY(button("Read the first chapter"));
+        verifyEdit(button("Read the first chapter"), "inline-insights-note.png", false);
+        auto *first = button("Read the first chapter");
+        auto *second = button("Finished page twelve");
+        QVERIFY(first && second);
+        QVERIFY(QMetaObject::invokeMethod(first, "clicked"));
+        QTRY_VERIFY(firstShown(window, "editableNoteText"));
+        QVERIFY(QMetaObject::invokeMethod(second, "clicked"));
+        QTRY_VERIFY(firstShown(window, "editableNoteText") &&
+                    firstShown(window, "editableNoteText")->property("text").toString() == "Finished page twelve");
+        auto *draft = firstShown(window, "editableNoteText");
+        draft->setProperty("text", "Still editing");
+        QVERIFY(QMetaObject::invokeMethod(first, "clicked"));
+        QVERIFY(hasVisualText(window, "Unsaved note"));
+        QTRY_VERIFY(draft->property("activeFocus").toBool());
+        QCOMPARE(draft->property("text").toString(), QString("Still editing"));
+
+        QVERIFY(QMetaObject::invokeMethod(window, "openEpic", Q_ARG(QVariant, QVariant("e-juz"))));
+        QTRY_VERIFY(button("Read the first chapter"));
+        QVERIFY(QMetaObject::invokeMethod(button("Read the first chapter"), "clicked"));
+        QTRY_COMPARE(root->property("page").toInt(), 7);
+        QTRY_VERIFY(draft->property("activeFocus").toBool());
+        QCOMPARE(draft->property("text").toString(), QString("Still editing"));
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!firstShown(window, "editableNoteText"));
+
+        QVERIFY(QMetaObject::invokeMethod(window, "openEpic", Q_ARG(QVariant, QVariant("e-juz"))));
+        QTRY_VERIFY(button("Read the first chapter"));
+        auto *epic = firstShown(window, "epicPage");
+        QVERIFY(epic);
+        auto *viewport = epic->property("contentItem").value<QQuickItem *>();
+        QVERIFY(viewport);
+        viewport->setProperty("contentY", qMax(0.0, viewport->property("contentHeight").toReal() - viewport->height()));
+        verifyEdit(button("Read the first chapter"), "inline-epic-note.png", true);
+
+        root->setProperty("page", 8);
+        QTRY_VERIFY(button("Finished page twelve"));
+        verifyEdit(button("Finished page twelve"), "inline-review-note.png", true);
+        QVERIFY(offlineRequests(dir).isEmpty());
+
+        // A note mutation only returns SessionView and leaves the tracking cap intact.
+        root->setProperty("page", 0);
+        const QVariantMap running = backend.running();
+        const auto cap = running.value("max_minutes");
+        QVERIFY(cap.toInt() > 0);
+        auto *runningNote = button("Phone buzzed, put it away");
+        QVERIFY(runningNote);
+        click(runningNote);
+        QTRY_VERIFY(firstShown(window, "editableNoteText"));
+        auto *runningDraft = firstShown(window, "editableNoteText");
+        QTRY_VERIFY(runningDraft->property("activeFocus").toBool());
+        runningDraft->setProperty("text", "Put the phone away");
+        bool acknowledged = false;
+        bool keptCap = false;
+        connect(&backend, &Backend::runningChanged, window, [&] {
+            if (!acknowledged && backend.running().value("version").toInt() > running.value("version").toInt()) {
+                acknowledged = true;
+                keptCap = backend.running().value("max_minutes") == cap;
+            }
+        });
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_VERIFY(button("Put the phone away"));
+        QVERIFY(keptCap);
+        const auto editedNote = offlineRequests(dir).last();
+        QCOMPARE(editedNote.value("method").toString(), QString("session.note_edit"));
+        QCOMPARE(editedNote.value("params").toObject().value("expected_version").toInt(), running.value("version").toInt());
+
+        // Enter is plain Save even if focus is on Save & Done.
+        QVERIFY(QMetaObject::invokeMethod(window, "pauseRunning"));
+        auto *alternate = qobject_cast<QQuickItem *>(firstShown(window, "sessionSaveDoneButton"));
+        QVERIFY(alternate);
+        alternate->forceActiveFocus();
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_COMPARE(offlineRequests(dir).size(), 2);
+        const auto stopped = offlineRequests(dir).last();
+        QCOMPARE(stopped.value("method").toString(), QString("session.stop"));
+        QVERIFY(!stopped.value("params").toObject().contains("done"));
+        QTRY_VERIFY(!root->property("sessionPromptVisible").toBool());
     }
 
     void insightsDateRangeAndScope() {
@@ -6055,6 +6286,7 @@ esac
         QVERIFY(window);
         window->resize(1280, 1500);
         window->show();
+        QVERIFY(QTest::qWaitForWindowActive(window));
         auto *link = qobject_cast<QQuickItem *>(findByName(window, "reviewSidebarItem"));
         QVERIFY(link);
         QTest::mouseClick(window, Qt::LeftButton, {}, link->mapToScene(QPointF(link->width()/2, link->height()/2)).toPoint());
@@ -6104,6 +6336,12 @@ esac
         auto *save = firstShown(window, "reviewSave");
         auto *confirmation = findByName(window, "reviewSaved");
         QVERIFY(note && search && confirmation);
+        QVERIFY(QMetaObject::invokeMethod(note, "forceActiveFocus"));
+        QTest::keyClick(window, Qt::Key_Return, Qt::ShiftModifier);
+        QCOMPARE(note->property("text").toString().count('\n'), 3);
+        QTest::keyClick(window, Qt::Key_Escape);
+        QCOMPARE(note->property("text").toString(), QString("Keep reading.\nTry mornings."));
+        QVERIFY(!save->property("enabled").toBool());
         const QString week = review.value("week").toString();
         search->setProperty("text", " SHOP ");
         QTRY_VERIFY(hasVisualText(window, "Sessions with notes  ·  1 of 2 shown"));
@@ -6119,7 +6357,8 @@ esac
         emit backend.previewChanged();
         QCOMPARE(note->property("text").toString(), QString("My draft"));
         shotWindow(window, "review-draft-filter.png");
-        QVERIFY(QMetaObject::invokeMethod(save, "clicked"));
+        QVERIFY(QMetaObject::invokeMethod(note, "forceActiveFocus"));
+        QTest::keyClick(window, Qt::Key_Return);
         QCOMPARE(backend.submittedWeek, week);
         QCOMPARE(backend.submittedNote, QString("My draft"));
         QVERIFY(!save->property("enabled").toBool());

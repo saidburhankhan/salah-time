@@ -56,7 +56,7 @@ Popup {
     width: Math.min(560, win.width - 80)
     height: body.implicitHeight + 48
     padding: 0
-    closePolicy: Popup.CloseOnEscape
+    closePolicy: Popup.NoAutoClose
     Overlay.modal: Rectangle { color: "#b3000000" }
     background: Rectangle {
         color: "#1c1b18"
@@ -75,7 +75,10 @@ Popup {
         }
     }
 
-    ColumnLayout {
+    contentItem: ColumnLayout {
+        focus: true
+        function submitForm() { dialog.submit() }
+        function cancelForm() { if (!dialog.waitingId) dialog.close() }
         id: body
         anchors.left: parent.left
         anchors.right: parent.right

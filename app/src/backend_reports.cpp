@@ -422,6 +422,13 @@ void Backend::writeSessionNote(const QVariantMap &edit, const QString &operation
                 clearError();
                 m_refreshPending = true;
                 emit sessionNoteWriteFinished(operation, true, false, session.toVariantMap(), {});
+                if (session.value("running").toBool() && m_running.value("id").toString() == id
+                    && session.value("version").toInteger() >= m_running.value("version").toLongLong()) {
+                    m_running.insert("version", session.value("version").toVariant());
+                    m_running.insert("note", session.value("note").toVariant());
+                    m_running.insert("notes", session.value("notes").toVariant());
+                    refreshRunning();
+                }
                 emit sessionWriteFinished(true, {}, operation);
                 return;
             }

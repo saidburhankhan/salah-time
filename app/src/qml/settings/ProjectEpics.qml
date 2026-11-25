@@ -97,8 +97,8 @@ ColumnLayout {
                     objectName: "epicRenameField"
                     visible: epicRow.renaming
                     Layout.fillWidth: true
-                    onAccepted: epics.commitRename(renameField.text)
-                    Keys.onEscapePressed: epics.renameId = ""
+                    function submitForm() { epics.commitRename(text) }
+                    function cancelForm() { epics.renameId = "" }
                 }
                 ColumnLayout {
                     visible: !epicRow.renaming
@@ -156,9 +156,15 @@ ColumnLayout {
                     visible: !epicRow.renaming && !epicRow.hasSessions && epics.removeId !== String(epicRow.modelData.id)
                     win: epics.win
                     text: qsTr("Remove")
-                    onClicked: epics.removeId = String(epicRow.modelData.id)
+                    onClicked: {
+                        epics.removeId = String(epicRow.modelData.id)
+                        removeEpicConfirm.forceActiveFocus()
+                    }
                 }
                 AppButton {
+                    id: removeEpicConfirm
+                    function submitForm() { clicked() }
+                    function cancelForm() { epics.removeId = "" }
                     objectName: "epicRemoveConfirm"
                     visible: epics.removeId === String(epicRow.modelData.id)
                     win: epics.win
@@ -186,7 +192,8 @@ ColumnLayout {
             objectName: "epicNameField"
             Layout.fillWidth: true
             placeholderText: qsTr("New epic name")
-            onAccepted: epics.add()
+            function submitForm() { epics.add() }
+            function cancelForm() { clear(); focus = false }
         }
         AppButton {
             objectName: "epicAddButton"

@@ -28,11 +28,20 @@ Popup {
         }
     }
     onClosed: quickPopup.win.quickVisible = false
+    function submit() {
+        if (!quickField.text.trim()) return
+        win.maybeToast({title: backend.parseDraft.title || quickField.text})
+        backend.addQuick(quickField.text, win.quickBlock)
+        win.quickVisible = false
+    }
     function reset() {
         quickField.text = ""
         quickField.forceActiveFocus()
     }
-    ColumnLayout {
+    contentItem: ColumnLayout {
+        function submitForm() { quickPopup.submit() }
+        function cancelForm() { quickPopup.win.quickVisible = false }
+        focus: true
         anchors.fill: parent
         anchors.margins: 28
         spacing: 14
@@ -60,11 +69,7 @@ Popup {
             placeholderText: qsTr("e.g. read 20m after isha daily")
             font.pixelSize: 20
             onTextChanged: parseTimer.restart()
-            onAccepted: if (text.trim()) {
-                quickPopup.win.maybeToast({ title: backend.parseDraft.title || text })
-                backend.addQuick(text, quickPopup.win.quickBlock)
-                quickPopup.win.quickVisible = false
-            }
+            onAccepted: quickPopup.submit()
         }
         Label {
             Layout.fillWidth: true
@@ -103,11 +108,7 @@ Popup {
                 text: qsTr("Add  ↵")
                 primary: true
                 enabled: quickField.text.trim() !== ""
-                onClicked: {
-                    quickPopup.win.maybeToast({ title: backend.parseDraft.title || quickField.text })
-                    backend.addQuick(quickField.text, quickPopup.win.quickBlock)
-                    quickPopup.win.quickVisible = false
-                }
+                onClicked: quickPopup.submit()
             }
         }
     }

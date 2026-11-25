@@ -205,8 +205,11 @@ ScrollView {
                     }
                 }
                 AppButton {
+                    id: removeRoutine
                     visible: !row.paused
                     objectName: "routineDelete"
+                    function submitForm() { if (row.confirming) removeRoutine.clicked() }
+                    function cancelForm() { page.confirmingId = "" }
                     win: row.win
                     text: row.confirming ? qsTr("Confirm delete") : qsTr("Delete")
                     onClicked: {
@@ -216,6 +219,7 @@ ScrollView {
                         } else {
                             page.confirmingVersion = row.routine.version ?? -1
                             page.confirmingId = row.routine.id
+                            removeRoutine.forceActiveFocus()
                         }
                     }
                 }

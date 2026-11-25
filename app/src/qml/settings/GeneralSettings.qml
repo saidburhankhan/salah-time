@@ -19,6 +19,8 @@ Item {
             Layout.preferredHeight: sleepColumn.implicitHeight + 44
             ColumnLayout {
                 id: sleepColumn
+                function submitForm() { backend.setSleepTime(sleepField.text) }
+                function cancelForm() { sleepField.text = backend.config.sleepTime || "23:00" }
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top

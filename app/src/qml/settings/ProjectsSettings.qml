@@ -154,7 +154,7 @@ RowLayout {
         anchors.centerIn: Overlay.overlay
         width: Math.min(480, projects.win.width - 48)
         padding: 22
-        closePolicy: saving ? Popup.NoAutoClose : Popup.CloseOnEscape
+        closePolicy: Popup.NoAutoClose
         Overlay.modal: Rectangle { color: "#b3000000" }
         background: Card { win: projects.win }
 
@@ -173,7 +173,17 @@ RowLayout {
                 archiveDialog.errorText = error
             }
         }
+        function submit() {
+            if (!counts || stale || saving) return
+            errorText = ""
+            projects.savingArchiveId = project.id
+            backend.setProjectArchived(project.id, true, project.version ?? -1)
+        }
+
         contentItem: ColumnLayout {
+            focus: true
+            function submitForm() { archiveDialog.submit() }
+            function cancelForm() { if (!archiveDialog.saving) archiveDialog.close() }
             spacing: 12
             Label {
                 Layout.fillWidth: true
@@ -234,10 +244,7 @@ RowLayout {
                     text: qsTr("Archive project")
                     enabled: !!archiveDialog.counts && !archiveDialog.stale && !archiveDialog.saving
                     onClicked: {
-                        var project = archiveDialog.project
-                        archiveDialog.errorText = ""
-                        projects.savingArchiveId = project.id
-                        backend.setProjectArchived(project.id, true, project.version ?? -1)
+                        archiveDialog.submit()
                     }
                 }
             }
@@ -350,6 +357,8 @@ RowLayout {
     }
 
     Card {
+        function submitForm() { projects.save() }
+        function cancelForm() { projects.startNew() }
         win: projects.win
         Layout.fillWidth: true
         Layout.fillHeight: true

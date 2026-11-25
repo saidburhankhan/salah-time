@@ -155,12 +155,61 @@ ApplicationWindow {
         pendingToast = item || ({})
         backend.previewItem(item || ({}))
     }
+    property var activeNoteEditor: null
+    property int activeNotePage: 0
+    function claimNoteEditor(editor) {
+        if (activeNoteEditor && activeNoteEditor !== editor) {
+            if (activeNoteEditor.dirty) {
+                toast.show(qsTr("Unsaved note"))
+                if (!activeNoteEditor.visible && page !== activeNotePage)
+                    page = activeNotePage
+                activeNoteEditor.focusDraft()
+                return false
+            }
+            activeNoteEditor.cancel()
+        }
+        activeNoteEditor = editor
+        activeNotePage = page
+        return true
+    }
+    function releaseNoteEditor(editor) {
+        if (activeNoteEditor === editor) activeNoteEditor = null
+    }
+    function noteIsIn(scope) {
+        for (var item = activeNoteEditor; item; item = item.parent)
+            if (item === scope) return true
+        return false
+    }
+    function formAction(name) {
+        for (var item = activeFocusItem; item; item = item.parent) {
+            if (item.visible && item.enabled && typeof item[name] === "function") return item
+        }
+        return null
+    }
+    function submitForm() {
+        var form = formAction("submitForm")
+        if (form) form.submitForm()
+        else if (sessionPromptVisible) sessionPrompt.save(false)
+        else if (entryVisible) entryPopup.submitPrimary()
+        else if (quickVisible) quickPopup.submit()
+    }
+    function canSubmitForm() {
+        return formAction("submitForm") !== null || sessionPromptVisible || entryVisible || quickVisible
+    }
     function closeTopOverlay() {
+        var form = formAction("cancelForm")
+        if (form) { form.cancelForm(); return true }
+        if (activeNoteEditor && !sessionPromptVisible && !entryVisible && !quickVisible && !helpVisible
+                && !scheduleDialog.visible && !routineEndDialog.visible && !resourceDrawer.opened) {
+            activeNoteEditor.cancel()
+            return true
+        }
+        if (scheduleDialog.visible) { if (!scheduleDialog.waitingId) scheduleDialog.close(); return true }
         if (routineEndDialog.opened) {
             if (!routineEndDialog.waiting) routineEndDialog.close()
             return true
         }
-        if (resourceDrawer.opened) { resourceDrawer.close(); return true }
+        if (resourceDrawer.opened) { resourceDrawer.cancel(); return true }
         if (sessionPromptVisible) { sessionPrompt.cancel(); return true }
         if (entryVisible && entryPopup.saving) return true
         if (entryVisible && entryPopup.confirming) { entryPopup.confirming = false; return true }
@@ -468,6 +517,9 @@ ApplicationWindow {
             title: backend.runningTitle,
             color: backend.runningColor,
             projectId: String(running.project_id || ""),
+            version: running.version,
+            notes: running.notes || [],
+            note: running.note || "",
             minutes: Math.max(1, Math.min(1440, elapsed)),
             maxMinutes: hasCap ? Math.max(1, cap) : 0,
             stale: running.stale === true,

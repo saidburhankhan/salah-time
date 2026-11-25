@@ -250,7 +250,15 @@ Rectangle {
         }
     }
 
+    readonly property real expandedSessionsHeight: sessionColumn.implicitHeight
+    property var displayedSessions: []
+    Binding {
+        itemCard.displayedSessions: itemCard.sessionList
+        when: !itemCard.win.noteIsIn(sessionColumn)
+        restoreMode: Binding.RestoreNone
+    }
     Column {
+        id: sessionColumn
         visible: itemCard.expanded
         anchors.left: parent.left
         anchors.right: parent.right
@@ -259,7 +267,7 @@ Rectangle {
         anchors.rightMargin: 12
         spacing: 6
         Repeater {
-            model: itemCard.expanded ? itemCard.sessionList : []
+            model: itemCard.expanded ? itemCard.displayedSessions : []
             SessionRow {
                 required property var modelData
                 width: parent.width

@@ -10,8 +10,8 @@ Item {
     Shortcut { sequence: "Ctrl+3"; context: Qt.ApplicationShortcut; onActivated: { shortcuts.win.page = 2; shortcuts.win.loadStatistics() } }
     Shortcut { sequence: "Ctrl+4"; context: Qt.ApplicationShortcut; onActivated: shortcuts.win.page = 3 }
     Shortcut { sequence: "Ctrl+K"; context: Qt.ApplicationShortcut; onActivated: shortcuts.win.openQuick("") }
-    Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: shortcuts.win.page === 0 && !shortcuts.win.quickVisible && !shortcuts.win.entryVisible; onActivated: backend.moveDay(-1) }
-    Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: shortcuts.win.page === 0 && !shortcuts.win.quickVisible && !shortcuts.win.entryVisible; onActivated: backend.moveDay(1) }
+    Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: shortcuts.win.page === 0 && !shortcuts.win.quickVisible && !shortcuts.win.entryVisible && !shortcuts.win.isTyping(); onActivated: backend.moveDay(-1) }
+    Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: shortcuts.win.page === 0 && !shortcuts.win.quickVisible && !shortcuts.win.entryVisible && !shortcuts.win.isTyping(); onActivated: backend.moveDay(1) }
     Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: shortcuts.win.page === 2 && !shortcuts.win.customRangeVisible && !shortcuts.win.isTyping(); onActivated: shortcuts.win.stepStats(-1) }
     Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: shortcuts.win.page === 2 && !shortcuts.win.customRangeVisible && !shortcuts.win.isTyping(); onActivated: shortcuts.win.stepStats(1) }
     Shortcut { sequence: "T"; context: Qt.ApplicationShortcut; enabled: !shortcuts.win.isTyping(); onActivated: backend.jumpToday() }
@@ -39,6 +39,12 @@ Item {
         function onChanged() {
             shortcuts.win.countdown = shortcuts.win.countdownFromNext()
         }
+    }
+    Shortcut {
+        sequences: ["Return", "Enter"]
+        context: Qt.WindowShortcut
+        enabled: shortcuts.win.canSubmitForm()
+        onActivated: shortcuts.win.submitForm()
     }
     Shortcut {
         sequence: "Escape"

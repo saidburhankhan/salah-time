@@ -17,7 +17,10 @@ Popup {
         radius: theme.radius
         border.color: helpPopup.win.border
     }
-    ColumnLayout {
+    contentItem: ColumnLayout {
+        function submitForm() { helpPopup.win.helpVisible = false }
+        function cancelForm() { helpPopup.win.helpVisible = false }
+        focus: true
         anchors.fill: parent
         anchors.margins: 26
         spacing: 12
@@ -30,7 +33,7 @@ Popup {
         Repeater {
             model: [["Ctrl 1", qsTr("Today")], ["Ctrl 2", qsTr("Routines")],
                 ["Ctrl 3", qsTr("Statistics")], ["Ctrl 4", qsTr("Settings")],
-                ["Ctrl K", qsTr("Quick add")], ["Enter", qsTr("Submit form")],
+                ["Ctrl K", qsTr("Quick add")], ["Enter", qsTr("Save form")], ["Shift Enter", qsTr("New line in notes")],
                 ["Esc", qsTr("Close top overlay / cancel drag")],
                 ["← / →", qsTr("Previous / next day")], ["T", qsTr("Today")],
                 ["?", qsTr("This help")], ["Ctrl Q / W", qsTr("Quit")],

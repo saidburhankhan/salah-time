@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../controls"
+import "../notes"
 
 // One of today's sessions under an item: when, how long, what was rated,
 // with Edit and Remove. A running session offers Pause instead.
@@ -13,16 +14,27 @@ Rectangle {
     property string itemTitle: ""
     property string projectColor: ""
     property bool confirmingRemove: false
+    property var savedSession: null
+    readonly property var noteSession: savedSession && savedSession.version > session.version ? savedSession : session
     readonly property bool running: !!session.running
     readonly property bool tick: !running && (session.minutes === null || session.minutes === undefined)
     readonly property string valuesText: win.valuesText(session.values)
     readonly property string epicName: win.epicName(session.epic_id)
-    readonly property var notes: session.notes || []
-    readonly property int noteLineHeight: 18
-    height: 46 + (notes.length > 0 ? notes.length * noteLineHeight + 6 : 0)
+    readonly property var notes: noteSession.notes || []
+    height: 46 + (noteColumn.implicitHeight > 0 ? noteColumn.implicitHeight + 6 : 0)
     radius: theme.radius
     color: "#181714"
     border.color: running ? theme.accent : "transparent"
+
+    function removeSession() {
+        if (!confirmingRemove) {
+            confirmingRemove = true
+            removeButton.forceActiveFocus()
+            return
+        }
+        confirmingRemove = false
+        backend.removeSession(String(session.id))
+    }
 
     RowLayout {
         height: 46
@@ -55,7 +67,7 @@ Rectangle {
         }
         Label {
             Layout.fillWidth: true
-            text: [sessionRow.epicName, sessionRow.valuesText, sessionRow.session.note || ""]
+            text: [sessionRow.epicName, sessionRow.valuesText]
                 .filter(Boolean).join("  ·  ")
             textFormat: Text.PlainText
             color: sessionRow.win.muted
@@ -76,7 +88,7 @@ Rectangle {
             onClicked: sessionRow.win.openSessionPrompt({
                 mode: "edit",
                 tick: sessionRow.tick,
-                version: sessionRow.session.version,
+                version: sessionRow.noteSession.version,
                 sessionId: String(sessionRow.session.id),
                 projectId: String(sessionRow.session.project_id || ""),
                 title: sessionRow.itemTitle,
@@ -84,20 +96,19 @@ Rectangle {
                 minutes: sessionRow.session.minutes || 0,
                 metrics: sessionRow.promptMetrics,
                 values: sessionRow.session.values || {},
-                notes: sessionRow.session.notes || [],
-                note: String(sessionRow.session.note || "")
+                notes: sessionRow.noteSession.notes || [],
+                note: String(sessionRow.noteSession.note || "")
             })
         }
         AppButton {
+            id: removeButton
             visible: !sessionRow.running
             win: sessionRow.win
             text: sessionRow.confirmingRemove ? qsTr("Remove") : "×"
-            onClicked: {
-                if (sessionRow.confirmingRemove)
-                    backend.removeSession(String(sessionRow.session.id))
-                else
-                    sessionRow.confirmingRemove = true
-            }
+            focusPolicy: Qt.StrongFocus
+            function submitForm() { if (sessionRow.confirmingRemove) sessionRow.removeSession() }
+            function cancelForm() { sessionRow.confirmingRemove = false }
+            onClicked: sessionRow.removeSession()
         }
         AppButton {
             visible: sessionRow.confirmingRemove
@@ -107,41 +118,28 @@ Rectangle {
         }
     }
 
-    Column {
-        visible: sessionRow.notes.length > 0
+    ColumnLayout {
+        id: noteColumn
+        spacing: 4
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.topMargin: 46
         anchors.leftMargin: 14
         anchors.rightMargin: 12
+        InlineNote {
+            win: sessionRow.win
+            session: sessionRow.noteSession
+            onSaved: session => sessionRow.savedSession = session
+        }
         Repeater {
             model: sessionRow.notes
-            Row {
-                id: noteLine
+            InlineNote {
                 required property var modelData
-                width: parent.width
-                height: sessionRow.noteLineHeight
-                spacing: 12
-                Label {
-                    width: 104
-                    height: parent.height
-                    verticalAlignment: Text.AlignVCenter
-                    text: sessionRow.win.clockTime(noteLine.modelData.at)
-                    color: sessionRow.win.muted
-                    font.family: sessionRow.win.mono
-                    font.pixelSize: 12
-                }
-                Label {
-                    width: parent.width - 116
-                    height: parent.height
-                    verticalAlignment: Text.AlignVCenter
-                    text: String(noteLine.modelData.text || "")
-                    textFormat: Text.PlainText
-                    color: sessionRow.win.text
-                    font.pixelSize: 12
-                    elide: Text.ElideRight
-                }
+                win: sessionRow.win
+                session: sessionRow.noteSession
+                entry: modelData
+                onSaved: session => sessionRow.savedSession = session
             }
         }
     }
