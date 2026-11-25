@@ -55,7 +55,7 @@ function reminderInstant(date, time) {
 
 function resourceDraft(kind, value, date, time) {
   var text = value.trim()
-  if (kind === "note" && text) return { kind: kind, body: text }
+  if (kind === "note" && text && Array.from(text).length <= 5000) return { kind: kind, body: text }
   if (kind === "link") {
     var url = normalizedWebUrl(value)
     if (url && Array.from(url).length <= 2000) return { kind: kind, url: url }

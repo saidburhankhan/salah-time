@@ -26,6 +26,7 @@ Item {
 
   signal valueEdited(var value)
   signal escapePressed()
+  signal accepted()
 
   function reset() {
     countInput.edited = false
@@ -104,6 +105,7 @@ Item {
         edited = true
         field.valueEdited(SessionLogic.parseCount(text))
       }
+      onAccepted: field.accepted()
       Keys.onEscapePressed: function(event) {
         field.escapePressed()
         event.accepted = true

@@ -164,13 +164,11 @@ same(logic.runningDisplaySeconds({ started_at: start, stale: true }, afterSleep)
 // ---- session notes ---------------------------------------------------------
 
 const localTime = new Date(2031, 4, 14, 9, 5).toISOString()
-const notes = [{ at: localTime, text: "<b>one</b>" }, { at: localTime, text: "two" }]
-same(logic.sessionNotesText({ note: "summary", notes }), "summary\n09:05 <b>one</b>\n09:05 two",
-  "main note and chronological entries use local 24-hour time and literal text")
-same(logic.sessionNotesText({ notes }), "09:05 <b>one</b>\n09:05 two",
-  "timestamped entries show when the main note is empty")
-same(logic.sessionNotesText({ note: "older" }), "older", "legacy notes render without a notes array")
-same(logic.sessionNotesText({}), "", "a session with no notes adds no empty line")
+same(logic.noteTime(localTime), "09:05", "timestamped entries display the local time")
+same(logic.noteTime(null), "", "missing timestamps do not add a visible time")
+same(logic.noteTarget("main", { id: "s", note: "<b>older</b>" }).original, "<b>older</b>",
+  "existing main note text is literal")
+same(logic.noteTarget("main", { id: "s" }).original, "", "missing main note gives no visible text")
 
 // ---- parsing ----------------------------------------------------------------
 
@@ -201,11 +199,35 @@ assert(logic.canAnnotateRunning({ "id": "r" }) && !logic.canAnnotateRunning({ "i
   && !logic.canAnnotateRunning(null), "stale or missing running session cannot be annotated")
 let n = 0
 const mint = () => "op" + (++n)
-const first = logic.noteAttempt(null, "s1", " hi ", mint)
-same(first, { "opId": "op1", "params": { "id": "s1", "text": "hi" } }, "first note attempt")
-assert(logic.noteAttempt(first, "s1", "hi  ", mint) === first, "unchanged retry keeps the op id")
-assert(logic.noteAttempt(first, "s1", "hi there", mint).opId === "op2", "edited draft gets a new op id")
-assert(logic.noteAttempt(first, "s2", "hi", mint).opId === "op3", "other session gets a new op id")
+const append = logic.noteTarget("append", { id: "s1", running: true, version: 1 })
+const first = logic.noteAttempt(null, append, " hi ", mint)
+same({ opId: first.opId, method: first.method, params: first.params },
+  { opId: "op1", method: "session.note", params: { id: "s1", text: "hi" } },
+  "running note append can coexist with a distraction bump")
+assert(logic.noteAttempt(first, append, "hi  ", mint) === first, "unchanged retry keeps the op id")
+assert(logic.noteAttempt(first, append, "hi there", mint).opId === "op2", "edited draft gets a new op id")
+assert(logic.noteAttempt(first, logic.noteTarget("append", { id: "s2" }), "hi", mint).opId === "op3",
+  "other session gets a new op id")
+const addedNote = fixture("session_note_at.json").changed.sessions[0]
+const revisedNote = fixture("session_note_edit.json").changed.sessions[0]
+const entryTarget = logic.noteTarget("entry", addedNote, addedNote.notes[0])
+const entryAttempt = logic.noteAttempt(null, entryTarget, revisedNote.notes[0].text, mint)
+same(entryAttempt.method, "session.note_edit", "entry editor selects the versioned note RPC")
+same(entryAttempt.params, {
+  session_id: revisedNote.id, note_id: revisedNote.notes[0].id,
+  expected_version: addedNote.version, text: revisedNote.notes[0].text
+}, "entry edit uses the parent version from the opening snapshot")
+assert(logic.noteAttempt(entryAttempt, entryTarget, revisedNote.notes[0].text, mint) === entryAttempt,
+  "replaying a note edit keeps its version and operation ID")
+const mainAttempt = logic.noteAttempt(null, logic.noteTarget("main", revisedNote), "One\nTwo", mint)
+same([mainAttempt.method, mainAttempt.params],
+  ["session.edit", { id: revisedNote.id, expected_version: revisedNote.version, note: "One\nTwo" }],
+  "main note sends literal multiline text and the captured version")
+const resource = logic.noteTarget("resource", { id: "resource", version: 2, body: "draft" })
+same(logic.noteAttempt(null, resource, "Some text", mint).params,
+  { id: "resource", expected_version: 2, body: "Some text" }, "resource note edit writes only its body")
+same(logic.noteAttempt(null, entryTarget, "  \n  ", mint), null, "blank note cannot clear an entry")
+same(logic.noteAttempt(null, entryTarget, "😀".repeat(501), mint), null, "note limit counts code points")
 same(logic.logParams("i", "", null, null, "", "", ""), { "values": {}, "item_id": "i" }, "tick log has no minutes")
 same(logic.logParams("", "p", 0, { "a": 1 }, "n", "isha", "e"),
   { "values": { "a": 1 }, "project_id": "p", "epic_id": "e", "minutes": 0, "note": "n", "block": "isha" }, "full log")

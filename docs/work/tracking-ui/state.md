@@ -335,3 +335,10 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   Shift+Enter newline, Esc cancel; buttons kept); Esc closes the widget; Esc/Enter rule on every
   dialog (Enter = plain Save when Save & done exists) → plan addendum "instant note editing…".
   Dispatched C9 (Sol) → CHECKPOINT 11 and C10 (Sol) → CHECKPOINT 8. Codex 5h 85%: may cap.
+- 14:28 Codex 5h cap (next 17:23). C9 (CP 11) and C10 (CP 8) WIP uncommitted (44 paths, app/ and
+  plugin/). systemd timers salah-resume-c9-2 / -c10-2 resume both (Sol) at 17:24.
+- 17:5x C9 CP 11 + C10 CP 8 (resumed 17:24) verified. Orchestrator fixes: timed notes now accept
+  newlines (guard::note_text, same rules as main notes; test added; 273 cargo tests), and the stale
+  app test itemEditorPicksAndCreatesProjects now presses Enter via submitForm (C9 routed Enter
+  through a window Shortcut; the socket test was skipped in the sandbox). 104 app tests; app
+  inline-editor and widget harness screenshots reviewed. Committed; installing.

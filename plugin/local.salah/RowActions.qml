@@ -34,6 +34,24 @@ Item {
 
   onVisibleChanged: if (!visible) confirmingDelete = false
 
+  function cancelForm() {
+    if (confirmingDelete) {
+      confirmingDelete = false
+      return true
+    }
+    return resources.item && resources.item.cancelDraft()
+  }
+
+  function saveForm() {
+    if (confirmingDelete) {
+      removeConfirmed()
+      return true
+    }
+    if (!resources.item || resources.item.addingKind === "") return false
+    resources.item.save()
+    return true
+  }
+
   // When a timed session started; a logged one has no start time.
   function sessionLabel(session) {
     var started = Date.parse(String(session.started_at || ""))
@@ -45,9 +63,14 @@ Item {
 
   // A copy that only changes when the sessions really do, so a status
   // refresh does not rebuild the rows under a half-typed minutes field.
-  property var shownSessions: []
-  onSessionsChanged: {
-    if (JSON.stringify(sessions) !== JSON.stringify(shownSessions)) shownSessions = sessions
+  readonly property var sessionIds: sessions.map(session => session.id)
+  property var shownIds: []
+  onSessionIdsChanged: {
+    var source = root.resourceHost && root.resourceHost.noteSource
+    if (source && source.indexOf("row:") === 0
+        && shownIds.some(id => source.indexOf("row:" + id + ":") === 0 && !sessionIds.includes(id)))
+      root.resourceHost.closeNote()
+    if (JSON.stringify(sessionIds) !== JSON.stringify(shownIds)) shownIds = sessionIds
   }
 
   // Keeps the panel's key catcher out of the way while a minutes field has
@@ -91,7 +114,11 @@ Item {
         fontSize: Style.font.bodySmall
         horizontalPadding: Style.space(5)
         verticalPadding: 0
-        onClicked: root.confirmingDelete = true
+        onClicked: {
+          if (!root.controller.leaveRowNote()) return
+          root.confirmingDelete = true
+          root.controller.forceActiveFocus()
+        }
       }
 
       Text {
@@ -156,6 +183,7 @@ Item {
     }
 
     Loader {
+      id: resources
       active: root.visible && root.resourceItemId !== ""
       width: parent.width
       sourceComponent: ItemResources {
@@ -178,13 +206,15 @@ Item {
     }
 
     Repeater {
-      model: root.shownSessions
+      model: root.shownIds
 
       Column {
         id: sessionRow
         required property var modelData
-        readonly property bool running: modelData.running === true
-        readonly property bool editable: SessionLogic.canEditMinutes(modelData)
+        readonly property var session: root.sessions.find(row => row.id === modelData) || null
+        readonly property bool running: session && session.running === true
+        readonly property bool editable: SessionLogic.canEditMinutes(session)
+        visible: session !== null
         width: column.width
 
         Row {
@@ -195,7 +225,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: Style.space(48)
             textFormat: Text.PlainText
-            text: root.sessionLabel(sessionRow.modelData)
+            text: sessionRow.session ? root.sessionLabel(sessionRow.session) : ""
             color: root.mutedForeground
             font.family: "monospace"
             font.pixelSize: Style.font.caption
@@ -212,11 +242,11 @@ Item {
           }
 
           TextField {
+            readonly property string savedText: sessionRow.editable ? String(sessionRow.session.minutes) : ""
             visible: sessionRow.editable
             anchors.verticalCenter: parent.verticalCenter
             width: Style.space(54)
             height: Style.space(24)
-            text: sessionRow.editable ? String(sessionRow.modelData.minutes) : ""
             foreground: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -225,16 +255,20 @@ Item {
             maximumLength: 4
             inputMethodHints: Qt.ImhDigitsOnly
             validator: IntValidator { bottom: 1; top: 1440 }
-            onActiveFocusChanged: root.fieldFocusChanged(activeFocus)
+            Component.onCompleted: text = savedText
+            onSavedTextChanged: if (!activeFocus) text = savedText
+            onActiveFocusChanged: {
+              if (!activeFocus) text = savedText
+              root.fieldFocusChanged(activeFocus)
+            }
             onAccepted: {
               var minutes = Number(text)
-              if (sessionRow.editable && minutes !== Number(sessionRow.modelData.minutes))
-                root.minutesEdited(String(sessionRow.modelData.id), minutes)
-              focus = false
+              if (sessionRow.editable && minutes !== Number(sessionRow.session.minutes))
+                root.minutesEdited(String(sessionRow.session.id), minutes)
+              root.controller.forceActiveFocus()
             }
             Keys.onEscapePressed: function(event) {
-              text = sessionRow.editable ? String(sessionRow.modelData.minutes) : ""
-              focus = false
+              root.controller.forceActiveFocus()
               event.accepted = true
             }
           }
@@ -260,19 +294,16 @@ Item {
             fontFamily: root.fontFamily
             horizontalPadding: 0
             verticalPadding: 0
-            onClicked: root.removeSessionRequested(String(sessionRow.modelData.id))
+            onClicked: if (sessionRow.session) root.removeSessionRequested(String(sessionRow.session.id))
           }
         }
 
-        Text {
+        SessionNotes {
           width: parent.width
-          visible: text !== ""
-          textFormat: Text.PlainText
-          text: SessionLogic.sessionNotesText(sessionRow.modelData)
-          color: root.mutedForeground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.bodySmall
-          wrapMode: Text.Wrap
+          host: root.resourceHost
+          session: sessionRow.session
+          surface: "row"
+          visible: implicitHeight > 0
         }
       }
     }

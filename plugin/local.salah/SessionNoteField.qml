@@ -8,46 +8,60 @@ Column {
 
   required property var host
   readonly property string fontFamily: host.bar ? host.bar.fontFamily : Style.font.family
-  readonly property alias textFocus: input.activeFocus
   spacing: Style.space(3)
 
   function focusInput() {
-    if (visible) input.forceActiveFocus()
+    if (visible) input.focusInput()
+  }
+
+  Component.onCompleted: Qt.callLater(focusInput)
+
+  Connections {
+    target: editor.host
+    function onNoteFocusRequested() { editor.focusInput() }
+  }
+
+  NoteInput {
+    id: input
+    width: parent.width
+    text: editor.host.noteDraft
+    placeholderText: editor.host.tr.t("session.notePlaceholder")
+    foreground: editor.host.foreground
+    fontFamily: editor.fontFamily
+    readOnly: editor.host.noteOp !== ""
+    onTextChanged: if (visible && editor.host.noteSource !== "") editor.host.noteDraft = text
+    onTextFocusChanged: {
+      if (textFocus) editor.host.focusedNoteField = input
+      else if (editor.host.focusedNoteField === input) editor.host.focusedNoteField = null
+    }
+    onAccepted: editor.host.saveNote()
+    onCanceled: editor.host.closeNote()
   }
 
   Row {
-    width: parent.width
+    anchors.right: parent.right
     spacing: Style.space(6)
 
-    TextField {
-      id: input
-      width: parent.width - save.width - parent.spacing
-      height: Style.space(28)
-      maximumLength: 500
-      text: editor.host.noteDraft
-      placeholderText: editor.host.tr.t("session.addNote")
-      foreground: editor.host.foreground
-      font.family: editor.fontFamily
-      font.pixelSize: Style.font.bodySmall
+    Button {
+      height: Style.space(24)
+      text: editor.host.tr.t("session.cancel")
+      enabled: editor.host.noteOp === ""
+      foreground: editor.host.mutedForeground
+      fontFamily: editor.fontFamily
+      fontSize: Style.font.bodySmall
       verticalPadding: 0
-      readOnly: editor.host.noteOp !== ""
-      onTextEdited: editor.host.noteDraft = text
-      onAccepted: editor.host.saveNote()
-      Keys.onEscapePressed: function(event) {
-        editor.host.closeNote()
-        event.accepted = true
-      }
+      onClicked: editor.host.closeNote()
     }
 
     Button {
-      id: save
-      height: input.height
-      text: editor.host.tr.t("session.save")
-      enabled: editor.host.noteDraft.trim() !== "" && editor.host.noteOp === ""
+      height: Style.space(24)
+      text: editor.host.tr.t(editor.host.noteOp === "" ? "session.save" : "session.saving")
+      enabled: editor.host.noteOp === ""
       bordered: true
       foreground: editor.host.foreground
       fontFamily: editor.fontFamily
       fontSize: Style.font.bodySmall
+      verticalPadding: 0
       onClicked: editor.host.saveNote()
     }
   }

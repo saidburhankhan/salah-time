@@ -78,7 +78,7 @@ Rectangle {
   // A metric's count field reports its focus here, so the panel's key
   // catcher can step aside while text is typed.
   property bool metricFocus: false
-  readonly property bool textFocus: minutesField.activeFocus || noteField.activeFocus || metricFocus
+  readonly property bool textFocus: minutesField.activeFocus || noteField.textFocus || metricFocus
   // A field destroyed while focused never reports losing focus.
   onVisibleChanged: if (!visible) metricFocus = false
 
@@ -87,6 +87,10 @@ Rectangle {
   signal logRequested(var target, int minutes, var values, string note, string epicId)
   signal cancelRequested()
   signal openAppRequested()
+
+  function cancel() {
+    if (!busy) cancelRequested()
+  }
 
   // Opens the panel fresh. `presetKey` ("item:<id>" / "project:<id>")
   // preselects a log target, e.g. from an item's "+ Time".
@@ -102,6 +106,7 @@ Rectangle {
     epicId = ""
     if (targetKey === "" && targets.length === 1) targetKey = targets[0].kind + ":" + targets[0].id
     resetMetricFields()
+    if (visible) forceActiveFocus()
   }
 
   function resetMetricFields() {
@@ -327,7 +332,7 @@ Rectangle {
         onTextEdited: panel.minutesText = text
         onAccepted: panel.save(false)
         Keys.onEscapePressed: function(event) {
-          panel.cancelRequested()
+          panel.cancel()
           event.accepted = true
         }
       }
@@ -376,27 +381,22 @@ Rectangle {
         foreground: panel.foreground
         mutedForeground: panel.mutedForeground
         onValueEdited: function(value) { panel.setValue(modelData.metric_id, value) }
-        onEscapePressed: panel.cancelRequested()
+        onEscapePressed: panel.cancel()
+        onAccepted: panel.save(false)
         onTextFocusChanged: panel.metricFocus = textFocus
       }
     }
 
-    TextField {
+    NoteInput {
       id: noteField
       visible: !panel.logMode || panel.targets.length > 0
       width: parent.width
-      height: Style.space(28)
       placeholderText: panel.strings.t("session.notePlaceholder")
       foreground: panel.foreground
-      font.family: panel.fontFamily
-      font.pixelSize: Style.font.bodySmall
-      verticalPadding: 0
-      maximumLength: 240
+      fontFamily: panel.fontFamily
+      readOnly: panel.busy
       onAccepted: panel.save(false)
-      Keys.onEscapePressed: function(event) {
-        panel.cancelRequested()
-        event.accepted = true
-      }
+      onCanceled: panel.cancel()
     }
 
     Text {
@@ -421,7 +421,8 @@ Rectangle {
         foreground: panel.mutedForeground
         fontFamily: panel.fontFamily
         fontSize: Style.font.bodySmall
-        onClicked: panel.cancelRequested()
+        enabled: !panel.busy
+        onClicked: panel.cancel()
       }
 
       Button {

@@ -50,10 +50,38 @@ function canAnnotateRunning(session) {
   return !!session && session.stale !== true
 }
 
-function noteAttempt(previous, sessionId, draft, newOpId) {
+function noteTarget(kind, row, entry) {
+  if (!row || !row.id) return null
+  var version = row.version
+  switch (kind) {
+  case "main":
+    return { method: "session.edit", field: "note", original: text(row.note), limit: 500,
+      params: { id: row.id, expected_version: version } }
+  case "entry":
+    if (!entry || !entry.id || !Number.isInteger(version)) return null
+    return { method: "session.note_edit", field: "text", original: text(entry.text), limit: 500,
+      params: { session_id: row.id, note_id: entry.id, expected_version: version } }
+  case "append":
+    if (!canAnnotateRunning(row)) return null
+    // Appends can coexist with a distraction bump, including the bar's
+    // right-click bump immediately before its note editor opens.
+    return { method: "session.note", field: "text", original: "", limit: 500, params: { id: row.id } }
+  case "resource":
+    return { method: "resource.edit", field: "body", original: text(row.body), limit: 5000,
+      params: { id: row.id, expected_version: version } }
+  default:
+    return null
+  }
+}
+
+function noteAttempt(previous, target, draft, newOpId) {
   var trimmed = text(draft).trim()
-  if (previous && previous.params.id === sessionId && previous.params.text === trimmed) return previous
-  return { opId: newOpId(), params: { id: sessionId, text: trimmed } }
+  if (!target || !trimmed || Array.from(trimmed).length > target.limit) return null
+  var params = Object.assign({}, target.params)
+  params[target.field] = trimmed
+  var key = JSON.stringify([target.method, params])
+  if (previous && previous.key === key) return previous
+  return { opId: newOpId(), method: target.method, params: params, key: key }
 }
 
 function logParams(itemId, projectId, minutes, values, note, block, epicId) {
@@ -247,14 +275,8 @@ function clockText(totalSeconds) {
   return pad(Math.floor(total / 60)) + ":" + pad(total % 60)
 }
 
-function sessionNotesText(session) {
-  var lines = session.note ? [session.note] : []
-  var entries = session.notes || []
-  for (var i = 0; i < entries.length; i++) {
-    var at = new Date(entries[i].at)
-    var stamp = isNaN(at.getTime()) ? "" : ("0" + at.getHours()).slice(-2)
-      + ":" + ("0" + at.getMinutes()).slice(-2) + " "
-    lines.push(stamp + entries[i].text)
-  }
-  return lines.join("\n")
+function noteTime(value) {
+  var at = new Date(value)
+  return !value || isNaN(at.getTime()) ? "" : ("0" + at.getHours()).slice(-2)
+    + ":" + ("0" + at.getMinutes()).slice(-2)
 }

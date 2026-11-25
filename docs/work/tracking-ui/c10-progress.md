@@ -186,3 +186,50 @@ reviewed in `/tmp/salah-c10-paused.IJ1gdW/`. The harness used an Items-only
 panel stand-in and stdio RPC.
 
 CHECKPOINT 7: Keep paused project work out of the widget timeline, goal chips and creation choices — files: plugin/local.salah/BarWidget.qml, plugin/local.salah/CreationLogic.js, plugin/local.salah/GoalLogic.js, plugin/local.salah/QuickAdd.qml, plugin/local.salah/tests/creation_logic_test.js, plugin/local.salah/tests/goal_logic_test.js, docs/work/tracking-ui/c10-progress.md
+
+## Instant notes and form keys
+
+Running and expanded-session notes, timestamped entries and task resource
+notes open an inline editor from the text or pencil. Running sessions also
+offer + Note, and the bar's right-click still bumps distractions and opens
+its note field. The widget keeps one saved-note editor open. A second note
+can replace a clean editor, while a dirty editor keeps focus and shows
+“Unsaved note”. An edit uses the version present when it opened. Retrying
+unchanged text reuses the operation ID and payload.
+
+| Widget form | Enter | Esc |
+| --- | --- | --- |
+| Running or expanded session main note or timestamped entry | Save the note | Cancel the edit and restore the displayed text |
+| Running + Note and bar right-click note | Append a timed note | Cancel the draft |
+| Existing task resource note | Save its body | Cancel the edit |
+| New resource note or link on an expanded task | Save the resource | Cancel the resource draft |
+| Task creation title and choices | Add using the selected schedule, or quick-add a bare line | Close an open attachment layer first, then dismiss the sheet |
+| Staged note, link or reminder, including reminder date and time fields | Attach a new draft or save the staged note edit | Cancel the entry, then close the attachment section on the next Esc |
+| Unconfirmed task write or failed attachment batch | Retry the original task write or the failed resources | Dismiss the retry view |
+| Pause, including Worked minutes, metrics and note | Plain Save | Cancel the Pause sheet |
+| Done, including metrics and note | Done with the supplied values | Cancel the Done sheet |
+| Log time, including minutes, metrics and note | Save the log | Cancel the Log sheet |
+| Expanded row title edit | Save the title | Restore the title and keep the row expanded |
+| Expanded row session minutes | Save the minutes | Restore the minutes and keep the row expanded |
+| Task delete confirmation | Confirm the displayed delete | Close the confirmation |
+| Popup with no form active | Activate the selected timeline row | Cancel an active drag, otherwise collapse an expanded row, otherwise close the popup |
+
+Shift+Enter inserts a literal newline in multiline fields. The current
+backend accepts multiline main and resource notes but rejects control
+characters in `session.note` and `session.note_edit`. The widget sends the
+literal draft, displays the validation message and keeps the draft.
+Persisting multi-line timed notes requires a backend change outside this
+slice.
+
+All 158 Node checks and four session-note RPC tests passed. Omarchy
+validation, QML syntax checks, JSON parsing and `git diff --check` passed.
+The offscreen Quickshell harness used real Qt key and mouse events, an
+Items-only panel stand-in, and the real CLI with scratch stdio RPC.
+It verified note clicks, versioned edits, appending, dirty-note focus,
+the timed-note validation error, staged attachments, layered Escape and
+plain Pause Save from a metric field. Reviewed the captures in
+`/tmp/salah-c10-notes.bY0hik/` for running and expanded-session main and
+timed-note editors, the bar editor, task resource notes, the staged note
+editor and Pause.
+
+CHECKPOINT 8: Add inline widget note editing and consistent form keys — files: plugin/local.salah/BarWidget.qml, plugin/local.salah/CreationResources.qml, plugin/local.salah/EditableNote.qml, plugin/local.salah/ItemResources.qml, plugin/local.salah/MetricField.qml, plugin/local.salah/NoteInput.qml, plugin/local.salah/QuickAdd.qml, plugin/local.salah/ResourceLogic.js, plugin/local.salah/RowActions.qml, plugin/local.salah/RunningCard.qml, plugin/local.salah/SessionLogic.js, plugin/local.salah/SessionNoteField.qml, plugin/local.salah/SessionNotes.qml, plugin/local.salah/SessionPanel.qml, plugin/local.salah/TimelineRow.qml, plugin/local.salah/i18n/en.json, plugin/local.salah/tests/session_logic_test.js, docs/work/tracking-ui/c10-progress.md

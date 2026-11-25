@@ -66,6 +66,27 @@ Column {
     quickField.focus = false
   }
 
+  function cancelLayer() {
+    if (!submitting && (taskAdded || itemAttempt || !resourceDrafts.cancelLayer())) dismiss()
+  }
+
+  function saveLayer() {
+    if (!submitting && !itemAttempt && !taskAdded && resourceDrafts.expanded && resourceDrafts.kind)
+      resourceDrafts.commitDraft()
+    else savePrimary()
+  }
+
+  function savePrimary() {
+    if (submitting) return
+    if (taskAdded) retryResources()
+    else if (itemAttempt || hasSheetChoices || resourceDrafts.entries.length || resourceDrafts.hasInput) {
+      submit(schedule.when === "backlog")
+    } else if (quickField.text.trim()) {
+      host.addItem(quickField.text)
+      dismiss()
+    }
+  }
+
   function submit(backlog) {
     if (submitting || taskAdded) return
     itemAttempt = CreationLogic.itemAttempt(itemAttempt, () => taskParams(backlog), transport.newOpId)
@@ -197,18 +218,10 @@ Column {
       if (edit.needsParse) parseTimer.restart()
       else parseTimer.stop()
     }
-    onAccepted: {
-      if (root.submitting || root.taskAdded || !text.trim()) return
-      if (root.itemAttempt || root.hasSheetChoices || resourceDrafts.entries.length || resourceDrafts.hasInput) {
-        root.submit(root.schedule.when === "backlog")
-      } else {
-        root.host.addItem(text)
-        root.dismiss()
-      }
-    }
+    onAccepted: root.savePrimary()
 
     Keys.onEscapePressed: function(event) {
-      root.dismiss()
+      root.cancelLayer()
       event.accepted = true
     }
   }

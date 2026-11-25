@@ -49,21 +49,40 @@ Item {
   readonly property bool expanded: rowType === "item"
     && controller !== null && controller.expandedItemId === itemId
   property bool editing: false
-  property string editText: title
 
   onExpandedChanged: if (!expanded) editing = false
 
   function selectRow() {
     timeline.currentIndex = index
     if (controller.expandedItemId !== ""
-        && controller.expandedItemId !== itemId)
+        && controller.expandedItemId !== itemId
+        && controller.leaveRowNote())
       controller.collapseExpanded()
   }
 
+  function cancelForm() {
+    if (!editing) return actions.cancelForm()
+    endTitleEdit()
+    return true
+  }
+
+  function saveForm() {
+    if (!editing) return actions.saveForm()
+    host.editItem(itemData, titleEditor.text)
+    endTitleEdit()
+    return true
+  }
+
+  function endTitleEdit() {
+    editing = false
+    controller.editingKey = ""
+    controller.forceActiveFocus()
+  }
+
   function beginTitleEdit() {
-    if (repeat !== "none") return
+    if (repeat !== "none" || !controller.leaveRowNote()) return
     editing = true
-    editText = title
+    titleEditor.text = title
     controller.editingKey = rowKey
     titleEditor.forceActiveFocus()
     titleEditor.selectAll()
@@ -277,17 +296,9 @@ Item {
         horizontalPadding: Style.space(4)
         verticalPadding: 0
         maximumLength: 200
-        text: row.editText
-        onAccepted: {
-          row.host.editItem(row.itemData, text)
-          row.editing = false
-          row.controller.editingKey = ""
-          row.controller.forceActiveFocus()
-        }
+        onAccepted: row.saveForm()
         Keys.onEscapePressed: function(event) {
-          row.editing = false
-          row.controller.editingKey = ""
-          row.controller.forceActiveFocus()
+          row.cancelForm()
           event.accepted = true
         }
       }

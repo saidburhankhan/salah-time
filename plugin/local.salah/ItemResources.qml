@@ -3,6 +3,7 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 import "ResourceLogic.js" as ResourceLogic
+import "SessionLogic.js" as SessionLogic
 
 Column {
   id: section
@@ -11,8 +12,9 @@ Column {
   required property string itemId
   required property string fontFamily
   readonly property var transport: host.resourceClient
-  readonly property bool textFocus: draft.activeFocus
-  readonly property var draftParams: ResourceLogic.quickResourceParams(itemId, addingKind, draft.text)
+  readonly property bool textFocus: linkDraft.activeFocus || noteDraft.textFocus
+  readonly property var draftParams: ResourceLogic.quickResourceParams(itemId, addingKind,
+    addingKind === "note" ? noteDraft.text : linkDraft.text)
   property var rows: []
   property string requestId: ""
   property string loadError: ""
@@ -31,12 +33,20 @@ Column {
   function toggleDraft(kind) {
     if (addOp) return
     var next = addingKind === kind ? "" : kind
+    if (next && !host.leaveNote()) return
     addingKind = next
-    draft.clear()
+    linkDraft.clear()
+    noteDraft.text = ""
     actionError = ""
     addAttempt = null
-    if (next) draft.forceActiveFocus()
-    else draft.focus = false
+    if (next === "note") noteDraft.focusInput()
+    else if (next) linkDraft.forceActiveFocus()
+  }
+
+  function cancelDraft() {
+    if (!addingKind) return false
+    toggleDraft(addingKind)
+    return true
   }
 
   function save() {
@@ -69,6 +79,10 @@ Column {
       section.loadError = ""
       // A QML signal can deliver a QVariantList, which has length but is not a JS Array.
       var rows = Array.from(resources)
+      var source = section.host.noteSource
+      if (source.indexOf("resource:") === 0
+          && section.rows.some(row => "resource:" + row.id === source)
+          && !rows.some(row => "resource:" + row.id === source)) section.host.closeNote()
       if (JSON.stringify(rows) !== JSON.stringify(section.rows)) section.rows = rows
     }
 
@@ -143,17 +157,18 @@ Column {
     }
   }
 
-  Row {
+  Column {
     visible: section.addingKind !== ""
     width: parent.width
     spacing: Style.space(4)
 
     TextField {
-      id: draft
-      width: Math.max(0, parent.width - saveButton.width - parent.spacing)
+      id: linkDraft
+      visible: section.addingKind === "link"
+      width: parent.width
       height: Style.space(26)
-      maximumLength: section.addingKind === "note" ? 5000 : 2000
-      placeholderText: section.host.tr.t(section.addingKind === "note" ? "resource.note" : "resource.url")
+      maximumLength: 2000
+      placeholderText: section.host.tr.t("resource.url")
       foreground: section.host.foreground
       font.family: section.fontFamily
       font.pixelSize: Style.font.bodySmall
@@ -162,14 +177,54 @@ Column {
       onTextEdited: section.actionError = ""
       onAccepted: section.save()
       Keys.onEscapePressed: function(event) {
-        section.toggleDraft(section.addingKind)
+        section.cancelDraft()
         event.accepted = true
       }
     }
 
+    NoteInput {
+      id: noteDraft
+      visible: section.addingKind === "note"
+      width: parent.width
+      placeholderText: section.host.tr.t("resource.note")
+      foreground: section.host.foreground
+      fontFamily: section.fontFamily
+      readOnly: !!section.addOp
+      onAccepted: section.save()
+      onCanceled: section.cancelDraft()
+    }
+  }
+
+  Text {
+    visible: !section.draftParams && (section.addingKind === "link"
+      || section.addingKind === "note" && noteDraft.text.trim() !== "")
+    width: parent.width
+    textFormat: Text.PlainText
+    text: section.host.tr.t(section.addingKind === "link" ? "resource.invalidUrl" : "resource.noteHint")
+    color: section.host.mutedForeground
+    font.family: section.fontFamily
+    font.pixelSize: Style.font.caption
+    elide: Text.ElideRight
+  }
+
+  Row {
+    visible: section.addingKind !== ""
+    anchors.right: parent.right
+    spacing: Style.space(4)
+
     Button {
-      id: saveButton
-      height: draft.height
+      height: Style.space(24)
+      enabled: !section.addOp
+      text: section.host.tr.t("session.cancel")
+      foreground: section.host.mutedForeground
+      fontFamily: section.fontFamily
+      fontSize: Style.font.bodySmall
+      verticalPadding: 0
+      onClicked: section.cancelDraft()
+    }
+
+    Button {
+      height: Style.space(24)
       enabled: !section.addOp && !!section.draftParams
       opacity: enabled ? 1 : 0.45
       text: section.host.tr.t("session.save")
@@ -182,20 +237,10 @@ Column {
     }
   }
 
-  Text {
-    visible: section.addingKind === "link" && !section.draftParams
-    width: parent.width
-    textFormat: Text.PlainText
-    text: section.host.tr.t("resource.invalidUrl")
-    color: section.host.mutedForeground
-    font.family: section.fontFamily
-    font.pixelSize: Style.font.caption
-    elide: Text.ElideRight
-  }
-
   Flickable {
+    id: resourceList
     width: parent.width
-    height: Math.min(contentHeight, Style.space(136))
+    height: Math.min(contentHeight, Style.space(section.host.noteSource.indexOf("resource:") === 0 ? 180 : 136))
     visible: height > 0
     contentWidth: width
     contentHeight: entries.implicitHeight
@@ -216,6 +261,7 @@ Column {
           id: entry
           required property var modelData
           readonly property bool link: modelData.kind === "link"
+          readonly property bool note: modelData.kind === "note"
           readonly property bool reminder: modelData.kind === "reminder"
           readonly property bool done: modelData.done === true
           readonly property string safeUrl: link ? ResourceLogic.webUrl(modelData.url) : ""
@@ -246,11 +292,21 @@ Column {
               visible: text !== ""
               width: parent.width
               textFormat: Text.PlainText
-              text: entry.link ? "" : (entry.modelData.body || "")
+              text: entry.link || entry.note ? "" : (entry.modelData.body || "")
               color: section.host.foreground
               font.family: section.fontFamily
               font.pixelSize: Style.font.bodySmall
               wrapMode: Text.Wrap
+            }
+
+            EditableNote {
+              visible: entry.note
+              width: parent.width
+              host: section.host
+              source: "resource:" + entry.modelData.id
+              target: entry.note ? SessionLogic.noteTarget("resource", entry.modelData) : null
+              onEditingChanged: if (editing)
+                resourceList.contentY = Math.min(entry.y, Math.max(0, resourceList.contentHeight - resourceList.height))
             }
 
             Text {

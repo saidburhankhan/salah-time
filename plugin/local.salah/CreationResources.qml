@@ -11,16 +11,23 @@ Column {
   property bool expanded: false
   property string kind: ""
   property var entries: []
-  readonly property bool textFocus: draft.activeFocus || reminderDate.activeFocus || reminderTime.activeFocus
-  readonly property bool hasInput: kind !== "" && (draft.text.trim() !== "" ||
+  property int editingIndex: -1
+  property bool unsavedNote: false
+  readonly property string value: kind === "note" ? noteDraft.text : draft.text
+  readonly property bool textFocus: draft.activeFocus || noteDraft.textFocus ||
+    reminderDate.activeFocus || reminderTime.activeFocus
+  readonly property bool hasInput: kind !== "" && (editingIndex >= 0 || value.trim() !== "" ||
     (kind === "reminder" && (reminderDate.text.trim() !== "" || reminderTime.text.trim() !== "")))
-  readonly property var draftParams: ResourceLogic.resourceDraft(kind, draft.text, reminderDate.text, reminderTime.text)
+  readonly property var draftParams: ResourceLogic.resourceDraft(kind, value, reminderDate.text, reminderTime.text)
 
   spacing: Style.space(3)
 
   function clearDraft() {
     kind = ""
+    editingIndex = -1
+    unsavedNote = false
     draft.clear()
+    noteDraft.text = ""
     reminderDate.clear()
     reminderTime.clear()
   }
@@ -31,13 +38,43 @@ Column {
     clearDraft()
   }
 
+  function cancelLayer() {
+    if (!expanded) return false
+    if (kind) clearDraft()
+    else expanded = false
+    return true
+  }
+
+  function editNote(index) {
+    if (editingIndex !== index && !leaveDraft()) return
+    kind = "note"
+    editingIndex = index
+    noteDraft.text = entries[index].body
+    noteDraft.focusInput()
+  }
+
+  function leaveDraft() {
+    if (kind !== "note") return commitDraft()
+    var original = editingIndex < 0 ? "" : entries[editingIndex].body
+    if (noteDraft.text !== original) {
+      unsavedNote = true
+      noteDraft.focusInput()
+      return false
+    }
+    clearDraft()
+    return true
+  }
+
   function commitDraft() {
     if (!hasInput) return true
     if (!draftParams) {
       expanded = true
       return false
     }
-    entries = entries.concat(draftParams)
+    var next = entries.slice()
+    if (editingIndex < 0) next.push(draftParams)
+    else next[editingIndex] = draftParams
+    entries = next
     clearDraft()
     return true
   }
@@ -90,10 +127,11 @@ Column {
         selected: section.kind === modelData.kind
         onClicked: {
           if (section.kind !== modelData.kind) {
-            if (!section.commitDraft()) return
+            if (!section.leaveDraft()) return
             section.kind = modelData.kind
           }
-          draft.forceActiveFocus()
+          if (section.kind === "note") noteDraft.focusInput()
+          else draft.forceActiveFocus()
         }
       }
     }
@@ -110,16 +148,33 @@ Column {
 
       DraftField {
         id: draft
-        width: Math.max(0, parent.width - attach.width - parent.spacing)
-        maximumLength: section.kind === "note" ? 5000 : section.kind === "link" ? 2000 : 200
-        placeholderText: section.host.tr.t(section.kind === "note" ? "resource.note"
-          : section.kind === "link" ? "resource.url" : "resource.reminderTitle")
+        visible: section.kind !== "note"
+        width: Math.max(0, parent.width - attach.width - cancel.width - parent.spacing * 2)
+        maximumLength: section.kind === "link" ? 2000 : 200
+        placeholderText: section.host.tr.t(section.kind === "link" ? "resource.url" : "resource.reminderTitle")
+      }
+
+      NoteInput {
+        id: noteDraft
+        visible: section.kind === "note"
+        width: draft.width
+        placeholderText: section.host.tr.t("resource.note")
+        foreground: section.host.foreground
+        fontFamily: section.fontFamily
+        onTextChanged: section.unsavedNote = false
+        onAccepted: section.commitDraft()
+        onCanceled: section.clearDraft()
+      }
+
+      ResourceButton {
+        id: cancel
+        text: section.host.tr.t("session.cancel")
+        onClicked: section.clearDraft()
       }
 
       ResourceButton {
         id: attach
-        height: draft.height
-        text: section.host.tr.t("creation.attach")
+        text: section.host.tr.t(section.editingIndex < 0 ? "creation.attach" : "session.save")
         enabled: !!section.draftParams
         opacity: enabled ? 1 : 0.45
         onClicked: section.commitDraft()
@@ -147,10 +202,11 @@ Column {
     }
 
     Text {
-      visible: !section.draftParams && section.kind !== "note"
+      visible: section.unsavedNote || !section.draftParams && (section.kind !== "note" || section.hasInput)
       width: parent.width
       textFormat: Text.PlainText
-      text: section.host.tr.t(section.kind === "link" ? "resource.invalidUrl" : "resource.reminderTimeHint")
+      text: section.host.tr.t(section.unsavedNote ? "session.unsavedNote" : section.kind === "link"
+        ? "resource.invalidUrl" : section.kind === "note" ? "resource.noteHint" : "resource.reminderTimeHint")
       color: section.host.mutedForeground
       font.family: section.fontFamily
       font.pixelSize: Style.font.caption
@@ -178,13 +234,17 @@ Column {
         model: section.entries
 
         Row {
+          id: summary
           required property var modelData
           required property int index
+          readonly property bool isNote: modelData.kind === "note"
+          visible: index !== section.editingIndex
           width: drafts.width
           spacing: Style.space(4)
 
           Text {
-            width: Math.max(0, parent.width - remove.width - parent.spacing)
+            width: Math.max(0, parent.width - remove.width - parent.spacing
+              - (summary.isNote ? edit.width + parent.spacing : 0))
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
             text: modelData.body || modelData.url || section.host.tr.t("reminder.subjectTime")
@@ -195,6 +255,20 @@ Column {
             font.pixelSize: Style.font.bodySmall
             elide: Text.ElideRight
             maximumLineCount: 1
+            MouseArea {
+              anchors.fill: parent
+              enabled: summary.isNote
+              cursorShape: Qt.PointingHandCursor
+              onClicked: section.editNote(summary.index)
+            }
+          }
+
+          ResourceButton {
+            id: edit
+            visible: summary.isNote
+            text: "✎"
+            tooltipText: section.host.tr.t("session.editNote")
+            onClicked: section.editNote(summary.index)
           }
 
           ResourceButton {
@@ -205,6 +279,7 @@ Column {
               var remaining = section.entries.slice()
               remaining.splice(index, 1)
               section.entries = remaining
+              if (index < section.editingIndex) section.editingIndex--
             }
           }
         }

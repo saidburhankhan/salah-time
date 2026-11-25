@@ -9,7 +9,6 @@ Rectangle {
 
   required property var host
   readonly property string fontFamily: host.bar ? host.bar.fontFamily : Style.font.family
-  readonly property alias noteFocus: editor.textFocus
   readonly property var timer: host.runningTimer
   readonly property var sleepCap: timer && timer.stale === true
     ? SessionLogic.sessionMinuteCap(timer.max_minutes) : null
@@ -145,19 +144,18 @@ Rectangle {
         fontFamily: card.fontFamily
         fontSize: Style.font.bodySmall
         verticalPadding: 0
-        onClicked: {
-          card.host.openNote("card")
-          editor.focusInput()
-        }
+        onClicked: card.host.openNote(notes.appendSource)
       }
     }
 
-    SessionNoteField {
-      id: editor
+    SessionNotes {
+      id: notes
       x: Style.space(10)
       width: parent.width - x * 2
-      visible: card.host.noteSource === "card"
       host: card.host
+      session: card.timer
+      surface: "card"
+      visible: implicitHeight > 0
     }
   }
 }

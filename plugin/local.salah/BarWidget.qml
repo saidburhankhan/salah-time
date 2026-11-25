@@ -65,11 +65,13 @@ BarWidget {
   property string sessionPanelOp: ""
   property string sessionPanelError: ""
   property string noteSource: ""
-  property string noteSessionId: ""
+  property var noteTarget: null
+  property var focusedNoteField: null
   property string noteDraft: ""
   property string noteOp: ""
   property string noteError: ""
   property var noteSubmission: null
+  signal noteFocusRequested()
   // An error from a row's own action, shown inside that expanded row.
   property string rowErrorKey: ""
   property string rowErrorText: ""
@@ -237,6 +239,7 @@ BarWidget {
   }
 
   function presetQuickAdd(block) {
+    if (!leaveNote()) return
     quickAddBlock = String(block || "")
     var content = panel.loadedContent
     if (content && content.quickField) {
@@ -316,7 +319,7 @@ BarWidget {
   }
 
   function pauseRunning() {
-    if (!runningTimer || sessionPanelOp !== "") return
+    if (!runningTimer || sessionPanelOp !== "" || !leaveNote()) return
     if (sessionPanelMode !== "pause" || pauseId !== runningTimer.id) {
       pauseId = runningTimer.id
       sessionPanelMode = "pause"
@@ -346,32 +349,69 @@ BarWidget {
   }
 
   function openNote(source) {
-    if (!canAnnotateTimer || noteOp) return
-    if (noteSessionId !== runningTimer.id) noteDraft = ""
-    noteSessionId = runningTimer.id
+    if (canAnnotateTimer) beginNote(source, SessionLogic.noteTarget("append", runningTimer))
+  }
+
+  function beginNote(source, target) {
+    if (!target) return
+    if (noteSource === source) {
+      noteFocusRequested()
+      return
+    }
+    if (!leaveNote()) return
+    noteTarget = target
+    noteDraft = target.original
     noteError = ""
     noteSource = source
   }
 
+  function leaveNote() {
+    if (noteSource === "") return true
+    if (noteOp || noteTarget && noteDraft !== noteTarget.original) {
+      if (!noteOp) noteError = strings.t("session.unsavedNote")
+      noteFocusRequested()
+      return false
+    }
+    closeNote()
+    return true
+  }
+
   function closeNote() {
+    if (noteOp) return
+    var restoreFocus = noteSource !== "" && noteSource !== "bar" && opened
     noteSource = ""
-    noteSessionId = ""
+    noteTarget = null
+    focusedNoteField = null
     noteDraft = ""
     noteError = ""
-    noteOp = ""
     noteSubmission = null
+    if (restoreFocus && panel.loadedContent) panel.loadedContent.forceActiveFocus()
   }
 
   function saveNote() {
-    if (!noteDraft.trim() || noteOp || !canAnnotateTimer || runningTimer.id !== noteSessionId) return
+    if (!noteTarget || noteOp) return
+    var value = noteDraft.trim()
+    if (value === "") {
+      noteError = strings.t("session.noteRequired")
+      noteFocusRequested()
+      return
+    }
+    if (Array.from(value).length > noteTarget.limit) {
+      noteError = strings.t("session.noteLimit").arg(noteTarget.limit)
+      return
+    }
+    if (!noteSubmission && value === noteTarget.original.trim()) {
+      closeNote()
+      return
+    }
     noteError = ""
-    noteSubmission = SessionLogic.noteAttempt(noteSubmission, noteSessionId, noteDraft, client.newOpId)
+    noteSubmission = SessionLogic.noteAttempt(noteSubmission, noteTarget, value, client.newOpId)
     noteOp = beginOp("note", "", "", noteSubmission.opId)
-    client.rpcMutation(noteOp, "session.note", Object.assign({}, noteSubmission.params))
+    client.rpcMutation(noteOp, noteSubmission.method, Object.assign({}, noteSubmission.params))
   }
 
   function openDonePanel(item) {
-    if (sessionPanelOp !== "") return
+    if (sessionPanelOp !== "" || !leaveNote()) return
     doneItem = item
     sessionPanelMode = "done"
     sessionPanelOp = ""
@@ -383,7 +423,7 @@ BarWidget {
   }
 
   function openLogPanel(presetKey) {
-    if (sessionPanelOp !== "") return
+    if (sessionPanelOp !== "" || !leaveNote()) return
     doneItem = null
     sessionPanelMode = "log"
     sessionPanelOp = ""
@@ -475,7 +515,7 @@ BarWidget {
   function close() {
     var content = panel.loadedContent
     if (content && content.collapseExpanded) content.collapseExpanded()
-    if (noteSource === "card") closeNote()
+    if (noteSource !== "" && noteSource !== "bar") closeNote()
     if (!sessionPanelOp) closeSessionPanel()
     panel.open = false
   }
@@ -495,7 +535,10 @@ BarWidget {
       if (JSON.stringify(reminders) !== JSON.stringify(dueReminders)) dueReminders = reminders
       var runningId = status.running ? status.running.id : ""
       if (sessionPanelMode === "pause" && pauseId !== runningId) closeSessionPanel()
-      if (noteSource && (noteSessionId !== runningId || !canAnnotateTimer)) closeNote()
+      if (noteSource === "bar" || noteSource.indexOf("card:") === 0) {
+        var noteSessionId = noteTarget.params.session_id || noteTarget.params.id
+        if (noteSessionId !== runningId && (noteSource !== "bar" || !noteSubmission)) closeNote()
+      }
       // The item being ticked was removed elsewhere (the app, the CLI).
       if (sessionPanelMode === "done" && doneItem && sessionPanelOp === "") {
         var stillThere = null
@@ -527,7 +570,10 @@ BarWidget {
     if (reminderId)
       dueReminders = dueReminders.filter(function(row) { return row.id !== reminderId })
     if (pendingOps[opId] && pendingOps[opId].pulse) bumpPulse.restart()
-    if (opId === noteOp) closeNote()
+    if (opId === noteOp) {
+      noteOp = ""
+      closeNote()
+    }
     if (opId === sessionPanelOp) closeSessionPanel()
     if (kind === "add") {
       var item = CreationLogic.addedItem(result)
@@ -810,11 +856,13 @@ BarWidget {
       property string dragTitle: ""
       property string editingKey: ""
       property string expandedItemId: ""
+      property bool returnHandled: false
       property string occurrenceHint: ""
       anchors.fill: parent
       readonly property real maxContentHeight: Math.max(Style.space(240), panel.availableCardHeight - panel.padding * 2)
       implicitHeight: Math.min(dayColumn.implicitHeight, maxContentHeight)
-      blocked: quickAdd.textFocus || editingKey !== "" || sessionEditor.textFocus || runningCard.noteFocus
+      blocked: quickAdd.textFocus || editingKey !== "" || sessionEditor.textFocus
+        || root.focusedNoteField !== null && root.focusedNoteField.textFocus
       function revealSessionEditor() {
         if (root.sessionPanelMode === "pause")
           dayScroll.contentY = Math.max(0, Math.min(sessionEditor.y, dayScroll.contentHeight - dayScroll.height))
@@ -843,27 +891,59 @@ BarWidget {
           Math.max(dayScroll.contentY, bottom - dayScroll.height))
       }
       function collapseExpanded() {
+        if (root.noteSource.indexOf("row:") === 0 || root.noteSource.indexOf("resource:") === 0)
+          root.closeNote()
         expandedItemId = ""
         editingKey = ""
       }
 
       function toggleExpanded(id) {
+        if (!leaveRowNote()) return
         expandedItemId = expandedItemId === id ? "" : id
         editingKey = ""
       }
 
+      function leaveRowNote() {
+        var source = root.noteSource
+        return source.indexOf("row:") !== 0 && source.indexOf("resource:") !== 0 || root.leaveNote()
+      }
+
+      function expandedRow() {
+        return expandedItemId ? timelineList.itemAtIndex(indexOfKey("item:" + expandedItemId)) : null
+      }
+
       onCloseRequested: {
-        if (dragKey !== "") cancelDrag()
-        else if (quickAdd.expanded) quickAdd.dismiss()
-        else if (root.sessionPanelMode !== "") root.closeSessionPanel()
-        else if (expandedItemId !== "") collapseExpanded()
-        else root.close()
+        if (root.noteSource !== "") root.closeNote()
+        else if (dragKey !== "") cancelDrag()
+        else if (root.sessionPanelMode !== "") sessionEditor.cancel()
+        else {
+          var row = expandedRow()
+          if (row && row.cancelForm()) return
+          if (quickAdd.expanded) quickAdd.cancelLayer()
+          else if (expandedItemId !== "") collapseExpanded()
+          else root.close()
+        }
+      }
+      onReturnRequested: {
+        returnHandled = true
+        if (root.noteSource !== "") root.saveNote()
+        else if (root.sessionPanelMode !== "") sessionEditor.save(false)
+        else {
+          var row = expandedRow()
+          if (row && row.saveForm()) return
+          if (quickAdd.expanded) quickAdd.saveLayer()
+          else returnHandled = false
+        }
       }
       onTabRequested: function(direction) {
         if (root.bar && typeof root.bar.switchPanelFrom === "function")
           root.bar.switchPanelFrom(root, direction)
       }
       onActivateRequested: {
+        if (returnHandled) {
+          returnHandled = false
+          return
+        }
         var row = timelineModel.get(timelineList.currentIndex)
         if (row && row.rowType === "item" && !row.pending) toggleExpanded(row.itemId)
         else root.refresh()
