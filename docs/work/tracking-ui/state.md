@@ -328,3 +328,6 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
 - 13:5x C9 CHECKPOINT 10 verified (103 app tests outside sandbox; screenshots: Notes page with
   filters/search/Timed, inline edit, session editor timed notes edit/add/remove, Insights metric
   row with Distractions/h and "recorded") and committed; installing via the gated chain.
+- 13:53 INSTALLED via gated chain (272 cargo + 103 app); daemon restarted 13:52; live notes.list
+  (28 days) = 12 notes; shell log clean; bar "Asr 1h 23m". Codex 5h 85%, weekly 53%.
+  Notes/filters feature DONE. Queue empty: ask the user.
