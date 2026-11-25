@@ -15,6 +15,8 @@
           "id": "<id:1>",
           "item_id": null,
           "metric_id": null,
+          "paused": false,
+          "paused_project": null,
           "period": "day",
           "position": 0,
           "progress": {

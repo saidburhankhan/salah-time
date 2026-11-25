@@ -106,6 +106,14 @@ fn goal_line(row: &Value) -> String {
     } else {
         "at least"
     };
+    if row["paused"] == true {
+        return format!(
+            "{}  {}  paused ({})",
+            text(&row["id"]),
+            scope,
+            text(&row["paused_project"]["name"])
+        );
+    }
     let progress = &row["progress"];
     let value = if progress["error"] == "sum_overflow" {
         "sum overflow".into()
@@ -142,7 +150,13 @@ pub fn goal_history(result: &Value) -> String {
                 text(&p["to"]),
                 p["target"],
                 value,
-                if p["met"] == true { "met" } else { "not met" }
+                if p["paused"] == true {
+                    "paused"
+                } else if p["met"] == true {
+                    "met"
+                } else {
+                    "not met"
+                }
             )
         })
         .collect::<Vec<_>>()
@@ -304,7 +318,7 @@ pub fn insights(result: &Value) -> String {
             "  {}  {} of {} min on plan ({label})",
             text(&r["name"]),
             r["on_plan_minutes"],
-            r["minutes"],
+            r["scored_minutes"],
         ));
     }
     for (title, key) in [("Best sessions", "best"), ("Hardest sessions", "hardest")] {
@@ -342,11 +356,16 @@ pub fn items(result: &Value) -> String {
         .iter()
         .map(|item| {
             format!(
-                "{}  {:<8} {}  ({})",
+                "{}  {:<8} {}  ({}){}",
                 short(&item["id"]),
                 item["block"].as_str().unwrap_or("backlog"),
                 text(&item["title"]),
                 text(&item["schedule_text"]),
+                if item["paused"] == true {
+                    " [paused]"
+                } else {
+                    ""
+                },
             )
         })
         .collect::<Vec<_>>()
@@ -362,11 +381,16 @@ pub fn projects(result: &Value) -> String {
                 .map(|metric| text(&metric["metric_id"]))
                 .collect();
             format!(
-                "{}  {}  {}  [{}]",
+                "{}  {}  {}  [{}]{}",
                 short(&project["id"]),
                 text(&project["color"]),
                 text(&project["name"]),
                 metrics.join(", "),
+                if project["archived"] == true {
+                    " [archived]"
+                } else {
+                    ""
+                },
             )
         })
         .collect::<Vec<_>>()
@@ -406,12 +430,17 @@ pub fn epics(result: &Value) -> String {
         .iter()
         .map(|epic| {
             format!(
-                "{}  {:<8} {}  {} min in {} sessions",
+                "{}  {:<8} {}  {} min in {} sessions{}",
                 short(&epic["id"]),
                 text(&epic["status"]),
                 text(&epic["name"]),
                 epic["total_minutes"],
                 epic["sessions"],
+                if epic["paused"] == true {
+                    " [paused]"
+                } else {
+                    ""
+                },
             )
         })
         .collect::<Vec<_>>()

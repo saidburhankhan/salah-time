@@ -16,6 +16,11 @@ pub struct XdgConfig {
 }
 
 impl XdgConfig {
+    pub fn open_store(&self, path: &std::path::Path, clock: &dyn Clock) -> Result<Store, Error> {
+        Store::open_with_day(path, || {
+            salah_core::day::current(&self.load()?, clock.now())
+        })
+    }
     pub fn standard() -> Self {
         Self {
             path: config::path(),
@@ -45,9 +50,10 @@ impl<'a> Local<'a> {
     pub fn open(clock: &'a dyn Clock, ids: &'a dyn IdGenerator) -> Result<Self, String> {
         let mut dispatcher = Dispatcher::new();
         dispatcher.accept_hello();
+        let config = XdgConfig::standard();
         Ok(Self {
-            store: Store::open(&default_path())?,
-            config: XdgConfig::standard(),
+            store: config.open_store(&default_path(), clock)?,
+            config,
             clock,
             ids,
             dispatcher,
@@ -91,8 +97,8 @@ impl<'a> Local<'a> {
 /// `salah rpc`: one JSON-RPC request per stdin line, one response per stdout
 /// line, until EOF. Unlike `Local`, the client must say `hello` first.
 pub fn serve_stdio(clock: &dyn Clock, ids: &dyn IdGenerator) -> Result<(), String> {
-    let mut store = Store::open(&default_path())?;
     let config = XdgConfig::standard();
+    let mut store = config.open_store(&default_path(), clock)?;
     let mut dispatcher = Dispatcher::new();
     let mut input = std::io::stdin().lock();
     let mut output = std::io::BufWriter::new(std::io::stdout().lock());

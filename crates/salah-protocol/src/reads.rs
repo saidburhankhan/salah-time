@@ -40,14 +40,20 @@ pub(crate) fn items(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcE
     struct Params {
         #[serde(default)]
         include_ended: bool,
+        #[serde(default)]
+        include_paused: bool,
     }
     let params: Params = parse(call.params)?;
     let today = day::current(&ctx.config.load()?, ctx.now())?;
-    let rows: Vec<ItemView> = items::list(ctx.store)?
-        .into_iter()
-        .filter(|item| params.include_ended || !item.ended(today))
-        .map(|item| ItemView::new(ctx.store, item, today))
-        .collect::<Result<_, _>>()?;
+    let rows = ctx.store.read_snapshot(|store| {
+        let mut rows: Vec<ItemView> = items::list(store)?
+            .into_iter()
+            .filter(|item| params.include_ended || !item.ended(today))
+            .map(|item| ItemView::new(store, item, today))
+            .collect::<Result<_, _>>()?;
+        rows.retain(|i| params.include_paused || !i.paused);
+        Ok(rows)
+    })?;
     to_value(rows)
 }
 
@@ -224,12 +230,24 @@ pub(crate) fn backlog(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, Rp
 pub(crate) fn epics(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
     let params: crate::methods::EpicsListParams = parse(call.params)?;
     let today = day::current(&ctx.config.load()?, ctx.now())?;
-    to_value(salah_core::epics::list(
+    let mut rows = salah_core::epics::list(
         ctx.store,
         params.project_id.as_deref(),
         params.status,
         today,
-    )?)
+    )?;
+    rows.retain(|e| params.include_paused || !e.paused);
+    to_value(rows)
+}
+
+pub(crate) fn pause_preview(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {
+    #[derive(serde::Deserialize)]
+    struct Params {
+        id: String,
+    }
+    let params: Params = parse(call.params)?;
+    let today = day::current(&ctx.config.load()?, ctx.now())?;
+    to_value(ctx.store.pause_preview(&params.id, today)?)
 }
 
 pub(crate) fn projects(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Value, RpcError> {

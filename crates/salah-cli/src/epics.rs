@@ -25,6 +25,9 @@ pub enum EpicCommand {
 
 #[derive(Args)]
 pub struct EpicListArgs {
+    /// Include epics of archived projects
+    #[arg(long)]
+    include_paused: bool,
     #[arg(long, value_name = "ID")]
     project: Option<String>,
     /// active or finished
@@ -70,6 +73,7 @@ pub fn epic(local: &mut Local<'_>, command: EpicCommand) -> Result<(), String> {
     let (method, params, output) = match command {
         EpicCommand::List(a) => {
             let params = Params::default()
+                .set("include_paused", a.include_paused)
                 .opt("project_id", a.project)
                 .opt("status", a.status);
             let result = local.call("epics.list", params.done())?;

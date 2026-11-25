@@ -87,6 +87,7 @@ pub(crate) fn tag(store: &mut Store, name: &str, projects: &[&Project]) -> Tag {
                 tag_ids.push(tag.id.clone());
                 projects::edit(
                     tx,
+                    &crate::test_support::config(),
                     at(16, 9, 0),
                     &project.id,
                     ProjectChanges {
@@ -484,7 +485,14 @@ fn a_project_filter_orders_metric_columns_like_its_prompt() {
                 metrics: Some(metrics),
                 ..Default::default()
             };
-            projects::edit(tx, at(25, 9, 0), &w.gym.id, changes, None)
+            projects::edit(
+                tx,
+                &crate::test_support::config(),
+                at(25, 9, 0),
+                &w.gym.id,
+                changes,
+                None,
+            )
         })
         .unwrap();
     let filter = Filter {

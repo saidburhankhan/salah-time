@@ -97,7 +97,7 @@ store-wide counter, never a precondition.
 | `hello` | `protocol[]`, `client`, `actor?` | `protocol`, `server`, `capabilities`, `revision` | protocol | — | — |
 | `status.get` | — | `Status`: prayer projection, `planner` (today's rows), `running: SessionView\|null`, `prompt: [PromptMetric]`, `goals: [GoalView]` (as `goals.list` for the current tracking day), `reminders: [DueReminder]` | config, source, storage | — | — |
 | `day.get` | `date?` | `DayPlan`: prayers, blocks with `capacity_minutes`/`planned_minutes`/`actual_minutes`/`unplanned_minutes` and rows, `open`, `fulfilment` | validation, source, storage | — | — |
-| `items.list` | `include_ended?` (default false) | `[ItemView]`, the backlog last | storage | — | — |
+| `items.list` | `include_ended?`, `include_paused?` (both default false) | `[ItemView]`, the backlog last | storage | — | — |
 | `backlog.list` | `project_id?`, `tag_id?` (each also `"none"`) | `[ItemView + project: {id,name,color,tag_ids}\|null + resources: {notes,links,reminders}]` in backlog order | not_found, storage | — | — |
 | `resources.list` | Exactly one of `item_id` or `epic_id` | `[Resource]` in position order | validation, not_found, storage | — | — |
 | `resource.add` | `op_id`, exactly one of `item_id` or `epic_id`, `kind`, `title?`, `body?`, `url?`, `remind_at?` | mutation result (`changed.resources`) | validation, not_found, storage | yes | no |
@@ -116,12 +116,13 @@ store-wide counter, never a precondition.
 | `item.schedule` | `op_id`, `id`, `day`, `block`, `expected_version?` (one-time items only) | mutation result (`changed.items`) | validation, not_found, conflict, source, storage | yes | yes |
 | `item.backlog` | `op_id`, `id`, `expected_version?` (one-time items only) | mutation result (`changed.items`) | validation, not_found, conflict, source, storage | yes | yes |
 | `item.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`, the task's ended goals in `changed.goals`) | not_found, conflict, storage | yes | yes |
-| `epics.list` | `project_id?`, `status?` (`active` or `finished`) | epics with work totals and task counts, in project and position order | validation, storage | — | — |
+| `epics.list` | `include_paused?` (default false), `project_id?`, `status?` (`active` or `finished`) | epics with work totals and task counts, in project and position order | validation, storage | — | — |
 | `epic.add` | `op_id`, `project_id`, `name`, `note?` | mutation result (`changed.epics`) | validation, not_found, storage | yes | no |
 | `epic.edit` | `op_id`, `id`, `expected_version?`, `name?`, `note?`, `status?` | mutation result (`changed.epics`) | validation, not_found, conflict, storage | yes | yes |
 | `epic.remove` | `op_id`, `id`, `expected_version?` | mutation result (`changed.deleted`, detached `changed.items`, the epic's ended goals in `changed.goals`) | not_found, conflict, storage | yes | yes |
 | `projects.list` | `archived?` | `[Project + tags:[Tag] + metrics:[ProjectMetric + metric:Metric]]` | storage | — | — |
 | `project.add` | `op_id`, `name`, `color?`, `note?`, `tag_ids?`, `metrics?:[{metric_id, required}]` (defaults to focus, quality and distractions in that order, with `required: false` for distractions) | mutation result (`changed.projects`) | validation, not_found, storage | yes | no |
+| `project.pause_preview` | `id` | `{goals, routines, open_tasks}` | not_found, storage | — | — |
 | `project.edit` | `op_id`, `id`, `expected_version?`, any add field (`note: null` clears), `archived?` | mutation result | validation, not_found, conflict, storage | yes | yes |
 | `tags.list` | — | `[Tag]` | storage | — | — |
 | `tag.add` | `op_id`, `name`, `color` | mutation result (`changed.tags`) | validation, storage | yes | no |
@@ -143,7 +144,7 @@ store-wide counter, never a precondition.
 | `review.notes` | `week` (Monday, YYYY-MM-DD), `query`, `limit?`, `after?` | `rows` of matching session notes, `next` cursor or null | validation, storage | — | — |
 | `session.notes` | `id` (session), `limit?`, `after?` | `notes` of live timestamped entries, `next` cursor or null | validation, not_found, storage | — | — |
 | `goals.list` | `at?` (a tracking day, default today), `include_ended?` (default false) | `[GoalView]` in position order: goals active on `at` (with `include_ended`, every goal started by `at`) | validation, storage | — | — |
-| `goals.history` | `id` (any goal of an edit chain), `from`, `to` (at most 730 days) | `[{from, to, value, target, met}]`, oldest first, through today's period | validation, not_found, storage | — | — |
+| `goals.history` | `id` (any goal of an edit chain), `from`, `to` (at most 730 days) | `[{from, to, value, target, met, paused}]`, oldest first, through today's period | validation, not_found, storage | — | — |
 | `goal.add` | `op_id`, at most one of `project_id` / `epic_id` / `item_id` (none: all work), `period` (`day`/`week`), `metric_id?` (none: minutes), `direction?` (`at_least` default, `at_most` only with a metric), `target` (finite, > 0) | mutation result (`changed.goals`) | validation, not_found, storage | yes | no |
 | `goal.edit` | `op_id`, `id`, `target`, `expected_version?` | mutation result (`changed.goals`: the successor first, then the ended predecessor; or the predecessor's id in `changed.deleted`) | validation, not_found, conflict, storage | yes | yes |
 | `goal.end` | `op_id`, `id`, `expected_version?` | mutation result (`changed.goals`) | validation, not_found, conflict, storage | yes | yes |
@@ -163,6 +164,34 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
 `marks`, and `deleted` (removed ids) — so clients never guard for a missing key.
 
 ## Shapes
+
+- `project.pause_preview {id}` counts active goals scoped to the project or its
+  epics or tasks, live routines that have yet to end, and open one-time tasks
+  (including the backlog). CLI: `salah project pause-preview ID --json`.
+  `project.edit {archived: true}` opens a pause on the current tracking day.
+  Resuming closes the span on the preceding day. Archiving then resuming on
+  the same tracking day leaves no span. Resuming also moves open one-time
+  tasks due during the span to the end of the backlog in the same revision.
+  Refresh project-dependent views when a project changes.
+- Project catalogues expose `archived`; `projects.list {}` includes both
+  states. For creation use `{archived: false}`. Item and epic views in
+  `items.list` and `epics.list` expose `paused`. Use `include_paused: true`
+  (CLI `--include-paused`) to include archived projects' tasks, routines and
+  epics in report filters. Ended routines additionally need `include_ended`.
+  The active backlog excludes paused projects. Session and routine activity
+  reports retain their work.
+- On a paused day, the project's routines and open tasks contribute no plan
+  lines or planned minutes. Completed one-time tasks remain visible on their
+  day. The widget planner omits paused items. Schema 007 starts a pause for
+  each project already archived on the tracking day of migration.
+- Each goal view has `paused` and `paused_project: {id, name} | null`.
+  A project, epic or task goal is paused for a period when any day in the
+  period overlaps its project's pause span. A task's historical project
+  determines its pause for that day. Paused periods retain their recorded
+  value and have `met: false`. Skip `goals.history` rows with `paused: true`
+  when counting missed periods or computing rates and streaks. The status
+  widget and Review's met counts omit paused goals. All-work goals continue
+  to count every eligible session.
 
 - Each epic has an `id`, `project_id`, `name`, nullable `note`, `position`, `status`,
   nullable `finished_at`, and the usual sync fields. Finishing sets the timestamp once.
@@ -325,7 +354,8 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
   Insights and the Notes list. Task edits resolve live task IDs.
 - `insights.get.on_plan` aggregates once per task. The numerator counts the
   portions of each session allocated to that session day's planned block. The
-  denominator includes all filtered minutes for the task. `planned_blocks` lists
+  denominator is `scored_minutes`, which excludes minutes during a project pause.
+  The `minutes` field retains all filtered minutes for the task. `planned_blocks` lists
   each historical block represented by the row and is omitted for unplanned work.
   The compatibility field `planned_block` names the block when there is exactly
   one and is null for multiple blocks. The matrix keeps the historical block split.
@@ -336,7 +366,7 @@ every list — `items` (`ItemView`: the stored item plus `schedule_text` and
 - `insights.get.on_plan` includes a final `Unplanned` row when the filter
   selects minutes logged directly on a project or epic. Its `item_id` and
   `planned_block` are null, `minutes` sums the item-less work, and
-  `on_plan_minutes` is zero. Adherence is undefined for this row.
+  `on_plan_minutes` and `scored_minutes` are zero. Adherence is undefined for this row.
 - For an average metric goal the server compares the weighted numerator with the
   target times the total sample weight before rounding the displayed mean. Exact
   equality meets both directions.

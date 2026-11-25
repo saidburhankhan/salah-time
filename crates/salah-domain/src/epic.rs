@@ -32,6 +32,7 @@ pub struct EpicRef {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct EpicView {
+    pub paused: bool,
     #[serde(flatten)]
     pub epic: Epic,
     pub total_minutes: i64,

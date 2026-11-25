@@ -5,6 +5,7 @@ use std::{fs, path::PathBuf};
 
 mod phase3;
 mod phase4;
+mod project_pauses;
 mod routine_end;
 
 struct Database {
@@ -179,7 +180,7 @@ fn fresh_database_runs_all_steps_and_skips_the_empty_version_zero_backup() {
         .iter()
         .map(|path| user_version(&Connection::open(path).unwrap()).unwrap())
         .collect();
-    assert_eq!(versions, [3, 4, 5]);
+    assert_eq!(versions, [4, 5, 6]);
     drop(Store::open(&db.path).unwrap());
     assert_eq!(db.backups(), paths);
 }

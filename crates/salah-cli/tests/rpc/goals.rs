@@ -187,8 +187,8 @@ fn sleep_rolls_over_both_sunday_periods_and_edits_preserve_history() {
     assert_eq!(
         history,
         json!([
-            {"from":"2031-05-12","to":"2031-05-18","value":10.0,"target":50.0,"met":false},
-            {"from":"2031-05-19","to":"2031-05-25","value":60.0,"target":55.0,"met":true}
+            {"from":"2031-05-12","to":"2031-05-18","value":10.0,"target":50.0,"met":false,"paused":false},
+            {"from":"2031-05-19","to":"2031-05-25","value":60.0,"target":55.0,"met":true,"paused":false}
         ])
     );
     let old = good(&mut rpc, "goals.list", json!({"at":"2031-05-18"}));

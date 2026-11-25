@@ -19,7 +19,7 @@ use salah_protocol::{
     ClockBoundaryNext, ClockBoundaryNotification, ConfigRepository, Context, Dispatcher, Request,
     Response, RpcError,
 };
-use salah_store::{Store, default_path};
+use salah_store::default_path;
 
 mod events;
 use events::{Subscribers, Topic};
@@ -189,7 +189,9 @@ pub fn serve(idle_minutes: u64) -> Result<(), String> {
 
     let watcher_shared = Arc::clone(&shared);
     // Establish the watch cursor before accepting any subscribers or writes.
-    let watcher = Store::open(&data).map_err(|e| e.to_string())?;
+    let watcher = config
+        .open_store(&data, &clock)
+        .map_err(|e| e.to_string())?;
     let version = watcher.data_version().map_err(|e| e.to_string())?;
     let seq = watcher.last_change_seq().map_err(|e| e.to_string())?;
     thread::spawn(move || events::watch(watcher, watcher_shared, version, seq));
@@ -356,7 +358,8 @@ fn writer_loop(
     jobs: mpsc::Receiver<WriteJob>,
     ready: mpsc::SyncSender<Result<(), String>>,
 ) {
-    let mut store = match Store::open(&data) {
+    let config = XdgConfig { path: config_path };
+    let mut store = match config.open_store(&data, &clock) {
         Ok(store) => {
             let _ = ready.send(Ok(()));
             store
@@ -366,7 +369,6 @@ fn writer_loop(
             return;
         }
     };
-    let config = XdgConfig { path: config_path };
     let ids = UuidV4;
     let mut dispatcher = Dispatcher::new();
     dispatcher.accept_hello();
@@ -470,7 +472,8 @@ fn handle_connection(
     });
 
     let mut reader = BufReader::new(stream);
-    let mut store = match Store::open(&data) {
+    let config = XdgConfig { path: config_path };
+    let mut store = match config.open_store(&data, &clock) {
         Ok(store) => store,
         Err(error) => {
             send_response(
@@ -487,7 +490,6 @@ fn handle_connection(
             return;
         }
     };
-    let config = XdgConfig { path: config_path };
     let ids = UuidV4;
     let mut dispatcher = Dispatcher::new();
     let subscriber_id = shared.next_subscriber.fetch_add(1, Ordering::SeqCst);

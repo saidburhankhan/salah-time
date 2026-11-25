@@ -1,0 +1,46 @@
+{
+  "id": 3,
+  "jsonrpc": "2.0",
+  "result": [
+    {
+      "from": "2031-05-12",
+      "met": true,
+      "paused": false,
+      "target": 10.0,
+      "to": "2031-05-12",
+      "value": 10.0
+    },
+    {
+      "from": "2031-05-13",
+      "met": false,
+      "paused": true,
+      "target": 10.0,
+      "to": "2031-05-13",
+      "value": 10.0
+    },
+    {
+      "from": "2031-05-14",
+      "met": false,
+      "paused": true,
+      "target": 10.0,
+      "to": "2031-05-14",
+      "value": 0.0
+    },
+    {
+      "from": "2031-05-15",
+      "met": false,
+      "paused": true,
+      "target": 10.0,
+      "to": "2031-05-15",
+      "value": 0.0
+    },
+    {
+      "from": "2031-05-16",
+      "met": true,
+      "paused": false,
+      "target": 10.0,
+      "to": "2031-05-16",
+      "value": 10.0
+    }
+  ]
+}

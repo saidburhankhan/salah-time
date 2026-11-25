@@ -7,6 +7,7 @@ mod item_tags;
 pub use item_tags::ReportTags;
 mod migrations;
 pub mod note_queries;
+mod pauses;
 mod read;
 pub mod reports;
 pub mod resources;
@@ -15,7 +16,7 @@ mod write;
 
 pub use write::WriteTx;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use codec::storage_error;
 use rusqlite::Connection;
 use salah_domain::error::Error;
@@ -74,17 +75,37 @@ pub struct Store {
 impl Store {
     /// Opens the database and migrates it in place, backing up each existing schema version first.
     pub fn open(path: &Path) -> Result<Self, Error> {
+        Self::open_with_day(path, || Ok(Utc::now().date_naive()))
+    }
+
+    /// The application provides its tracking day for migrations that date existing data.
+    pub fn open_with_day(
+        path: &Path,
+        day: impl Fn() -> Result<NaiveDate, Error>,
+    ) -> Result<Self, Error> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| Error::Storage(format!("store: {e}")))?;
         }
-        Self::init(Connection::open(path).map_err(storage_error)?, Some(path))
+        Self::init(
+            Connection::open(path).map_err(storage_error)?,
+            Some(path),
+            &day,
+        )
     }
 
     pub fn open_in_memory() -> Result<Self, Error> {
-        Self::init(Connection::open_in_memory().map_err(storage_error)?, None)
+        Self::init(
+            Connection::open_in_memory().map_err(storage_error)?,
+            None,
+            &|| Ok(Utc::now().date_naive()),
+        )
     }
 
-    fn init(mut conn: Connection, path: Option<&Path>) -> Result<Self, Error> {
+    fn init(
+        mut conn: Connection,
+        path: Option<&Path>,
+        day: &dyn Fn() -> Result<NaiveDate, Error>,
+    ) -> Result<Self, Error> {
         conn.busy_timeout(Duration::from_secs(3))
             .map_err(storage_error)?;
         conn.pragma_update(None, "foreign_keys", "ON")
@@ -94,7 +115,7 @@ impl Store {
             .as_deref()
             .or(path)
             .filter(|p| !p.as_os_str().is_empty());
-        migrations::apply(&mut conn, file)?;
+        migrations::run_with_day(&mut conn, file, migrations::STEPS, day)?;
         reports::register_report_functions(&conn)?;
         Ok(Self { conn })
     }

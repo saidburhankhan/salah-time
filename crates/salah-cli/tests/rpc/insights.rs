@@ -196,7 +196,7 @@ fn itemless_project_and_epic_work_share_an_unplanned_row_after_filtering() {
         let report = good(&mut rpc, "insights.get", filter);
         assert_eq!(
             report["on_plan"],
-            json!([{"item_id":null,"name":"Unplanned","planned_block":null,"minutes":minutes,"on_plan_minutes":0}])
+            json!([{"item_id":null,"name":"Unplanned","planned_block":null,"minutes":minutes,"scored_minutes":0,"on_plan_minutes":0}])
         );
         let cells = report["block_matrix"].as_array().unwrap();
         assert!(cells.iter().all(|c| c["planned_block"].is_null()));
@@ -241,7 +241,7 @@ fn insights_uses_one_task_rate_across_a_historical_block_move() {
     assert_eq!(
         result["on_plan"],
         json!([{"item_id":item,"name":"Read","planned_block":null,
-        "planned_blocks":["fajr","asr"],"on_plan_minutes":30,"minutes":60}])
+        "planned_blocks":["fajr","asr"],"on_plan_minutes":30,"minutes":60,"scored_minutes":60}])
     );
     assert_eq!(
         result["block_matrix"],

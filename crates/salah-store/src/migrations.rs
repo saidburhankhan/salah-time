@@ -5,6 +5,7 @@ mod backup;
 mod tests;
 
 use crate::{codec::storage_error, user_version};
+use chrono::NaiveDate;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 use salah_domain::error::Error;
 use std::path::Path;
@@ -40,13 +41,28 @@ pub(super) const STEPS: &[Step] = &[
         sql: include_str!("migrations/006_routine_end_day.sql"),
         foreign_keys_off: false,
     },
+    Step {
+        sql: include_str!("migrations/007_project_pauses.sql"),
+        foreign_keys_off: false,
+    },
 ];
 
+#[cfg(test)]
 pub(super) fn apply(conn: &mut Connection, path: Option<&Path>) -> Result<(), Error> {
     run(conn, path, STEPS)
 }
 
+#[cfg(test)]
 fn run(conn: &mut Connection, path: Option<&Path>, steps: &[Step]) -> Result<(), Error> {
+    run_with_day(conn, path, steps, &|| Ok(chrono::Utc::now().date_naive()))
+}
+
+pub(super) fn run_with_day(
+    conn: &mut Connection,
+    path: Option<&Path>,
+    steps: &[Step],
+    day: &dyn Fn() -> Result<NaiveDate, Error>,
+) -> Result<(), Error> {
     if recognized_version(conn, steps.len())? == steps.len() {
         return Ok(());
     }
@@ -62,7 +78,7 @@ fn run(conn: &mut Connection, path: Option<&Path>, steps: &[Step]) -> Result<(),
             conn.pragma_update(None, "foreign_keys", false)
                 .map_err(storage_error)?;
         }
-        let result = step.apply(conn, path, version as i64);
+        let result = step.apply(conn, path, version as i64, day);
         if step.foreign_keys_off {
             conn.pragma_update(None, "foreign_keys", true)
                 .map_err(storage_error)?;
@@ -95,7 +111,13 @@ fn recognized_version(conn: &Connection, latest: usize) -> Result<usize, Error> 
 }
 
 impl Step {
-    fn apply(&self, conn: &mut Connection, path: Option<&Path>, version: i64) -> Result<(), Error> {
+    fn apply(
+        &self,
+        conn: &mut Connection,
+        path: Option<&Path>,
+        version: i64,
+        day: &dyn Fn() -> Result<NaiveDate, Error>,
+    ) -> Result<(), Error> {
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage_error)?;
@@ -107,15 +129,34 @@ impl Step {
             Some(path) if version > 0 => Some(backup::save(path, version)?),
             _ => None,
         };
-        let result = self.commit(tx, version + 1);
+        let result = self.commit(tx, version + 1, day);
         match snapshot {
             Some(snapshot) => snapshot.finish(result),
             None => result,
         }
     }
 
-    fn commit(&self, tx: Transaction<'_>, next: i64) -> Result<(), Error> {
+    fn commit(
+        &self,
+        tx: Transaction<'_>,
+        next: i64,
+        day: &dyn Fn() -> Result<NaiveDate, Error>,
+    ) -> Result<(), Error> {
         tx.execute_batch(self.sql).map_err(storage_error)?;
+        if next == 7
+            && tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM projects WHERE archived)",
+                    [],
+                    |r| r.get::<_, bool>(0),
+                )
+                .map_err(storage_error)?
+        {
+            tx.execute(
+                "INSERT INTO project_pauses(project_id,from_day) SELECT id,?1 FROM projects WHERE archived",
+                [crate::codec::day(day()?)],
+            ).map_err(storage_error)?;
+        }
         if self.foreign_keys_off
             && let Some((table, rowid, parent, fkid)) = tx
                 .query_row("PRAGMA foreign_key_check", [], |r| {

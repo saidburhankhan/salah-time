@@ -69,6 +69,19 @@ impl WriteTx<'_> {
     }
 
     pub fn put_project(&self, project: &Project) -> Result<i64, Error> {
+        let open = self
+            .one(
+                "SELECT 1 FROM project_pauses WHERE project_id=?1 AND to_day IS NULL",
+                [&project.id],
+                |_| Ok(()),
+            )?
+            .is_some();
+        if open != project.archived {
+            return Err(Error::validation(
+                "archived",
+                "change the project and its pause span together",
+            ));
+        }
         let (version, op) = self.next_version("projects", &project.id, project.deleted_at)?;
         self.execute(
             "INSERT INTO projects

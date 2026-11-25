@@ -19,6 +19,7 @@ pub struct Snapshot {
     pub clock: DayClock,
     pub blocks: Vec<DayBlock>,
     pub plan: Vec<DayPlanLine>,
+    pub(crate) paused_projects: std::collections::BTreeSet<String>,
 }
 
 /// The stored snapshot of a written past day, else the computed one.
@@ -28,24 +29,34 @@ pub fn snapshot(
     day: NaiveDate,
     today: NaiveDate,
 ) -> Result<Snapshot, Error> {
-    if day < today && store.day_written(day)? {
-        return Ok(Snapshot {
-            blocks: store.day_blocks(day)?,
-            clock: clock_for_day(store, config, day, today)?,
-            plan: store.day_plan(day)?,
-        });
-    }
-    let (blocks, clock) = blocks_for_day(store, config, day, day < today)?;
-    let items = if day < today {
-        store.items_on(day)?
+    let (blocks, clock, base_plan) = if day < today && store.day_written(day)? {
+        (
+            store.day_blocks(day)?,
+            clock_for_day(store, config, day, today)?,
+            store.day_plan(day)?,
+        )
     } else {
-        store.items()?
+        let (blocks, clock) = blocks_for_day(store, config, day, day < today)?;
+        let items = if day < today {
+            store.items_on(day)?
+        } else {
+            store.items()?
+        };
+        let plan = planned_lines(items, day, clock.sleep_at);
+        (blocks, clock, plan)
     };
-    let plan = planned_lines(items, day, clock.sleep_at);
+    let paused_projects = store.paused_projects_on(day)?;
+    let mut plan = base_plan;
+    plan.retain(|line| {
+        line.project_id
+            .as_ref()
+            .is_none_or(|id| !paused_projects.contains(id))
+    });
     Ok(Snapshot {
         blocks,
         clock,
         plan,
+        paused_projects,
     })
 }
 
@@ -108,6 +119,7 @@ pub fn freeze(
         blocks,
         clock,
         plan,
+        ..
     } = snapshot(tx, config, day, today)?;
     tx.write_day(day, &clock, &blocks, &plan)
 }

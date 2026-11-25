@@ -313,8 +313,14 @@ pub(crate) fn project_edit(call: Call<'_>, ctx: &mut Context<'_>) -> Result<Valu
     let now = ctx.now();
     let config = ctx.config;
     mutate(ctx.store, call.method, &p.op_id, |tx| {
-        let (project, affected) =
-            projects::edit(tx, now, &p.id, p.changes.clone(), p.expected_version)?;
+        let (project, affected) = projects::edit(
+            tx,
+            &config.load()?,
+            now,
+            &p.id,
+            p.changes.clone(),
+            p.expected_version,
+        )?;
         let mut changed = project_view(tx, project)?;
         if !affected.is_empty() {
             let today = day::current(&config.load()?, now)?;

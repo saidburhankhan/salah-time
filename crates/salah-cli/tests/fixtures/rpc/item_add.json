@@ -45,6 +45,7 @@
             }
           ],
           "next_occurrence": "2031-05-14",
+          "paused": false,
           "planned_minutes": 30,
           "position": 0,
           "project_id": "<id:3>",

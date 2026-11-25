@@ -45,6 +45,7 @@
             }
           ],
           "next_occurrence": null,
+          "paused": false,
           "planned_minutes": null,
           "position": 1,
           "project_id": null,

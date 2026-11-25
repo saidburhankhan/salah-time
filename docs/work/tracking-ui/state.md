@@ -301,3 +301,11 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   unarchive); everything stays in statistics → plan.md addendum "archiving a project pauses…".
   Live: no goals, no archived projects (Quran, Career active), so migration 007 is additive only.
   Dispatched C8 (Astra) backend → CHECKPOINT 12. Then C9 (Sol) app, C10 (Sol) widget.
+- 08:04 Codex 5h cap after ~45 min of one Astra worker ("try again at 12:22"). C8 CHECKPOINT 12 WIP
+  uncommitted (builds; protocol notes in c8-progress.md §12). systemd timer salah-resume-c8 resumes
+  C8 (Astra) at 12:23. Then verify (cargo tests incl. sockets, live-copy migration 007 gate),
+  commit, dispatch C9 (Sol) app + C10 (Sol) widget.
+- 12:2x C8 CHECKPOINT 12 (resumed 12:23, Astra) verified: scripts/test 267 incl. 8 socket tests;
+  migration 007 gate on a fresh copy of the live DB: v6→v7, integrity/FK ok, 25 tables same row
+  counts, day.get 23–25 Nov, stats.get Oct–Nov and routines.activity identical, items.list only
+  adds paused:false. Committed. Next: C9 (Sol) app + C10 (Sol) widget on c8-progress.md §12.

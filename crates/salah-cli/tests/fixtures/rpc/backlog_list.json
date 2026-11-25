@@ -40,6 +40,7 @@
         }
       ],
       "next_occurrence": null,
+      "paused": false,
       "planned_minutes": 40,
       "position": 1,
       "project": {

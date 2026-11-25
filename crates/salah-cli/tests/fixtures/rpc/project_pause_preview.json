@@ -1,0 +1,9 @@
+{
+  "id": 6,
+  "jsonrpc": "2.0",
+  "result": {
+    "goals": 0,
+    "open_tasks": 3,
+    "routines": 1
+  }
+}

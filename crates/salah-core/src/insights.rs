@@ -102,6 +102,7 @@ struct PlanRow {
     #[serde(skip_serializing_if = "BTreeSet::is_empty")]
     planned_blocks: BTreeSet<BoundaryId>,
     minutes: i64,
+    scored_minutes: i64,
     on_plan_minutes: i64,
 }
 #[derive(Serialize)]
@@ -178,6 +179,11 @@ pub fn get(
         // plan once, including the task's block before any subsequent moves.
         for group in rows.chunk_by(|a, b| a.session.block.day == b.session.block.day) {
             let snap = day::snapshot(store, config, group[0].session.block.day, today)?;
+            let paused_items = if snap.paused_projects.is_empty() {
+                BTreeSet::new()
+            } else {
+                store.paused_items_on(group[0].session.block.day)?
+            };
             let planned: BTreeMap<_, _> = snap
                 .plan
                 .iter()
@@ -207,9 +213,13 @@ pub fn get(
                         planned_block: None,
                         planned_blocks: BTreeSet::new(),
                         minutes: 0,
+                        scored_minutes: 0,
                         on_plan_minutes: 0,
                     });
                     plan.minutes += minutes;
+                    if !paused_items.contains(&item.id) {
+                        plan.scored_minutes += minutes;
+                    }
                     if let Some(block) = planned_block {
                         plan.planned_blocks.insert(block);
                         plan.on_plan_minutes += allocations
@@ -237,6 +247,7 @@ pub fn get(
                 planned_block: None,
                 planned_blocks: BTreeSet::new(),
                 minutes: bare_minutes,
+                scored_minutes: 0,
                 on_plan_minutes: 0,
             });
         }

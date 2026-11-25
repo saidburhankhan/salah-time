@@ -1,5 +1,5 @@
 use super::{Database, STEPS, assert_preserved, original_rows, phase4::populated_v4, rows};
-use crate::{Store, migrations, user_version};
+use crate::{migrations, user_version};
 use rusqlite::{ErrorCode, types::Value};
 
 #[test]
@@ -15,11 +15,9 @@ fn v6_preserves_v5_data_and_history_and_checks_routine_end_dates() {
     ).unwrap();
     let before = original_rows(&conn);
     let item_rowids = rows(&conn, "SELECT rowid,id FROM items ORDER BY rowid");
-    drop(conn);
-    let store = Store::open(&db.path).unwrap();
-    let conn = &store.conn;
-    assert_eq!(store.version().unwrap(), 6);
-    assert!(store.foreign_keys_enabled().unwrap());
+    migrations::run(&mut conn, Some(&db.path), &STEPS[..6]).unwrap();
+    assert_eq!(user_version(&conn).unwrap(), 6);
+    let conn = &conn;
     assert_eq!(db.backups().len(), 1);
     let backup = db.backup(5);
     assert!(!backup.column_exists(None, "items", "end_day").unwrap());
@@ -57,9 +55,9 @@ fn v6_preserves_v5_data_and_history_and_checks_routine_end_dates() {
     .unwrap();
     let after = original_rows(conn);
     let backups = db.backups();
-    drop(store);
-    let store = Store::open(&db.path).unwrap();
-    assert_preserved(&store.conn, &after);
+    let mut reopened = rusqlite::Connection::open(&db.path).unwrap();
+    migrations::run(&mut reopened, Some(&db.path), &STEPS[..6]).unwrap();
+    assert_preserved(&reopened, &after);
     assert_eq!(db.backups(), backups);
 }
 
@@ -69,7 +67,11 @@ fn a_v5_reader_refuses_v6_and_the_current_runner_refuses_newer() {
     let mut conn = populated_v4(&db);
     migrations::run(&mut conn, None, &STEPS[..6]).unwrap();
     let backups = db.backups();
-    for (version, steps) in [(6, &STEPS[..5]), (7, STEPS)] {
+    for (version, steps) in [
+        (6, &STEPS[..5]),
+        (7, &STEPS[..6]),
+        (crate::schema_version() + 1, STEPS),
+    ] {
         conn.pragma_update(None, "user_version", version).unwrap();
         let err = migrations::run(&mut conn, Some(&db.path), steps).unwrap_err();
         assert!(err.to_string().contains("unsupported schema version"));

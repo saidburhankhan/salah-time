@@ -5,6 +5,7 @@
     {
       "from": "2031-05-12",
       "met": false,
+      "paused": false,
       "target": 50.0,
       "to": "2031-05-18",
       "value": 10.0
@@ -12,6 +13,7 @@
     {
       "from": "2031-05-19",
       "met": true,
+      "paused": false,
       "target": 55.0,
       "to": "2031-05-25",
       "value": 60.0

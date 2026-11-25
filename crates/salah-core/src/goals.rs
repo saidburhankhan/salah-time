@@ -144,17 +144,28 @@ fn periods(
             samples.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
         }
     }
+    let pauses = store.goal_pauses(&g.scope, from, through)?;
     let mut rows = Vec::new();
     loop {
         let to = g.period.bounds(from)?.1;
+        let paused_project = pauses
+            .iter()
+            .find(|p| p.from <= to && p.to >= from)
+            .map(|p| p.project.clone());
+        let mut progress = progress(
+            g,
+            from,
+            to,
+            rollup,
+            groups.get(&from).map(Vec::as_slice).unwrap_or_default(),
+        );
+        if paused_project.is_some() {
+            progress.met = false;
+        }
         rows.push(HistoryRow {
-            progress: progress(
-                g,
-                from,
-                to,
-                rollup,
-                groups.get(&from).map(Vec::as_slice).unwrap_or_default(),
-            ),
+            paused: paused_project.is_some(),
+            paused_project,
+            progress,
             target: g.target,
         });
         if to >= through {
@@ -182,6 +193,8 @@ pub(crate) fn met_between(
         for row in periods(store, &g, from, to)? {
             if row.progress.met {
                 met.push(GoalView {
+                    paused: false,
+                    paused_project: None,
                     goal: g.clone(),
                     scope_label: label.clone(),
                     progress: row.progress,
@@ -198,6 +211,8 @@ pub fn view(store: &Store, g: Goal, at: NaiveDate) -> Result<GoalView, Error> {
         .pop()
         .ok_or_else(|| Error::Storage("goal has no valid period".into()))?;
     Ok(GoalView {
+        paused: p.paused,
+        paused_project: p.paused_project,
         scope_label: store.goal_scope_label(&g.scope)?,
         goal: g,
         progress: p.progress,

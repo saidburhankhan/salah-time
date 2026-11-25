@@ -23,6 +23,9 @@ pub enum ItemCommand {
         /// Also list routines past their last tracking day
         #[arg(long)]
         include_ended: bool,
+        /// Include tasks belonging to archived projects
+        #[arg(long)]
+        include_paused: bool,
         #[command(flatten)]
         output: Output,
     },
@@ -54,6 +57,8 @@ pub enum SessionCommand {
 
 #[derive(Subcommand)]
 pub enum ProjectCommand {
+    /// Count goals, routines and open tasks affected by archiving
+    PausePreview(IdArgs),
     /// List projects
     List(ArchivedArgs),
     /// Add a project
@@ -523,9 +528,13 @@ pub fn item(local: &mut Local<'_>, command: ItemCommand) -> Result<(), String> {
         }
         ItemCommand::List {
             include_ended,
+            include_paused,
             output,
         } => {
-            let result = local.call("items.list", json!({"include_ended":include_ended}))?;
+            let result = local.call(
+                "items.list",
+                json!({"include_ended":include_ended,"include_paused":include_paused}),
+            )?;
             print(&output, &result, render::items)
         }
         ItemCommand::Parse(a) => {
@@ -633,6 +642,10 @@ pub fn session(local: &mut Local<'_>, command: SessionCommand) -> Result<(), Str
 
 pub fn project(local: &mut Local<'_>, command: ProjectCommand) -> Result<(), String> {
     match command {
+        ProjectCommand::PausePreview(a) => {
+            let result = local.call("project.pause_preview", json!({"id":a.id}))?;
+            print(&a.output, &result, render::pretty)
+        }
         ProjectCommand::List(a) => {
             let result = local.call(
                 "projects.list",

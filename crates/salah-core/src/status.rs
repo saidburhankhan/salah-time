@@ -129,7 +129,7 @@ impl Status {
         }
         let today = self.current_block.block.day;
         match crate::goals::list(store, config, today, false) {
-            Ok(goals) => self.goals = goals,
+            Ok(goals) => self.goals = goals.into_iter().filter(|g| !g.paused).collect(),
             Err(error) => errors.push(error.to_string()),
         }
         match store.due_reminders(now) {

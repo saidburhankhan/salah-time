@@ -164,6 +164,14 @@ fn method_success_and_error(client: &mut Client) {
         .unwrap()
         .to_string();
     assert_eq!(
+        client.good("project.pause_preview", json!({"id":project}))["goals"],
+        0
+    );
+    assert_eq!(
+        client.bad("project.pause_preview", json!({"id":"missing"})),
+        -32002
+    );
+    assert_eq!(
         client.bad(
             "project.add",
             json!({"op_id":"s4-project-bad","name":"X","tag_ids":["missing"]})

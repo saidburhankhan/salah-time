@@ -58,6 +58,9 @@ pub fn list(
                 .project_id
                 .as_deref()
                 .and_then(|id| projects.iter().find(|p| p.id == id));
+            if project.is_some_and(|p| p.archived) {
+                continue;
+            }
             let tag_ids: Vec<String> = project
                 .map(|p| p.tag_ids.clone())
                 .unwrap_or_default()

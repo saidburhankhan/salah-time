@@ -97,6 +97,7 @@ const METHODS: &[(&str, Kind, Handler)] = &[
     ("epic.edit", Kind::Write, writes::epic_edit),
     ("epic.remove", Kind::Write, writes::epic_remove),
     ("project.add", Kind::Write, writes::project_add),
+    ("project.pause_preview", Kind::Read, reads::pause_preview),
     ("project.edit", Kind::Write, writes::project_edit),
     ("tag.add", Kind::Write, writes::tag_add),
     ("tag.edit", Kind::Write, writes::tag_edit),

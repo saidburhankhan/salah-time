@@ -247,6 +247,7 @@ struct Ledger {
     day: NaiveDate,
     blocks: Vec<DayBlock>,
     plan: Vec<DayPlanLine>,
+    paused_projects: BTreeSet<String>,
     items: Vec<Item>,
     projects: Vec<Project>,
     sessions: Vec<Session>,
@@ -268,6 +269,7 @@ impl Ledger {
             blocks,
             clock,
             plan,
+            paused_projects,
         } = snapshot(store, config, day, today)?;
         Ok(Self {
             now,
@@ -275,6 +277,7 @@ impl Ledger {
             clock,
             blocks,
             plan,
+            paused_projects,
             items: if day < today {
                 store.items_on(day)?
             } else {
@@ -320,7 +323,36 @@ impl Ledger {
         start: BoundaryId,
         (actual_minutes, unplanned_minutes): (i64, i64),
     ) -> Result<BlockPlan, Error> {
-        let items = self.rows(store, start)?;
+        let mut items = self.rows(store, start)?;
+        // A ticked one-time task is still visible on its scheduled day. Its
+        // display row is independent of the scored plan, including after a freeze.
+        for item in self.items.iter().filter(|item| {
+            item.repeat == Repeat::None
+                && item.block == Some(start)
+                && item.day == Some(self.day)
+                && item
+                    .project_id
+                    .as_ref()
+                    .is_some_and(|id| self.paused_projects.contains(id))
+                && item.created_at <= self.clock.sleep_at
+                && item.deleted_at.is_none_or(|at| at > self.clock.sleep_at)
+        }) {
+            if store.item_completed_by(&item.id, self.day)? {
+                let line = DayPlanLine {
+                    day: self.day,
+                    block: start,
+                    item_id: item.id.clone(),
+                    project_id: item.project_id.clone(),
+                    epic_id: item.epic_id.clone(),
+                    planned_minutes: None,
+                };
+                let mut row = self.row(store, item, &line)?;
+                row.done = true;
+                row.next_occurrence = None;
+                items.push(row);
+            }
+        }
+        items.sort_by_key(|row| row.position);
         Ok(BlockPlan {
             start,
             end: start.next().unwrap_or(BoundaryId::Sleep),

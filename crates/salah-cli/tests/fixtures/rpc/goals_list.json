@@ -11,6 +11,8 @@
       "id": "<id:1>",
       "item_id": null,
       "metric_id": null,
+      "paused": false,
+      "paused_project": null,
       "period": "day",
       "position": 0,
       "progress": {
@@ -36,6 +38,8 @@
       "id": "<id:2>",
       "item_id": null,
       "metric_id": null,
+      "paused": false,
+      "paused_project": null,
       "period": "day",
       "position": 1,
       "progress": {
@@ -61,6 +65,8 @@
       "id": "<id:5>",
       "item_id": null,
       "metric_id": null,
+      "paused": false,
+      "paused_project": null,
       "period": "week",
       "position": 2,
       "progress": {
@@ -86,6 +92,8 @@
       "id": "<id:6>",
       "item_id": "<id:7>",
       "metric_id": null,
+      "paused": false,
+      "paused_project": null,
       "period": "day",
       "position": 3,
       "progress": {
@@ -111,6 +119,8 @@
       "id": "<id:8>",
       "item_id": null,
       "metric_id": "focus",
+      "paused": false,
+      "paused_project": null,
       "period": "week",
       "position": 4,
       "progress": {
@@ -136,6 +146,8 @@
       "id": "<id:9>",
       "item_id": null,
       "metric_id": "distractions",
+      "paused": false,
+      "paused_project": null,
       "period": "week",
       "position": 5,
       "progress": {

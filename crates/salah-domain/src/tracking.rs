@@ -21,6 +21,13 @@ pub struct Project {
     pub version: i64,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PausePreview {
+    pub goals: i64,
+    pub routines: i64,
+    pub open_tasks: i64,
+}
+
 /// The colour-coded project a row belongs to.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ProjectRef {

@@ -59,16 +59,16 @@ impl Store {
                  )) AS done FROM items i JOIN selected e ON e.id=i.epic_id
                  WHERE i.deleted_at IS NULL GROUP BY i.epic_id
              )
-             SELECT e.*, COALESCE(w.minutes,0) AS total_minutes, COALESCE(w.sessions,0) AS sessions,
+             SELECT e.*, p.archived AS paused, COALESCE(w.minutes,0) AS total_minutes, COALESCE(w.sessions,0) AS sessions,
                     COALESCE(w.days,0) AS days_worked, w.last_day,
                     COALESCE(t.total-t.done,0) AS open_tasks, COALESCE(t.done,0) AS done_tasks
-             FROM selected e LEFT JOIN work w ON e.id=w.epic_id LEFT JOIN tasks t ON e.id=t.epic_id
+             FROM selected e JOIN projects p ON p.id=e.project_id LEFT JOIN work w ON e.id=w.epic_id LEFT JOIN tasks t ON e.id=t.epic_id
              ORDER BY e.project_id,e.position,e.id"
             ),
             params![project, status.map(|s| codec::name(&s)), codec::day(today)],
             |row| {
                 Ok(EpicView {
-                    epic: codec::epic(row)?,
+                    paused:row.get("paused")?, epic: codec::epic(row)?,
                     total_minutes: row.get("total_minutes")?,
                     sessions: row.get("sessions")?,
                     days_worked: row.get("days_worked")?,

@@ -85,7 +85,21 @@ pub struct Progress {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct PauseProject {
+    pub id: String,
+    pub name: String,
+}
+
+pub struct GoalPause {
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+    pub project: PauseProject,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct GoalView {
+    pub paused: bool,
+    pub paused_project: Option<PauseProject>,
     #[serde(flatten)]
     pub goal: Goal,
     pub scope_label: Option<String>,
@@ -94,6 +108,9 @@ pub struct GoalView {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct HistoryRow {
+    pub paused: bool,
+    #[serde(skip)]
+    pub paused_project: Option<PauseProject>,
     #[serde(flatten)]
     pub progress: Progress,
     pub target: f64,

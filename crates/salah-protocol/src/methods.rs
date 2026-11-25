@@ -240,6 +240,8 @@ pub struct PrayerParams {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct EpicsListParams {
+    #[serde(default)]
+    pub include_paused: bool,
     pub project_id: Option<String>,
     pub status: Option<EpicStatus>,
 }

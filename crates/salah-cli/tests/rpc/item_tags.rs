@@ -1,8 +1,8 @@
 use super::phase2::{added, bad, good};
+use super::sqlite;
 use super::{Fixtures, Harness, NOW, Session};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::process::Command;
 
 #[test]
 fn defaults_explicit_tags_and_retagged_history() {
@@ -142,22 +142,6 @@ fn defaults_explicit_tags_and_retagged_history() {
         "not_found",
         None,
     );
-}
-
-fn sqlite(h: &Harness, sql: &str) -> String {
-    let out = Command::new("sqlite3")
-        .arg("-batch")
-        .arg("-bail")
-        .arg(&h.data)
-        .arg(format!("\n{sql}"))
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout).unwrap()
 }
 
 #[test]

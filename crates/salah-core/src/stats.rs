@@ -634,6 +634,7 @@ mod tests {
                 let tag = tags::add(tx, at(20, 9, 0), ids(), "Deen", "#00aa00")?;
                 projects::edit(
                     tx,
+                    &crate::test_support::config(),
                     at(20, 9, 0),
                     &quran.id,
                     projects::ProjectChanges {

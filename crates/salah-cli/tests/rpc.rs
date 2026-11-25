@@ -98,6 +98,22 @@ impl Harness {
     }
 }
 
+fn sqlite(h: &Harness, sql: &str) -> String {
+    let out = Command::new("sqlite3")
+        .arg("-batch")
+        .arg("-bail")
+        .arg(&h.data)
+        .arg(format!("\n{sql}"))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap()
+}
+
 /// One `salah rpc` process driven request by request, so later requests can
 /// use ids returned by earlier ones.
 struct Session {
@@ -589,3 +605,6 @@ mod assignments;
 
 #[path = "rpc/routines.rs"]
 mod routines;
+
+#[path = "rpc/project_pauses.rs"]
+mod project_pauses;

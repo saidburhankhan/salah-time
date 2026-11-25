@@ -1,0 +1,26 @@
+{
+  "id": 14,
+  "jsonrpc": "2.0",
+  "result": [
+    {
+      "created_at": "2031-05-12T04:30:00Z",
+      "days_worked": 2,
+      "deleted_at": null,
+      "done_tasks": 0,
+      "finished_at": null,
+      "id": "<id:2>",
+      "last_worked": "2031-05-13",
+      "name": "Course",
+      "note": null,
+      "open_tasks": 1,
+      "paused": true,
+      "position": 0,
+      "project_id": "<id:1>",
+      "sessions": 3,
+      "status": "active",
+      "total_minutes": 28,
+      "updated_at": "2031-05-12T04:30:00Z",
+      "version": 1
+    }
+  ]
+}

@@ -10,7 +10,7 @@ use salah_domain::{
     tracking::{Item, Metric, Project, ProjectMetric, Tag},
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 const NAME_MAX: usize = 60;
 const DEFAULT_COLOR: &str = "#4c8bf5";
@@ -160,6 +160,7 @@ pub fn add(
 
 pub fn edit(
     tx: &WriteTx<'_>,
+    config: &crate::config::Config,
     now: DateTime<Utc>,
     id: &str,
     changes: ProjectChanges,
@@ -179,7 +180,28 @@ pub fn edit(
     if let Some(tag_ids) = changes.tag_ids {
         project.tag_ids = checked_tags(tx, tag_ids)?;
     }
-    if let Some(archived) = changes.archived {
+    let mut affected = BTreeMap::new();
+    if let Some(archived) = changes.archived
+        && project.archived != archived
+    {
+        let day = crate::day::current(config, now)?;
+        if archived {
+            tx.start_pause(id, day)?;
+        } else {
+            let start = tx.finish_pause(id, day)?;
+            let expired = tx.expired_task_ids(id, start, day)?;
+            if !expired.is_empty() {
+                let first = crate::items::next_position(tx, None)?;
+                for (position, id) in (first..).zip(expired) {
+                    let mut item = crate::items::find(tx, &id)?;
+                    tx.preserve_item(&item, day)?;
+                    item.position = position;
+                    item.block = None;
+                    item.day = None;
+                    affected.insert(id, item);
+                }
+            }
+        }
         project.archived = archived;
     }
     let links = changes
@@ -188,7 +210,7 @@ pub fn edit(
         .transpose()?;
     project.updated_at = now;
     project.version = tx.put_project(&project)?;
-    let items = if let Some(links) = links {
+    if let Some(links) = links {
         let previous = tx.project_metrics(&project.id)?;
         let removed: BTreeSet<_> = previous
             .iter()
@@ -196,22 +218,27 @@ pub fn edit(
             .map(|link| &link.metric_id)
             .collect();
         tx.set_project_metrics(&project.id, &links)?;
-        drop_removed_choices(tx, now, &project.id, &removed)?
-    } else {
-        Vec::new()
-    };
-    Ok((project, items))
+        drop_removed_choices(tx, &project.id, &removed, &mut affected)?;
+    }
+    let mut changed = Vec::new();
+    for mut item in affected.into_values() {
+        item.updated_at = now;
+        item.version = tx.put_item(&item)?;
+        if item.is_live() {
+            changed.push(item);
+        }
+    }
+    Ok((project, changed))
 }
 
 fn drop_removed_choices(
     tx: &WriteTx<'_>,
-    now: DateTime<Utc>,
     project_id: &str,
     removed: &BTreeSet<&String>,
-) -> Result<Vec<Item>, Error> {
-    let mut changed = Vec::new();
+    affected: &mut BTreeMap<String, Item>,
+) -> Result<(), Error> {
     if removed.is_empty() {
-        return Ok(changed);
+        return Ok(());
     }
     for mut item in tx.custom_items_in_project(project_id)? {
         let Some(ids) = &mut item.metric_ids else {
@@ -223,14 +250,14 @@ fn drop_removed_choices(
             if !item.is_live() {
                 crate::epics::detach_removed(tx, &mut item)?;
             }
-            item.updated_at = now;
-            item.version = tx.put_item(&item)?;
-            if item.is_live() {
-                changed.push(item);
+            if let Some(moved) = affected.get_mut(&item.id) {
+                moved.metric_ids = item.metric_ids;
+            } else {
+                affected.insert(item.id.clone(), item);
             }
         }
     }
-    Ok(changed)
+    Ok(())
 }
 
 pub(crate) fn checked_tags(store: &Store, tag_ids: Vec<String>) -> Result<Vec<String>, Error> {

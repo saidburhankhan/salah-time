@@ -13,6 +13,7 @@
       "name": "Read",
       "note": "Spring",
       "open_tasks": 0,
+      "paused": false,
       "position": 0,
       "project_id": "<id:2>",
       "sessions": 2,

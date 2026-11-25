@@ -450,14 +450,16 @@
         "planned_block": "fajr",
         "planned_blocks": [
           "fajr"
-        ]
+        ],
+        "scored_minutes": 30
       },
       {
         "item_id": "<id:7>",
         "minutes": 10,
         "name": "Walk",
         "on_plan_minutes": 0,
-        "planned_block": null
+        "planned_block": null,
+        "scored_minutes": 10
       }
     ]
   }

@@ -92,7 +92,9 @@ pub fn sync_saved(
         });
     }
     let (updated, provider) = sync(&current, now, local_timezone_offset)?;
-    let mut store = crate::Store::open(&salah_store::default_path())?;
+    let mut store = crate::Store::open_with_day(&salah_store::default_path(), || {
+        crate::day::current(&current, now)
+    })?;
     store.write(|tx| {
         // The network lookup ran outside the writer lock. A settings edit
         // during that lookup takes precedence over this outdated result.

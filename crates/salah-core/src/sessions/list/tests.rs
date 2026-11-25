@@ -92,7 +92,14 @@ fn world() -> World {
                 tag_ids: Some(vec![tag.id.clone()]),
                 ..Default::default()
             };
-            projects::edit(tx, at(16, 6, 0), &quran.id, changes, None)?;
+            projects::edit(
+                tx,
+                &crate::test_support::config(),
+                at(16, 6, 0),
+                &quran.id,
+                changes,
+                None,
+            )?;
             let read = items::add(
                 tx,
                 &config(),

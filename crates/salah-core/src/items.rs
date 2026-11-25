@@ -84,6 +84,7 @@ pub enum MovePosition {
 /// A stored item with its display recurrence.
 #[derive(Clone, Debug, Serialize)]
 pub struct ItemView {
+    pub paused: bool,
     pub ended: bool,
     #[serde(flatten)]
     pub item: Item,
@@ -98,11 +99,17 @@ pub struct ItemView {
 
 impl ItemView {
     pub fn new(store: &Store, item: Item, from: NaiveDate) -> Result<Self, Error> {
+        let paused = store.project_archived(item.project_id.as_deref())?;
         Ok(Self {
+            paused,
             tag_ids: store.item_tag_ids(&item.id)?,
             metrics: effective_metrics(store, &item)?,
             schedule_text: item.schedule_text(),
-            next_occurrence: item.next_occurrence(from),
+            next_occurrence: if paused {
+                None
+            } else {
+                item.next_occurrence(from)
+            },
             backlog: item.is_backlog(),
             ended: item.ended(from),
             item,
