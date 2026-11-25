@@ -238,6 +238,9 @@ ApplicationWindow {
         }
         return null
     }
+    function reportLabel(name, archived) {
+        return archived ? qsTr("%1 (archived)").arg(name) : name
+    }
     function epicName(id) {
         var epic = epicById(id)
         return epic ? String(epic.name || "") : ""
@@ -247,7 +250,7 @@ ApplicationWindow {
         if (!projectId)
             return []
         var list = (backend.epics || []).filter(function(e) {
-            return String(e.project_id) === String(projectId) && (includeFinished || e.status !== "finished")
+            return String(e.project_id) === String(projectId) && (includeFinished || (!e.paused && e.status !== "finished"))
         })
         return list.sort(function(a, b) {
             return (a.status === "finished" ? 1 : 0) - (b.status === "finished" ? 1 : 0)

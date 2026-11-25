@@ -79,7 +79,7 @@ public:
     void goalsHistory(const QString &id, const QString &from, const QString &to, Callback callback);
     void rpcRead(const QString &method, const QJsonObject &params, Callback callback);
     void routineActivity(const QDate &from, const QDate &to, const QString &before, Callback callback);
-    void itemsList(Callback callback, bool includeEnded = false);
+    void itemsList(Callback callback, bool includeEnded = false, bool includePaused = false);
     void itemAdd(const ItemFields &fields, Callback callback = {});
     void itemEdit(const QString &id, const ItemFields &fields, Callback callback = {}, qint64 expectedVersion = -1);
     void setRoutineEndDay(const QString &id, const QString &day, Callback callback, qint64 expectedVersion);
@@ -108,7 +108,9 @@ public:
     void preview(const ItemFields &fields, Callback callback);
     void configShow(Callback callback);
     void configSetSleepTime(const QString &time, Callback callback = {});
-    void listEntities(const QString &method, Callback callback);
+    void projectsList(Callback callback);
+    void reportEpicsList(Callback callback);
+    void projectPausePreview(const QString &id, Callback callback);
     void mutateEntity(const QString &method, QJsonObject params, Callback callback = {}, const QString &operation = {});
 
     static QString makeOpId();

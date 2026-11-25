@@ -34,12 +34,17 @@ ScrollView {
     property bool searchingNotes: false
     property bool previewSearch: false
     property string notesError: ""
+    readonly property alias noteFilters: noteFilters
+    readonly property bool scopedNotes: !!(noteFilters.projectId || noteFilters.epicId || noteFilters.itemId)
+    readonly property bool searchAcrossWeek: !!noteQuery || (scopedNotes && notesArePreview)
     readonly property var matchingNotes: {
-        if (!noteQuery) return noted
-        if (!previewSearch) return searchRows
+        var rows = searchAcrossWeek && !previewSearch ? searchRows : noted
         var query = noteQuery.toLowerCase()
-        return noted.filter(function(session) {
-            return String(session.note || "").toLowerCase().includes(query)
+        return rows.filter(function(session) {
+            if (noteFilters.projectId && (session.project_id || "none") !== noteFilters.projectId) return false
+            if (noteFilters.epicId && (session.epic_id || "none") !== noteFilters.epicId) return false
+            if (noteFilters.itemId && session.item_id !== noteFilters.itemId) return false
+            return !previewSearch || !query || String(session.note || "").toLowerCase().includes(query)
                 || (session.notes || []).some(entry => String(entry.text || "").toLowerCase().includes(query))
         })
     }
@@ -84,7 +89,7 @@ ScrollView {
         searchRows = []
         notesNext = ""
         notesError = ""
-        searchingNotes = !!noteQuery && hasReview
+        searchingNotes = searchAcrossWeek && hasReview
         if (searchingNotes) noteSearchDelay.restart()
         else noteSearchDelay.stop()
     }
@@ -112,12 +117,16 @@ ScrollView {
         }
         searchRows = merged
     }
-    function open() { if (week) backend.loadReview(week) }
+    function open() {
+        backend.loadReportItems()
+        loadWeek()
+    }
+    function loadWeek() { if (week) backend.loadReview(week) }
     function shift(weeks) { setWeek(backend.reviewWeekStart(week, weeks)) }
     function setWeek(value) {
         if (!value || value > currentWeek) return
         pickedWeek = value
-        open()
+        loadWeek()
     }
     function weekText(start) {
         if (!start) return ""
@@ -147,7 +156,7 @@ ScrollView {
         }
         function onReviewsInvalidated() { if (page.visible) page.open() }
         function onOfflineChanged() { if (page.visible) page.open() }
-        function onTodayDayChanged() { if (page.visible) Qt.callLater(page.open) }
+        function onTodayDayChanged() { if (page.visible) Qt.callLater(page.loadWeek) }
         function onReviewSaveFinished(ok, message, key, submitted) {
             var state = page.stateFor(key)
             if (state.pending !== submitted) return
@@ -160,6 +169,7 @@ ScrollView {
     onVisibleChanged: if (visible) open()
     onReviewChanged: { acceptReview(); resetSearch() }
     onNoteQueryChanged: resetSearch()
+    onSearchAcrossWeekChanged: resetSearch()
     onWeekChanged: {
         showDraft()
         if (notesSearch) notesSearch.clear()
@@ -215,6 +225,7 @@ ScrollView {
         id: totals
         property string title: ""
         property var rows: []
+        property bool byEpic: false
         readonly property real largest: rows.reduce((m, r) => Math.max(m, r.minutes), 1)
         Layout.fillWidth: true
         Layout.alignment: Qt.AlignTop
@@ -227,7 +238,11 @@ ScrollView {
                 model: totals.rows
                 Total {
                     required property var modelData
-                    name: modelData.name
+                    name: {
+                        var epic = totals.byEpic ? page.win.epicById(modelData.id) : null
+                        var project = page.win.projectById(totals.byEpic ? epic?.project_id : modelData.id)
+                        return page.win.reportLabel(modelData.name, epic?.paused || project?.archived)
+                    }
                     minutes: modelData.minutes
                     maxMinutes: totals.largest
                 }
@@ -317,6 +332,7 @@ ScrollView {
                 Totals {
                     objectName: "reviewByEpic"
                     title: qsTr("Minutes by epic")
+                    byEpic: true
                     rows: (page.summary && page.summary.by_epic) || []
                 }
             }
@@ -422,13 +438,34 @@ ScrollView {
                 }
             }
 
-            SectionTitle {
-                objectName: "reviewNotesTitle"
-                text: qsTr("Sessions with notes") + "  ·  " + (page.noteQuery
-                    ? (page.previewSearch ? qsTr("%1 of %2 shown").arg(page.matchingNotes.length).arg(page.noted.length)
-                        : qsTr("%1 matching shown").arg(page.matchingNotes.length))
-                    : page.notedCount > page.noted.length
-                        ? qsTr("%1 of %2").arg(page.noted.length).arg(page.notedCount) : page.noted.length)
+            RowLayout {
+                Layout.fillWidth: true
+                SectionTitle {
+                    objectName: "reviewNotesTitle"
+                    Layout.fillWidth: true
+                    text: qsTr("Sessions with notes") + "  ·  " + (page.scopedNotes || page.noteQuery
+                        ? (page.previewSearch ? qsTr("%1 of %2 shown").arg(page.matchingNotes.length).arg(page.noted.length)
+                            : qsTr("%1 matching shown").arg(page.matchingNotes.length))
+                        : page.notedCount > page.noted.length
+                            ? qsTr("%1 of %2").arg(page.noted.length).arg(page.notedCount) : page.notedCount)
+                }
+                ChoiceChip {
+                    objectName: "reviewNotesFilterToggle"
+                    win: page.win
+                    text: qsTr("Filter notes")
+                    selected: noteFilters.visible || page.scopedNotes
+                    onClicked: noteFilters.visible = !noteFilters.visible
+                }
+            }
+            FilterBar {
+                id: noteFilters
+                objectName: "reviewNotesFilters"
+                Layout.fillWidth: true
+                win: page.win
+                visible: false
+                showRange: false
+                showTags: false
+                showMetrics: false
             }
             TextField {
                 id: notesSearch
@@ -451,8 +488,8 @@ ScrollView {
             Label {
                 visible: page.searchingNotes || !!page.notesError || page.matchingNotes.length === 0
                 Layout.fillWidth: true
-                text: page.searchingNotes ? qsTr("Searching notes…") : page.notesError || (page.noteQuery
-                    ? qsTr("No matching notes.") : page.notedCount > 0
+                text: page.searchingNotes ? qsTr("Searching notes…") : page.notesError || ((page.noteQuery || page.scopedNotes)
+                    ? (page.notesNext ? qsTr("No matches on the pages loaded so far.") : qsTr("No matching notes.")) : page.notedCount > 0
                         ? qsTr("No session previews available.") : qsTr("No sessions with notes this week."))
                 textFormat: Text.PlainText
                 wrapMode: Text.WordWrap

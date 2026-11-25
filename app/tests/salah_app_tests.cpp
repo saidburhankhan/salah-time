@@ -144,11 +144,12 @@ private:
 class TrackingUiPreviewBackend : public Backend {
     Q_OBJECT
     Q_PROPERTY(bool offlineMode READ previewOfflineMode CONSTANT)
-    Q_PROPERTY(QVariantList projects READ previewProjects CONSTANT)
+    Q_PROPERTY(QVariantList projects READ previewProjects NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList tags READ previewTags NOTIFY tagsLoaded)
     Q_PROPERTY(QVariantList epics READ previewEpics CONSTANT)
     Q_PROPERTY(QVariantList metrics READ previewMetrics CONSTANT)
     Q_PROPERTY(QVariantList trackingItems MEMBER m_previewTasks CONSTANT)
+    Q_PROPERTY(QVariantList reportItems READ previewReportItems NOTIFY reportItemsChanged)
     Q_PROPERTY(QVariantList backlogItems MEMBER m_previewBacklog CONSTANT)
     Q_PROPERTY(QVariantMap statsTable MEMBER m_previewStatsTable CONSTANT)
 public:
@@ -159,7 +160,9 @@ public:
           m_previewTasks(tasks.toVariantList()), m_previewBacklog(backlog.toVariantList()),
           m_previewStatsTable(statsTable.toVariantMap()) {}
     bool previewOfflineMode() const { return false; }
-    QVariantList previewProjects() const { return TrackingFixture::projects().toVariantList(); }
+    QVariantList projectCatalog = TrackingFixture::projects().toVariantList();
+    QVariantList previewProjects() const { return projectCatalog; }
+    QVariantList previewReportItems() const { return m_previewTasks.isEmpty() ? reportItems() : m_previewTasks; }
     QVariantList tagCatalog = TrackingFixture::tags().toVariantList();
     QVariantList previewTags() const { return tagCatalog; }
     QVariantList epicCatalog = TrackingFixture::epics().toVariantList();
@@ -176,7 +179,7 @@ class ReportsPreviewBackend : public TrackingUiPreviewBackend {
     Q_PROPERTY(QString todayDay READ trackingDate NOTIFY todayDayChanged)
     Q_PROPERTY(QVariantMap insights MEMBER report NOTIFY previewChanged)
     Q_PROPERTY(QVariantMap review MEMBER reviewData NOTIFY previewChanged)
-    Q_PROPERTY(QVariantList goals MEMBER goalRows CONSTANT)
+    Q_PROPERTY(QVariantList goals MEMBER goalRows NOTIFY previewChanged)
     Q_PROPERTY(QString goalHistoryId MEMBER historyId CONSTANT)
     Q_PROPERTY(QVariantList goalHistory MEMBER history CONSTANT)
 public:
@@ -1556,7 +1559,7 @@ fi
         QScopedPointer<QObject> root(component.create());
         QVERIFY2(root, qPrintable(component.errorString()));
         root->setProperty("page", 2);
-        backend.loadTrackingItems();
+        QVERIFY(QMetaObject::invokeMethod(root.data(), "loadStatistics"));
         waitForBackendIdle(backend);
         QObject *stats = findByName(root.data(), "statsScroll");
         QObject *bar = stats->property("filterBar").value<QObject *>();
@@ -1678,7 +1681,7 @@ fi
         QCOMPARE(model->data(index, RoutinesModel::DoneDaysRole).toInt(), 2);
         QCOMPARE(requestCount(daemon, "sessions.list"), 0);
         QCOMPARE(lastRequest(daemon, "items.list").value("params").toObject(),
-                 (QJsonObject{{"include_ended", true}}));
+                 (QJsonObject{{"include_ended", true}, {"include_paused", true}}));
         QList<QJsonObject> pages;
         for (const auto &request : daemon.requests)
             if (request.value("method") == "routines.activity")
@@ -1687,6 +1690,365 @@ fi
         auto continuation = range;
         continuation["before"] = routineActivityPage(false).value("next");
         QCOMPARE(pages, (QList<QJsonObject>{range, continuation}));
+    }
+
+    void projectArchiveRpcRefreshesDependentViews() {
+        QTemporaryDir dir;
+        FakeDaemon daemon(daemon_path(dir));
+        if (!daemon.ok()) QSKIP("AF_UNIX unavailable in sandbox");
+        const QString projectId("<id:1>");
+        auto project = TrackingFixture::projects().at(1).toObject();
+        project["id"] = projectId;
+        project["archived"] = false;
+        project["version"] = 5;
+        const auto items = rpcFixture("items_list_paused").value("result").toArray();
+        const auto epics = rpcFixture("epics_list_paused").value("result").toArray();
+        const auto goals = rpcFixture("goals_list_paused").value("result").toArray();
+        const auto history = rpcFixture("goals_history_paused").value("result").toArray();
+        const auto preview = fixture("project_pause_preview");
+        const auto reads = trackingHandler(trackingState(false));
+        bool archived = false;
+        qint64 revision = 100;
+        daemon.setHandler([&](const QJsonObject &request, QLocalSocket *socket, FakeDaemon *server) {
+            const auto method = request.value("method").toString();
+            const auto params = request.value("params").toObject();
+            if (method == "project.pause_preview") server->respond(socket, request, preview);
+            else if (method == "project.edit") {
+                archived = params.value("archived").toBool();
+                project["archived"] = archived;
+                project["version"] = project.value("version").toInt() + 1;
+                auto changed = emptyChanged();
+                changed["projects"] = QJsonArray{project};
+                server->respond(socket, request, QJsonObject{{"op_id", params.value("op_id")},
+                                                             {"revision", ++revision}, {"changed", changed}});
+            } else if (method == "projects.list") server->respond(socket, request, QJsonArray{project});
+            else if (method == "epics.list") server->respond(socket, request, epics);
+            else if (method == "goals.list") server->respond(socket, request, goals);
+            else if (method == "goals.history") server->respond(socket, request, history);
+            else if (method == "items.list") {
+                QJsonArray rows;
+                if (!archived || params.value("include_paused").toBool()) {
+                    for (const auto &value : items) {
+                        auto row = value.toObject();
+                        row["paused"] = archived;
+                        rows.append(row);
+                    }
+                }
+                server->respond(socket, request, rows);
+            } else if (method == "routines.activity")
+                server->respond(socket, request, fixture("routines_activity"));
+            else
+                reads(request, socket, server);
+        });
+
+        Backend backend(nullptr, fake(dir), 3000, daemon_path(dir));
+        QSignalSpy reviewed(&backend, &Backend::reviewsInvalidated);
+        QSignalSpy reports(&backend, &Backend::reportsInvalidated);
+        QSignalSpy previewLoaded(&backend, &Backend::projectPausePreviewLoaded);
+        QSignalSpy saved(&backend, &Backend::projectArchiveFinished);
+        backend.loadProjectPausePreview(42, projectId);
+        QTRY_COMPARE(previewLoaded.size(), 1);
+        QCOMPARE(previewLoaded.first().at(0).toInt(), 42);
+        QCOMPARE(previewLoaded.first().at(1).toMap(), preview.toVariantMap());
+        QCOMPARE(lastRequest(daemon, "project.pause_preview").value("params").toObject(),
+                 (QJsonObject{{"id", projectId}}));
+        QVERIFY(lastRequest(daemon, "project.edit").isEmpty());
+
+        backend.loadSettings();
+        backend.setRoutinesOpen(true);
+        QTRY_COMPARE(backend.routines()->rowCount(), 1);
+        backend.setProjectArchived(projectId, true, 5);
+        QTRY_COMPARE(saved.size(), 1);
+        QVERIFY(saved.first().at(2).toBool());
+        auto patch = lastRequest(daemon, "project.edit").value("params").toObject();
+        QVERIFY(!patch.take("op_id").toString().isEmpty());
+        QCOMPARE(patch, (QJsonObject{{"id", projectId}, {"archived", true}, {"expected_version", 5}}));
+        QVERIFY(reviewed.size() > 0);
+        QVERIFY(reports.size() > 0);
+        QTRY_COMPARE(backend.pausedRoutines()->rowCount(), 1);
+        QCOMPARE(backend.routines()->rowCount(), 0);
+        QVERIFY(backend.trackingItems().isEmpty());
+
+        backend.loadReportItems();
+        QTRY_COMPARE(backend.reportItems().size(), items.size());
+        QCOMPARE(lastRequest(daemon, "items.list").value("params").toObject(),
+                 (QJsonObject{{"include_ended", true}, {"include_paused", true}}));
+        QCOMPARE(lastRequest(daemon, "epics.list").value("params").toObject(),
+                 (QJsonObject{{"include_paused", true}}));
+        QVERIFY(backend.epics().first().toMap().value("paused").toBool());
+        QCOMPARE(backend.goals(), goals.toVariantList());
+        backend.loadGoalHistory("<id:4>");
+        QTRY_COMPARE(backend.goalHistory(), history.toVariantList());
+        backend.setProjectArchived(projectId, false, 6);
+        QTRY_COMPARE(saved.size(), 2);
+        QVERIFY(saved.last().at(2).toBool());
+        QCOMPARE(lastRequest(daemon, "project.edit").value("params").toObject().value("archived"), QJsonValue(false));
+        QTRY_COMPARE(backend.routines()->rowCount(), 1);
+        QCOMPARE(backend.pausedRoutines()->rowCount(), 0);
+        QVERIFY(!backend.projects().first().toMap().value("archived").toBool());
+        QVERIFY2(backend.error().isEmpty(), qPrintable(backend.error()));
+    }
+
+    void projectPauseUiAndReportScreens() {
+        QTemporaryDir dir;
+        fake(dir);
+        auto saveJson = [&](const QString &name, const auto &data) {
+            write(dir.filePath(name + ".json"), QJsonDocument(data).toJson());
+        };
+        const QString program = dir.filePath("project-cli");
+        write(program, R"SH(#!/bin/sh
+cd "$(dirname "$0")"
+case "$1 $2" in
+  "project list") cat projects.json ;;
+  "epic list") printf '%s\n' "$*" >> catalogue-args; cat epics.json ;;
+  "project pause-preview") printf '%s\n' "$*" >> catalogue-args; cat preview.json ;;
+  "item list")
+    printf '%s\n' "$*" >> catalogue-args
+    if [ "$4" = "--include-paused" ]; then cat items.json; else printf '[]\n'; fi ;;
+  "routines activity") cat activity.json ;;
+  "stats series") cat series.json ;;
+  "rpc ")
+    read -r hello && read -r request || exit 2
+    printf '%s\n' "$request" >> frames
+    printf '%s\n' "$request" | jq -c '{jsonrpc,id,result:{op_id:.params.op_id,revision:1,
+        changed:{items:[],sessions:[],projects:[],tags:[],metrics:[],marks:[],deleted:[]}}}' ;;
+  *) exec ./salah "$@" ;;
+esac
+)SH");
+        QFile::setPermissions(program, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        auto preview = fixture("project_pause_preview");
+        preview["goals"] = 2;
+        saveJson("preview", preview);
+        saveJson("series", TrackingFixture::trendMonth({"minutes"}, false));
+        const auto items = rpcFixture("items_list_paused").value("result").toArray();
+        saveJson("items", items);
+        auto activity = fixture("routines_activity");
+        auto activityRows = activity.value("rows").toArray();
+        for (qsizetype i = 0; i < activityRows.size(); ++i) {
+            auto row = activityRows[i].toObject();
+            row["item_id"] = "<id:3>";
+            activityRows[i] = row;
+        }
+        activity["rows"] = activityRows;
+        saveJson("activity", activity);
+
+        ReportsPreviewBackend backend(program, daemon_path(dir), {}, {});
+        auto project = TrackingFixture::projects().at(1).toObject().toVariantMap();
+        project["id"] = "<id:1>";
+        project["name"] = "Study";
+        project["archived"] = false;
+        project["version"] = 5;
+        backend.projectCatalog = {project};
+        saveJson("projects", QJsonArray{QJsonObject::fromVariantMap(project)});
+        saveJson("epics", rpcFixture("epics_list_paused").value("result").toArray());
+        backend.epicCatalog = rpcFixture("epics_list_paused").value("result").toArray().toVariantList();
+        const auto pausedGoals = rpcFixture("goals_list_paused").value("result").toArray().toVariantList();
+        auto activeGoals = pausedGoals;
+        for (auto &value : activeGoals) {
+            auto row = value.toMap();
+            row["paused"] = false;
+            row["paused_project"] = QVariant();
+            value = row;
+        }
+        backend.goalRows = activeGoals;
+        backend.history = rpcFixture("goals_history_paused").value("result").toArray().toVariantList();
+        backend.historyId = "<id:4>";
+        backend.report = fixture("insights").toVariantMap();
+        auto plan = backend.report.value("on_plan").toList();
+        auto partlyScored = plan.first().toMap();
+        partlyScored["name"] = "Daily";
+        partlyScored["scored_minutes"] = 20;
+        partlyScored["planned_block"] = QVariant();
+        partlyScored["planned_blocks"] = QVariantList{"fajr", "asr"};
+        plan[0] = partlyScored;
+        auto paused = partlyScored;
+        paused["item_id"] = "<id:4>";
+        paused["name"] = "Wednesday";
+        paused["scored_minutes"] = 0;
+        paused["on_plan_minutes"] = 0;
+        plan.append(paused);
+        backend.report["on_plan"] = plan;
+        backend.reviewData = fixture("review_get").toVariantMap();
+        auto summary = backend.reviewData.value("summary").toMap();
+        summary["by_project"] = QVariantList{QVariantMap{{"id", "<id:1>"}, {"name", "Study"}, {"minutes", 30}}};
+        summary["by_epic"] = QVariantList{QVariantMap{{"id", "<id:2>"}, {"name", "Course"}, {"minutes", 30}}};
+        summary["sessions_with_notes_count"] = 48;
+        backend.reviewData["summary"] = summary;
+        backend.hasRemoteNoteSearch = true;
+        QObject::connect(&backend, &Backend::projectArchiveFinished, &backend,
+                         [&](const QString &, bool archived, bool ok, const QString &) {
+            if (!ok) return;
+            project["archived"] = archived;
+            project["version"] = project.value("version").toInt() + 1;
+            backend.projectCatalog = {project};
+            saveJson("projects", QJsonArray{QJsonObject::fromVariantMap(project)});
+            backend.goalRows = archived ? pausedGoals : activeGoals;
+            emit backend.settingsChanged();
+            emit backend.previewChanged();
+            auto updated = items;
+            for (qsizetype i = 0; i < updated.size(); ++i) {
+                auto row = updated[i].toObject();
+                row["paused"] = archived;
+                updated[i] = row;
+            }
+            saveJson("items", updated);
+        });
+        backend.reload();
+        waitForBackendIdle(backend);
+        Theme theme(dir.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine, QUrl("qrc:/qml/Main.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        window->resize(1280, 960);
+        auto click = [&](const QString &name) {
+            QObject *control = firstShown(window, name);
+            return control && control->property("enabled").toBool() && QMetaObject::invokeMethod(control, "clicked");
+        };
+
+        QVERIFY(QMetaObject::invokeMethod(window, "openSettings", Q_ARG(QVariant, QVariant("projects"))));
+        auto *settings = firstShown(window, "projectsSettings");
+        QVERIFY(settings);
+        QVERIFY(QMetaObject::invokeMethod(settings, "startEdit", Q_ARG(QVariant, QVariant(project))));
+        QVERIFY(click("projectArchiveAction"));
+        auto *confirm = firstShown(window, "projectArchiveConfirm");
+        QVERIFY(confirm);
+        QVERIFY(!confirm->property("enabled").toBool());
+        QTRY_VERIFY(confirm->property("enabled").toBool());
+        QVERIFY(hasVisualText(window, "Pauses 2 goals, 1 routine and 3 open tasks."));
+        QVERIFY(hasVisualText(window, "Past work stays in Statistics."));
+        QVERIFY(offlineRequests(dir).isEmpty());
+        shotWindow(window, "project-archive-confirm.png");
+        QVERIFY(click("projectArchiveConfirm"));
+        QTRY_COMPARE(firstShown(window, "projectArchiveAction")->property("text").toString(), QString("Resume"));
+        QTRY_VERIFY(!firstShown(window, "projectArchiveConfirm"));
+        QVERIFY(click("showArchivedProjects"));
+        shotWindow(window, "project-resume.png");
+
+        window->setProperty("page", 6);
+        QTRY_VERIFY(hasVisualText(window, "Paused"));
+        QTRY_VERIFY(hasVisualText(window, "Paused this period · Study"));
+        QVERIFY(hasVisualText(window, "This week  ·  1 of 1 met"));
+        QVERIFY(!hasVisualText(window, "Today  ·  0 of 2 met"));
+        QVERIFY(hasVisualText(window, "Met in 2 of 2 periods"));
+        QVERIFY(hasVisualText(window, "3 paused periods  ·  2-period streak"));
+        auto *history = firstShown(window, "goalHistory");
+        QVERIFY(history);
+        QCOMPARE(history->property("pausedCount").toInt(), 3);
+        QCOMPARE(history->property("streak").toInt(), 2);
+        window->setHeight(1240);
+        shotWindow(window, "project-paused-goals.png");
+        window->setHeight(960);
+
+        window->setProperty("page", 1);
+        QTRY_VERIFY(hasVisualText(window, "Paused — project archived"));
+        QTRY_VERIFY(hasVisualText(window, "2 days done  ·  37 min"));
+        QCOMPARE(backend.routines()->rowCount(), 0);
+        QVERIFY(backend.trackingItems().isEmpty());
+        QVERIFY(!firstShown(window, "routineEnd"));
+        shotWindow(window, "project-paused-routines.png");
+        QVERIFY(click("newRoutine"));
+        QTRY_VERIFY(firstShown(window, "entryTitleField"));
+        QVERIFY(!firstShown(window, "entryProject_<id:1>"));
+        window->setProperty("entryVisible", false);
+
+        window->setProperty("page", 2);
+        QVERIFY(QMetaObject::invokeMethod(window, "loadStatistics"));
+        QTRY_VERIFY(firstShown(window, "statsTask_<id:3>"));
+        QCOMPARE(backend.epics().first().toMap().value("id").toString(), QString("<id:2>"));
+        auto checkReportFilters = [&] {
+            QVERIFY(click("statsProject_<id:1>"));
+            QVERIFY(click("statsEpic_<id:2>"));
+            QVERIFY(click("statsTask_<id:3>"));
+            QCOMPARE(firstShown(window, "statsProject_<id:1>")->property("text").toString(), QString("Study (archived)"));
+            QCOMPARE(firstShown(window, "statsEpic_<id:2>")->property("text").toString(), QString("Course (archived)"));
+            QCOMPARE(firstShown(window, "statsTask_<id:3>")->property("text").toString(), QString("Daily (archived)"));
+        };
+        checkReportFilters();
+        waitForBackendIdle(backend);
+        backend.dismissError();
+        window->setHeight(1130);
+        shotWindow(window, "project-archived-statistics.png");
+        window->setHeight(960);
+
+        QVERIFY(QMetaObject::invokeMethod(window, "openEpic", Q_ARG(QVariant, QVariant("<id:2>"))));
+        QTRY_VERIFY(hasVisualText(window, "Study  ·  Project archived"));
+        QVERIFY(hasVisualText(window, "Daily"));
+        auto *logButton = firstShown(window, "epicLogButton");
+        QVERIFY(logButton && !logButton->property("enabled").toBool());
+        shotWindow(window, "project-archived-epic.png");
+
+        window->setProperty("page", 7);
+        QTRY_VERIFY(firstShown(window, "insightsFilters"));
+        QVERIFY(click("insightsFilters"));
+        checkReportFilters();
+        QVERIFY(click("insightsTab_plan"));
+        QCOMPARE(firstShown(window, "onPlanRate_<id:3>")->property("text").toString(), QString("75%"));
+        QCOMPARE(firstShown(window, "onPlanRate_<id:4>")->property("text").toString(), QString("—"));
+        QVERIFY(hasVisualText(window, "15 / 20"));
+        QVERIFY(hasVisualText(window, "Multiple"));
+        shotWindow(window, "project-archived-insights.png");
+
+        window->resize(1280, 1260);
+        window->setProperty("page", 8);
+        QTRY_VERIFY(firstShown(window, "reviewNotesFilterToggle"));
+        QVERIFY(hasVisualText(window, "Study (archived)"));
+        QVERIFY(click("reviewNotesFilterToggle"));
+        checkReportFilters();
+        QTRY_COMPARE(backend.noteSearches.size(), 1);
+        const auto first = backend.noteSearches.last();
+        QVERIFY(first.query.isEmpty());
+        auto session = summary.value("sessions_with_notes").toList().first().toMap();
+        session["project_id"] = "<id:1>";
+        session["epic_id"] = "<id:2>";
+        session["item_id"] = "<id:3>";
+        session["item"] = QVariantMap{{"id", "<id:3>"}, {"title", "Daily"}};
+        session["project"] = QVariantMap{{"id", "<id:1>"}, {"name", "Study"}, {"color", "#9b59b6"}};
+        session["notes"] = QVariantList{QVariantMap{{"at", "2031-05-14T09:30:00Z"}, {"text", "Finished the chapter."}}};
+        auto unrelated = session;
+        unrelated["id"] = "outside-scope";
+        unrelated["item_id"] = "another-task";
+        emit backend.reviewNotesLoaded(first.request, {{"rows", QVariantList{unrelated}}, {"next", "page-two"}}, {}, false);
+        QVERIFY(hasVisualText(window, "No matches on the pages loaded so far."));
+        QVERIFY(click("reviewMoreNotes"));
+        QCOMPARE(backend.noteSearches.last().after, QString("page-two"));
+        emit backend.reviewNotesLoaded(backend.noteSearches.last().request,
+                                       {{"rows", QVariantList{session}}}, {}, false);
+        QCOMPARE(firstShown(window, "reviewPage")->property("matchingNotes").toList().size(), 1);
+        QVERIFY(hasVisualText(window, "Sessions with notes  ·  1 matching shown"));
+        shotWindow(window, "project-archived-review.png");
+
+        window->setProperty("page", 1);
+        QVERIFY(click("routineUnarchiveProject"));
+        QTRY_COMPARE(offlineRequests(dir).size(), 2);
+        auto params = offlineRequests(dir).last().value("params").toObject();
+        QCOMPARE(params.take("archived"), QJsonValue(false));
+        QCOMPARE(params.value("expected_version").toInt(), 6);
+        QTRY_COMPARE(backend.routines()->rowCount(), 1);
+        QCOMPARE(backend.pausedRoutines()->rowCount(), 0);
+        QVERIFY(hasVisualText(window, "2 days done  ·  37 min"));
+
+        QVERIFY(QMetaObject::invokeMethod(window, "openSettings", Q_ARG(QVariant, QVariant("projects"))));
+        QVERIFY(click("projectArchiveAction"));
+        QTRY_VERIFY(confirm->property("enabled").toBool());
+        QVERIFY(click("projectArchiveConfirm"));
+        QTRY_COMPARE(firstShown(window, "projectArchiveAction")->property("text").toString(), QString("Resume"));
+        QTRY_VERIFY(!firstShown(window, "projectArchiveConfirm"));
+        QVERIFY(click("projectArchiveAction"));
+        QTRY_COMPARE(offlineRequests(dir).size(), 4);
+        QCOMPARE(offlineRequests(dir).last().value("params").toObject().value("archived"), QJsonValue(false));
+        QTRY_COMPARE(firstShown(window, "projectArchiveAction")->property("text").toString(), QString("Archive"));
+
+        QFile args(dir.filePath("catalogue-args"));
+        QVERIFY(args.open(QIODevice::ReadOnly));
+        const auto calls = args.readAll();
+        QVERIFY(calls.contains("project pause-preview <id:1> --json"));
+        QVERIFY(calls.contains("item list --include-ended --include-paused --json"));
+        QVERIFY(calls.contains("epic list --include-paused --json"));
     }
 
     void routinesCatalogActionsAndHistory() {
@@ -1885,7 +2247,7 @@ esac
         QTRY_VERIFY(hasVisualText(window, "2 days done  ·  37 min"));
         QFile catalogueArgs(dir.filePath("catalogue-args"));
         QVERIFY(catalogueArgs.open(QIODevice::ReadOnly));
-        QVERIFY(catalogueArgs.readAll().contains("item list --include-ended --json"));
+        QVERIFY(catalogueArgs.readAll().contains("item list --include-ended --include-paused --json"));
         const auto click = [window](const QString &name) {
             auto *control = firstShown(window, name);
             return control && QMetaObject::invokeMethod(control, "clicked");
@@ -4330,7 +4692,7 @@ esac
         auto *chipBackground = allTasks->property("background").value<QQuickItem *>();
         QVERIFY(searchBackground && chipBackground);
         QCOMPARE(searchBackground->height(), chipBackground->height());
-        QCOMPARE(bar->property("projectChoices").toList().size(), 3);
+        QCOMPARE(bar->property("projectChoices").toList().size(), 4);
         auto click = [bar](const QString &name) {
             auto *chip = findItemByName(bar, name);
             return chip && chip->property("visible").toBool() && QMetaObject::invokeMethod(chip, "clicked");
@@ -4342,7 +4704,7 @@ esac
         QVERIFY(click("statsTask_review"));
         QVERIFY(click("statsTag_learning"));
         QCOMPARE(bar->property("projectId").toString(), QString("quran"));
-        QCOMPARE(bar->property("projectChoices").toList().size(), 3);
+        QCOMPARE(bar->property("projectChoices").toList().size(), 4);
         QVERIFY(bar->property("itemId").toString().isEmpty());
         QCOMPARE(bar->property("taskChoices").toList().value(0).toMap().value("id").toString(), QString("read"));
         waitForBackendIdle(backend);
@@ -4890,7 +5252,7 @@ esac
         waitForBackendIdle(backend);
         QCOMPARE(lastRequest(daemon, "stats.get").value("params").toObject().value("tag_id").toString(), QString("learning"));
         // The project choices stay available while a tag is selected.
-        QCOMPARE(stats->property("projectChoices").toList().size(), 3);
+        QCOMPARE(stats->property("projectChoices").toList().size(), 4);
         QVERIFY(QMetaObject::invokeMethod(stats, "setFilter", Q_ARG(QVariant, QVariant("project")), Q_ARG(QVariant, QVariant("study"))));
         waitForBackendIdle(backend);
         QCOMPARE(stats->property("taskChoices").toList().size(), 2);
@@ -5366,7 +5728,7 @@ esac
             auto *rate = firstShown(window, "onPlanRate_" + row.value("item_id").toString());
             QVERIFY(rate);
             if (!row.value("planned_block").isNull()) {
-                const double percent = row.value("on_plan_minutes").toDouble() * 100 / row.value("minutes").toDouble();
+                const double percent = row.value("on_plan_minutes").toDouble() * 100 / row.value("scored_minutes").toDouble();
                 QCOMPARE(rate->property("text").toString(), QString::number(qRound(percent * 10) / 10.) + "%");
             }
         }

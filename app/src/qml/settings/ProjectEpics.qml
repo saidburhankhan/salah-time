@@ -14,12 +14,13 @@ ColumnLayout {
     // The epic being renamed and the one asking to be removed ("" for none).
     property string renameId: ""
     property string removeId: ""
+    readonly property bool paused: !!win.projectById(projectId)?.archived
     readonly property var rows: win.projectEpics(projectId, true)
     spacing: 8
 
     function add() {
         var name = addField.text.trim()
-        if (name === "" || projectId === "")
+        if (name === "" || projectId === "" || paused)
             return
         backend.saveEntity("epic", { project_id: projectId, name: name })
         addField.text = ""
@@ -177,6 +178,7 @@ ColumnLayout {
         }
     }
     RowLayout {
+        visible: !epics.paused
         Layout.fillWidth: true
         spacing: 8
         TextField {

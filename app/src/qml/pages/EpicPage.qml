@@ -16,8 +16,9 @@ ScrollView {
     readonly property var epic: win.epicById(win.epicId)
     readonly property var project: epic ? win.projectById(epic.project_id) : null
     readonly property color dot: project ? Qt.color(String(project.color || "#78909c")) : Qt.color("#5f5b53")
+    readonly property bool paused: !!epic?.paused || !!project?.archived
     readonly property bool finished: !!epic && epic.status === "finished"
-    readonly property var tasks: (backend.trackingItems || []).filter(function(item) {
+    readonly property var tasks: ((paused ? backend.reportItems : backend.trackingItems) || []).filter(function(item) {
         return String(item.epic_id || "") === String(win.epicId)
     })
     // stats.series (minutes, split none) as the points the chart draws.
@@ -38,6 +39,7 @@ ScrollView {
     function open() {
         backend.loadSettings()
         backend.loadTrackingItems()
+        backend.loadReportItems()
         backend.loadEpicPage(win.epicId)
     }
     function setStatus(status) {
@@ -45,7 +47,7 @@ ScrollView {
             backend.saveEntity("epic", { id: String(epic.id), status: status })
     }
     function logTime() {
-        if (!epic)
+        if (!epic || paused)
             return
         win.openSessionPrompt({
             mode: "log",
@@ -82,6 +84,7 @@ ScrollView {
         function onReportsInvalidated() {
             if (epicPage.visible) {
                 backend.loadTrackingItems()
+                backend.loadReportItems()
                 backend.loadEpicPage(epicPage.win.epicId)
             }
         }
@@ -156,7 +159,8 @@ ScrollView {
                         objectName: "epicSubtitle"
                         Layout.fillWidth: true
                         text: (epicPage.project ? String(epicPage.project.name || "") : qsTr("No project"))
-                            + "  ·  " + (epicPage.finished ? qsTr("Finished") : qsTr("Active"))
+                            + "  ·  " + (epicPage.paused ? qsTr("Project archived")
+                                             : epicPage.finished ? qsTr("Finished") : qsTr("Active"))
                         textFormat: Text.PlainText
                         color: epicPage.win.muted
                         font.pixelSize: 13
@@ -182,7 +186,7 @@ ScrollView {
                     objectName: "epicLogButton"
                     win: epicPage.win
                     text: qsTr("Log time")
-                    enabled: !epicPage.finished
+                    enabled: !epicPage.finished && !epicPage.paused
                     onClicked: epicPage.logTime()
                 }
                 AppButton {

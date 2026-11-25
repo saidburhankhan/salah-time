@@ -526,12 +526,16 @@ CoreClient::Callback Backend::statsResponse() {
 }
 
 void Backend::loadTrackingItems() {
-    const bool includeEnded = m_routinesOpen;
-    m_client.itemsList(readResponse([this, includeEnded](const CoreClient::Result &result) {
+    const bool routinesOpen = m_routinesOpen;
+    const quint64 request = ++m_itemsRequest;
+    m_client.itemsList(readResponse([this, request, routinesOpen](const CoreClient::Result &result) {
+        if (request != m_itemsRequest) return;
         if (const auto *json = std::get_if<Dto::Json>(&result.value)) {
-            QVariantList active, ended;
+            QVariantList active, ended, paused;
             for (const auto &entry : json->value.toArray()) {
-                auto &list = entry.toObject().value("ended").toBool() ? ended : active;
+                const QJsonObject item = entry.toObject();
+                auto &list = item.value("paused").toBool() ? paused
+                    : item.value("ended").toBool() ? ended : active;
                 list.append(entry.toVariant());
             }
             if (m_trackingItems != active) {
@@ -539,14 +543,15 @@ void Backend::loadTrackingItems() {
                 m_routines.setItems(active);
                 emit trackingItemsChanged();
             }
-            if (includeEnded && m_endedItems != ended) {
+            if (routinesOpen && m_routinesOpen) {
                 m_endedItems = ended;
                 m_endedRoutines.setItems(ended);
+                m_pausedRoutines.setItems(paused);
+                if (m_routines.count() || m_endedRoutines.count() || m_pausedRoutines.count())
+                    loadRoutineHistory(m_today);
             }
-            if (includeEnded && m_routinesOpen && (m_routines.count() || m_endedRoutines.count()))
-                loadRoutineHistory(m_today);
         }
-    }), includeEnded);
+    }), routinesOpen, routinesOpen);
 }
 
 void Backend::moveDay(int amount) {
@@ -909,24 +914,27 @@ void Backend::setSleepTime(const QString &time) {
     }, true));
 }
 
+CoreClient::Callback Backend::settingsListResponse(QVariantList &target) {
+    return readResponse([this, &target](const CoreClient::Result &result) {
+        if (const auto *json = std::get_if<Dto::Json>(&result.value); json && json->value.isArray()) {
+            target = json->value.toArray().toVariantList();
+            emit settingsChanged();
+            if (&target == &m_tags) emit tagsLoaded();
+            refreshRunning();
+        }
+    });
+}
+
+void Backend::loadProjectCatalogues() {
+    m_client.projectsList(settingsListResponse(m_projects));
+    m_client.reportEpicsList(settingsListResponse(m_epics));
+}
+
 void Backend::loadSettings() {
-    // The list methods are served by the daemon only; the CLI fallback has
-    // nothing to show, and an error banner for it would be noise.
+    loadProjectCatalogues();
     if (m_client.offline()) return;
-    auto load = [this](const QString &method, QVariantList *target) {
-        m_client.listEntities(method, readResponse([this, target](const CoreClient::Result &result) {
-            if (const auto *json = std::get_if<Dto::Json>(&result.value)) {
-                *target = json->value.toArray().toVariantList();
-                emit settingsChanged();
-                if (target == &m_tags) emit tagsLoaded();
-                refreshRunning();
-            }
-        }));
-    };
-    load(QStringLiteral("projects.list"), &m_projects);
-    load(QStringLiteral("epics.list"), &m_epics);
-    load(QStringLiteral("tags.list"), &m_tags);
-    load(QStringLiteral("metrics.list"), &m_metrics);
+    m_client.rpcRead(QStringLiteral("tags.list"), {}, settingsListResponse(m_tags));
+    m_client.rpcRead(QStringLiteral("metrics.list"), {}, settingsListResponse(m_metrics));
     loadGoals();
 }
 
@@ -937,6 +945,50 @@ void Backend::saveEntity(const QString &kind, const QVariantMap &fields) {
     const bool editing = !fields.value(QStringLiteral("id")).toString().isEmpty();
     m_client.mutateEntity(kind + (editing ? QStringLiteral(".edit") : QStringLiteral(".add")),
                           QJsonObject::fromVariantMap(fields), entityResponse(kind));
+}
+
+void Backend::loadProjectPausePreview(int request, const QString &id) {
+    m_client.projectPausePreview(id, [this, request](const CoreClient::Result &result) {
+        const auto *data = std::get_if<Dto::Json>(&result.value);
+        if (result.ok && data && data->json.value("goals").isDouble()
+            && data->json.value("routines").isDouble() && data->json.value("open_tasks").isDouble()) {
+            emit projectPausePreviewLoaded(request, data->json.toVariantMap(), {});
+        } else {
+            emit projectPausePreviewLoaded(request, {}, result.ok ? tr("Could not read project pause counts.")
+                                                                 : result.error.message);
+        }
+    });
+}
+
+void Backend::setProjectArchived(const QString &id, bool archived, qint64 expectedVersion) {
+    if (id.isEmpty()) return;
+    QJsonObject fields{{"id", id}, {"archived", archived}};
+    if (expectedVersion >= 0) fields.insert("expected_version", expectedVersion);
+    m_client.mutateEntity(QStringLiteral("project.edit"), fields,
+                          [this, id, archived](const CoreClient::Result &result) {
+        if (result.ok) {
+            if (const auto *mutation = std::get_if<Dto::MutationResult>(&result.value)) {
+                const auto changed = mutation->json.value("changed").toObject().value("projects").toArray();
+                for (const auto &entry : changed) {
+                    const auto project = entry.toObject();
+                    if (project.value("id").toString() != id || !project.value("archived").isBool()) continue;
+                    for (auto &row : m_projects) {
+                        if (row.toMap().value("id").toString() != id) continue;
+                        row = project.toVariantMap();
+                        emit settingsChanged();
+                        break;
+                    }
+                }
+            }
+            clearError();
+            if (m_client.offline()) loadGoals();
+            reloadChangedScopes({QStringLiteral("projects")});
+        } else {
+            fail(result.error.message);
+            loadSettings();
+        }
+        emit projectArchiveFinished(id, archived, result.ok, result.error.message);
+    });
 }
 
 void Backend::removeTag(const QString &id) {
@@ -994,7 +1046,7 @@ bool Backend::loadHistoricalTaskForEdit(const QString &id, int request) {
             fail(tr("Could not read the current task list."));
         }
         emit historicalTaskForEdit(request, {});
-    }, true);
+    }, true, true);
     return true;
 }
 

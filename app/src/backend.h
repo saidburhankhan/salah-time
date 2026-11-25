@@ -28,6 +28,7 @@ class Backend : public QObject {
     Q_PROPERTY(PrayerModel *prayers READ prayers CONSTANT)
     Q_PROPERTY(RoutinesModel *routines READ routines CONSTANT)
     Q_PROPERTY(RoutinesModel *endedRoutines READ endedRoutines CONSTANT)
+    Q_PROPERTY(RoutinesModel *pausedRoutines READ pausedRoutines CONSTANT)
     Q_PROPERTY(StatsItemsModel *statsItems READ statsItems CONSTANT)
     Q_PROPERTY(StatsDailyModel *statsDaily READ statsDaily CONSTANT)
     Q_PROPERTY(QSortFilterProxyModel *statsDailyNewest READ statsDailyNewest CONSTANT)
@@ -55,6 +56,7 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList metrics READ metrics NOTIFY settingsChanged)
     Q_PROPERTY(QVariantMap statsData READ statsData NOTIFY statsDataChanged)
     Q_PROPERTY(QVariantList trackingItems READ trackingItems NOTIFY trackingItemsChanged)
+    Q_PROPERTY(QVariantList reportItems READ reportItems NOTIFY reportItemsChanged)
     Q_PROPERTY(QVariantList backlogItems READ backlogItems NOTIFY backlogChanged)
     Q_PROPERTY(bool backlogLoading READ backlogLoading NOTIFY backlogChanged)
     Q_PROPERTY(QVariantMap running READ running NOTIFY runningChanged)
@@ -86,6 +88,7 @@ public:
     PrayerModel *prayers() { return &m_prayers; }
     RoutinesModel *routines() { return &m_routines; }
     RoutinesModel *endedRoutines() { return &m_endedRoutines; }
+    RoutinesModel *pausedRoutines() { return &m_pausedRoutines; }
     StatsItemsModel *statsItems() { return &m_statsItems; }
     StatsDailyModel *statsDaily() { return &m_statsDaily; }
     QSortFilterProxyModel *statsDailyNewest() { return &m_statsDailyNewest; }
@@ -129,6 +132,7 @@ public:
     QString goalHistoryId() const { return m_goalHistoryId; }
     QVariantList metrics() const { return m_metrics; }
     QVariantList trackingItems() const { return m_trackingItems; }
+    QVariantList reportItems() const { return m_reportItems; }
     QVariantList backlogItems() const { return m_backlogItems; }
     bool backlogLoading() const { return m_backlogLoading; }
     QVariantMap statsData() const { return m_stats.json.toVariantMap(); }
@@ -171,6 +175,7 @@ public:
     Q_INVOKABLE QVariant uiSetting(const QString &key, const QVariant &fallback = {}) const;
     Q_INVOKABLE void setUiSetting(const QString &key, const QVariant &value);
     Q_INVOKABLE void loadTrackingItems();
+    Q_INVOKABLE void loadReportItems();
     Q_INVOKABLE void setRoutinesOpen(bool open);
     Q_INVOKABLE void loadBacklog(const QString &tagId, const QString &projectId);
     Q_INVOKABLE void closeBacklog();
@@ -214,6 +219,8 @@ public:
     Q_INVOKABLE void setSleepTime(const QString &time);
     Q_INVOKABLE void loadSettings();
     Q_INVOKABLE void saveEntity(const QString &kind, const QVariantMap &fields);
+    Q_INVOKABLE void loadProjectPausePreview(int request, const QString &id);
+    Q_INVOKABLE void setProjectArchived(const QString &id, bool archived, qint64 expectedVersion);
     Q_INVOKABLE void removeTag(const QString &id);
     // Epics (backend_epics.cpp). Remove only works for an epic without sessions.
     Q_INVOKABLE void removeEpic(const QString &id);
@@ -265,11 +272,14 @@ signals:
     void tagsLoaded();
     void statsDataChanged();
     void trackingItemsChanged();
+    void reportItemsChanged();
     void backlogChanged();
     void scheduleFinished(const QString &id, bool ok, const QString &message);
     // A project/tag/metric write finished. `id` is the saved row's id (empty
     // for a removal); on failure `error` carries the server message.
     void entitySaved(const QString &kind, const QString &id);
+    void projectPausePreviewLoaded(int request, const QVariantMap &counts, const QString &error);
+    void projectArchiveFinished(const QString &id, bool archived, bool ok, const QString &error);
     void entitySaveFailed(const QString &kind, const QString &error);
     // A session write (tick, log, stop, edit, remove) finished.
     void sessionWriteFinished(bool ok, const QString &message, const QString &operation);
@@ -316,6 +326,8 @@ private:
     CoreClient::Callback routineEditResponse(const QString &id);
     CoreClient::Callback mutationResponse(const QString &pendingId = {}, const QString &pendingOpId = {});
     CoreClient::Callback entityResponse(const QString &kind);
+    CoreClient::Callback settingsListResponse(QVariantList &target);
+    void loadProjectCatalogues();
     CoreClient::Callback goalResponse();
     qint64 goalVersion(const QString &id) const;
     CoreClient::Callback sessionResponse(const QString &pendingItemId, bool announce = true);
@@ -375,7 +387,7 @@ private:
 
     DayTimelineModel m_timeline;
     PrayerModel m_prayers;
-    RoutinesModel m_routines, m_endedRoutines;
+    RoutinesModel m_routines, m_endedRoutines, m_pausedRoutines;
     StatsItemsModel m_statsItems;
     StatsDailyModel m_statsDaily;
     QSortFilterProxyModel m_statsDailyNewest;
@@ -398,7 +410,8 @@ private:
     quint64 m_goalsRequest = 0;
     quint64 m_goalHistoryRequest = 0;
     quint64 m_epicRequest = 0;
-    QVariantList m_trackingItems, m_endedItems;
+    QVariantList m_trackingItems, m_endedItems, m_reportItems;
+    quint64 m_itemsRequest = 0, m_reportItemsRequest = 0;
     QVariantList m_backlogItems;
     QJsonObject m_backlogParams;
     quint64 m_backlogRequest = 0;

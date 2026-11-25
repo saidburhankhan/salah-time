@@ -98,3 +98,13 @@ Hovering a stroke, axis or series chip highlights it. Clicking pins the highligh
 `app/bin/build` and `git diff --check` passed. `SALAH_UI_SHOT_DIR=/tmp/c9-cp8-reviewed app/bin/test` passed 56 tests with zero failures and 44 AF_UNIX skips. Reviewed all 68 screenshots, including one through five measures, each requested series hover, the pinned state and the Table header hover.
 
 CHECKPOINT 8: Give Trends a scale per measure, normalised overflow and pinnable focus, and show ranges in Table headers (app/src/qml/Main.qml, app/src/qml/pages/StatisticsPage.qml, app/src/qml/statistics/AxisScale.js, app/src/qml/statistics/GeneralTable.qml, app/src/qml/statistics/TrendsChart.qml, app/src/qml/statistics/TrendsPlot.qml, app/src/resources.qrc, app/tests/salah_app_tests.cpp, app/tests/tracking_fixture.h, docs/work/tracking-ui/c9-progress.md)
+
+## Project archive and pause
+
+Project Settings shows server counts before archiving and explains that past work stays in Statistics. The confirmation uses the project version captured when it opened. Settings offers Resume, and paused routines retain their activity strip and can unarchive their project directly.
+
+Goals list paused periods separately and identify the project. Goal history keeps the values for paused periods, draws their result neutrally, and excludes them from the met count, denominator and streak. Statistics, Insights and Review can select archived projects, epics and tasks. Review applies the scopes to sessions with notes and follows the existing note pagination. Insights shows total time alongside scored minutes and calculates adherence from the latter.
+
+`app/bin/build` and `git diff --check` passed. `SALAH_UI_SHOT_DIR=/tmp/c9-cp9-checkpoint app/bin/test` passed 57 tests with zero failures and 45 AF_UNIX skips, including the new socket regression in the skip count. Reviewed all 76 screenshots, including the eight archive, resume, paused and report views.
+
+CHECKPOINT 9: Confirm project archives, show paused goals and routines, and keep archived work selectable in reports (app/src/backend.cpp, app/src/backend.h, app/src/backend_reports.cpp, app/src/client/coreclient.cpp, app/src/client/coreclient.h, app/src/qml/Main.qml, app/src/qml/goals/GoalHistory.qml, app/src/qml/goals/GoalRow.qml, app/src/qml/insights/PlanAdherence.qml, app/src/qml/pages/EpicPage.qml, app/src/qml/pages/GoalsPage.qml, app/src/qml/pages/InsightsPage.qml, app/src/qml/pages/ReviewPage.qml, app/src/qml/pages/RoutinesPage.qml, app/src/qml/pages/StatisticsPage.qml, app/src/qml/settings/ProjectEpics.qml, app/src/qml/settings/ProjectsSettings.qml, app/src/qml/statistics/FilterBar.qml, app/tests/salah_app_tests.cpp, docs/work/tracking-ui/c9-progress.md)

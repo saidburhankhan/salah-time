@@ -40,11 +40,20 @@ ColumnLayout {
         contentItem: ColumnLayout {
             spacing: 12
             Heading { text: qsTr("On-plan rate per task") }
+            Label {
+                visible: (plan.report.on_plan || []).some(row => row.item_id && row.scored_minutes < row.minutes)
+                Layout.fillWidth: true
+                text: qsTr("Rates exclude minutes logged while a project was paused.")
+                wrapMode: Text.WordWrap
+                color: plan.win.muted
+                font.pixelSize: 13
+            }
             RowLayout {
                 Layout.fillWidth: true
                 Cell { Layout.fillWidth: true; horizontalAlignment: Text.AlignLeft; text: qsTr("Task"); color: plan.win.muted }
                 Cell { Layout.preferredWidth: 100; text: qsTr("Planned block"); color: plan.win.muted }
-                Cell { Layout.preferredWidth: 142; text: qsTr("On-plan / total min"); color: plan.win.muted }
+                Cell { Layout.preferredWidth: 142; text: qsTr("On-plan / scored min"); color: plan.win.muted }
+                Cell { Layout.preferredWidth: 68; text: qsTr("Total min"); color: plan.win.muted }
                 Cell { Layout.preferredWidth: 68; text: qsTr("Rate"); color: plan.win.muted }
             }
             Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: plan.win.border }
@@ -54,24 +63,30 @@ ColumnLayout {
                     id: task
                     required property var modelData
                     Layout.fillWidth: true
-                    readonly property bool planned: !!modelData.planned_block
+                    readonly property var plannedBlocks: modelData.planned_blocks || []
+                    readonly property bool planned: !!modelData.planned_block || plannedBlocks.length > 0
+                    readonly property real scoredMinutes: modelData.scored_minutes ?? modelData.minutes
+                    readonly property bool hasRate: planned && scoredMinutes > 0
                     Cell {
                         Layout.fillWidth: true
                         horizontalAlignment: Text.AlignLeft
                         wrapMode: Text.Wrap
                         text: task.modelData.name || qsTr("Unplanned")
                     }
-                    Cell { Layout.preferredWidth: 100; text: plan.blockLabel(task.modelData.planned_block) }
+                    Cell {
+                        Layout.preferredWidth: 100
+                        text: task.plannedBlocks.length > 1 ? qsTr("Multiple") : plan.blockLabel(task.modelData.planned_block)
+                    }
                     Cell {
                         Layout.preferredWidth: 142
-                        text: (task.planned ? String(task.modelData.on_plan_minutes) : "—") + " / " + task.modelData.minutes
+                        text: task.hasRate ? task.modelData.on_plan_minutes + " / " + task.scoredMinutes : "—"
                     }
+                    Cell { Layout.preferredWidth: 68; text: String(task.modelData.minutes) }
                     Cell {
                         objectName: "onPlanRate_" + (task.modelData.item_id || "unplanned")
                         Layout.preferredWidth: 68
-                        color: task.planned ? plan.win.selectedText : plan.win.muted
-                        text: task.planned && task.modelData.minutes > 0
-                            ? plan.win.numberText(100 * task.modelData.on_plan_minutes / task.modelData.minutes) + "%" : "—"
+                        color: task.hasRate ? plan.win.selectedText : plan.win.muted
+                        text: task.hasRate ? plan.win.numberText(100 * task.modelData.on_plan_minutes / task.scoredMinutes) + "%" : "—"
                     }
                 }
             }

@@ -64,10 +64,26 @@ QJsonObject Backend::filterParams(const QVariantMap &filter, bool allowAnyDays) 
     return params;
 }
 
+void Backend::loadReportItems() {
+    if (m_client.offline()) loadProjectCatalogues();
+    const quint64 request = ++m_reportItemsRequest;
+    m_client.itemsList(readResponse([this, request](const CoreClient::Result &result) {
+        if (request != m_reportItemsRequest) return;
+        if (const auto *data = std::get_if<Dto::Json>(&result.value); data && data->value.isArray()) {
+            const QVariantList items = data->value.toArray().toVariantList();
+            if (m_reportItems == items) return;
+            m_reportItems = items;
+            emit reportItemsChanged();
+        }
+    }), true, true);
+}
+
 void Backend::setRoutinesOpen(bool open) {
     m_routinesOpen = open;
     ++m_routineRequest;
-    if (open) loadTrackingItems();
+    if (!open) return;
+    if (m_client.offline()) loadProjectCatalogues();
+    loadTrackingItems();
 }
 
 void Backend::loadRoutineHistory(const QDate &through, const QString &before) {
@@ -83,6 +99,7 @@ void Backend::loadRoutineHistory(const QDate &through, const QString &before) {
         if (!result.ok || !data || !data->json.value("rows").isArray()) {
             m_routines.setHistory({}, {});
             m_endedRoutines.setHistory({}, {});
+            m_pausedRoutines.setHistory({}, {});
             fail(result.ok ? tr("Could not read routine activity.") : result.error.message);
             return;
         }
@@ -99,6 +116,7 @@ void Backend::loadRoutineHistory(const QDate &through, const QString &before) {
         if (!next.isEmpty() && next != before) loadRoutineHistory(through, next);
         else {
             m_endedRoutines.setHistory(through, m_pendingRoutineHistory);
+            m_pausedRoutines.setHistory(through, m_pendingRoutineHistory);
             m_routines.setHistory(through, std::move(m_pendingRoutineHistory));
         }
     });

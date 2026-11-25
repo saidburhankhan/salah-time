@@ -32,7 +32,7 @@ ScrollView {
     }
 
     function open() {
-        backend.loadTrackingItems()
+        backend.loadReportItems()
         reload()
     }
     function reload() {

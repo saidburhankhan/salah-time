@@ -12,8 +12,9 @@ ScrollView {
     objectName: "goalsPage"
     property var win
     readonly property string historyId: backend.goalHistoryId
-    readonly property var dayGoals: (backend.goals || []).filter(function(goal) { return goal.period === "day" })
-    readonly property var weekGoals: (backend.goals || []).filter(function(goal) { return goal.period === "week" })
+    readonly property var dayGoals: (backend.goals || []).filter(function(goal) { return !goal.paused && goal.period === "day" })
+    readonly property var weekGoals: (backend.goals || []).filter(function(goal) { return !goal.paused && goal.period === "week" })
+    readonly property var pausedGoals: (backend.goals || []).filter(function(goal) { return goal.paused })
     readonly property var allMetrics: (backend.metrics || []).filter(function(m) { return m.builtin && !m.archived })
     clip: true
     contentWidth: availableWidth
@@ -71,7 +72,8 @@ ScrollView {
         Repeater {
             model: [
                 { id: "day", title: qsTr("Today"), rows: goalsPage.dayGoals },
-                { id: "week", title: qsTr("This week"), rows: goalsPage.weekGoals }
+                { id: "week", title: qsTr("This week"), rows: goalsPage.weekGoals },
+                { id: "paused", title: qsTr("Paused"), rows: goalsPage.pausedGoals }
             ]
             ColumnLayout {
                 required property var modelData
@@ -79,7 +81,7 @@ ScrollView {
                 Layout.fillWidth: true
                 spacing: 8
                 Label {
-                    text: modelData.title + "  ·  " + qsTr("%1 of %2 met")
+                    text: modelData.id === "paused" ? modelData.title : modelData.title + "  ·  " + qsTr("%1 of %2 met")
                         .arg(modelData.rows.filter(function(g) { return g.progress && g.progress.met }).length)
                         .arg(modelData.rows.length)
                     textFormat: Text.PlainText

@@ -17,7 +17,7 @@ ScrollView {
     contentWidth: availableWidth
 
     function open() {
-        backend.loadTrackingItems()
+        backend.loadReportItems()
         reload()
     }
     function reload() { backend.loadInsights(filters.query()) }

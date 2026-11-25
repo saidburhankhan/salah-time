@@ -15,7 +15,9 @@ RowLayout {
     property string editColor: "#4c8bf5"
     property var editTags: []
     property var editMetrics: []
-    property bool editArchived: false
+    readonly property var currentProject: win.projectById(editId)
+    readonly property bool editArchived: !!currentProject && !!currentProject.archived
+    property string savingArchiveId: ""
     // A new project follows the metric defaults until the user changes them.
     property bool metricsTouched: false
     readonly property var visibleProjects: (backend.projects || []).filter(function(p) {
@@ -39,7 +41,6 @@ RowLayout {
         noteField.text = ""
         editColor = "#4c8bf5"
         editTags = []
-        editArchived = false
         metricsTouched = false
         editMetrics = defaultMetrics()
         nameField.forceActiveFocus()
@@ -70,7 +71,6 @@ RowLayout {
         editMetrics = (project.metrics || []).map(function(link) {
             return { metric_id: String(link.metric_id), required: false }
         })
-        editArchived = !!project.archived
         metricsTouched = true
     }
 
@@ -125,9 +125,122 @@ RowLayout {
 
     Connections {
         target: backend
+        function onProjectArchiveFinished(id, archived, ok, error) {
+            if (projects.savingArchiveId !== id) return
+            projects.savingArchiveId = ""
+            if (!archived || !archiveDialog.visible) return
+            if (ok) archiveDialog.close()
+            else archiveDialog.errorText = error
+        }
         function onEntitySaved(kind, id) {
             if (kind === "project" && id !== "")
                 projects.editId = id
+        }
+    }
+
+    Popup {
+        id: archiveDialog
+        objectName: "projectArchiveDialog"
+        property int request: 0
+        property var project: ({})
+        property var counts: null
+        property string errorText: ""
+        readonly property bool saving: projects.savingArchiveId !== ""
+        readonly property var current: projects.win.projectById(project.id)
+        readonly property bool stale: !current || current.archived || current.version !== project.version
+
+        modal: true
+        focus: true
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(480, projects.win.width - 48)
+        padding: 22
+        closePolicy: saving ? Popup.NoAutoClose : Popup.CloseOnEscape
+        Overlay.modal: Rectangle { color: "#b3000000" }
+        background: Card { win: projects.win }
+
+        function preview(row) {
+            project = row
+            counts = null
+            errorText = ""
+            open()
+            backend.loadProjectPausePreview(++request, project.id)
+        }
+        Connections {
+            target: backend
+            function onProjectPausePreviewLoaded(request, counts, error) {
+                if (!archiveDialog.visible || request !== archiveDialog.request) return
+                archiveDialog.counts = error ? null : counts
+                archiveDialog.errorText = error
+            }
+        }
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Archive %1?").arg(archiveDialog.project.name || "")
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+                color: projects.win.text
+                font.pixelSize: 20
+                font.weight: Font.DemiBold
+            }
+            Label {
+                objectName: "projectPauseCounts"
+                Layout.fillWidth: true
+                readonly property var counts: archiveDialog.counts
+                text: counts ? qsTr("Pauses %1, %2 and %3.")
+                    .arg(counts.goals === 1 ? qsTr("1 goal") : qsTr("%1 goals").arg(counts.goals))
+                    .arg(counts.routines === 1 ? qsTr("1 routine") : qsTr("%1 routines").arg(counts.routines))
+                    .arg(counts.open_tasks === 1 ? qsTr("1 open task") : qsTr("%1 open tasks").arg(counts.open_tasks))
+                    : archiveDialog.errorText || qsTr("Loading pause counts…")
+                textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
+                color: projects.win.text
+            }
+            Label {
+                visible: !archiveDialog.saving && archiveDialog.stale
+                Layout.fillWidth: true
+                text: qsTr("The project changed. Close this dialog and reopen it for current counts.")
+                wrapMode: Text.WordWrap
+                color: projects.win.muted
+            }
+            Label {
+                visible: !!archiveDialog.counts && !!archiveDialog.errorText
+                Layout.fillWidth: true
+                text: archiveDialog.errorText
+                textFormat: Text.PlainText
+                color: projects.win.muted
+                wrapMode: Text.WordWrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Past work stays in Statistics.")
+                color: projects.win.muted
+                wrapMode: Text.WordWrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                AppButton {
+                    win: projects.win
+                    text: qsTr("Cancel")
+                    enabled: !archiveDialog.saving
+                    onClicked: archiveDialog.close()
+                }
+                AppButton {
+                    objectName: "projectArchiveConfirm"
+                    win: projects.win
+                    primary: true
+                    text: qsTr("Archive project")
+                    enabled: !!archiveDialog.counts && !archiveDialog.stale && !archiveDialog.saving
+                    onClicked: {
+                        var project = archiveDialog.project
+                        archiveDialog.errorText = ""
+                        projects.savingArchiveId = project.id
+                        backend.setProjectArchived(project.id, true, project.version ?? -1)
+                    }
+                }
+            }
         }
     }
 
@@ -152,6 +265,7 @@ RowLayout {
                 Layout.fillWidth: true
             }
             ChoiceChip {
+                objectName: "showArchivedProjects"
                 win: projects.win
                 text: qsTr("Show archived")
                 selected: projects.showArchived
@@ -163,7 +277,9 @@ RowLayout {
             visible: projects.visibleProjects.length === 0
             Layout.fillWidth: true
             Layout.topMargin: 12
-            text: qsTr("No projects yet. A project groups items and sessions, gives them a colour, and decides what you rate after a session.")
+            text: (backend.projects || []).length > 0
+                ? qsTr("No active projects. Select Show archived to resume a project.")
+                : qsTr("No projects yet. A project groups items and sessions, gives them a colour, and decides what you rate after a session.")
             color: projects.win.muted
             wrapMode: Text.WordWrap
         }
@@ -178,6 +294,7 @@ RowLayout {
             delegate: Card {
                 id: projectRow
                 required property var modelData
+                objectName: "settingsProject_" + modelData.id
                 readonly property bool current: projects.editId === String(modelData.id)
                 win: projects.win
                 width: ListView.view.width
@@ -256,18 +373,25 @@ RowLayout {
                 }
                 Label {
                     visible: projects.editArchived
-                    text: qsTr("Archived — hidden from pickers")
+                    text: qsTr("Archived · plans paused")
                     color: projects.win.muted
                     font.pixelSize: 12
                 }
             }
             AppButton {
+                objectName: "projectArchiveAction"
                 win: projects.win
-                visible: projects.editId !== ""
-                text: projects.editArchived ? qsTr("Restore") : qsTr("Archive")
+                visible: !!projects.currentProject
+                enabled: projects.savingArchiveId === ""
+                text: projects.editArchived ? qsTr("Resume") : qsTr("Archive")
                 onClicked: {
-                    backend.saveEntity("project", { id: projects.editId, archived: !projects.editArchived })
-                    projects.editArchived = !projects.editArchived
+                    var project = projects.currentProject
+                    if (project.archived) {
+                        projects.savingArchiveId = project.id
+                        backend.setProjectArchived(project.id, false, project.version ?? -1)
+                    } else {
+                        archiveDialog.preview(project)
+                    }
                 }
             }
             AppButton {

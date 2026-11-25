@@ -379,12 +379,16 @@ void CoreClient::routineActivity(const QDate &from, const QDate &to, const QStri
             Dto::decodeJson, Dto::decodeJson);
 }
 
-void CoreClient::itemsList(Callback callback, bool includeEnded) {
+void CoreClient::itemsList(Callback callback, bool includeEnded, bool includePaused) {
     QStringList args{"item", "list"};
     QJsonObject params;
     if (includeEnded) {
         args << "--include-ended";
         params.insert("include_ended", true);
+    }
+    if (includePaused) {
+        args << "--include-paused";
+        params.insert("include_paused", true);
     }
     args << "--json";
     enqueue(args, params, QStringLiteral("items.list"), std::move(callback), true, false,
@@ -565,10 +569,19 @@ void CoreClient::configSetSleepTime(const QString &time, Callback callback) {
     const QString opId = makeOpId();
     writeRpc(QStringLiteral("config.set"), QJsonObject{{"op_id", opId}, {"sleep_time", time}}, std::move(callback), Dto::decodeConfig);
 }
-void CoreClient::listEntities(const QString &method, Callback callback) {
-    // No archive filter: Settings shows archived rows to restore.
-    enqueue({QStringLiteral("rpc"), method}, QJsonObject{}, method, std::move(callback), true, false,
-            Dto::decodeJson, nullptr, {}, true);
+void CoreClient::projectsList(Callback callback) {
+    enqueue({"project", "list", "--json"}, {}, QStringLiteral("projects.list"),
+            std::move(callback), true, false, Dto::decodeJson, Dto::decodeJson);
+}
+
+void CoreClient::reportEpicsList(Callback callback) {
+    enqueue({"epic", "list", "--include-paused", "--json"}, {{"include_paused", true}}, QStringLiteral("epics.list"),
+            std::move(callback), true, false, Dto::decodeJson, Dto::decodeJson);
+}
+
+void CoreClient::projectPausePreview(const QString &id, Callback callback) {
+    enqueue({"project", "pause-preview", id, "--json"}, {{"id", id}}, QStringLiteral("project.pause_preview"),
+            std::move(callback), true, false, Dto::decodeJson, Dto::decodeJson);
 }
 void CoreClient::mutateEntity(const QString &method, QJsonObject params, Callback callback, const QString &operation) {
     const QString opId = operation.isEmpty() ? makeOpId() : operation;

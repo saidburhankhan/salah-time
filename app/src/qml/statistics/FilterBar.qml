@@ -13,6 +13,8 @@ ColumnLayout {
     property var win
     // 7, 28 or 90 days, or 0 for the custom from/to range.
     property bool showMetrics: true
+    property bool showRange: true
+    property bool showTags: true
     property int range: 28
     property string customFrom: ""
     property string customTo: ""
@@ -36,9 +38,7 @@ ColumnLayout {
     readonly property var matchingTasks: taskChoices.filter(function(task) {
         return String(task.title || "").toLowerCase().includes(taskSearch.trim().toLowerCase())
     })
-    readonly property var projectChoices: (backend.projects || []).filter(function(p) {
-        return !p.archived
-    })
+    readonly property var projectChoices: backend.projects || []
     // The epics of the shown projects, narrowed by the chosen project.
     readonly property var epicChoices: {
         var allowed = {}
@@ -49,7 +49,7 @@ ColumnLayout {
             return allowed[project] === true && (projectId === "" || project === projectId)
         })
     }
-    readonly property var scopedTasks: (backend.trackingItems || []).filter(function(item) {
+    readonly property var scopedTasks: (backend.reportItems || []).filter(function(item) {
         var project = String(item.project_id || "none")
         var epic = String(item.epic_id || "none")
         return (projectId === "" || project === projectId) && (epicId === "" || epic === epicId)
@@ -168,8 +168,12 @@ ColumnLayout {
         return q
     }
     function epicLabel(epic) {
-        var name = String(epic.name || "")
-        return projectId === "" ? win.projectName(epic.project_id) + " · " + name : name
+        var project = win.projectById(epic.project_id)
+        var name = win.reportLabel(String(epic.name || ""), epic.paused || project?.archived)
+        return projectId === "" && project ? project.name + " · " + name : name
+    }
+    function taskLabel(task) {
+        return win.reportLabel(String(task.title || ""), task.paused || win.projectById(task.project_id)?.archived)
     }
     // kind: "" (clear everything), "tag", "project", "epic" or "item".
     // A project, epic or tag change can make a selected task unavailable.
@@ -299,15 +303,18 @@ ColumnLayout {
                 parts.push("# " + String(tag.name))
         }
         if (projectId !== "")
-            parts.push(projectId === "none" ? qsTr("No project") : win.projectName(projectId))
+            parts.push(projectId === "none" ? qsTr("No project")
+                : win.reportLabel(win.projectName(projectId), win.projectById(projectId)?.archived))
         if (epicId === "none")
             parts.push(qsTr("No epic"))
-        else if (epicId !== "")
-            parts.push(win.epicName(epicId))
+        else if (epicId !== "") {
+            var epic = win.epicById(epicId)
+            if (epic) parts.push(win.reportLabel(epic.name, epic.paused || win.projectById(epic.project_id)?.archived))
+        }
         if (itemId !== "") {
-            var task = (backend.trackingItems || []).filter(function(t) { return String(t.id) === itemId })[0]
+            var task = (backend.reportItems || []).filter(function(t) { return String(t.id) === itemId })[0]
             if (task)
-                parts.push(String(task.title))
+                parts.push(taskLabel(task))
         }
         return parts.join(" / ")
     }
@@ -323,6 +330,7 @@ ColumnLayout {
 
     RowLayout {
         objectName: "statsRangeList"
+        visible: bar.showRange
         Layout.fillWidth: true
         spacing: 8
         RowTitle {
@@ -387,7 +395,7 @@ ColumnLayout {
     }
 
     Label {
-        visible: bar.range === 0 && bar.rangeError !== ""
+        visible: bar.showRange && bar.range === 0 && bar.rangeError !== ""
         text: bar.rangeError
         textFormat: Text.PlainText
         color: "#df9986"
@@ -420,8 +428,9 @@ ColumnLayout {
                 model: bar.projectChoices
                 ChoiceChip {
                     required property var modelData
+                    objectName: "statsProject_" + String(modelData.id)
                     win: bar.win
-                    text: String(modelData.name || "")
+                    text: bar.win.reportLabel(String(modelData.name || ""), modelData.archived)
                     dotColor: String(modelData.color || "transparent")
                     selected: bar.projectId === String(modelData.id)
                     onClicked: bar.setFilter("project", String(modelData.id))
@@ -525,7 +534,7 @@ ColumnLayout {
                             required property var modelData
                             win: bar.win
                             objectName: "statsTask_" + modelData.id
-                            text: String(modelData.title || "")
+                            text: bar.taskLabel(modelData)
                             selected: bar.itemId === String(modelData.id)
                             onClicked: bar.setFilter("item", String(modelData.id))
                         }
@@ -536,6 +545,7 @@ ColumnLayout {
     }
 
     RowLayout {
+        visible: bar.showTags
         Layout.fillWidth: true
         spacing: 8
         RowTitle {

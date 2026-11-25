@@ -10,6 +10,7 @@ ScrollView {
     property string confirmingId: ""
     property double confirmingVersion: -1
     property string resumingId: ""
+    property string resumingProject: ""
     clip: true
     contentWidth: availableWidth
     onVisibleChanged: {
@@ -19,6 +20,9 @@ ScrollView {
 
     Connections {
         target: backend
+        function onProjectArchiveFinished(id, archived, ok, error) {
+            if (!archived && id === page.resumingProject) page.resumingProject = ""
+        }
         function onRoutineEditFinished(id, ok, error) {
             if (id === page.resumingId) page.resumingId = ""
         }
@@ -40,7 +44,7 @@ ScrollView {
             }
             AppButton {
                 objectName: "newRoutine"
-                visible: rows.count > 0 || endedRows.count > 0
+                visible: rows.count > 0 || endedRows.count > 0 || pausedRows.count > 0
                 win: page.win
                 text: qsTr("+ New routine")
                 primary: true
@@ -48,7 +52,7 @@ ScrollView {
             }
         }
         Pane {
-            visible: rows.count === 0 && endedRows.count === 0
+            visible: rows.count === 0 && endedRows.count === 0 && pausedRows.count === 0
             Layout.fillWidth: true
             padding: 24
             background: Card { win: page.win }
@@ -92,6 +96,19 @@ ScrollView {
             model: backend.endedRoutines
             RoutineRow {}
         }
+        Label {
+            visible: pausedRows.count > 0
+            Layout.fillWidth: true
+            text: qsTr("Paused — project archived")
+            color: page.win.text
+            font.pixelSize: 18
+            font.weight: Font.DemiBold
+        }
+        Repeater {
+            id: pausedRows
+            model: backend.pausedRoutines
+            RoutineRow {}
+        }
     }
 
     component RoutineRow: Card {
@@ -101,6 +118,8 @@ ScrollView {
         required property real minutes
         required property int doneDays
         readonly property bool ended: !!routine.ended
+        readonly property bool paused: !!routine.paused
+        readonly property var project: paused ? win.projectById(routine.project_id) : null
         readonly property bool confirming: page.confirmingId === routine.id
         objectName: "routineRow_" + routine.id
         win: page.win
@@ -109,6 +128,7 @@ ScrollView {
         color: hit.containsMouse ? win.card : win.panel
         MouseArea {
             id: hit
+            enabled: !row.paused
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
@@ -134,7 +154,8 @@ ScrollView {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: row.win.joinedDetail(row.routine.block, row.routine.schedule_text)
+                        text: [row.win.joinedDetail(row.routine.block, row.routine.schedule_text),
+                               row.project ? row.project.name : ""].filter(Boolean).join(" · ")
                         textFormat: Text.PlainText
                         color: row.win.muted
                         font.pixelSize: 13
@@ -142,21 +163,21 @@ ScrollView {
                     }
                 }
                 AppButton {
-                    visible: !row.confirming && !row.ended
+                    visible: !row.paused && !row.confirming && !row.ended
                     objectName: "routineEdit"
                     win: row.win
                     text: qsTr("Edit")
                     onClicked: page.win.openEntry(row.routine.id)
                 }
                 AppButton {
-                    visible: !row.confirming && !row.ended
+                    visible: !row.paused && !row.confirming && !row.ended
                     objectName: "routineEnd"
                     win: row.win
                     text: row.routine.end_day ? qsTr("Change end date") : qsTr("End routine")
                     onClicked: page.win.openRoutineEnd(row.routine)
                 }
                 AppButton {
-                    visible: !row.confirming && row.ended
+                    visible: !row.paused && !row.confirming && row.ended
                     objectName: "routineResume"
                     win: row.win
                     text: qsTr("Resume")
@@ -167,12 +188,24 @@ ScrollView {
                     }
                 }
                 AppButton {
-                    visible: row.confirming
+                    visible: !row.paused && row.confirming
                     win: row.win
                     text: qsTr("Cancel")
                     onClicked: page.confirmingId = ""
                 }
                 AppButton {
+                    objectName: "routineUnarchiveProject"
+                    visible: row.paused
+                    enabled: !!row.project && row.project.archived && page.resumingProject === ""
+                    win: row.win
+                    text: qsTr("Unarchive project")
+                    onClicked: {
+                        page.resumingProject = row.project.id
+                        backend.setProjectArchived(row.project.id, false, row.project.version ?? -1)
+                    }
+                }
+                AppButton {
+                    visible: !row.paused
                     objectName: "routineDelete"
                     win: row.win
                     text: row.confirming ? qsTr("Confirm delete") : qsTr("Delete")
@@ -188,7 +221,7 @@ ScrollView {
                 }
             }
             Label {
-                visible: row.confirming
+                visible: !row.paused && row.confirming
                 Layout.fillWidth: true
                 text: row.ended ? qsTr("Delete this ended routine?")
                     : qsTr("Choose End routine to stop future occurrences and keep the routine in Ended.")
@@ -236,7 +269,7 @@ ScrollView {
                 }
             }
             Label {
-                visible: !row.ended && !!row.routine.next_occurrence
+                visible: !row.paused && !row.ended && !!row.routine.next_occurrence
                 text: qsTr("Next · %1").arg(row.win.shortDate(row.routine.next_occurrence))
                 textFormat: Text.PlainText
                 color: row.win.muted

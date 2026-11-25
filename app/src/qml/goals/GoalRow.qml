@@ -18,7 +18,8 @@ Rectangle {
     property bool historyOpen: false
     signal historyToggled()
     readonly property var progress: goal.progress || {}
-    readonly property bool met: !!progress.met
+    readonly property bool paused: !!goal.paused
+    readonly property bool met: !paused && !!progress.met
     readonly property bool canRemove: !!goal.starts_on && !goal.ends_on && String(goal.starts_on) === String(progress.from)
     property bool editing: false
     property bool confirming: false
@@ -106,9 +107,19 @@ Rectangle {
                 width: parent.width * GoalText.ratio(row.goal)
                 height: parent.height
                 radius: 4
-                color: GoalText.tint(row.goal)
-                opacity: 0.85
+                color: row.paused ? row.win.muted : GoalText.tint(row.goal)
+                opacity: row.paused ? 0.55 : 0.85
             }
+        }
+        Label {
+            visible: row.paused
+            Layout.fillWidth: true
+            text: row.goal.paused_project?.name ? qsTr("Paused this period · %1").arg(row.goal.paused_project.name)
+                                               : qsTr("Paused this period")
+            textFormat: Text.PlainText
+            elide: Text.ElideRight
+            color: row.win.muted
+            font.pixelSize: 12
         }
         Label {
             visible: row.progress.from !== undefined && !!row.progress.from
