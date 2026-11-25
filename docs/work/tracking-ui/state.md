@@ -313,3 +313,7 @@ tick with focus, done) → untick (not done, minutes kept). Live install ok, no 
   confirm counts, Goals Paused section + neutral history rows, Routines paused group, Statistics
   archived filters) and C10 CHECKPOINT 7 (widget hides paused rows, creation skips archived
   projects/paused epics; 151 node checks) committed.
+- 12:54 INSTALLED via gated chain (267 cargo + 102 app + node checks). Live DB v6→v7 with bak-v6
+  kept; integrity/FK ok; project_pauses empty (no archived projects); daemon restarted 12:53;
+  `salah day` today ok; shell log clean; bar "Asr 2h 22m". Archive-pauses feature DONE.
+  Queue empty: ask the user what next.
